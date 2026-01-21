@@ -1,0 +1,14 @@
+_target_: pokenizer.training.datamodule.PoYoTokenizerDataModule
+data_root_dir: /network/projects/neuro-galaxy/data/processed_qc
+batch_size: 32
+num_workers: 4
+context_length_s: 1.0
+seed: 42
+tokenizer: ???  # Required: Tokenizer instance (injected via ${model} in main config)
+pretokenizer_transform: 
+  _target_: pokenizer.training.transforms.NormalizePerChannel
+config: 
+  - selection:
+    - brainset: schalk_wolpaw_physionet_2009
+      sessions:
+      - S1_20090812_imagined_movement
