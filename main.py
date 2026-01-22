@@ -1,9 +1,13 @@
-from brainsets.datasets.KempSleepEDF2013 import KempSleepEDF2013
+from foundry.datasets import SchalkWolpawPhysionet2009
 
-dataset = KempSleepEDF2013(
-    root="/network/projects/neuro-galaxy/data/processed_qc",
-    config=KempSleepEDF2013.config,
-    split="train",
+processed_dir = "./data/processed/"
+
+physionet = SchalkWolpawPhysionet2009(
+    root=processed_dir,
+    task_type="LeftRightImagery",
+    fold_number=0,
+    fold_type="inter-subject",
 )
 
-print(dataset)
+print(physionet)
+print(physionet.get_sampling_intervals(split="train"))

@@ -257,7 +257,7 @@ wheels = [
 [[package]]
 name = "foundry"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "brainsets" },
     { name = "ipykernel" },

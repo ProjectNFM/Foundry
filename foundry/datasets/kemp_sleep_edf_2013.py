@@ -12,7 +12,7 @@ class KempSleepEDF2013(EEGDatasetMixin, Dataset):
         recording_ids: Optional[list[str]] = None,
         transform: Optional[Callable] = None,
         uniquify_channel_ids: bool = True,
-        split_type: Optional[Literal["fold_0", "fold_1", "fold_2"]] = "fold_0",
+        fold_number: Optional[Literal[0, 1, 2, 3, 4]] = 0,
         dirname: str = "kemp_sleep_edf_2013",
         **kwargs,
     ):
@@ -25,19 +25,19 @@ class KempSleepEDF2013(EEGDatasetMixin, Dataset):
         )
 
         self.eeg_dataset_mixin_uniquify_channel_ids = uniquify_channel_ids
-        self.split_type = split_type
+        self.fold_number = fold_number
 
     def get_sampling_intervals(
         self,
         split: Optional[Literal["train", "valid", "test"]] = None,
     ):
-        if self.split_type is None:
+        if self.fold_number is None:
             return {rid: self.get_recording(rid).domain for rid in self.recording_ids}
 
-        if self.split_type not in ["fold_0", "fold_1", "fold_2"]:
+        if self.fold_number not in [0, 1, 2, 3, 4]:
             raise ValueError(
-                f"Invalid split_type '{self.split_type}'."
-                " Must be one of ['fold_0', 'fold_1', 'fold_2'] or None."
+                f"Invalid fold_number '{self.fold_number}'."
+                " Must be one of [0, 1, 2, 3, 4] or None."
             )
 
         if split not in ["train", "valid", "test"]:
@@ -45,7 +45,7 @@ class KempSleepEDF2013(EEGDatasetMixin, Dataset):
                 f"Invalid split '{split}'. Must be one of ['train', 'valid', 'test']."
             )
 
-        key = f"{self.split_type}.{split}"
+        key = f"splits.fold_{self.fold_number}.{split}"
         return {
             rid: self.get_recording(rid).get_nested_attribute(key)
             for rid in self.recording_ids
