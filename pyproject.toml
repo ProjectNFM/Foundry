@@ -6,12 +6,11 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "brainsets",
- "ipykernel>=7.1.0",
- "lightning>=2.6.0",
- "torch>=2.9.1",
- "torch-brain",
+    "ipykernel>=7.1.0",
+    "torch>=2.9.1",
+    "pytorch-brain",
 ]
 
 [tool.uv.sources]
-torch-brain = { git = "ssh://git@github.com/neuro-galaxy/torch_brain" }
-brainsets = { git = "ssh://git@github.com/neuro-galaxy/brainsets" }
+pytorch-brain = { git = "ssh://git@github.com/neuro-galaxy/torch_brain", branch = "vinam/dataset_overhaul" }
+brainsets = { git = "ssh://git@github.com/neuro-galaxy/brainsets", branch = "vinam/datasets" }
