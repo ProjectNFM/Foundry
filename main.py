@@ -1,13 +1,21 @@
-from foundry.datasets import SchalkWolpawPhysionet2009
+from typing import Any
+
+from foundry.datasets import KorczowskiBrainInvaders2014a
+from torch_brain.data.sampler import RandomFixedWindowSampler
+from torch.utils.data import DataLoader
+
 
 processed_dir = "./data/processed/"
 
-physionet = SchalkWolpawPhysionet2009(
+korczowski = KorczowskiBrainInvaders2014a(
     root=processed_dir,
-    task_type="LeftRightImagery",
     fold_number=0,
     fold_type="inter-subject",
 )
 
-print(physionet)
-print(physionet.get_sampling_intervals(split="train"))
+sampler = RandomFixedWindowSampler(
+    sampling_intervals=korczowski.get_sampling_intervals(split="train"),
+    window_length=1.0,
+)
+
+print(sampler)
