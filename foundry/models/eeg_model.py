@@ -183,14 +183,19 @@ class EEGModel(nn.Module):
         """
         start, end = 0, self.sequence_length
 
-        patch_length_samples = int(self.patch_size_seconds * data.eeg.sampling_rate)
+        patch_length_samples = int(
+            self.patch_size_seconds * data.eeg.sampling_rate
+        )
 
         duration = data.domain.end - data.domain.start
-        stride_seconds = self.patch_size_seconds * (1 - self.patch_overlap_percentage)
+        stride_seconds = self.patch_size_seconds * (
+            1 - self.patch_overlap_percentage
+        )
         stride_samples = int(stride_seconds * data.eeg.sampling_rate)
 
         num_patches = (
-            int((duration.item() - self.patch_size_seconds) / stride_seconds) + 1
+            int((duration.item() - self.patch_size_seconds) / stride_seconds)
+            + 1
         )
 
         patch_indices = np.arange(num_patches)
@@ -208,7 +213,9 @@ class EEGModel(nn.Module):
         mid_indices = (start_indices + end_indices) // 2
         patch_center_times = data.eeg.timestamps[mid_indices]
 
-        indices = start_indices[:, None] + np.arange(patch_length_samples)[None, :]
+        indices = (
+            start_indices[:, None] + np.arange(patch_length_samples)[None, :]
+        )
 
         modality_field = (
             data.units.modality.astype(str)
@@ -242,7 +249,9 @@ class EEGModel(nn.Module):
 
         tokenized_data = {
             "input_values": pad8(torch.from_numpy(patches_array).float()),
-            "input_timestamps": pad8(torch.from_numpy(patch_center_times).float()),
+            "input_timestamps": pad8(
+                torch.from_numpy(patch_center_times).float()
+            ),
             "input_mask": track_mask8(patch_center_times),
             "latent_index": latent_index,
             "latent_timestamps": latent_timestamps,

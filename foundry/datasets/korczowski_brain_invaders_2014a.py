@@ -47,14 +47,12 @@ class KorczowskiBrainInvaders2014a(EEGDatasetMixin, Dataset):
 
         if fold_type not in ["intra-subject", "inter-subject"]:
             raise ValueError(
-                f"Invalid fold_type '{fold_type}'. "
-                "Must be one of ['intra-subject', 'inter-subject']."
+                f"Invalid fold_type '{fold_type}'. Must be one of ['intra-subject', 'inter-subject']."
             )
 
         if fold_number not in [0, 1, 2]:
             raise ValueError(
-                f"Invalid fold_number '{fold_number}'. "
-                "Must be one of [0, 1, 2] or None."
+                f"Invalid fold_number '{fold_number}'. Must be one of [0, 1, 2] or None."
             )
 
     def get_sampling_intervals(
@@ -71,7 +69,10 @@ class KorczowskiBrainInvaders2014a(EEGDatasetMixin, Dataset):
             Dictionary mapping recording IDs to their sampling intervals.
         """
         if self.fold_number is None:
-            return {rid: self.get_recording(rid).domain for rid in self.recording_ids}
+            return {
+                rid: self.get_recording(rid).domain
+                for rid in self.recording_ids
+            }
 
         if self.fold_type == "intra-subject":
             key = f"splits.{self.fold_type}.fold_{self.fold_number}.{split}"

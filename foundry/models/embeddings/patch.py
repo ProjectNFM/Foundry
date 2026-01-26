@@ -53,6 +53,8 @@ class PatchEmbedding(nn.Module):
         projection = self.get_projection(time_steps, channels)
 
         flattened = input_values.view(batch_size * num_patches, -1)
-        embeddings = projection(flattened).view(batch_size, num_patches, self.embed_dim)
+        embeddings = projection(flattened).view(
+            batch_size, num_patches, self.embed_dim
+        )
 
         return embeddings

@@ -7,11 +7,11 @@ from .mixins import EEGDatasetMixin
 
 class ShiraziHbnr1DS0055052024(EEGDatasetMixin, Dataset):
     """Healthy Brain Network (HBN) EEG Dataset from OpenNeuro (Shirazi et al., 2024).
-    
+
     High-density EEG recordings from participants performing various passive and active tasks
     including resting state, movie watching, and cognitive tasks. Uses 129-channel EEG system
     (128 electrodes E1-E128 plus Cz reference).
-    
+
     Args:
         root: Path to the root directory containing processed dataset folders.
         recording_ids: Optional list of recording IDs to include. If None, all recordings are used.
@@ -20,7 +20,7 @@ class ShiraziHbnr1DS0055052024(EEGDatasetMixin, Dataset):
         dirname: Directory name within root containing the dataset files.
         **kwargs: Additional arguments passed to Dataset.__init__.
     """
-    
+
     def __init__(
         self,
         root: str,
@@ -37,5 +37,5 @@ class ShiraziHbnr1DS0055052024(EEGDatasetMixin, Dataset):
             namespace_attributes=["session.id", "subject.id", "channels.id"],
             **kwargs,
         )
-        
+
         self.eeg_dataset_mixin_uniquify_channel_ids = uniquify_channel_ids

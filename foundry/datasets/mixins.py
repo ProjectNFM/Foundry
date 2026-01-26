@@ -28,5 +28,7 @@ class EEGDatasetMixin:
 
     def get_channel_ids(self) -> list[str]:
         """Return a sorted list of all channel IDs across all recordings in the dataset."""
-        ans = [self.get_recording(rid).channels.id for rid in self.recording_ids]
+        ans = [
+            self.get_recording(rid).channels.id for rid in self.recording_ids
+        ]
         return np.sort(np.concatenate(ans)).tolist()

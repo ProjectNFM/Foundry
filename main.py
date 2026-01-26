@@ -1,4 +1,3 @@
-
 from foundry.datasets import KorczowskiBrainInvaders2014a
 from torch_brain.data.sampler import RandomFixedWindowSampler
 

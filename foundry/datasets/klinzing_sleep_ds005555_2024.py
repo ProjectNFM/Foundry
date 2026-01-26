@@ -7,14 +7,14 @@ from .mixins import EEGDatasetMixin
 
 class KlinzingSleepDS0055552024(EEGDatasetMixin, Dataset):
     """Bitbrain Open Access Sleep (BOAS) Dataset from OpenNeuro (Klinzing et al., 2024).
-    
-    Simultaneous recordings from a clinical PSG system (Micromed) and a wearable EEG headband 
+
+    Simultaneous recordings from a clinical PSG system (Micromed) and a wearable EEG headband
     (Bitbrain) across 128 nights. Includes expert-consensus sleep stage labels.
-    
+
     The dataset contains two acquisition types:
     - PSG recordings: Full polysomnography with multiple EEG, EOG, EMG, and physiological channels
     - Headband recordings: Wearable device with 2 frontal EEG channels and motion/PPG sensors
-    
+
     Args:
         root: Path to the root directory containing processed dataset folders.
         recording_ids: Optional list of recording IDs to include. If None, all recordings are used.
@@ -23,7 +23,7 @@ class KlinzingSleepDS0055552024(EEGDatasetMixin, Dataset):
         dirname: Directory name within root containing the dataset files.
         **kwargs: Additional arguments passed to Dataset.__init__.
     """
-    
+
     def __init__(
         self,
         root: str,
@@ -40,5 +40,5 @@ class KlinzingSleepDS0055552024(EEGDatasetMixin, Dataset):
             namespace_attributes=["session.id", "subject.id", "channels.id"],
             **kwargs,
         )
-        
+
         self.eeg_dataset_mixin_uniquify_channel_ids = uniquify_channel_ids

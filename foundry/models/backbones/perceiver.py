@@ -10,12 +10,6 @@ from torch_brain.nn import (
 
 
 class PerceiverEncoder(nn.Module):
-    """
-    Encoder that compresses inputs into latent tokens via cross-attention.
-
-    Standalone component that can be used independently.
-    """
-
     def __init__(
         self,
         embed_dim: int,
@@ -35,7 +29,8 @@ class PerceiverEncoder(nn.Module):
             rotate_value=True,
         )
         self.ffn = nn.Sequential(
-            nn.LayerNorm(embed_dim), FeedForward(dim=embed_dim, dropout=ffn_dropout)
+            nn.LayerNorm(embed_dim),
+            FeedForward(dim=embed_dim, dropout=ffn_dropout),
         )
 
     def forward(
@@ -48,7 +43,11 @@ class PerceiverEncoder(nn.Module):
     ) -> torch.Tensor:
         """Encode inputs into latents via cross-attention."""
         latents = latents + self.cross_atn(
-            latents, inputs, latent_timestamp_emb, input_timestamp_emb, input_mask
+            latents,
+            inputs,
+            latent_timestamp_emb,
+            input_timestamp_emb,
+            input_mask,
         )
         latents = latents + self.ffn(latents)
         return latents
@@ -100,7 +99,9 @@ class PerceiverProcessor(nn.Module):
     ) -> torch.Tensor:
         """Process latents with self-attention."""
         for self_attn, self_ff in self.layers:
-            latents = latents + self.dropout(self_attn(latents, latent_timestamp_emb))
+            latents = latents + self.dropout(
+                self_attn(latents, latent_timestamp_emb)
+            )
             latents = latents + self.dropout(self_ff(latents))
         return latents
 
@@ -131,7 +132,8 @@ class PerceiverDecoder(nn.Module):
             rotate_value=False,
         )
         self.ffn = nn.Sequential(
-            nn.LayerNorm(embed_dim), FeedForward(dim=embed_dim, dropout=ffn_dropout)
+            nn.LayerNorm(embed_dim),
+            FeedForward(dim=embed_dim, dropout=ffn_dropout),
         )
 
     def forward(
@@ -210,7 +212,11 @@ class PerceiverIOBackbone(nn.Module):
     ) -> torch.Tensor:
         """Full encoder-processor-decoder pass."""
         latents = self.encoder(
-            latents, inputs, latent_timestamp_emb, input_timestamp_emb, input_mask
+            latents,
+            inputs,
+            latent_timestamp_emb,
+            input_timestamp_emb,
+            input_mask,
         )
         latents = self.processor(latents, latent_timestamp_emb)
         outputs = self.decoder(

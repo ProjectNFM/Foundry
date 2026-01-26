@@ -64,14 +64,12 @@ class SchalkWolpawPhysionet2009(EEGDatasetMixin, Dataset):
 
         if task_type is not None and task_type not in self.TASK_CONFIGS:
             raise ValueError(
-                f"Invalid task_type '{task_type}'. "
-                f"Must be one of {list(self.TASK_CONFIGS.keys())} or None."
+                f"Invalid task_type '{task_type}'. Must be one of {list(self.TASK_CONFIGS.keys())} or None."
             )
 
         if fold_type not in ["intra-subject", "inter-subject"]:
             raise ValueError(
-                f"Invalid fold_type '{fold_type}'. "
-                "Must be one of ['intra-subject', 'inter-subject']."
+                f"Invalid fold_type '{fold_type}'. Must be one of ['intra-subject', 'inter-subject']."
             )
 
     def get_sampling_intervals(
@@ -88,7 +86,10 @@ class SchalkWolpawPhysionet2009(EEGDatasetMixin, Dataset):
             Dictionary mapping recording IDs to their sampling intervals.
         """
         if self.task_type is None or self.fold_number is None:
-            return {rid: self.get_recording(rid).domain for rid in self.recording_ids}
+            return {
+                rid: self.get_recording(rid).domain
+                for rid in self.recording_ids
+            }
 
         if split not in ["train", "valid", "test"]:
             raise ValueError(

@@ -90,7 +90,9 @@ class TestPerceiverProcessor:
         latents = torch.randn(batch_size, num_latents, embed_dim)
         latent_timestamp_emb = torch.randn(batch_size, num_latents, dim_head)
 
-        output = processor(latents=latents, latent_timestamp_emb=latent_timestamp_emb)
+        output = processor(
+            latents=latents, latent_timestamp_emb=latent_timestamp_emb
+        )
 
         assert output.shape == (batch_size, num_latents, embed_dim)
 
@@ -108,12 +110,16 @@ class TestPerceiverProcessor:
             assert output.shape == (batch_size, 20, embed_dim)
 
     def test_custom_heads(self, embed_dim, batch_size):
-        processor = PerceiverProcessor(embed_dim=embed_dim, depth=2, self_heads=12)
+        processor = PerceiverProcessor(
+            embed_dim=embed_dim, depth=2, self_heads=12
+        )
 
         latents = torch.randn(batch_size, 20, embed_dim)
         latent_timestamp_emb = torch.randn(batch_size, 20, 64)
 
-        output = processor(latents=latents, latent_timestamp_emb=latent_timestamp_emb)
+        output = processor(
+            latents=latents, latent_timestamp_emb=latent_timestamp_emb
+        )
 
         assert output.shape == (batch_size, 20, embed_dim)
 
@@ -266,9 +272,13 @@ class TestPerceiverIOBackbone:
             inputs = torch.randn(batch_size, num_inputs, embed_dim)
             input_timestamp_emb = torch.randn(batch_size, num_inputs, dim_head)
             latents = torch.randn(batch_size, num_latents, embed_dim)
-            latent_timestamp_emb = torch.randn(batch_size, num_latents, dim_head)
+            latent_timestamp_emb = torch.randn(
+                batch_size, num_latents, dim_head
+            )
             output_queries = torch.randn(batch_size, num_outputs, embed_dim)
-            output_timestamp_emb = torch.randn(batch_size, num_outputs, dim_head)
+            output_timestamp_emb = torch.randn(
+                batch_size, num_outputs, dim_head
+            )
 
             output = backbone(
                 inputs=inputs,
