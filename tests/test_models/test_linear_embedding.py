@@ -16,7 +16,9 @@ class TestLinearEmbedding:
         time_steps = 50
         channels = 4
 
-        input_values = torch.randn(batch_size, num_patches, time_steps, channels)
+        input_values = torch.randn(
+            batch_size, num_patches, time_steps, channels
+        )
         output = embedding(input_values)
 
         assert output.shape == (batch_size, num_patches, embed_dim)

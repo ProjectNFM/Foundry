@@ -24,7 +24,9 @@ class TestMLPEmbedding:
         time_steps = 50
         channels = 4
 
-        input_values = torch.randn(batch_size, num_patches, time_steps, channels)
+        input_values = torch.randn(
+            batch_size, num_patches, time_steps, channels
+        )
         output = embedding(input_values)
 
         assert output.shape == (batch_size, num_patches, embed_dim)
@@ -75,7 +77,9 @@ class TestMLPEmbedding:
     def test_invalid_activation(self, embed_dim):
         with pytest.raises(ValueError, match="Unknown activation"):
             embedding = MLPEmbedding(
-                embed_dim=embed_dim, hidden_dims=[64], activation="invalid_activation"
+                embed_dim=embed_dim,
+                hidden_dims=[64],
+                activation="invalid_activation",
             )
             embedding.get_projection(50, 4)
 
