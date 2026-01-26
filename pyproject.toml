@@ -15,6 +15,14 @@ dependencies = [
     "pytorch-brain",
 ]
 
+[dependency-groups]
+dev = ["pytest>=8.0.0"]
+
 [tool.uv.sources]
 pytorch-brain = { git = "ssh://git@github.com/neuro-galaxy/torch_brain", branch = "vinam/dataset_overhaul" }
 brainsets = { git = "ssh://git@github.com/neuro-galaxy/brainsets", branch = "vinam/datasets" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
