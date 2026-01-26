@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8.0.0"]
+dev = ["pytest>=8.0.0", "ruff>=0.14.14"]
 
 [tool.uv.sources]
 pytorch-brain = { git = "ssh://git@github.com/neuro-galaxy/torch_brain", branch = "vinam/dataset_overhaul" }
@@ -26,3 +26,9 @@ brainsets = { git = "ssh://git@github.com/neuro-galaxy/brainsets", branch = "vin
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

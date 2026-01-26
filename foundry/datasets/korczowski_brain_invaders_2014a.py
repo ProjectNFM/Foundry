@@ -1,7 +1,6 @@
 from typing import Callable, Optional, Literal
 from pathlib import Path
 
-from torch_brain.data.dataset import np
 from torch_brain.dataset import Dataset
 from .mixins import EEGDatasetMixin
 

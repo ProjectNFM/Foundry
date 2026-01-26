@@ -1,4 +1,3 @@
-import pytest
 import torch
 
 from foundry.models import (
@@ -15,39 +14,39 @@ class TestPerceiverEncoder:
         assert encoder.embed_dim == embed_dim
 
     def test_forward_pass_basic(self, embed_dim, batch_size):
-        encoder = PerceiverEncoder(embed_dim=embed_dim, dim_head=64)
-        
+        encoder = PerceiverEncoder(embed_dim=embed_dim)
+
         num_latents = 20
         num_inputs = 100
-        rotary_dim = 128
-        
+        dim_head = 64
+
         latents = torch.randn(batch_size, num_latents, embed_dim)
         inputs = torch.randn(batch_size, num_inputs, embed_dim)
-        latent_timestamp_emb = torch.randn(batch_size, num_latents, rotary_dim)
-        input_timestamp_emb = torch.randn(batch_size, num_inputs, rotary_dim)
-        
+        latent_timestamp_emb = torch.randn(batch_size, num_latents, dim_head)
+        input_timestamp_emb = torch.randn(batch_size, num_inputs, dim_head)
+
         output = encoder(
             latents=latents,
             inputs=inputs,
             latent_timestamp_emb=latent_timestamp_emb,
             input_timestamp_emb=input_timestamp_emb,
         )
-        
+
         assert output.shape == (batch_size, num_latents, embed_dim)
 
     def test_forward_pass_with_mask(self, embed_dim, batch_size):
-        encoder = PerceiverEncoder(embed_dim=embed_dim, dim_head=64)
-        
+        encoder = PerceiverEncoder(embed_dim=embed_dim)
+
         num_latents = 20
         num_inputs = 100
-        rotary_dim = 128
-        
+        dim_head = 64
+
         latents = torch.randn(batch_size, num_latents, embed_dim)
         inputs = torch.randn(batch_size, num_inputs, embed_dim)
-        latent_timestamp_emb = torch.randn(batch_size, num_latents, rotary_dim)
-        input_timestamp_emb = torch.randn(batch_size, num_inputs, rotary_dim)
+        latent_timestamp_emb = torch.randn(batch_size, num_latents, dim_head)
+        input_timestamp_emb = torch.randn(batch_size, num_inputs, dim_head)
         input_mask = torch.ones(batch_size, num_inputs, dtype=torch.bool)
-        
+
         output = encoder(
             latents=latents,
             inputs=inputs,
@@ -55,24 +54,24 @@ class TestPerceiverEncoder:
             input_timestamp_emb=input_timestamp_emb,
             input_mask=input_mask,
         )
-        
+
         assert output.shape == (batch_size, num_latents, embed_dim)
 
     def test_custom_heads(self, embed_dim, batch_size):
-        encoder = PerceiverEncoder(embed_dim=embed_dim, cross_heads=4, dim_head=64)
-        
+        encoder = PerceiverEncoder(embed_dim=embed_dim, cross_heads=4)
+
         latents = torch.randn(batch_size, 20, embed_dim)
         inputs = torch.randn(batch_size, 100, embed_dim)
-        latent_timestamp_emb = torch.randn(batch_size, 20, 128)
-        input_timestamp_emb = torch.randn(batch_size, 100, 128)
-        
+        latent_timestamp_emb = torch.randn(batch_size, 20, 64)
+        input_timestamp_emb = torch.randn(batch_size, 100, 64)
+
         output = encoder(
             latents=latents,
             inputs=inputs,
             latent_timestamp_emb=latent_timestamp_emb,
             input_timestamp_emb=input_timestamp_emb,
         )
-        
+
         assert output.shape == (batch_size, 20, embed_dim)
 
 
@@ -83,37 +82,39 @@ class TestPerceiverProcessor:
         assert len(processor.layers) == 2
 
     def test_forward_pass_basic(self, embed_dim, batch_size):
-        processor = PerceiverProcessor(embed_dim=embed_dim, depth=2, dim_head=64)
-        
+        processor = PerceiverProcessor(embed_dim=embed_dim, depth=2)
+
         num_latents = 20
-        rotary_dim = 128
-        
+        dim_head = 64
+
         latents = torch.randn(batch_size, num_latents, embed_dim)
-        latent_timestamp_emb = torch.randn(batch_size, num_latents, rotary_dim)
-        
+        latent_timestamp_emb = torch.randn(batch_size, num_latents, dim_head)
+
         output = processor(latents=latents, latent_timestamp_emb=latent_timestamp_emb)
-        
+
         assert output.shape == (batch_size, num_latents, embed_dim)
 
     def test_different_depths(self, embed_dim, batch_size):
         for depth in [1, 2, 4, 6]:
-            processor = PerceiverProcessor(embed_dim=embed_dim, depth=depth, dim_head=64)
+            processor = PerceiverProcessor(embed_dim=embed_dim, depth=depth)
             assert len(processor.layers) == depth
-            
+
             latents = torch.randn(batch_size, 20, embed_dim)
-            latent_timestamp_emb = torch.randn(batch_size, 20, 128)
-            
-            output = processor(latents=latents, latent_timestamp_emb=latent_timestamp_emb)
+            latent_timestamp_emb = torch.randn(batch_size, 20, 64)
+
+            output = processor(
+                latents=latents, latent_timestamp_emb=latent_timestamp_emb
+            )
             assert output.shape == (batch_size, 20, embed_dim)
 
     def test_custom_heads(self, embed_dim, batch_size):
-        processor = PerceiverProcessor(embed_dim=embed_dim, depth=2, self_heads=12, dim_head=64)
-        
+        processor = PerceiverProcessor(embed_dim=embed_dim, depth=2, self_heads=12)
+
         latents = torch.randn(batch_size, 20, embed_dim)
-        latent_timestamp_emb = torch.randn(batch_size, 20, 128)
-        
+        latent_timestamp_emb = torch.randn(batch_size, 20, 64)
+
         output = processor(latents=latents, latent_timestamp_emb=latent_timestamp_emb)
-        
+
         assert output.shape == (batch_size, 20, embed_dim)
 
 
@@ -123,41 +124,41 @@ class TestPerceiverDecoder:
         assert decoder.embed_dim == embed_dim
 
     def test_forward_pass_basic(self, embed_dim, batch_size):
-        decoder = PerceiverDecoder(embed_dim=embed_dim, dim_head=64)
-        
+        decoder = PerceiverDecoder(embed_dim=embed_dim)
+
         num_queries = 30
         num_latents = 20
-        rotary_dim = 128
-        
+        dim_head = 64
+
         queries = torch.randn(batch_size, num_queries, embed_dim)
         latents = torch.randn(batch_size, num_latents, embed_dim)
-        query_timestamp_emb = torch.randn(batch_size, num_queries, rotary_dim)
-        latent_timestamp_emb = torch.randn(batch_size, num_latents, rotary_dim)
-        
+        query_timestamp_emb = torch.randn(batch_size, num_queries, dim_head)
+        latent_timestamp_emb = torch.randn(batch_size, num_latents, dim_head)
+
         output = decoder(
             queries=queries,
             latents=latents,
             query_timestamp_emb=query_timestamp_emb,
             latent_timestamp_emb=latent_timestamp_emb,
         )
-        
+
         assert output.shape == (batch_size, num_queries, embed_dim)
 
     def test_custom_heads(self, embed_dim, batch_size):
-        decoder = PerceiverDecoder(embed_dim=embed_dim, cross_heads=4, dim_head=64)
-        
+        decoder = PerceiverDecoder(embed_dim=embed_dim, cross_heads=4)
+
         queries = torch.randn(batch_size, 30, embed_dim)
         latents = torch.randn(batch_size, 20, embed_dim)
-        query_timestamp_emb = torch.randn(batch_size, 30, 128)
-        latent_timestamp_emb = torch.randn(batch_size, 20, 128)
-        
+        query_timestamp_emb = torch.randn(batch_size, 30, 64)
+        latent_timestamp_emb = torch.randn(batch_size, 20, 64)
+
         output = decoder(
             queries=queries,
             latents=latents,
             query_timestamp_emb=query_timestamp_emb,
             latent_timestamp_emb=latent_timestamp_emb,
         )
-        
+
         assert output.shape == (batch_size, 30, embed_dim)
 
 
@@ -170,20 +171,20 @@ class TestPerceiverIOBackbone:
         assert hasattr(backbone, "decoder")
 
     def test_forward_pass_end_to_end(self, embed_dim, batch_size):
-        backbone = PerceiverIOBackbone(embed_dim=embed_dim, depth=2, dim_head=64)
-        
+        backbone = PerceiverIOBackbone(embed_dim=embed_dim, depth=2)
+
         num_inputs = 100
         num_latents = 20
         num_outputs = 30
-        rotary_dim = 128
-        
+        dim_head = 64
+
         inputs = torch.randn(batch_size, num_inputs, embed_dim)
-        input_timestamp_emb = torch.randn(batch_size, num_inputs, rotary_dim)
+        input_timestamp_emb = torch.randn(batch_size, num_inputs, dim_head)
         latents = torch.randn(batch_size, num_latents, embed_dim)
-        latent_timestamp_emb = torch.randn(batch_size, num_latents, rotary_dim)
+        latent_timestamp_emb = torch.randn(batch_size, num_latents, dim_head)
         output_queries = torch.randn(batch_size, num_outputs, embed_dim)
-        output_timestamp_emb = torch.randn(batch_size, num_outputs, rotary_dim)
-        
+        output_timestamp_emb = torch.randn(batch_size, num_outputs, dim_head)
+
         output = backbone(
             inputs=inputs,
             input_timestamp_emb=input_timestamp_emb,
@@ -192,25 +193,25 @@ class TestPerceiverIOBackbone:
             output_queries=output_queries,
             output_timestamp_emb=output_timestamp_emb,
         )
-        
+
         assert output.shape == (batch_size, num_outputs, embed_dim)
 
     def test_forward_pass_with_mask(self, embed_dim, batch_size):
-        backbone = PerceiverIOBackbone(embed_dim=embed_dim, depth=2, dim_head=64)
-        
+        backbone = PerceiverIOBackbone(embed_dim=embed_dim, depth=2)
+
         num_inputs = 100
         num_latents = 20
         num_outputs = 30
-        rotary_dim = 128
-        
+        dim_head = 64
+
         inputs = torch.randn(batch_size, num_inputs, embed_dim)
-        input_timestamp_emb = torch.randn(batch_size, num_inputs, rotary_dim)
+        input_timestamp_emb = torch.randn(batch_size, num_inputs, dim_head)
         input_mask = torch.ones(batch_size, num_inputs, dtype=torch.bool)
         latents = torch.randn(batch_size, num_latents, embed_dim)
-        latent_timestamp_emb = torch.randn(batch_size, num_latents, rotary_dim)
+        latent_timestamp_emb = torch.randn(batch_size, num_latents, dim_head)
         output_queries = torch.randn(batch_size, num_outputs, embed_dim)
-        output_timestamp_emb = torch.randn(batch_size, num_outputs, rotary_dim)
-        
+        output_timestamp_emb = torch.randn(batch_size, num_outputs, dim_head)
+
         output = backbone(
             inputs=inputs,
             input_timestamp_emb=input_timestamp_emb,
@@ -220,7 +221,7 @@ class TestPerceiverIOBackbone:
             output_timestamp_emb=output_timestamp_emb,
             input_mask=input_mask,
         )
-        
+
         assert output.shape == (batch_size, num_outputs, embed_dim)
 
     def test_custom_configuration(self, embed_dim, batch_size):
@@ -231,14 +232,14 @@ class TestPerceiverIOBackbone:
             self_heads=12,
             dim_head=32,
         )
-        
+
         inputs = torch.randn(batch_size, 100, embed_dim)
-        input_timestamp_emb = torch.randn(batch_size, 100, 64)
+        input_timestamp_emb = torch.randn(batch_size, 100, 32)
         latents = torch.randn(batch_size, 20, embed_dim)
-        latent_timestamp_emb = torch.randn(batch_size, 20, 64)
+        latent_timestamp_emb = torch.randn(batch_size, 20, 32)
         output_queries = torch.randn(batch_size, 30, embed_dim)
-        output_timestamp_emb = torch.randn(batch_size, 30, 64)
-        
+        output_timestamp_emb = torch.randn(batch_size, 30, 32)
+
         output = backbone(
             inputs=inputs,
             input_timestamp_emb=input_timestamp_emb,
@@ -247,28 +248,28 @@ class TestPerceiverIOBackbone:
             output_queries=output_queries,
             output_timestamp_emb=output_timestamp_emb,
         )
-        
+
         assert output.shape == (batch_size, 30, embed_dim)
 
     def test_different_sequence_lengths(self, embed_dim, batch_size):
-        backbone = PerceiverIOBackbone(embed_dim=embed_dim, depth=2, dim_head=64)
-        
-        rotary_dim = 128
-        
+        backbone = PerceiverIOBackbone(embed_dim=embed_dim, depth=2)
+
+        dim_head = 64
+
         test_cases = [
             (50, 10, 20),
             (200, 40, 60),
             (500, 100, 150),
         ]
-        
+
         for num_inputs, num_latents, num_outputs in test_cases:
             inputs = torch.randn(batch_size, num_inputs, embed_dim)
-            input_timestamp_emb = torch.randn(batch_size, num_inputs, rotary_dim)
+            input_timestamp_emb = torch.randn(batch_size, num_inputs, dim_head)
             latents = torch.randn(batch_size, num_latents, embed_dim)
-            latent_timestamp_emb = torch.randn(batch_size, num_latents, rotary_dim)
+            latent_timestamp_emb = torch.randn(batch_size, num_latents, dim_head)
             output_queries = torch.randn(batch_size, num_outputs, embed_dim)
-            output_timestamp_emb = torch.randn(batch_size, num_outputs, rotary_dim)
-            
+            output_timestamp_emb = torch.randn(batch_size, num_outputs, dim_head)
+
             output = backbone(
                 inputs=inputs,
                 input_timestamp_emb=input_timestamp_emb,
@@ -277,5 +278,5 @@ class TestPerceiverIOBackbone:
                 output_queries=output_queries,
                 output_timestamp_emb=output_timestamp_emb,
             )
-            
+
             assert output.shape == (batch_size, num_outputs, embed_dim)

@@ -1,8 +1,6 @@
-from typing import Any
 
 from foundry.datasets import KorczowskiBrainInvaders2014a
 from torch_brain.data.sampler import RandomFixedWindowSampler
-from torch.utils.data import DataLoader
 
 
 processed_dir = "./data/processed/"
