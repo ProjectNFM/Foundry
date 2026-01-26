@@ -1,7 +1,12 @@
+from typing import TYPE_CHECKING
+
 import numpy as np
 from temporaldata import Data
 
 from torch_brain.utils import np_string_prefix
+
+if TYPE_CHECKING:
+    from torch_brain.registry import ModalitySpec
 
 
 class EEGDatasetMixin:
@@ -32,3 +37,21 @@ class EEGDatasetMixin:
             self.get_recording(rid).channels.id for rid in self.recording_ids
         ]
         return np.sort(np.concatenate(ans)).tolist()
+
+
+class ModalityMixin:
+    """Mixin for datasets that provide modality specifications."""
+
+    MODALITIES: dict[str, int] = {}
+
+    @classmethod
+    def get_modality_specs(cls) -> dict[str, "ModalitySpec"]:
+        """Return ModalitySpec objects for this dataset's modalities keyed by name."""
+        from torch_brain.registry import MODALITY_REGISTRY
+
+        return {name: MODALITY_REGISTRY[name] for name in cls.MODALITIES.keys()}
+
+    @classmethod
+    def get_modality_names(cls) -> list[str]:
+        """Return names of available modalities."""
+        return list(cls.MODALITIES.keys())

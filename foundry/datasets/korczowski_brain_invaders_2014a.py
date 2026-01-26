@@ -2,10 +2,12 @@ from typing import Callable, Optional, Literal
 from pathlib import Path
 
 from torch_brain.dataset import Dataset
-from .mixins import EEGDatasetMixin
+from .mixins import EEGDatasetMixin, ModalityMixin
+from .modalities import P300_TARGET
 
 
-class KorczowskiBrainInvaders2014a(EEGDatasetMixin, Dataset):
+class KorczowskiBrainInvaders2014a(ModalityMixin, EEGDatasetMixin, Dataset):
+    MODALITIES = {"p300_target": P300_TARGET}
     """Brain Invaders 2014a P300 Dataset (Korczowski et al., 2014).
 
     EEG recordings from 71 subjects performing a visual P300 Brain-Computer Interface task

@@ -3,10 +3,20 @@ import numpy as np
 from pathlib import Path
 
 from torch_brain.dataset import Dataset
-from .mixins import EEGDatasetMixin
+from .mixins import EEGDatasetMixin, ModalityMixin
+from .modalities import (
+    MOTOR_IMAGERY_5CLASS,
+    MOTOR_IMAGERY_LEFT_RIGHT,
+    MOTOR_IMAGERY_RIGHT_FEET,
+)
 
 
-class SchalkWolpawPhysionet2009(EEGDatasetMixin, Dataset):
+class SchalkWolpawPhysionet2009(ModalityMixin, EEGDatasetMixin, Dataset):
+    MODALITIES = {
+        "motor_imagery_5class": MOTOR_IMAGERY_5CLASS,
+        "motor_imagery_left_right": MOTOR_IMAGERY_LEFT_RIGHT,
+        "motor_imagery_right_feet": MOTOR_IMAGERY_RIGHT_FEET,
+    }
     """PhysioNet Motor Imagery Dataset (Schalk & Wolpaw, 2009).
 
     EEG motor imagery data from 109 volunteers performing motor imagery tasks.

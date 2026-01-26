@@ -12,70 +12,85 @@ from torch_brain.nn import (
     RotaryTimeEmbedding,
     prepare_for_multitask_readout,
 )
+from torch_brain.registry import ModalitySpec
 from torch_brain.utils import create_linspace_latent_tokens
+
+from foundry.models.backbones import PerceiverIOBackbone
 
 
 class EEGModel(nn.Module):
     """
-    Flexible EEG model that composes independent building blocks.
+    POYO-style EEG model with built-in Perceiver architecture.
 
-    This model is a reference implementation showing how to wire together
-    embedding, backbone, and readout components. You can use this as-is or
-    build your own composition using the individual building blocks however
-    you want.
-
-    The model doesn't enforce any interfaces - components are wired together
-    through explicit method calls in the forward pass.
+    This model uses a PerceiverIO backbone internally and only accepts
+    input_embedding as a configurable module. All other components
+    (encoder, processor, decoder) are built-in.
     """
 
     def __init__(
         self,
         input_embedding: nn.Module,
-        backbone: nn.Module,
-        readout_specs: list[str],
+        readout_specs: list[ModalitySpec] | dict[str, ModalitySpec],
         embed_dim: int,
         sequence_length: float,
-        patch_size_seconds: float = 0.5,
-        patch_overlap_percentage: float = 0.5,
         latent_step: float = 0.1,
         num_latents_per_step: int = 1,
-        emb_init_scale: float = 0.02,
+        depth: int = 2,
         dim_head: int = 64,
+        cross_heads: int = 1,
+        self_heads: int = 8,
+        ffn_dropout: float = 0.2,
+        lin_dropout: float = 0.4,
+        atn_dropout: float = 0.0,
+        emb_init_scale: float = 0.02,
         t_min: float = 1e-4,
         t_max: float = 2.0627,
     ):
         """
         Args:
             input_embedding: Module that converts raw inputs to embeddings
-            backbone: Module that processes embeddings (can be any architecture)
             readout_specs: List of task specifications for multitask readout
             embed_dim: Embedding dimension (must match components)
             sequence_length: Length of sequences in seconds
-            patch_size_seconds: Size of each patch in seconds
-            patch_overlap_percentage: Overlap percentage between consecutive patches
             latent_step: Time step between latent tokens in seconds
             num_latents_per_step: Number of latent tokens per time step
+            depth: Number of processor layers
+            dim_head: Dimension per attention head
+            cross_heads: Number of attention heads for cross-attention
+            self_heads: Number of attention heads for self-attention
+            ffn_dropout: Dropout rate for feedforward networks
+            lin_dropout: Dropout rate for linear layers in processor
+            atn_dropout: Dropout rate for attention layers
             emb_init_scale: Initialization scale for embeddings
-            dim_head: Dimension per attention head for rotary embeddings
             t_min: Minimum time value for rotary encoding
             t_max: Maximum time value for rotary encoding
         """
         super().__init__()
 
         self.input_embedding = input_embedding
-        self.backbone = backbone
         self.embed_dim = embed_dim
-
         self.sequence_length = sequence_length
-        self.patch_size_seconds = patch_size_seconds
-        self.patch_overlap_percentage = patch_overlap_percentage
         self.latent_step = latent_step
         self.num_latents_per_step = num_latents_per_step
 
-        self.readout_specs = {spec.id: spec for spec in readout_specs}
+        if isinstance(readout_specs, list):
+            self.readout_specs = {spec.id: spec for spec in readout_specs}
+        else:
+            self.readout_specs = readout_specs
         self.global_to_local_task_id = {
             spec.id: idx for idx, spec in enumerate(self.readout_specs.values())
         }
+
+        self.backbone = PerceiverIOBackbone(
+            embed_dim=embed_dim,
+            depth=depth,
+            dim_head=dim_head,
+            cross_heads=cross_heads,
+            self_heads=self_heads,
+            ffn_dropout=ffn_dropout,
+            lin_dropout=lin_dropout,
+            atn_dropout=atn_dropout,
+        )
 
         self.session_emb = InfiniteVocabEmbedding(
             self.embed_dim, init_scale=emb_init_scale
@@ -113,9 +128,6 @@ class EEGModel(nn.Module):
     ) -> Dict:
         """
         Forward pass through the model.
-
-        This implementation shows one way to wire components together.
-        You can build your own forward pass using the components however you want.
 
         Args:
             input_values: Raw input tensor (shape depends on input_embedding)
@@ -172,50 +184,20 @@ class EEGModel(nn.Module):
 
     def tokenize(self, data: Data) -> dict:
         """
-        Tokenize the input data by creating overlapping patches.
+        Tokenize the input data. Assumes data has already been patched.
 
         Args:
-            data: TemporalData object containing EEG signal and timestamps.
+            data: TemporalData object containing patched EEG signal and timestamps.
                   Must have data.config["multitask_readout"] configured.
+                  The data.eeg field should already be patched (use Patching transform).
 
         Returns:
             dict with model_inputs, target_values, target_weights, and metadata
         """
         start, end = 0, self.sequence_length
 
-        patch_length_samples = int(
-            self.patch_size_seconds * data.eeg.sampling_rate
-        )
-
-        duration = data.domain.end - data.domain.start
-        stride_seconds = self.patch_size_seconds * (
-            1 - self.patch_overlap_percentage
-        )
-        stride_samples = int(stride_seconds * data.eeg.sampling_rate)
-
-        num_patches = (
-            int((duration.item() - self.patch_size_seconds) / stride_seconds)
-            + 1
-        )
-
-        patch_indices = np.arange(num_patches)
-        start_indices = patch_indices * stride_samples
-        end_indices = start_indices + patch_length_samples
-
-        valid_mask = end_indices <= len(data.eeg.signal)
-
-        if not np.any(valid_mask):
-            raise ValueError("No valid patches created from the data")
-
-        start_indices = start_indices[valid_mask]
-        end_indices = end_indices[valid_mask]
-
-        mid_indices = (start_indices + end_indices) // 2
-        patch_center_times = data.eeg.timestamps[mid_indices]
-
-        indices = (
-            start_indices[:, None] + np.arange(patch_length_samples)[None, :]
-        )
+        if not hasattr(data, "eeg") or data.eeg is None:
+            raise ValueError("Data must have an 'eeg' field")
 
         modality_field = (
             data.units.modality.astype(str)
@@ -223,7 +205,9 @@ class EEGModel(nn.Module):
             else data.units.standard_types
         )
         modality_mask = modality_field == "EEG"
-        patches_array = data.eeg.signal[indices][:, :, modality_mask]
+
+        patches_array = data.eeg.signal[:, :, modality_mask]
+        patch_center_times = data.eeg.timestamps
 
         latent_index, latent_timestamps = create_linspace_latent_tokens(
             start,

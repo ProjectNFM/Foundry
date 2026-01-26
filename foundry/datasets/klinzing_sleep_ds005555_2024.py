@@ -2,10 +2,12 @@ from typing import Callable, Optional
 from pathlib import Path
 
 from torch_brain.dataset import Dataset
-from .mixins import EEGDatasetMixin
+from .mixins import EEGDatasetMixin, ModalityMixin
+from .modalities import SLEEP_STAGE_5CLASS
 
 
-class KlinzingSleepDS0055552024(EEGDatasetMixin, Dataset):
+class KlinzingSleepDS0055552024(ModalityMixin, EEGDatasetMixin, Dataset):
+    MODALITIES = {"sleep_stage_5class": SLEEP_STAGE_5CLASS}
     """Bitbrain Open Access Sleep (BOAS) Dataset from OpenNeuro (Klinzing et al., 2024).
 
     Simultaneous recordings from a clinical PSG system (Micromed) and a wearable EEG headband
