@@ -99,7 +99,9 @@ class PerceiverProcessor(nn.Module):
     ) -> torch.Tensor:
         """Process latents with self-attention."""
         for self_attn, self_ff in self.layers:
-            latents = latents + self.dropout(self_attn(latents, latent_timestamp_emb))
+            latents = latents + self.dropout(
+                self_attn(latents, latent_timestamp_emb)
+            )
             latents = latents + self.dropout(self_ff(latents))
         return latents
 
