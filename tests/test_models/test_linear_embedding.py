@@ -1,31 +1,29 @@
 import torch
 
-from foundry.models import PatchEmbedding
+from foundry.models import LinearEmbedding
 
 
-class TestPatchEmbedding:
+class TestLinearEmbedding:
     def test_initialization(self, embed_dim):
-        embedding = PatchEmbedding(embed_dim=embed_dim)
+        embedding = LinearEmbedding(embed_dim=embed_dim)
         assert embedding.embed_dim == embed_dim
         assert len(embedding.projections) == 0
 
     def test_forward_pass_basic(self, embed_dim, batch_size):
-        embedding = PatchEmbedding(embed_dim=embed_dim)
+        embedding = LinearEmbedding(embed_dim=embed_dim)
 
         num_patches = 10
         time_steps = 50
         channels = 4
 
-        input_values = torch.randn(
-            batch_size, num_patches, time_steps, channels
-        )
+        input_values = torch.randn(batch_size, num_patches, time_steps, channels)
         output = embedding(input_values)
 
         assert output.shape == (batch_size, num_patches, embed_dim)
         assert len(embedding.projections) == 1
 
     def test_forward_pass_different_shapes(self, embed_dim, batch_size):
-        embedding = PatchEmbedding(embed_dim=embed_dim)
+        embedding = LinearEmbedding(embed_dim=embed_dim)
 
         shape1 = (batch_size, 10, 50, 4)
         shape2 = (batch_size, 15, 100, 8)
@@ -41,7 +39,7 @@ class TestPatchEmbedding:
         assert len(embedding.projections) == 2
 
     def test_get_projection_caching(self, embed_dim):
-        embedding = PatchEmbedding(embed_dim=embed_dim)
+        embedding = LinearEmbedding(embed_dim=embed_dim)
 
         time_steps, channels = 50, 4
 
@@ -52,7 +50,7 @@ class TestPatchEmbedding:
         assert len(embedding.projections) == 1
 
     def test_get_projection_different_dimensions(self, embed_dim):
-        embedding = PatchEmbedding(embed_dim=embed_dim)
+        embedding = LinearEmbedding(embed_dim=embed_dim)
 
         proj1 = embedding.get_projection(50, 4)
         proj2 = embedding.get_projection(100, 8)
@@ -64,7 +62,7 @@ class TestPatchEmbedding:
         assert len(embedding.projections) == 3
 
     def test_projection_output_dimensions(self, embed_dim):
-        embedding = PatchEmbedding(embed_dim=embed_dim)
+        embedding = LinearEmbedding(embed_dim=embed_dim)
 
         time_steps, channels = 50, 4
         projection = embedding.get_projection(time_steps, channels)
@@ -73,7 +71,7 @@ class TestPatchEmbedding:
         assert projection.out_features == embed_dim
 
     def test_forward_pass_single_batch(self, embed_dim):
-        embedding = PatchEmbedding(embed_dim=embed_dim)
+        embedding = LinearEmbedding(embed_dim=embed_dim)
 
         input_values = torch.randn(1, 20, 100, 6)
         output = embedding(input_values)
@@ -81,7 +79,7 @@ class TestPatchEmbedding:
         assert output.shape == (1, 20, embed_dim)
 
     def test_forward_pass_large_batch(self, embed_dim):
-        embedding = PatchEmbedding(embed_dim=embed_dim)
+        embedding = LinearEmbedding(embed_dim=embed_dim)
 
         batch_size = 16
         input_values = torch.randn(batch_size, 5, 30, 2)
@@ -90,7 +88,7 @@ class TestPatchEmbedding:
         assert output.shape == (batch_size, 5, embed_dim)
 
     def test_projection_initialization(self, embed_dim):
-        embedding = PatchEmbedding(embed_dim=embed_dim)
+        embedding = LinearEmbedding(embed_dim=embed_dim)
         projection = embedding.get_projection(50, 4)
 
         assert hasattr(projection, "weight")

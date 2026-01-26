@@ -2,13 +2,11 @@ import torch
 import torch.nn as nn
 
 
-class PatchEmbedding(nn.Module):
+class LinearEmbedding(nn.Module):
     """
-    Converts variable-sized EEG patches to fixed-size embeddings.
+    Converts variable-sized EEG patches to fixed-size embeddings using a linear projection.
 
-    Uses dynamic projection layers created on-the-fly based on input dimensions.
-    Each unique combination of (time_steps, channels) gets its own projection layer.
-    This is a standalone component - it just does the embedding projection.
+    Uses a single projection layer that maps the flattened input to the output embedding dimension.
     """
 
     def __init__(self, embed_dim: int):
