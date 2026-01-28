@@ -92,6 +92,9 @@ class EEGModel(nn.Module):
             atn_dropout=atn_dropout,
         )
 
+        self.unit_emb = InfiniteVocabEmbedding(
+            self.embed_dim, init_scale=emb_init_scale
+        )
         self.session_emb = InfiniteVocabEmbedding(
             self.embed_dim, init_scale=emb_init_scale
         )
@@ -118,6 +121,8 @@ class EEGModel(nn.Module):
         *,
         input_values: torch.Tensor,
         input_timestamps: torch.Tensor,
+        input_channel_index: torch.Tensor,
+        input_session_index: torch.Tensor,
         input_mask: Optional[torch.Tensor] = None,
         latent_index: torch.Tensor,
         latent_timestamps: torch.Tensor,
@@ -132,6 +137,8 @@ class EEGModel(nn.Module):
         Args:
             input_values: Raw input tensor (shape depends on input_embedding)
             input_timestamps: Timestamps for input sequence
+            input_channel_index: Channel/unit indices (batch_size, n_channels)
+            input_session_index: Session index for input (batch_size,)
             input_mask: Optional mask for input sequence
             latent_index: Indices for latent tokens (batch_size, n_latent)
             latent_timestamps: Timestamps for latent tokens (batch_size, n_latent)
@@ -143,13 +150,12 @@ class EEGModel(nn.Module):
         Returns:
             Dictionary of task-specific outputs
         """
-        if self.session_emb.is_lazy():
-            raise ValueError(
-                "Session vocabulary has not been initialized, please use "
-                "`model.session_emb.initialize_vocab(session_ids)`"
-            )
+        self._validate_vocab_initialization()
 
         inputs = self.input_embedding(input_values)
+        inputs = self._add_context_embeddings(
+            inputs, input_channel_index, input_session_index
+        )
         input_timestamp_emb = self.rotary_emb(input_timestamps)
 
         latents = self.latent_emb(latent_index)
@@ -182,6 +188,43 @@ class EEGModel(nn.Module):
 
         return output
 
+    def _validate_vocab_initialization(self):
+        """Validate that vocabularies have been properly initialized."""
+        if self.unit_emb.is_lazy():
+            raise ValueError(
+                "Unit vocabulary has not been initialized, please use "
+                "`model.unit_emb.initialize_vocab(unit_ids)`"
+            )
+        if self.session_emb.is_lazy():
+            raise ValueError(
+                "Session vocabulary has not been initialized, please use "
+                "`model.session_emb.initialize_vocab(session_ids)`"
+            )
+
+    def _add_context_embeddings(
+        self,
+        inputs: torch.Tensor,
+        input_channel_index: torch.Tensor,
+        input_session_index: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Add channel and session embeddings to input patch embeddings.
+
+        Args:
+            inputs: Patch embeddings (batch_size, n_patches, embed_dim)
+            input_channel_index: Channel indices (batch_size, n_channels)
+            input_session_index: Session index (batch_size,)
+
+        Returns:
+            Inputs with added channel and session context (batch_size, n_patches, embed_dim)
+        """
+        channel_emb = self.unit_emb(input_channel_index)
+        channel_emb = channel_emb.mean(dim=1, keepdim=True)
+
+        session_emb = self.session_emb(input_session_index).unsqueeze(1)
+
+        return inputs + channel_emb + session_emb
+
     def tokenize(self, data: Data) -> dict:
         """
         Tokenize the input data. Assumes data has already been patched.
@@ -199,15 +242,25 @@ class EEGModel(nn.Module):
         if not hasattr(data, "eeg") or data.eeg is None:
             raise ValueError("Data must have an 'eeg' field")
 
-        modality_field = (
-            data.units.modality.astype(str)
-            if hasattr(data.units, "modality")
-            else data.units.standard_types
-        )
-        modality_mask = modality_field == "EEG"
+        if data.eeg.signal.ndim != 3:
+            raise ValueError(
+                f"Data must be patched before tokenization. Expected 3D signal "
+                f"(num_patches, channels, patch_samples), got {data.eeg.signal.ndim}D "
+                f"with shape {data.eeg.signal.shape}. Use Patching transform first."
+            )
 
-        patches_array = data.eeg.signal[:, :, modality_mask]
+        modality_field = (
+            data.channels.types.astype(str)
+            if hasattr(data.channels, "types")
+            else np.array(["EEG"] * len(data.channels)).astype(str)
+        )
+        modality_mask = np.char.lower(modality_field) == "eeg"
+
+        patches_array = data.eeg.signal[:, modality_mask, :]
         patch_center_times = data.eeg.timestamps
+
+        channel_ids = data.channels.id[modality_mask]
+        input_channel_index = self.unit_emb.tokenizer(channel_ids)
 
         latent_index, latent_timestamps = create_linspace_latent_tokens(
             start,
@@ -216,7 +269,7 @@ class EEGModel(nn.Module):
             num_latents_per_step=self.num_latents_per_step,
         )
 
-        session_index = self.session_emb.tokenizer(data.session.id)
+        input_session_index = self.session_emb.tokenizer(data.session.id)
 
         (
             output_timestamps,
@@ -229,17 +282,21 @@ class EEGModel(nn.Module):
             self.readout_specs,
         )
 
-        session_index = np.repeat(session_index, len(output_timestamps))
+        output_session_index = np.repeat(
+            input_session_index, len(output_timestamps)
+        )
 
         tokenized_data = {
             "input_values": pad8(torch.from_numpy(patches_array).float()),
             "input_timestamps": pad8(
                 torch.from_numpy(patch_center_times).float()
             ),
+            "input_channel_index": input_channel_index,
+            "input_session_index": input_session_index,
             "input_mask": track_mask8(patch_center_times),
             "latent_index": latent_index,
             "latent_timestamps": latent_timestamps,
-            "output_session_index": pad8(session_index),
+            "output_session_index": pad8(output_session_index),
             "output_timestamps": pad8(output_timestamps),
             "output_decoder_index": pad8(output_task_index),
             "target_values": chain(output_values, allow_missing_keys=True),

@@ -38,6 +38,10 @@ class EEGDatasetMixin:
         ]
         return np.sort(np.concatenate(ans)).tolist()
 
+    def get_recording_ids(self) -> list[str]:
+        """Return a sorted list of all recording IDs in the dataset."""
+        return np.sort(np.array(self.recording_ids)).tolist()
+
 
 class ModalityMixin:
     """Mixin for datasets that provide modality specifications."""

@@ -1,6 +1,7 @@
 from foundry.models import EEGModel, LinearEmbedding
 from foundry.data.datamodules import PhysionetDataModule
 from foundry.data.datasets import SchalkWolpawPhysionet2009
+from foundry.transforms.patching import Patching
 
 
 processed_dir = "./data/processed/"
@@ -15,5 +16,11 @@ eeg_model = EEGModel(
 data_module = PhysionetDataModule(
     root=processed_dir,
     model=eeg_model,
-    transform=None,
+    window_length=1.0,
+    transform=Patching(patch_duration=0.1),
 )
+data_module.setup("fit")
+
+sample1 = next(iter(data_module.train_dataloader()))
+
+eeg_model(sample1)

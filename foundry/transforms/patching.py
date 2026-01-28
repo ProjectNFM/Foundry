@@ -24,23 +24,28 @@ class Patching:
     Example:
         >>> data = Data(
         ...     eeg=RegularTimeSeries(
-        ...         data=np.random.randn(500, 32),
+        ...         data=np.random.randn(500, 32),  # shape: (T=500, C=32)
         ...         sampling_rate=250.0,
         ...         domain=Interval(0.0, 2.0),
         ...     ),
         ...     domain=Interval(0.0, 2.0),
         ... )
-        >>> # Non-overlapping patches
+        >>> # Non-overlapping patches: 2 patches of 250 samples each
         >>> transform = Patching(patch_duration=1.0, stride=1.0)
         >>> patched_data = transform(data)
+        >>> patched_data.eeg.data.shape  # (P=2, C=32, S=250)
 
-        >>> # Overlapping patches (50% overlap)
+        >>> # Overlapping patches (50% overlap): 2 patches of 500 samples each
         >>> transform = Patching(patch_duration=2.0, stride=1.0)
         >>> patched_data = transform(data)
+        >>> patched_data.eeg.data.shape  # (P=2, C=32, S=500)
     """
 
     def __init__(
-        self, patch_duration: float, stride: float = None, timestamp_mode: str = "middle"
+        self,
+        patch_duration: float,
+        stride: float = None,
+        timestamp_mode: str = "middle",
     ):
         self.patch_duration = patch_duration
         self.stride = stride if stride is not None else patch_duration
@@ -58,10 +63,17 @@ class Patching:
             data: The temporalData object to patch.
 
         Returns:
-            A new Data object with patched time series fields.
+            A new Data object with patched time series fields. Each RegularTimeSeries
+            attribute is transformed from shape (T, C, ...) to (P, C, S, ...) where:
+                - T: original number of time samples
+                - C: number of channels
+                - P: number of patches
+                - S: samples per patch (patch_duration * sampling_rate)
         """
         if data.domain is None:
-            raise ValueError("Data object must have a domain to apply patching.")
+            raise ValueError(
+                "Data object must have a domain to apply patching."
+            )
 
         out = Data()
 
@@ -100,11 +112,20 @@ class Patching:
     def _patch_time_series(self, ts):
         """Patch a time series object (RegularTimeSeries or IrregularTimeSeries).
 
+        Shape transformation:
+            Input:  (T, C, ...) where T is time samples, C is channels
+            Output: (P, C, S, ...) where P is num_patches, S is samples_per_patch
+
+        The output sampling_rate becomes 1/stride (patches per second), and each
+        patch contains patch_duration * original_sampling_rate samples.
+
         Args:
             ts: The time series to patch (RegularTimeSeries or IrregularTimeSeries).
+                Data arrays must have shape (T, C, ...) with T >= 1.
 
         Returns:
-            A new time series of the same type with patched data.
+            A new time series of the same type with patched data arrays of shape
+            (P, C, S, ...). Returns a copy unchanged if no patchable arrays exist.
         """
         array_attrs = {}
 
@@ -147,11 +168,15 @@ class Patching:
             num_patches = 1
         else:
             num_patches = (
-                int(np.ceil((time_samples - patch_samples) / stride_samples)) + 1
+                int(np.ceil((time_samples - patch_samples) / stride_samples))
+                + 1
             )
 
-        total_samples_needed = (num_patches - 1) * stride_samples + patch_samples
+        total_samples_needed = (
+            num_patches - 1
+        ) * stride_samples + patch_samples
 
+        # indices shape: (P, S) - each row contains sample indices for one patch
         indices = (
             np.arange(patch_samples)[None, :]
             + stride_samples * np.arange(num_patches)[:, None]
@@ -159,16 +184,18 @@ class Patching:
 
         patched_attrs = {}
         for key, attr_data in array_attrs.items():
+            # attr_data shape: (T, C, ...)
             if time_samples < total_samples_needed:
-                pad_width = [(0, total_samples_needed - time_samples)] + [(0, 0)] * (
-                    attr_data.ndim - 1
-                )
+                pad_width = [(0, total_samples_needed - time_samples)] + [
+                    (0, 0)
+                ] * (attr_data.ndim - 1)
                 padded_data = np.pad(
                     attr_data, pad_width, mode="constant", constant_values=0
                 )
             else:
                 padded_data = attr_data
 
+            # After indexing: (P, S, C, ...) -> moveaxis -> (P, C, S, ...)
             patches = padded_data[indices]
             patches = np.moveaxis(patches, 2, 1)
             patched_attrs[key] = patches
@@ -200,7 +227,9 @@ class Patching:
 
         return patched_ts
 
-    def _is_regularly_spaced(self, ts: IrregularTimeSeries, tolerance=1e-6) -> bool:
+    def _is_regularly_spaced(
+        self, ts: IrregularTimeSeries, tolerance=1e-6
+    ) -> bool:
         """Check if timestamps are regularly spaced.
 
         Args:
