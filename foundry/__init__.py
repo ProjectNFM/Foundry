@@ -1,3 +1,3 @@
-from . import datasets
+from . import data
 
-__all__ = ["datasets"]
+__all__ = ["data"]

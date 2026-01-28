@@ -1,6 +1,6 @@
 import pytest
 
-from foundry.datasets import (
+from foundry.data.datasets import (
     KempSleepEDF2013,
     KlinzingSleepDS0055552024,
     KorczowskiBrainInvaders2014a,
