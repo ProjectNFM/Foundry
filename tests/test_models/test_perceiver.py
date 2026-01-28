@@ -22,8 +22,10 @@ class TestPerceiverEncoder:
 
         latents = torch.randn(batch_size, num_latents, embed_dim)
         inputs = torch.randn(batch_size, num_inputs, embed_dim)
-        latent_timestamp_emb = torch.randn(batch_size, num_latents, dim_head)
-        input_timestamp_emb = torch.randn(batch_size, num_inputs, dim_head)
+        latent_timestamp_emb = torch.randn(
+            batch_size, num_latents, dim_head * 2
+        )
+        input_timestamp_emb = torch.randn(batch_size, num_inputs, dim_head * 2)
 
         output = encoder(
             latents=latents,
@@ -43,8 +45,10 @@ class TestPerceiverEncoder:
 
         latents = torch.randn(batch_size, num_latents, embed_dim)
         inputs = torch.randn(batch_size, num_inputs, embed_dim)
-        latent_timestamp_emb = torch.randn(batch_size, num_latents, dim_head)
-        input_timestamp_emb = torch.randn(batch_size, num_inputs, dim_head)
+        latent_timestamp_emb = torch.randn(
+            batch_size, num_latents, dim_head * 2
+        )
+        input_timestamp_emb = torch.randn(batch_size, num_inputs, dim_head * 2)
         input_mask = torch.ones(batch_size, num_inputs, dtype=torch.bool)
 
         output = encoder(
@@ -62,8 +66,8 @@ class TestPerceiverEncoder:
 
         latents = torch.randn(batch_size, 20, embed_dim)
         inputs = torch.randn(batch_size, 100, embed_dim)
-        latent_timestamp_emb = torch.randn(batch_size, 20, 64)
-        input_timestamp_emb = torch.randn(batch_size, 100, 64)
+        latent_timestamp_emb = torch.randn(batch_size, 20, 64 * 2)
+        input_timestamp_emb = torch.randn(batch_size, 100, 64 * 2)
 
         output = encoder(
             latents=latents,
@@ -88,7 +92,9 @@ class TestPerceiverProcessor:
         dim_head = 64
 
         latents = torch.randn(batch_size, num_latents, embed_dim)
-        latent_timestamp_emb = torch.randn(batch_size, num_latents, dim_head)
+        latent_timestamp_emb = torch.randn(
+            batch_size, num_latents, dim_head * 2
+        )
 
         output = processor(
             latents=latents, latent_timestamp_emb=latent_timestamp_emb
@@ -102,7 +108,7 @@ class TestPerceiverProcessor:
             assert len(processor.layers) == depth
 
             latents = torch.randn(batch_size, 20, embed_dim)
-            latent_timestamp_emb = torch.randn(batch_size, 20, 64)
+            latent_timestamp_emb = torch.randn(batch_size, 20, 64 * 2)
 
             output = processor(
                 latents=latents, latent_timestamp_emb=latent_timestamp_emb
@@ -115,7 +121,7 @@ class TestPerceiverProcessor:
         )
 
         latents = torch.randn(batch_size, 20, embed_dim)
-        latent_timestamp_emb = torch.randn(batch_size, 20, 64)
+        latent_timestamp_emb = torch.randn(batch_size, 20, 64 * 2)
 
         output = processor(
             latents=latents, latent_timestamp_emb=latent_timestamp_emb
@@ -138,8 +144,10 @@ class TestPerceiverDecoder:
 
         queries = torch.randn(batch_size, num_queries, embed_dim)
         latents = torch.randn(batch_size, num_latents, embed_dim)
-        query_timestamp_emb = torch.randn(batch_size, num_queries, dim_head)
-        latent_timestamp_emb = torch.randn(batch_size, num_latents, dim_head)
+        query_timestamp_emb = torch.randn(batch_size, num_queries, dim_head * 2)
+        latent_timestamp_emb = torch.randn(
+            batch_size, num_latents, dim_head * 2
+        )
 
         output = decoder(
             queries=queries,
@@ -155,8 +163,8 @@ class TestPerceiverDecoder:
 
         queries = torch.randn(batch_size, 30, embed_dim)
         latents = torch.randn(batch_size, 20, embed_dim)
-        query_timestamp_emb = torch.randn(batch_size, 30, 64)
-        latent_timestamp_emb = torch.randn(batch_size, 20, 64)
+        query_timestamp_emb = torch.randn(batch_size, 30, 64 * 2)
+        latent_timestamp_emb = torch.randn(batch_size, 20, 64 * 2)
 
         output = decoder(
             queries=queries,
@@ -185,11 +193,15 @@ class TestPerceiverIOBackbone:
         dim_head = 64
 
         inputs = torch.randn(batch_size, num_inputs, embed_dim)
-        input_timestamp_emb = torch.randn(batch_size, num_inputs, dim_head)
+        input_timestamp_emb = torch.randn(batch_size, num_inputs, dim_head * 2)
         latents = torch.randn(batch_size, num_latents, embed_dim)
-        latent_timestamp_emb = torch.randn(batch_size, num_latents, dim_head)
+        latent_timestamp_emb = torch.randn(
+            batch_size, num_latents, dim_head * 2
+        )
         output_queries = torch.randn(batch_size, num_outputs, embed_dim)
-        output_timestamp_emb = torch.randn(batch_size, num_outputs, dim_head)
+        output_timestamp_emb = torch.randn(
+            batch_size, num_outputs, dim_head * 2
+        )
 
         output = backbone(
             inputs=inputs,
@@ -211,12 +223,16 @@ class TestPerceiverIOBackbone:
         dim_head = 64
 
         inputs = torch.randn(batch_size, num_inputs, embed_dim)
-        input_timestamp_emb = torch.randn(batch_size, num_inputs, dim_head)
+        input_timestamp_emb = torch.randn(batch_size, num_inputs, dim_head * 2)
         input_mask = torch.ones(batch_size, num_inputs, dtype=torch.bool)
         latents = torch.randn(batch_size, num_latents, embed_dim)
-        latent_timestamp_emb = torch.randn(batch_size, num_latents, dim_head)
+        latent_timestamp_emb = torch.randn(
+            batch_size, num_latents, dim_head * 2
+        )
         output_queries = torch.randn(batch_size, num_outputs, embed_dim)
-        output_timestamp_emb = torch.randn(batch_size, num_outputs, dim_head)
+        output_timestamp_emb = torch.randn(
+            batch_size, num_outputs, dim_head * 2
+        )
 
         output = backbone(
             inputs=inputs,
@@ -240,11 +256,11 @@ class TestPerceiverIOBackbone:
         )
 
         inputs = torch.randn(batch_size, 100, embed_dim)
-        input_timestamp_emb = torch.randn(batch_size, 100, 32)
+        input_timestamp_emb = torch.randn(batch_size, 100, 32 * 2)
         latents = torch.randn(batch_size, 20, embed_dim)
-        latent_timestamp_emb = torch.randn(batch_size, 20, 32)
+        latent_timestamp_emb = torch.randn(batch_size, 20, 32 * 2)
         output_queries = torch.randn(batch_size, 30, embed_dim)
-        output_timestamp_emb = torch.randn(batch_size, 30, 32)
+        output_timestamp_emb = torch.randn(batch_size, 30, 32 * 2)
 
         output = backbone(
             inputs=inputs,
@@ -270,14 +286,16 @@ class TestPerceiverIOBackbone:
 
         for num_inputs, num_latents, num_outputs in test_cases:
             inputs = torch.randn(batch_size, num_inputs, embed_dim)
-            input_timestamp_emb = torch.randn(batch_size, num_inputs, dim_head)
+            input_timestamp_emb = torch.randn(
+                batch_size, num_inputs, dim_head * 2
+            )
             latents = torch.randn(batch_size, num_latents, embed_dim)
             latent_timestamp_emb = torch.randn(
-                batch_size, num_latents, dim_head
+                batch_size, num_latents, dim_head * 2
             )
             output_queries = torch.randn(batch_size, num_outputs, embed_dim)
             output_timestamp_emb = torch.randn(
-                batch_size, num_outputs, dim_head
+                batch_size, num_outputs, dim_head * 2
             )
 
             output = backbone(

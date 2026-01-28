@@ -77,7 +77,7 @@ class KorczowskiBrainInvaders2014a(ModalityMixin, EEGDatasetMixin, Dataset):
             }
 
         if self.fold_type == "intra-subject":
-            key = f"splits.{self.fold_type}.fold_{self.fold_number}.{split}"
+            key = f"splits.fold_{self.fold_number}.{split}"
             return {
                 rid: self.get_recording(rid).get_nested_attribute(key)
                 for rid in self.recording_ids
