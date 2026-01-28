@@ -109,6 +109,10 @@ class PhysionetDataModule(LightningDataModule):
                 session_ids = self.dataset.get_recording_ids()
                 self.model.session_emb.initialize_vocab(session_ids)
 
+            if self.model.channel_emb.is_lazy():
+                channel_ids = self.dataset.get_channel_ids()
+                self.model.channel_emb.initialize_vocab(channel_ids)
+
     def train_dataloader(self) -> DataLoader:
         """Create training DataLoader with RandomFixedWindowSampler."""
         train_intervals = self.dataset.get_sampling_intervals(split="train")

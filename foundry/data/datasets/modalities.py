@@ -24,7 +24,7 @@ MOTOR_IMAGERY_5CLASS = register_modality(
     dim=5,
     type=DataType.MULTINOMIAL,
     timestamp_key="motor_imagery_trials.timestamps",
-    value_key="motor_imagery_trials.movements",
+    value_key="motor_imagery_trials.movement_ids",
     loss_fn=CrossEntropyLoss(),
 )
 
@@ -33,7 +33,7 @@ MOTOR_IMAGERY_LEFT_RIGHT = register_modality(
     dim=2,
     type=DataType.MULTINOMIAL,
     timestamp_key="motor_imagery_trials.timestamps",
-    value_key="motor_imagery_trials.movements",
+    value_key="motor_imagery_trials.movement_ids",
     loss_fn=CrossEntropyLoss(),
 )
 
@@ -42,6 +42,6 @@ MOTOR_IMAGERY_RIGHT_FEET = register_modality(
     dim=2,
     type=DataType.MULTINOMIAL,
     timestamp_key="motor_imagery_trials.timestamps",
-    value_key="motor_imagery_trials.movements",
+    value_key="motor_imagery_trials.movement_ids",
     loss_fn=CrossEntropyLoss(),
 )

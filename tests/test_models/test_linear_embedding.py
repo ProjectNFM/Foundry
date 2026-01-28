@@ -12,23 +12,20 @@ class TestLinearEmbedding:
     def test_forward_pass_basic(self, embed_dim, batch_size):
         embedding = LinearEmbedding(embed_dim=embed_dim)
 
-        num_patches = 10
-        time_steps = 50
-        channels = 4
+        num_tokens = 10
+        patch_samples = 50
 
-        input_values = torch.randn(
-            batch_size, num_patches, time_steps, channels
-        )
+        input_values = torch.randn(batch_size, num_tokens, patch_samples)
         output = embedding(input_values)
 
-        assert output.shape == (batch_size, num_patches, embed_dim)
+        assert output.shape == (batch_size, num_tokens, embed_dim)
         assert len(embedding.projections) == 1
 
     def test_forward_pass_different_shapes(self, embed_dim, batch_size):
         embedding = LinearEmbedding(embed_dim=embed_dim)
 
-        shape1 = (batch_size, 10, 50, 4)
-        shape2 = (batch_size, 15, 100, 8)
+        shape1 = (batch_size, 10, 50)
+        shape2 = (batch_size, 15, 100)
 
         input1 = torch.randn(*shape1)
         input2 = torch.randn(*shape2)
@@ -43,10 +40,10 @@ class TestLinearEmbedding:
     def test_get_projection_caching(self, embed_dim):
         embedding = LinearEmbedding(embed_dim=embed_dim)
 
-        time_steps, channels = 50, 4
+        patch_samples = 50
 
-        proj1 = embedding.get_projection(time_steps, channels)
-        proj2 = embedding.get_projection(time_steps, channels)
+        proj1 = embedding.get_projection(patch_samples)
+        proj2 = embedding.get_projection(patch_samples)
 
         assert proj1 is proj2
         assert len(embedding.projections) == 1
@@ -54,9 +51,9 @@ class TestLinearEmbedding:
     def test_get_projection_different_dimensions(self, embed_dim):
         embedding = LinearEmbedding(embed_dim=embed_dim)
 
-        proj1 = embedding.get_projection(50, 4)
-        proj2 = embedding.get_projection(100, 8)
-        proj3 = embedding.get_projection(50, 8)
+        proj1 = embedding.get_projection(50)
+        proj2 = embedding.get_projection(100)
+        proj3 = embedding.get_projection(75)
 
         assert proj1 is not proj2
         assert proj1 is not proj3
@@ -66,16 +63,16 @@ class TestLinearEmbedding:
     def test_projection_output_dimensions(self, embed_dim):
         embedding = LinearEmbedding(embed_dim=embed_dim)
 
-        time_steps, channels = 50, 4
-        projection = embedding.get_projection(time_steps, channels)
+        patch_samples = 50
+        projection = embedding.get_projection(patch_samples)
 
-        assert projection.in_features == time_steps * channels
+        assert projection.in_features == patch_samples
         assert projection.out_features == embed_dim
 
     def test_forward_pass_single_batch(self, embed_dim):
         embedding = LinearEmbedding(embed_dim=embed_dim)
 
-        input_values = torch.randn(1, 20, 100, 6)
+        input_values = torch.randn(1, 20, 100)
         output = embedding(input_values)
 
         assert output.shape == (1, 20, embed_dim)
@@ -84,16 +81,16 @@ class TestLinearEmbedding:
         embedding = LinearEmbedding(embed_dim=embed_dim)
 
         batch_size = 16
-        input_values = torch.randn(batch_size, 5, 30, 2)
+        input_values = torch.randn(batch_size, 5, 30)
         output = embedding(input_values)
 
         assert output.shape == (batch_size, 5, embed_dim)
 
     def test_projection_initialization(self, embed_dim):
         embedding = LinearEmbedding(embed_dim=embed_dim)
-        projection = embedding.get_projection(50, 4)
+        projection = embedding.get_projection(50)
 
         assert hasattr(projection, "weight")
         assert hasattr(projection, "bias")
-        assert projection.weight.shape == (embed_dim, 50 * 4)
+        assert projection.weight.shape == (embed_dim, 50)
         assert projection.bias.shape == (embed_dim,)

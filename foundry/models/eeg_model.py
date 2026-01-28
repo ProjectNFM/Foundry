@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from temporaldata import Data
-from torch_brain.data import chain, pad8, track_mask8
+from torch_brain.data import chain, pad8, pad2d
 from torch_brain.nn import (
     Embedding,
     InfiniteVocabEmbedding,
@@ -30,7 +30,7 @@ class EEGModel(nn.Module):
     def __init__(
         self,
         input_embedding: nn.Module,
-        readout_specs: list[ModalitySpec] | dict[str, ModalitySpec],
+        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
         embed_dim: int,
         sequence_length: float,
         latent_step: float = 0.1,
@@ -45,11 +45,13 @@ class EEGModel(nn.Module):
         emb_init_scale: float = 0.02,
         t_min: float = 1e-4,
         t_max: float = 2.0627,
+        context_mode: str = "add",
     ):
         """
         Args:
             input_embedding: Module that converts raw inputs to embeddings
-            readout_specs: List of task specifications for multitask readout
+            readout_specs: List/dict of task specifications for multitask readout.
+                Can be ModalitySpec objects or string names that resolve from registry.
             embed_dim: Embedding dimension (must match components)
             sequence_length: Length of sequences in seconds
             latent_step: Time step between latent tokens in seconds
@@ -64,19 +66,25 @@ class EEGModel(nn.Module):
             emb_init_scale: Initialization scale for embeddings
             t_min: Minimum time value for rotary encoding
             t_max: Maximum time value for rotary encoding
+            context_mode: How to combine context embeddings with input embeddings.
+                'add': Add channel and session embeddings to input embeddings
+                'concat': Concatenate embeddings and project back to embed_dim
         """
         super().__init__()
+
+        if context_mode not in ["add", "concat"]:
+            raise ValueError(
+                f"context_mode must be 'add' or 'concat', got '{context_mode}'"
+            )
 
         self.input_embedding = input_embedding
         self.embed_dim = embed_dim
         self.sequence_length = sequence_length
         self.latent_step = latent_step
         self.num_latents_per_step = num_latents_per_step
+        self.context_mode = context_mode
 
-        if isinstance(readout_specs, list):
-            self.readout_specs = {spec.id: spec for spec in readout_specs}
-        else:
-            self.readout_specs = readout_specs
+        self.readout_specs = self._resolve_readout_specs(readout_specs)
         self.global_to_local_task_id = {
             spec.id: idx for idx, spec in enumerate(self.readout_specs.values())
         }
@@ -92,7 +100,7 @@ class EEGModel(nn.Module):
             atn_dropout=atn_dropout,
         )
 
-        self.unit_emb = InfiniteVocabEmbedding(
+        self.channel_emb = InfiniteVocabEmbedding(
             self.embed_dim, init_scale=emb_init_scale
         )
         self.session_emb = InfiniteVocabEmbedding(
@@ -116,6 +124,13 @@ class EEGModel(nn.Module):
             readout_specs=self.readout_specs,
         )
 
+        if self.context_mode == "concat":
+            self.context_projection = nn.Linear(
+                3 * self.embed_dim, self.embed_dim
+            )
+            nn.init.xavier_uniform_(self.context_projection.weight, gain=1.0)
+            nn.init.zeros_(self.context_projection.bias)
+
     def forward(
         self,
         *,
@@ -135,11 +150,11 @@ class EEGModel(nn.Module):
         Forward pass through the model.
 
         Args:
-            input_values: Raw input tensor (shape depends on input_embedding)
-            input_timestamps: Timestamps for input sequence
-            input_channel_index: Channel/unit indices (batch_size, n_channels)
+            input_values: Flattened input tokens (batch_size, n_tokens, patch_samples)
+            input_timestamps: Timestamps per token (batch_size, n_tokens)
+            input_channel_index: Channel index per token (batch_size, n_tokens)
             input_session_index: Session index for input (batch_size,)
-            input_mask: Optional mask for input sequence
+            input_mask: Optional mask for input tokens (batch_size, n_tokens, patch_samples)
             latent_index: Indices for latent tokens (batch_size, n_latent)
             latent_timestamps: Timestamps for latent tokens (batch_size, n_latent)
             output_session_index: Session indices for output queries (batch_size, n_out)
@@ -188,55 +203,36 @@ class EEGModel(nn.Module):
 
         return output
 
-    def _validate_vocab_initialization(self):
-        """Validate that vocabularies have been properly initialized."""
-        if self.unit_emb.is_lazy():
-            raise ValueError(
-                "Unit vocabulary has not been initialized, please use "
-                "`model.unit_emb.initialize_vocab(unit_ids)`"
-            )
-        if self.session_emb.is_lazy():
-            raise ValueError(
-                "Session vocabulary has not been initialized, please use "
-                "`model.session_emb.initialize_vocab(session_ids)`"
-            )
-
-    def _add_context_embeddings(
-        self,
-        inputs: torch.Tensor,
-        input_channel_index: torch.Tensor,
-        input_session_index: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Add channel and session embeddings to input patch embeddings.
-
-        Args:
-            inputs: Patch embeddings (batch_size, n_patches, embed_dim)
-            input_channel_index: Channel indices (batch_size, n_channels)
-            input_session_index: Session index (batch_size,)
-
-        Returns:
-            Inputs with added channel and session context (batch_size, n_patches, embed_dim)
-        """
-        channel_emb = self.unit_emb(input_channel_index)
-        channel_emb = channel_emb.mean(dim=1, keepdim=True)
-
-        session_emb = self.session_emb(input_session_index).unsqueeze(1)
-
-        return inputs + channel_emb + session_emb
-
     def tokenize(self, data: Data) -> dict:
         """
         Tokenize the input data. Assumes data has already been patched.
 
         Args:
             data: TemporalData object containing patched EEG signal and timestamps.
-                  Must have data.config["multitask_readout"] configured.
+                  If data.config["multitask_readout"] is set by the dataset, it will be
+                  intersected with the model's readout_specs to use only supported modalities.
                   The data.eeg field should already be patched (use Patching transform).
 
         Returns:
             dict with model_inputs, target_values, target_weights, and metadata
         """
+        if not hasattr(data, "config") or data.config is None:
+            data.config = {}
+
+        if "multitask_readout" not in data.config:
+            data.config["multitask_readout"] = [
+                {"readout_id": spec_id} for spec_id in self.readout_specs.keys()
+            ]
+        else:
+            available = [
+                cfg["readout_id"] for cfg in data.config["multitask_readout"]
+            ]
+            data.config["multitask_readout"] = [
+                {"readout_id": name}
+                for name in available
+                if name in self.readout_specs
+            ]
+
         start, end = 0, self.sequence_length
 
         if not hasattr(data, "eeg") or data.eeg is None:
@@ -260,7 +256,16 @@ class EEGModel(nn.Module):
         patch_center_times = data.eeg.timestamps
 
         channel_ids = data.channels.id[modality_mask]
-        input_channel_index = self.unit_emb.tokenizer(channel_ids)
+        channel_tokens = self.channel_emb.tokenizer(channel_ids)
+
+        num_patches, num_channels, patch_samples = patches_array.shape
+
+        flattened_patches = patches_array.transpose(1, 0, 2).reshape(
+            num_channels * num_patches, patch_samples
+        )
+
+        channel_index_expanded = np.repeat(channel_tokens, num_patches)
+        timestamps_expanded = np.tile(patch_center_times, num_channels)
 
         latent_index, latent_timestamps = create_linspace_latent_tokens(
             start,
@@ -286,14 +291,16 @@ class EEGModel(nn.Module):
             input_session_index, len(output_timestamps)
         )
 
+        input_mask = torch.ones(num_channels * num_patches, dtype=torch.bool)
+
         tokenized_data = {
-            "input_values": pad8(torch.from_numpy(patches_array).float()),
+            "input_values": pad2d(torch.from_numpy(flattened_patches).float()),
             "input_timestamps": pad8(
-                torch.from_numpy(patch_center_times).float()
+                torch.from_numpy(timestamps_expanded).float()
             ),
-            "input_channel_index": input_channel_index,
+            "input_channel_index": pad8(channel_index_expanded),
             "input_session_index": input_session_index,
-            "input_mask": track_mask8(patch_center_times),
+            "input_mask": pad8(input_mask),
             "latent_index": latent_index,
             "latent_timestamps": latent_timestamps,
             "output_session_index": pad8(output_session_index),
@@ -307,3 +314,82 @@ class EEGModel(nn.Module):
         }
 
         return tokenized_data
+
+    def _validate_vocab_initialization(self):
+        """Validate that vocabularies have been properly initialized."""
+        if self.channel_emb.is_lazy():
+            raise ValueError(
+                "Channel vocabulary has not been initialized, please use "
+                "`model.channel_emb.initialize_vocab(channel_ids)`"
+            )
+        if self.session_emb.is_lazy():
+            raise ValueError(
+                "Session vocabulary has not been initialized, please use "
+                "`model.session_emb.initialize_vocab(session_ids)`"
+            )
+
+    def _resolve_readout_specs(
+        self, readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec]
+    ) -> dict[str, ModalitySpec]:
+        """Resolve string modality names to ModalitySpec objects.
+
+        Args:
+            readout_specs: List or dict of ModalitySpec objects or string modality names
+
+        Returns:
+            Dictionary mapping modality names to ModalitySpec objects
+        """
+        from torch_brain.registry import MODALITY_REGISTRY
+
+        if isinstance(readout_specs, dict):
+            return readout_specs
+
+        resolved = {}
+        for spec in readout_specs:
+            if isinstance(spec, str):
+                if spec not in MODALITY_REGISTRY:
+                    raise ValueError(
+                        f"Unknown modality '{spec}' in registry. "
+                        f"Available: {list(MODALITY_REGISTRY.keys())}"
+                    )
+                resolved[spec] = MODALITY_REGISTRY[spec]
+            else:
+                for name, registry_spec in MODALITY_REGISTRY.items():
+                    if registry_spec.id == spec.id:
+                        resolved[name] = spec
+                        break
+                else:
+                    raise ValueError(
+                        f"ModalitySpec with id {spec.id} not found in registry"
+                    )
+        return resolved
+
+    def _add_context_embeddings(
+        self,
+        inputs: torch.Tensor,
+        input_channel_index: torch.Tensor,
+        input_session_index: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Combine channel and session embeddings with input token embeddings.
+
+        Args:
+            inputs: Token embeddings (batch_size, n_tokens, embed_dim)
+            input_channel_index: Channel indices per token (batch_size, n_tokens)
+            input_session_index: Session index (batch_size,)
+
+        Returns:
+            Inputs with channel and session context (batch_size, n_tokens, embed_dim)
+        """
+        channel_emb = self.channel_emb(input_channel_index)
+        session_emb = self.session_emb(input_session_index).unsqueeze(1)
+
+        if self.context_mode == "add":
+            return inputs + channel_emb + session_emb
+        else:
+            batch_size, n_tokens, _ = inputs.shape
+            session_emb_expanded = session_emb.expand(batch_size, n_tokens, -1)
+            concatenated = torch.cat(
+                [inputs, channel_emb, session_emb_expanded], dim=-1
+            )
+            return self.context_projection(concatenated)

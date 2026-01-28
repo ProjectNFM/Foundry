@@ -59,3 +59,56 @@ class ModalityMixin:
     def get_modality_names(cls) -> list[str]:
         """Return names of available modalities."""
         return list(cls.MODALITIES.keys())
+
+    @classmethod
+    def get_modality(cls, name: str) -> "ModalitySpec":
+        """Get a single modality spec by name."""
+        if name not in cls.MODALITIES:
+            available = cls.get_modality_names()
+            raise ValueError(
+                f"Unknown modality '{name}'. Available: {available}"
+            )
+        from torch_brain.registry import MODALITY_REGISTRY
+
+        return MODALITY_REGISTRY[name]
+
+    @classmethod
+    def get_modalities(
+        cls, names: list[str] | None = None
+    ) -> list["ModalitySpec"]:
+        """Get modality specs as list. If names is None, returns all available."""
+        if names is None:
+            names = list(cls.MODALITIES.keys())
+        return [cls.get_modality(name) for name in names]
+
+    def get_recording_hook(self, data: Data):
+        """Set multitask_readout config based on dataset's supported modalities."""
+        if not hasattr(data, "config") or data.config is None:
+            data.config = {}
+        data.config["multitask_readout"] = [
+            {"readout_id": name} for name in self.MODALITIES.keys()
+        ]
+        super().get_recording_hook(data)
+
+
+def combine_modalities(
+    *dataset_tasks: tuple[type, list[str]],
+) -> list["ModalitySpec"]:
+    """Combine modalities from multiple datasets.
+
+    Args:
+        *dataset_tasks: Variable number of (dataset_class, modality_names) tuples
+
+    Returns:
+        List of ModalitySpec objects from all specified datasets
+
+    Example:
+        combine_modalities(
+            (SchalkWolpawPhysionet2009, ["motor_imagery_5class"]),
+            (KempSleepEDF2013, ["sleep_stage_5class"]),
+        )
+    """
+    specs = []
+    for dataset_cls, task_names in dataset_tasks:
+        specs.extend(dataset_cls.get_modalities(task_names))
+    return specs

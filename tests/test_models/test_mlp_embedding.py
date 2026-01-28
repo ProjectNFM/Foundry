@@ -20,16 +20,13 @@ class TestMLPEmbedding:
             embed_dim=embed_dim, hidden_dims=[128, 64], activation="relu"
         )
 
-        num_patches = 10
-        time_steps = 50
-        channels = 4
+        num_tokens = 10
+        patch_samples = 50
 
-        input_values = torch.randn(
-            batch_size, num_patches, time_steps, channels
-        )
+        input_values = torch.randn(batch_size, num_tokens, patch_samples)
         output = embedding(input_values)
 
-        assert output.shape == (batch_size, num_patches, embed_dim)
+        assert output.shape == (batch_size, num_tokens, embed_dim)
         assert len(embedding.projections) == 1
 
     def test_forward_pass_different_shapes(self, embed_dim, batch_size):
@@ -37,8 +34,8 @@ class TestMLPEmbedding:
             embed_dim=embed_dim, hidden_dims=[256], activation="gelu"
         )
 
-        shape1 = (batch_size, 10, 50, 4)
-        shape2 = (batch_size, 15, 100, 8)
+        shape1 = (batch_size, 10, 50)
+        shape2 = (batch_size, 15, 100)
 
         input1 = torch.randn(*shape1)
         input2 = torch.randn(*shape2)
@@ -55,10 +52,10 @@ class TestMLPEmbedding:
             embed_dim=embed_dim, hidden_dims=[128], activation="relu"
         )
 
-        time_steps, channels = 50, 4
+        patch_samples = 50
 
-        proj1 = embedding.get_projection(time_steps, channels)
-        proj2 = embedding.get_projection(time_steps, channels)
+        proj1 = embedding.get_projection(patch_samples)
+        proj2 = embedding.get_projection(patch_samples)
 
         assert proj1 is proj2
         assert len(embedding.projections) == 1
@@ -70,7 +67,7 @@ class TestMLPEmbedding:
             embedding = MLPEmbedding(
                 embed_dim=embed_dim, hidden_dims=[64], activation=activation
             )
-            input_values = torch.randn(batch_size, 5, 30, 2)
+            input_values = torch.randn(batch_size, 5, 30)
             output = embedding(input_values)
             assert output.shape == (batch_size, 5, embed_dim)
 
@@ -81,13 +78,13 @@ class TestMLPEmbedding:
                 hidden_dims=[64],
                 activation="invalid_activation",
             )
-            embedding.get_projection(50, 4)
+            embedding.get_projection(50)
 
     def test_single_hidden_layer(self, embed_dim, batch_size):
         embedding = MLPEmbedding(
             embed_dim=embed_dim, hidden_dims=[128], activation="relu"
         )
-        input_values = torch.randn(batch_size, 10, 50, 4)
+        input_values = torch.randn(batch_size, 10, 50)
         output = embedding(input_values)
         assert output.shape == (batch_size, 10, embed_dim)
 
@@ -95,7 +92,7 @@ class TestMLPEmbedding:
         embedding = MLPEmbedding(
             embed_dim=embed_dim, hidden_dims=[256, 128, 64], activation="gelu"
         )
-        input_values = torch.randn(batch_size, 10, 50, 4)
+        input_values = torch.randn(batch_size, 10, 50)
         output = embedding(input_values)
         assert output.shape == (batch_size, 10, embed_dim)
 
@@ -103,7 +100,7 @@ class TestMLPEmbedding:
         embedding = MLPEmbedding(
             embed_dim=embed_dim, hidden_dims=[128, 64], activation="relu"
         )
-        projection = embedding.get_projection(50, 4)
+        projection = embedding.get_projection(50)
 
         expected_layers = 1 + 2 * len(embedding.hidden_dims)
         assert len(projection) == expected_layers
@@ -112,7 +109,7 @@ class TestMLPEmbedding:
         embedding = MLPEmbedding(
             embed_dim=embed_dim, hidden_dims=[128], activation="gelu"
         )
-        input_values = torch.randn(1, 20, 100, 6)
+        input_values = torch.randn(1, 20, 100)
         output = embedding(input_values)
         assert output.shape == (1, 20, embed_dim)
 
@@ -121,6 +118,6 @@ class TestMLPEmbedding:
             embed_dim=embed_dim, hidden_dims=[128, 64], activation="silu"
         )
         batch_size = 16
-        input_values = torch.randn(batch_size, 5, 30, 2)
+        input_values = torch.randn(batch_size, 5, 30)
         output = embedding(input_values)
         assert output.shape == (batch_size, 5, embed_dim)

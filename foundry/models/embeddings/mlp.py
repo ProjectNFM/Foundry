@@ -6,10 +6,10 @@ from foundry.models.embeddings.utils import get_activation
 
 class MLPEmbedding(nn.Module):
     """
-    Converts variable-sized EEG patches to fixed-size embeddings using MLP.
+    Converts variable-sized EEG tokens to fixed-size embeddings using MLP.
 
     Uses dynamic MLP networks created on-the-fly based on input dimensions.
-    Each unique combination of (time_steps, channels) gets its own MLP.
+    Each unique patch_samples size gets its own MLP.
     """
 
     def __init__(
@@ -30,21 +30,20 @@ class MLPEmbedding(nn.Module):
         self.activation = activation
         self.projections = nn.ModuleDict()
 
-    def get_projection(self, time_steps: int, channels: int) -> nn.Module:
+    def get_projection(self, patch_samples: int) -> nn.Module:
         """
-        Get or create MLP projection for given dimensions.
+        Get or create MLP projection for given patch size.
 
         Args:
-            time_steps: Number of time steps in each patch
-            channels: Number of channels in each patch
+            patch_samples: Number of samples in each patch
 
         Returns:
-            MLP that maps flattened patches to embed_dim
+            MLP that maps patches to embed_dim
         """
-        key = f"{time_steps}_{channels}"
+        key = str(patch_samples)
         if key not in self.projections:
             layers = []
-            input_dim = time_steps * channels
+            input_dim = patch_samples
 
             for hidden_dim in self.hidden_dims:
                 layers.append(nn.Linear(input_dim, hidden_dim))
@@ -65,20 +64,20 @@ class MLPEmbedding(nn.Module):
 
     def forward(self, input_values: torch.Tensor) -> torch.Tensor:
         """
-        Convert patches to embeddings.
+        Convert tokens to embeddings.
 
         Args:
-            input_values: Patches of shape (batch_size, num_patches, time_steps, channels)
+            input_values: Tokens of shape (batch_size, num_tokens, patch_samples)
 
         Returns:
-            Embeddings of shape (batch_size, num_patches, embed_dim)
+            Embeddings of shape (batch_size, num_tokens, embed_dim)
         """
-        batch_size, num_patches, time_steps, channels = input_values.shape
-        projection = self.get_projection(time_steps, channels)
+        batch_size, num_tokens, patch_samples = input_values.shape
+        projection = self.get_projection(patch_samples)
 
-        flattened = input_values.view(batch_size * num_patches, -1)
+        flattened = input_values.view(batch_size * num_tokens, patch_samples)
         embeddings = projection(flattened).view(
-            batch_size, num_patches, self.embed_dim
+            batch_size, num_tokens, self.embed_dim
         )
 
         return embeddings

@@ -26,16 +26,13 @@ class TestCNNEmbedding:
             activation="relu",
         )
 
-        num_patches = 10
-        time_steps = 50
-        channels = 4
+        num_tokens = 10
+        patch_samples = 50
 
-        input_values = torch.randn(
-            batch_size, num_patches, time_steps, channels
-        )
+        input_values = torch.randn(batch_size, num_tokens, patch_samples)
         output = embedding(input_values)
 
-        assert output.shape == (batch_size, num_patches, embed_dim)
+        assert output.shape == (batch_size, num_tokens, embed_dim)
         assert len(embedding.projections) == 1
 
     def test_forward_pass_different_shapes(self, embed_dim, batch_size):
@@ -46,8 +43,8 @@ class TestCNNEmbedding:
             activation="gelu",
         )
 
-        shape1 = (batch_size, 10, 50, 4)
-        shape2 = (batch_size, 15, 100, 8)
+        shape1 = (batch_size, 10, 50)
+        shape2 = (batch_size, 15, 100)
 
         input1 = torch.randn(*shape1)
         input2 = torch.randn(*shape2)
@@ -67,10 +64,10 @@ class TestCNNEmbedding:
             activation="relu",
         )
 
-        time_steps, channels = 50, 4
+        patch_samples = 50
 
-        proj1 = embedding.get_projection(time_steps, channels)
-        proj2 = embedding.get_projection(time_steps, channels)
+        proj1 = embedding.get_projection(patch_samples)
+        proj2 = embedding.get_projection(patch_samples)
 
         assert proj1 is proj2
         assert len(embedding.projections) == 1
@@ -85,7 +82,7 @@ class TestCNNEmbedding:
                 kernel_size=3,
                 activation=activation,
             )
-            input_values = torch.randn(batch_size, 5, 30, 2)
+            input_values = torch.randn(batch_size, 5, 30)
             output = embedding(input_values)
             assert output.shape == (batch_size, 5, embed_dim)
 
@@ -97,7 +94,7 @@ class TestCNNEmbedding:
                 kernel_size=3,
                 activation="invalid_activation",
             )
-            embedding.get_projection(50, 4)
+            embedding.get_projection(50)
 
     def test_different_kernel_sizes(self, embed_dim, batch_size):
         kernel_sizes = [3, 5, 7]
@@ -109,8 +106,8 @@ class TestCNNEmbedding:
                 kernel_size=kernel_size,
                 activation="relu",
             )
-            time_steps = 50
-            input_values = torch.randn(batch_size, 5, time_steps, 2)
+            patch_samples = 50
+            input_values = torch.randn(batch_size, 5, patch_samples)
             output = embedding(input_values)
             assert output.shape == (batch_size, 5, embed_dim)
 
@@ -124,7 +121,7 @@ class TestCNNEmbedding:
                 kernel_size=3,
                 activation="gelu",
             )
-            input_values = torch.randn(batch_size, 5, 30, 2)
+            input_values = torch.randn(batch_size, 5, 30)
             output = embedding(input_values)
             assert output.shape == (batch_size, 5, embed_dim)
 
@@ -135,7 +132,7 @@ class TestCNNEmbedding:
             kernel_size=3,
             activation="relu",
         )
-        projection = embedding.get_projection(50, 4)
+        projection = embedding.get_projection(50)
 
         assert len(projection) == 4
 
@@ -146,7 +143,7 @@ class TestCNNEmbedding:
             kernel_size=3,
             activation="gelu",
         )
-        input_values = torch.randn(1, 20, 100, 6)
+        input_values = torch.randn(1, 20, 100)
         output = embedding(input_values)
         assert output.shape == (1, 20, embed_dim)
 
@@ -158,7 +155,7 @@ class TestCNNEmbedding:
             activation="silu",
         )
         batch_size = 16
-        input_values = torch.randn(batch_size, 5, 30, 2)
+        input_values = torch.randn(batch_size, 5, 30)
         output = embedding(input_values)
         assert output.shape == (batch_size, 5, embed_dim)
 
@@ -169,12 +166,11 @@ class TestCNNEmbedding:
             kernel_size=3,
             activation="relu",
         )
-        time_steps = 50
-        channels = 4
+        patch_samples = 50
 
-        projection = embedding.get_projection(time_steps, channels)
+        projection = embedding.get_projection(patch_samples)
         conv_layer = projection[0]
 
-        assert conv_layer.in_channels == channels
+        assert conv_layer.in_channels == 1
         assert conv_layer.out_channels == 32
         assert conv_layer.kernel_size == (3,)

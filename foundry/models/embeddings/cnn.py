@@ -6,11 +6,11 @@ from foundry.models.embeddings.utils import get_activation
 
 class CNNEmbedding(nn.Module):
     """
-    Converts variable-sized EEG patches to fixed-size embeddings using 1D CNN.
+    Converts variable-sized EEG tokens to fixed-size embeddings using 1D CNN.
 
     Uses dynamic CNN networks created on-the-fly based on input dimensions.
-    Each unique combination of (time_steps, channels) gets its own CNN.
-    The CNN operates on the time dimension and flattens the output before projection.
+    Each unique patch_samples size gets its own CNN.
+    The CNN operates on the time dimension (treating each token as a single-channel signal).
     """
 
     def __init__(
@@ -34,25 +34,24 @@ class CNNEmbedding(nn.Module):
         self.activation = activation
         self.projections = nn.ModuleDict()
 
-    def get_projection(self, time_steps: int, channels: int) -> nn.Module:
+    def get_projection(self, patch_samples: int) -> nn.Module:
         """
-        Get or create CNN projection for given dimensions.
+        Get or create CNN projection for given patch size.
 
         Args:
-            time_steps: Number of time steps in each patch
-            channels: Number of channels in each patch
+            patch_samples: Number of samples in each patch
 
         Returns:
             CNN module that maps patches to embed_dim
         """
-        key = f"{time_steps}_{channels}"
+        key = str(patch_samples)
         if key not in self.projections:
-            conv_out_time = time_steps - self.kernel_size + 1
+            conv_out_time = patch_samples - self.kernel_size + 1
             flattened_dim = conv_out_time * self.num_filters
 
             cnn = nn.Sequential(
                 nn.Conv1d(
-                    in_channels=channels,
+                    in_channels=1,
                     out_channels=self.num_filters,
                     kernel_size=self.kernel_size,
                     padding=0,
@@ -75,24 +74,21 @@ class CNNEmbedding(nn.Module):
 
     def forward(self, input_values: torch.Tensor) -> torch.Tensor:
         """
-        Convert patches to embeddings.
+        Convert tokens to embeddings.
 
         Args:
-            input_values: Patches of shape (batch_size, num_patches, time_steps, channels)
+            input_values: Tokens of shape (batch_size, num_tokens, patch_samples)
 
         Returns:
-            Embeddings of shape (batch_size, num_patches, embed_dim)
+            Embeddings of shape (batch_size, num_tokens, embed_dim)
         """
-        batch_size, num_patches, time_steps, channels = input_values.shape
-        projection = self.get_projection(time_steps, channels)
+        batch_size, num_tokens, patch_samples = input_values.shape
+        projection = self.get_projection(patch_samples)
 
-        reshaped = input_values.view(
-            batch_size * num_patches, time_steps, channels
-        )
-        reshaped = reshaped.transpose(1, 2)
+        reshaped = input_values.view(batch_size * num_tokens, 1, patch_samples)
 
         embeddings = projection(reshaped).view(
-            batch_size, num_patches, self.embed_dim
+            batch_size, num_tokens, self.embed_dim
         )
 
         return embeddings
