@@ -85,16 +85,11 @@ class PhysionetDataModule(LightningDataModule):
             stage: Stage to setup the DataModule for. Can be 'fit', 'test', 'validate'.
         """
         if self.dataset is None:
-            transforms = Compose(
-                [
-                    self.transform,
-                    self.model.tokenize,
-                ]
-            )
+            self.transform.append(self.model.tokenize)
             self.dataset = SchalkWolpawPhysionet2009(
                 root=self.root,
                 recording_ids=self.recording_ids,
-                transform=transforms,
+                transform=Compose(self.transform),
                 uniquify_channel_ids=self.uniquify_channel_ids,
                 task_type=self.task_type,
                 fold_number=self.fold_number,

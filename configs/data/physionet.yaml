@@ -8,8 +8,10 @@ window_length: ${hyperparameters.window_length}
 seed: 42
 
 transform:
-  _target_: foundry.transforms.Patching
-  patch_duration: ${hyperparameters.patch_duration}
+  - _target_: foundry.transforms.RescaleEEG
+    factor: 1e5
+  - _target_: foundry.transforms.Patching
+    patch_duration: ${hyperparameters.patch_duration}
 
 recording_ids: null
 uniquify_channel_ids: true
