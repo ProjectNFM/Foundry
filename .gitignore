@@ -210,3 +210,4 @@ __marimo__/
 .eegdash_cache
 outputs/
 lightning_logs/
+logs/

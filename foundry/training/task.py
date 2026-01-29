@@ -126,8 +126,7 @@ class EEGTask(L.LightningModule):
             if target.numel() == 0:
                 continue
 
-            logits = task_output["logits"]
-            probs = torch.softmax(logits, dim=-1)
+            probs = torch.softmax(task_output, dim=-1)
 
             self.train_metrics[task_name].update(probs, target)
 
@@ -183,8 +182,7 @@ class EEGTask(L.LightningModule):
             if target.numel() == 0:
                 continue
 
-            logits = task_output["logits"]
-            probs = torch.softmax(logits, dim=-1)
+            probs = torch.softmax(task_output, dim=-1)
 
             self.val_metrics[task_name].update(probs, target)
             self.val_confusion_matrices[task_name].update(probs, target)
@@ -296,7 +294,7 @@ class EEGTask(L.LightningModule):
             weights = target_weights.get(readout_id, 1.0)
 
             taskwise_loss[readout_id] = spec.loss_fn(
-                task_output["logits"], target, weights
+                task_output, target, weights
             )
 
             num_sequences = torch.any(
