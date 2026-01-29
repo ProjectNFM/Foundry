@@ -208,3 +208,5 @@ __marimo__/
 
 ./data/
 .eegdash_cache
+outputs/
+lightning_logs/

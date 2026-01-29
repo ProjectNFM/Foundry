@@ -2,7 +2,15 @@ defaults:
   - model: eeg
   - data: physionet
   - trainer: default
+  - logger: wandb
   - _self_
+
+experiment:
+  name: eeg_training
+  group: default
+  tags: [eeg, training]
+  seed: 42
+  log_level: INFO
 
 task:
   learning_rate: 1e-4

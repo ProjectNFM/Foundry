@@ -1,8 +1,9 @@
 _target_: foundry.models.EEGModel
 
+
 input_embedding:
   _target_: foundry.models.embeddings.LinearEmbedding
-  embed_dim: ${embed_dim}
+  embed_dim: ${model.embed_dim}
 
 readout_specs:
   - motor_imagery_5class
