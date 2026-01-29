@@ -1,0 +1,20 @@
+_target_: foundry.data.datamodules.PhysionetDataModule
+
+root: ./data/processed/
+batch_size: 32
+num_workers: 0
+pin_memory: false
+shuffle_train: true
+window_length: 1.0
+seed: 42
+
+transform:
+  _target_: foundry.transforms.Patching
+  patch_duration: 0.1
+
+recording_ids: null
+uniquify_channel_ids: true
+task_type: MotorImagery
+fold_number: 0
+fold_type: inter-subject
+dirname: schalk_wolpaw_physionet_2009
