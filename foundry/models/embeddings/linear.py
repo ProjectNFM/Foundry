@@ -18,6 +18,7 @@ class LinearEmbedding(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
         self.projections = nn.ModuleDict()
+        self.register_buffer("_device_tracker", torch.zeros(1))
 
     def get_projection(self, patch_samples: int) -> nn.Module:
         """
@@ -34,6 +35,7 @@ class LinearEmbedding(nn.Module):
             projection = nn.Linear(patch_samples, self.embed_dim)
             nn.init.xavier_uniform_(projection.weight, gain=1.0)
             nn.init.zeros_(projection.bias)
+            projection = projection.to(self._device_tracker.device)
             self.projections[key] = projection
         return self.projections[key]
 
