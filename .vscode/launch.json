@@ -14,7 +14,8 @@
             "args": [
                 "--config-name",
                 "config",
-                "logger=csv"
+                // "logger=csv"
+                "logger=wandb"
             ]
         }
     ]

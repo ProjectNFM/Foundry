@@ -6,11 +6,17 @@ defaults:
   - _self_
 
 experiment:
-  name: eeg_training
-  group: default
-  tags: [eeg, training]
+  name: eeg_training_est
+  group: DEBUGGING 
+  tags: [eeg, training, debugging]
   seed: 42
   log_level: INFO
+
+hyperparameters:
+  batch_size: 256
+  window_length: 1.0
+  patch_duration: 0.1
+  fold_number: 0
 
 task:
   learning_rate: 1e-4

@@ -142,8 +142,6 @@ class EEGTask(L.LightningModule):
                 for metrics in self.train_metrics.values()
                 for k, v in metrics.items()
             },
-            on_step=False,
-            on_epoch=True,
         )
 
         return total_loss
@@ -199,8 +197,6 @@ class EEGTask(L.LightningModule):
                 for metrics in self.val_metrics.values()
                 for k, v in metrics.items()
             },
-            on_step=False,
-            on_epoch=True,
         )
 
         return total_loss
