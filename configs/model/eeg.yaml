@@ -6,7 +6,7 @@ input_embedding:
   embed_dim: ${model.embed_dim}
 
 readout_specs:
-  - motor_imagery_5class
+  - motor_imagery_right_feet
 
 embed_dim: 128
 sequence_length: 1.0
@@ -18,7 +18,7 @@ cross_heads: 1
 self_heads: 8
 ffn_dropout: 0.2
 lin_dropout: 0.4
-atn_dropout: 0.0
+atn_dropout: 0.2
 emb_init_scale: 0.02
 t_min: 1e-2
 t_max: 0.5

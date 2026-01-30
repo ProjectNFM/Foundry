@@ -25,7 +25,8 @@ def _create_task_metrics(num_classes: int, prefix: str) -> MetricCollection:
     Returns:
         MetricCollection with accuracy, F1, AUROC, precision, and recall
     """
-    task_type = "binary" if num_classes == 2 else "multiclass"
+    # task_type = "binary" if num_classes == 2 else "multiclass"
+    task_type = "multiclass"
     return MetricCollection(
         {
             "acc": Accuracy(task=task_type, num_classes=num_classes),
@@ -76,7 +77,8 @@ class EEGTask(L.LightningModule):
 
         for task_name, spec in model.readout_specs.items():
             num_classes = spec.dim
-            task_type = "binary" if num_classes == 2 else "multiclass"
+            # task_type = "binary" if num_classes == 2 else "multiclass"
+            task_type = "multiclass"
 
             self.train_metrics[task_name] = _create_task_metrics(
                 num_classes, f"train/{task_name}_"
@@ -127,8 +129,9 @@ class EEGTask(L.LightningModule):
                 continue
 
             probs = torch.softmax(task_output, dim=-1)
+            mapped_target = self._apply_label_mapping(target, task_name)
 
-            self.train_metrics[task_name].update(probs, target)
+            self.train_metrics[task_name].update(probs, mapped_target)
 
             self.log(
                 f"train/{task_name}_loss",
@@ -136,13 +139,11 @@ class EEGTask(L.LightningModule):
                 prog_bar=False,
             )
 
-        self.log_dict(
-            {
-                k: v
-                for metrics in self.train_metrics.values()
-                for k, v in metrics.items()
-            },
-        )
+            self.log_dict(
+                self.train_metrics[task_name],
+                on_step=False,
+                on_epoch=True,
+            )
 
         return total_loss
 
@@ -181,9 +182,10 @@ class EEGTask(L.LightningModule):
                 continue
 
             probs = torch.softmax(task_output, dim=-1)
+            mapped_target = self._apply_label_mapping(target, task_name)
 
-            self.val_metrics[task_name].update(probs, target)
-            self.val_confusion_matrices[task_name].update(probs, target)
+            self.val_metrics[task_name].update(probs, mapped_target)
+            self.val_confusion_matrices[task_name].update(probs, mapped_target)
 
             self.log(
                 f"val/{task_name}_loss",
@@ -191,13 +193,11 @@ class EEGTask(L.LightningModule):
                 prog_bar=False,
             )
 
-        self.log_dict(
-            {
-                k: v
-                for metrics in self.val_metrics.values()
-                for k, v in metrics.items()
-            },
-        )
+            self.log_dict(
+                self.val_metrics[task_name],
+                on_step=False,
+                on_epoch=True,
+            )
 
         return total_loss
 
@@ -254,6 +254,32 @@ class EEGTask(L.LightningModule):
 
         output_decoder_index = batch["output_decoder_index"]
         return batch, target_values, target_weights, output_decoder_index
+
+    def _apply_label_mapping(
+        self, target: torch.Tensor, task_name: str
+    ) -> torch.Tensor:
+        """
+        Apply label mapping if the task uses MappedCrossEntropyLoss.
+
+        Args:
+            target: Target tensor with original label IDs
+            task_name: Name of the task
+
+        Returns:
+            Mapped target tensor with class indices [0, num_classes-1]
+        """
+        from foundry.data.datasets.modalities import MappedCrossEntropyLoss
+
+        spec = self.model.readout_specs[task_name]
+        loss_fn = spec.loss_fn
+
+        if isinstance(loss_fn, MappedCrossEntropyLoss):
+            mapped_target = torch.zeros_like(target)
+            for i, key in enumerate(loss_fn._keys):
+                mask = target == key
+                mapped_target[mask] = loss_fn._values[i]
+            return mapped_target
+        return target
 
     def _compute_multitask_loss(
         self,

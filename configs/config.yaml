@@ -6,7 +6,7 @@ defaults:
   - _self_
 
 experiment:
-  name: eeg_training_est
+  name: physionet_right_hand_feet_imagery_more_dropout
   group: DEBUGGING 
   tags: [eeg, training, debugging]
   seed: 42
