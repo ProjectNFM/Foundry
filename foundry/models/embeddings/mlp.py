@@ -29,6 +29,7 @@ class MLPEmbedding(nn.Module):
         self.hidden_dims = hidden_dims
         self.activation = activation
         self.projections = nn.ModuleDict()
+        self.register_buffer("_device_tracker", torch.zeros(1))
 
     def get_projection(self, patch_samples: int) -> nn.Module:
         """
@@ -59,6 +60,7 @@ class MLPEmbedding(nn.Module):
                     nn.init.xavier_uniform_(module.weight, gain=1.0)
                     nn.init.zeros_(module.bias)
 
+            mlp = mlp.to(self._device_tracker.device)
             self.projections[key] = mlp
         return self.projections[key]
 

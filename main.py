@@ -1,33 +1,47 @@
-from foundry.models import EEGModel, LinearEmbedding
-from foundry.data.datamodules import PhysionetDataModule
-from foundry.transforms.patching import Patching
+import logging
 
-processed_dir = "./data/processed/"
+import hydra
+from hydra.utils import instantiate
+from lightning import seed_everything
+from omegaconf import DictConfig
+from rich.logging import RichHandler
 
-eeg_model = EEGModel(
-    input_embedding=LinearEmbedding(embed_dim=128),
-    readout_specs=["motor_imagery_5class"],
-    embed_dim=128,
-    sequence_length=1.0,
-    context_mode="add",
-)
+from foundry.training import EEGTask
 
-data_module = PhysionetDataModule(
-    root=processed_dir,
-    model=eeg_model,
-    window_length=1.0,
-    transform=Patching(patch_duration=0.1),
-)
-data_module.setup("fit")
+logger = logging.getLogger(__name__)
 
-sample1 = next(iter(data_module.train_dataloader()))
 
-target_values = sample1.pop("target_values")
-target_weights = sample1.pop("target_weights")
-session_id = sample1.pop("session_id")
-absolute_start = sample1.pop("absolute_start")
-eval_mask = sample1.pop("eval_mask")
+def setup_logging(log_level: str):
+    logging.basicConfig(
+        level=log_level,
+        format="%(message)s",
+        datefmt="[%X]",
+        handlers=[
+            RichHandler(rich_tracebacks=True, markup=True, show_path=False)
+        ],
+        force=True,
+    )
 
-output = eeg_model(**sample1)
-print(f"Output keys: {output.keys()}")
-print(f"Motor imagery output shape: {output['motor_imagery_5class'].shape}")
+
+@hydra.main(version_base=None, config_path="configs", config_name="config")
+def main(cfg: DictConfig):
+    """
+    Main training entry point using Hydra configuration.
+
+    Args:
+        cfg: Hydra configuration object
+    """
+    setup_logging(cfg.experiment.log_level)
+    seed_everything(cfg.experiment.seed, workers=True)
+    logger.info(f"Starting training: {cfg.experiment.name}")
+
+    model = instantiate(cfg.model)
+    datamodule = instantiate(cfg.data, model=model)
+
+    task = EEGTask(model=model, **cfg.task)
+    trainer = instantiate(cfg.trainer)
+    trainer.fit(task, datamodule)
+
+
+if __name__ == "__main__":
+    main()

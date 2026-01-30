@@ -121,3 +121,57 @@ class TestMLPEmbedding:
         input_values = torch.randn(batch_size, 5, 30)
         output = embedding(input_values)
         assert output.shape == (batch_size, 5, embed_dim)
+
+    def test_device_placement_cpu(self, embed_dim, batch_size):
+        embedding = MLPEmbedding(
+            embed_dim=embed_dim, hidden_dims=[128], activation="relu"
+        )
+        embedding = embedding.to("cpu")
+
+        input_values = torch.randn(batch_size, 10, 50)
+        output = embedding(input_values)
+
+        assert output.device.type == "cpu"
+        projection = embedding.projections["50"]
+        assert next(projection.parameters()).device.type == "cpu"
+
+    def test_device_placement_cuda(self, embed_dim, batch_size):
+        if not torch.cuda.is_available():
+            return
+
+        embedding = MLPEmbedding(
+            embed_dim=embed_dim, hidden_dims=[128], activation="relu"
+        )
+        embedding = embedding.to("cuda")
+
+        input_values = torch.randn(batch_size, 10, 50, device="cuda")
+        output = embedding(input_values)
+
+        assert output.device.type == "cuda"
+        projection = embedding.projections["50"]
+        assert next(projection.parameters()).device.type == "cuda"
+
+    def test_dynamic_projection_inherits_device(self, embed_dim, batch_size):
+        if not torch.cuda.is_available():
+            return
+
+        embedding = MLPEmbedding(
+            embed_dim=embed_dim, hidden_dims=[128], activation="relu"
+        )
+        embedding = embedding.to("cuda")
+
+        input_values_50 = torch.randn(batch_size, 10, 50, device="cuda")
+        output_50 = embedding(input_values_50)
+
+        input_values_100 = torch.randn(batch_size, 10, 100, device="cuda")
+        output_100 = embedding(input_values_100)
+
+        assert output_50.device.type == "cuda"
+        assert output_100.device.type == "cuda"
+        assert (
+            next(embedding.projections["50"].parameters()).device.type == "cuda"
+        )
+        assert (
+            next(embedding.projections["100"].parameters()).device.type
+            == "cuda"
+        )

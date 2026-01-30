@@ -1,0 +1,8 @@
+_target_: lightning.pytorch.loggers.WandbLogger
+name: ${experiment.name}_${now:%Y-%m-%d_%H-%M-%S}
+project: foundry
+save_dir: logs/wandb
+offline: false
+log_model: all
+group: ${experiment.group}
+tags: ${experiment.tags}

@@ -1,0 +1,23 @@
+defaults:
+  - model: eeg
+  - data: physionet
+  - trainer: default
+  - logger: wandb
+  - _self_
+
+experiment:
+  name: physionet_right_hand_feet_imagery_more_dropout
+  group: DEBUGGING 
+  tags: [eeg, training, debugging]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 256
+  window_length: 1.0
+  patch_duration: 0.1
+  fold_number: 0
+
+task:
+  learning_rate: 1e-4
+  weight_decay: 0.01

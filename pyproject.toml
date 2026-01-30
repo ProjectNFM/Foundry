@@ -10,10 +10,14 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "brainsets",
+    "hydra-core>=1.3.0",
     "ipykernel>=7.1.0",
     "lightning>=2.0.0",
     "torch>=2.9.1",
     "pytorch-brain",
+    "matplotlib>=3.10.8",
+    "torchmetrics>=1.8.2",
+    "wandb>=0.24.0",
 ]
 
 [dependency-groups]

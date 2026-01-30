@@ -27,7 +27,6 @@ class PhysionetDataModule(LightningDataModule):
         batch_size: int = 32,
         num_workers: int = 0,
         pin_memory: bool = False,
-        shuffle_train: bool = True,
         window_length: Optional[float] = None,
         transform: Optional[Callable] = None,
         seed: int = 42,
@@ -49,7 +48,6 @@ class PhysionetDataModule(LightningDataModule):
             batch_size: Batch size for DataLoaders.
             num_workers: Number of worker processes for DataLoaders.
             pin_memory: Whether to pin memory in DataLoaders.
-            shuffle_train: Whether to shuffle training data.
             window_length: Length of windows for RandomFixedWindowSampler in seconds.
             transform: Optional transform to apply to each data sample before tokenization.
             seed: Random seed for sampling.
@@ -66,7 +64,6 @@ class PhysionetDataModule(LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
-        self.shuffle_train = shuffle_train
         self.window_length = window_length
         self.transform = transform
         self.seed = seed
@@ -88,16 +85,11 @@ class PhysionetDataModule(LightningDataModule):
             stage: Stage to setup the DataModule for. Can be 'fit', 'test', 'validate'.
         """
         if self.dataset is None:
-            transforms = Compose(
-                [
-                    self.transform,
-                    self.model.tokenize,
-                ]
-            )
+            self.transform.append(self.model.tokenize)
             self.dataset = SchalkWolpawPhysionet2009(
                 root=self.root,
                 recording_ids=self.recording_ids,
-                transform=transforms,
+                transform=Compose(self.transform),
                 uniquify_channel_ids=self.uniquify_channel_ids,
                 task_type=self.task_type,
                 fold_number=self.fold_number,

@@ -33,6 +33,7 @@ class CNNEmbedding(nn.Module):
         self.kernel_size = kernel_size
         self.activation = activation
         self.projections = nn.ModuleDict()
+        self.register_buffer("_device_tracker", torch.zeros(1))
 
     def get_projection(self, patch_samples: int) -> nn.Module:
         """
@@ -69,6 +70,7 @@ class CNNEmbedding(nn.Module):
                     nn.init.xavier_uniform_(module.weight, gain=1.0)
                     nn.init.zeros_(module.bias)
 
+            cnn = cnn.to(self._device_tracker.device)
             self.projections[key] = cnn
         return self.projections[key]
 

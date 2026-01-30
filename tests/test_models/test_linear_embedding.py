@@ -94,3 +94,46 @@ class TestLinearEmbedding:
         assert hasattr(projection, "bias")
         assert projection.weight.shape == (embed_dim, 50)
         assert projection.bias.shape == (embed_dim,)
+
+    def test_device_placement_cpu(self, embed_dim, batch_size):
+        embedding = LinearEmbedding(embed_dim=embed_dim)
+        embedding = embedding.to("cpu")
+
+        input_values = torch.randn(batch_size, 10, 50)
+        output = embedding(input_values)
+
+        assert output.device.type == "cpu"
+        projection = embedding.projections["50"]
+        assert projection.weight.device.type == "cpu"
+
+    def test_device_placement_cuda(self, embed_dim, batch_size):
+        if not torch.cuda.is_available():
+            return
+
+        embedding = LinearEmbedding(embed_dim=embed_dim)
+        embedding = embedding.to("cuda")
+
+        input_values = torch.randn(batch_size, 10, 50, device="cuda")
+        output = embedding(input_values)
+
+        assert output.device.type == "cuda"
+        projection = embedding.projections["50"]
+        assert projection.weight.device.type == "cuda"
+
+    def test_dynamic_projection_inherits_device(self, embed_dim, batch_size):
+        if not torch.cuda.is_available():
+            return
+
+        embedding = LinearEmbedding(embed_dim=embed_dim)
+        embedding = embedding.to("cuda")
+
+        input_values_50 = torch.randn(batch_size, 10, 50, device="cuda")
+        output_50 = embedding(input_values_50)
+
+        input_values_100 = torch.randn(batch_size, 10, 100, device="cuda")
+        output_100 = embedding(input_values_100)
+
+        assert output_50.device.type == "cuda"
+        assert output_100.device.type == "cuda"
+        assert embedding.projections["50"].weight.device.type == "cuda"
+        assert embedding.projections["100"].weight.device.type == "cuda"

@@ -286,6 +286,8 @@ class EEGModel(nn.Module):
             data,
             self.readout_specs,
         )
+        # HACK: We put the timestamps to zero here because for classification tasks we do not want to use them.
+        output_timestamps = torch.zeros_like(output_timestamps)
 
         output_session_index = np.repeat(
             input_session_index, len(output_timestamps)

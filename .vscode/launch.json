@@ -11,6 +11,12 @@
             "program": "main.py",
             "console": "integratedTerminal",
             "justMyCode": false,
+            "args": [
+                "--config-name",
+                "config",
+                // "logger=csv"
+                "logger=wandb"
+            ]
         }
     ]
 }
