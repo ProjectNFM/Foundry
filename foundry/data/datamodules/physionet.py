@@ -22,7 +22,7 @@ class PhysionetDataModule(LightningDataModule):
 
     def __init__(
         self,
-        model: torch.nn.Module,
+        tokenizer: Callable,
         root: str,
         batch_size: int = 32,
         num_workers: int = 0,
@@ -30,6 +30,7 @@ class PhysionetDataModule(LightningDataModule):
         window_length: Optional[float] = None,
         transform: Optional[Callable] = None,
         seed: int = 42,
+        vocab_initializer: Optional[Callable] = None,
         # Dataset specific args
         recording_ids: Optional[list[str]] = None,
         uniquify_channel_ids: bool = True,
@@ -43,7 +44,7 @@ class PhysionetDataModule(LightningDataModule):
         """Initialize PhysionetDataModule.
 
         Args:
-            model: Model instance with tokenize method.
+            tokenizer: Function to tokenize data samples (typically model.tokenize).
             root: Root directory of the data.
             batch_size: Batch size for DataLoaders.
             num_workers: Number of worker processes for DataLoaders.
@@ -51,6 +52,7 @@ class PhysionetDataModule(LightningDataModule):
             window_length: Length of windows for RandomFixedWindowSampler in seconds.
             transform: Optional transform to apply to each data sample before tokenization.
             seed: Random seed for sampling.
+            vocab_initializer: Optional callback to initialize model vocabularies with dataset info.
             recording_ids: Optional list of recording IDs to include.
             uniquify_channel_ids: If True, prefix channel IDs with session ID.
             task_type: Task configuration for sampling intervals.
@@ -59,7 +61,8 @@ class PhysionetDataModule(LightningDataModule):
             dirname: Directory name within root containing the dataset files.
         """
         super().__init__()
-        self.model = model
+        self.tokenizer = tokenizer
+        self.vocab_initializer = vocab_initializer
         self.root = root
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -85,7 +88,7 @@ class PhysionetDataModule(LightningDataModule):
             stage: Stage to setup the DataModule for. Can be 'fit', 'test', 'validate'.
         """
         if self.dataset is None:
-            self.transform.append(self.model.tokenize)
+            self.transform.append(self.tokenizer)
             self.dataset = SchalkWolpawPhysionet2009(
                 root=self.root,
                 recording_ids=self.recording_ids,
@@ -97,13 +100,12 @@ class PhysionetDataModule(LightningDataModule):
                 dirname=self.dirname,
             )
 
-            if self.model.session_emb.is_lazy():
-                session_ids = self.dataset.get_recording_ids()
-                self.model.session_emb.initialize_vocab(session_ids)
-
-            if self.model.channel_emb.is_lazy():
-                channel_ids = self.dataset.get_channel_ids()
-                self.model.channel_emb.initialize_vocab(channel_ids)
+            if self.vocab_initializer is not None:
+                vocab_info = {
+                    "session_ids": self.dataset.get_recording_ids(),
+                    "channel_ids": self.dataset.get_channel_ids(),
+                }
+                self.vocab_initializer(vocab_info)
 
     def train_dataloader(self) -> DataLoader:
         """Create training DataLoader with RandomFixedWindowSampler."""

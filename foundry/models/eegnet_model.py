@@ -160,6 +160,14 @@ class EEGNetModel(nn.Module):
 
         self._init_keras_style()
 
+    def initialize_vocabs(self, vocab_info: dict):
+        """EEGNet doesn't use vocabularies, so this is a no-op.
+
+        Args:
+            vocab_info: Dictionary with vocabulary information (unused)
+        """
+        pass
+
     def _init_keras_style(self):
         """Initialize weights using Keras-style initialization (glorot_uniform + zero biases)."""
         for m in self.modules():

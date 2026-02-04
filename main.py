@@ -36,7 +36,11 @@ def main(cfg: DictConfig):
     logger.info(f"Starting training: {cfg.experiment.name}")
 
     model = instantiate(cfg.model)
-    datamodule = instantiate(cfg.data, model=model)
+    datamodule = instantiate(
+        cfg.data,
+        tokenizer=model.tokenize,
+        vocab_initializer=model.initialize_vocabs,
+    )
 
     task = EEGTask(model=model, **cfg.task)
     trainer = instantiate(cfg.trainer)

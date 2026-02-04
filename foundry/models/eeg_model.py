@@ -317,16 +317,30 @@ class EEGModel(nn.Module):
 
         return tokenized_data
 
+    def initialize_vocabs(self, vocab_info: dict):
+        """Initialize vocabularies from dataset information.
+
+        Args:
+            vocab_info: Dictionary with 'session_ids' and 'channel_ids' keys
+        """
+        if "session_ids" in vocab_info and self.session_emb.is_lazy():
+            self.session_emb.initialize_vocab(vocab_info["session_ids"])
+
+        if "channel_ids" in vocab_info and self.channel_emb.is_lazy():
+            self.channel_emb.initialize_vocab(vocab_info["channel_ids"])
+
     def _validate_vocab_initialization(self):
         """Validate that vocabularies have been properly initialized."""
         if self.channel_emb.is_lazy():
             raise ValueError(
                 "Channel vocabulary has not been initialized, please use "
+                "`model.initialize_vocabs(vocab_info)` or "
                 "`model.channel_emb.initialize_vocab(channel_ids)`"
             )
         if self.session_emb.is_lazy():
             raise ValueError(
                 "Session vocabulary has not been initialized, please use "
+                "`model.initialize_vocabs(vocab_info)` or "
                 "`model.session_emb.initialize_vocab(session_ids)`"
             )
 
