@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Main",
+            "name": "Train POYOEEG",
             "type": "debugpy",
             "request": "launch",
             "program": "main.py",
@@ -15,7 +15,22 @@
                 "--config-name",
                 "config",
                 // "logger=csv"
-                "logger=wandb"
+                "logger=wandb",
+                "model=eeg"
+            ]
+        },
+        {
+            "name": "Train EEGNet",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "main.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "--config-name",
+                "config",
+                "logger=csv",
+                "model=eegnet"
             ]
         }
     ]

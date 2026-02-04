@@ -5,6 +5,7 @@ from foundry.models.backbones import (
     PerceiverProcessor,
 )
 from foundry.models.eeg_model import EEGModel
+from foundry.models.eegnet_model import EEGNetModel
 from foundry.models.embeddings import (
     CNNEmbedding,
     MLPEmbedding,
@@ -13,6 +14,7 @@ from foundry.models.embeddings import (
 
 __all__ = [
     "EEGModel",
+    "EEGNetModel",
     "LinearEmbedding",
     "MLPEmbedding",
     "CNNEmbedding",

@@ -1,0 +1,21 @@
+_target_: foundry.models.EEGNetModel
+
+# Same as EEGModel - supports multiple tasks
+readout_specs:
+  - motor_imagery_right_feet
+
+# EEGNet input dimensions
+in_chans: 64        # Will be set dynamically or from data config
+in_times: 160       # window_length * sampling_rate
+
+# EEGNet architecture hyperparameters
+F1: 8               # Temporal filters
+D: 2                # Depth multiplier
+F2: null            # Auto: F1 * D = 16
+kernel_time: 64
+kernel_time_separable: 16
+pool_time_size_1: 4
+pool_time_size_2: 8
+dropout: 0.25
+spatial_max_norm: 1.0
+normalize_mode: zscore

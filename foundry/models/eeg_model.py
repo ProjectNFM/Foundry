@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
 import torch
@@ -365,6 +365,23 @@ class EEGModel(nn.Module):
                         f"ModalitySpec with id {spec.id} not found in registry"
                     )
         return resolved
+
+    def unpack_batch(self, batch: Dict[str, Any]) -> tuple:
+        """Extract model inputs and targets from batch.
+
+        Args:
+            batch: Batch dictionary from dataloader
+
+        Returns:
+            Tuple of (model_inputs, target_values, target_weights, output_decoder_index)
+        """
+        target_values = batch.pop("target_values")
+        target_weights = batch.pop("target_weights")
+        batch.pop("session_id", None)
+        batch.pop("absolute_start", None)
+        batch.pop("eval_mask", None)
+        output_decoder_index = batch["output_decoder_index"]
+        return batch, target_values, target_weights, output_decoder_index
 
     def _add_context_embeddings(
         self,

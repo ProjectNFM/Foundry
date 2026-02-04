@@ -13,6 +13,12 @@ from torchmetrics.classification import (
     Recall,
 )
 
+# TODO: Want to add EEGNet
+# - Ghazaleh has an implementation in torch_brain but it is not yet integrated into the library.
+# - We would probably need to refine that implementation and make it a bit more general.
+# - Also thinking that I should think about how to adapt the current training script to accept multiple loss parameters.
+# - Maybe the only thing I need to do is to change the metrics to be its own modular pluggable thing and then have multiple trainers.
+
 
 def _create_task_metrics(num_classes: int, prefix: str) -> MetricCollection:
     """
@@ -108,7 +114,7 @@ class EEGTask(L.LightningModule):
             Loss tensor
         """
         model_inputs, target_values, target_weights, output_decoder_index = (
-            self._unpack_batch(batch)
+            self.model.unpack_batch(batch)
         )
 
         outputs = self.model(**model_inputs, unpack_output=False)
@@ -161,7 +167,7 @@ class EEGTask(L.LightningModule):
             Loss tensor
         """
         model_inputs, target_values, target_weights, output_decoder_index = (
-            self._unpack_batch(batch)
+            self.model.unpack_batch(batch)
         )
 
         outputs = self.model(**model_inputs, unpack_output=False)
@@ -235,25 +241,6 @@ class EEGTask(L.LightningModule):
 
             plt.close(fig)
             cm.reset()
-
-    def _unpack_batch(self, batch: Dict[str, Any]):
-        """
-        Separate model inputs from targets and metadata.
-
-        Args:
-            batch: Batch dictionary from dataloader
-
-        Returns:
-            Tuple of (model_inputs, target_values, target_weights, output_decoder_index)
-        """
-        target_values = batch.pop("target_values")
-        target_weights = batch.pop("target_weights")
-        batch.pop("session_id", None)
-        batch.pop("absolute_start", None)
-        batch.pop("eval_mask", None)
-
-        output_decoder_index = batch["output_decoder_index"]
-        return batch, target_values, target_weights, output_decoder_index
 
     def _apply_label_mapping(
         self, target: torch.Tensor, task_name: str

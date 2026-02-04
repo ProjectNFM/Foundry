@@ -1,0 +1,7 @@
+defaults:
+  - physionet
+
+# Override transforms to skip Patching (EEGNet expects raw windows)
+transform:
+  - _target_: foundry.transforms.RescaleEEG
+    factor: 1e5
