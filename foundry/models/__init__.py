@@ -4,7 +4,7 @@ from foundry.models.backbones import (
     PerceiverIOBackbone,
     PerceiverProcessor,
 )
-from foundry.models.eeg_model import EEGModel
+from foundry.models.poyo_eeg import POYOEEGModel
 from foundry.models.embeddings import (
     CNNEmbedding,
     MLPEmbedding,
@@ -12,7 +12,7 @@ from foundry.models.embeddings import (
 )
 
 __all__ = [
-    "EEGModel",
+    "POYOEEGModel",
     "LinearEmbedding",
     "MLPEmbedding",
     "CNNEmbedding",

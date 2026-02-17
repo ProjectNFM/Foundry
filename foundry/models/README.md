@@ -20,7 +20,7 @@ foundry/models/
 │   └── cnn.py           # CNNEmbedding
 ├── backbones/           # Model architectures
 │   └── perceiver.py     # Perceiver IO components (encoder, processor, decoder)
-├── eeg_model.py         # Reference implementation showing composition
+├── poyo_eeg.py          # Reference POYO-style EEG model implementation
 └── README.md            # This file
 ```
 
@@ -76,19 +76,17 @@ outputs = backbone(
 )
 ```
 
-### Complete Model (`eeg_model.py`)
+### Complete Model (`poyo_eeg.py`)
 
-**EEGModel** is a reference implementation showing how to compose the pieces.
+**POYOEEGModel** is a reference POYO-style implementation showing how to compose the pieces with a Perceiver backbone.
 
 ```python
-from foundry.models import EEGModel, LinearEmbedding, PerceiverIOBackbone
+from foundry.models import POYOEEGModel, LinearEmbedding
 
 embedding = LinearEmbedding(embed_dim=256)
-backbone = PerceiverIOBackbone(embed_dim=256, depth=2)
 
-model = EEGModel(
+model = POYOEEGModel(
     input_embedding=embedding,
-    backbone=backbone,
     readout_specs=readout_specs,
     embed_dim=256,
     sequence_length=30.0,
@@ -100,11 +98,10 @@ model = EEGModel(
 ### Example 1: Use Standard Components
 
 ```python
-from foundry.models import EEGModel, LinearEmbedding, PerceiverIOBackbone
+from foundry.models import POYOEEGModel, LinearEmbedding
 
-model = EEGModel(
+model = POYOEEGModel(
     input_embedding=LinearEmbedding(embed_dim=256),
-    backbone=PerceiverIOBackbone(embed_dim=256, depth=2),
     readout_specs=readout_specs,
     embed_dim=256,
     sequence_length=30.0,
@@ -122,9 +119,8 @@ class ConvEmbedding(nn.Module):
     def forward(self, input_values):
         return self.conv(input_values)
 
-model = EEGModel(
+model = POYOEEGModel(
     input_embedding=ConvEmbedding(embed_dim=256),
-    backbone=PerceiverIOBackbone(embed_dim=256, depth=2),
     readout_specs=readout_specs,
     embed_dim=256,
     sequence_length=30.0,

@@ -18,7 +18,7 @@ from torch_brain.utils import create_linspace_latent_tokens
 from foundry.models.backbones import PerceiverIOBackbone
 
 
-class EEGModel(nn.Module):
+class POYOEEGModel(nn.Module):
     """
     POYO-style EEG model with built-in Perceiver architecture.
 
