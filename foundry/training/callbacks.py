@@ -52,12 +52,12 @@ class VocabInitializerCallback(L.Callback):
 
         dataset = datamodule.dataset
 
-        # Initialize session vocab
+        # Initialize vocabularies
+        vocab_info = {}  
         if hasattr(dataset, "get_recording_ids"):
-            session_ids = dataset.get_recording_ids()
-            model.initialize_session_vocab(session_ids)
+            vocab_info["session_ids"] = dataset.get_recording_ids()
 
-        # Initialize channel vocab
         if hasattr(dataset, "get_channel_ids"):
-            channel_ids = dataset.get_channel_ids()
-            model.initialize_channel_vocab(channel_ids)
+            vocab_info["channel_ids"] = dataset.get_channel_ids()
+
+        model.initialize_vocabs(vocab_info)

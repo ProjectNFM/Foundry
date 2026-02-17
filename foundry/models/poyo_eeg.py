@@ -322,16 +322,18 @@ class POYOEEGModel(nn.Module):
 
         return tokenized_data
 
-    def initialize_session_vocab(self, session_ids: list[str]) -> None:
-        """Initialize session vocabulary if lazy."""
-        if self.session_emb.is_lazy():
-            self.session_emb.initialize_vocab(session_ids)
-    
-    def initialize_channel_vocab(self, channel_ids: list[str]) -> None:
-        """Initialize channel vocabulary if lazy."""
-        if self.channel_emb.is_lazy():
-            self.channel_emb.initialize_vocab(channel_ids)
-    
+    def initialize_vocabs(self, vocab_info: dict):
+        """Initialize vocabularies from dataset information.
+
+        Args:
+            vocab_info: Dictionary with 'session_ids' and 'channel_ids' keys
+        """
+        if "session_ids" in vocab_info and self.session_emb.is_lazy():
+            self.session_emb.initialize_vocab(vocab_info["session_ids"])
+
+        if "channel_ids" in vocab_info and self.channel_emb.is_lazy():
+            self.channel_emb.initialize_vocab(vocab_info["channel_ids"])
+
     def has_lazy_vocabs(self) -> bool:
         """Check if vocabularies are still lazy (uninitialized)."""
         return self.channel_emb.is_lazy() or self.session_emb.is_lazy()

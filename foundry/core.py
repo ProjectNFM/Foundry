@@ -64,33 +64,12 @@ class VocabManager(Protocol):
     Some models use infinite vocabulary embeddings that must be initialized with
     the full set of possible identifiers before training.
     """
-    #TODO: Add a single method to initialize the vocabulary
-    # This method accepts a dictionary of session_ids and channel_ids (see below)
-    # def initialize_vocabs(self, vocab_info: dict):
-    #     """Initialize vocabularies from dataset information.
 
-    #     Args:
-    #         vocab_info: Dictionary with 'session_ids' and 'channel_ids' keys
-    #     """
-    #     if "session_ids" in vocab_info and self.session_emb.is_lazy():
-    #         self.session_emb.initialize_vocab(vocab_info["session_ids"])
-
-    #     if "channel_ids" in vocab_info and self.channel_emb.is_lazy():
-    #         self.channel_emb.initialize_vocab(vocab_info["channel_ids"])
-
-    def initialize_session_vocab(self, session_ids: list[str]) -> None:
-        """Initialize session vocabulary.
+    def initialize_vocabs(self, vocab_info: dict):
+        """Initialize vocabularies from dataset information.
 
         Args:
-            session_ids: List of unique session IDs in the dataset.
-        """
-        ...
-
-    def initialize_channel_vocab(self, channel_ids: list[str]) -> None:
-        """Initialize channel vocabulary.
-
-        Args:
-            channel_ids: List of unique channel IDs in the dataset.
+            vocab_info: Dictionary with keys for any identifier list ending in '_ids' (e.g., 'session_ids', 'channel_ids', etc.)
         """
         ...
 
