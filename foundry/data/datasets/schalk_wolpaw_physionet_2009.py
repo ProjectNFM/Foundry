@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 
 from torch_brain.dataset import Dataset
-from .mixins import EEGDatasetMixin, ModalityMixin
+from .mixins import NeuralDatasetMixin, FoldedDatasetMixin, ModalityMixin
 from .modalities import (
     MOTOR_IMAGERY_5CLASS,
     MOTOR_IMAGERY_LEFT_RIGHT,
@@ -11,7 +11,7 @@ from .modalities import (
 )
 
 
-class SchalkWolpawPhysionet2009(ModalityMixin, EEGDatasetMixin, Dataset):
+class SchalkWolpawPhysionet2009(ModalityMixin, FoldedDatasetMixin, NeuralDatasetMixin, Dataset):
     MODALITIES = {
         "motor_imagery_5class": MOTOR_IMAGERY_5CLASS,
         "motor_imagery_left_right": MOTOR_IMAGERY_LEFT_RIGHT,

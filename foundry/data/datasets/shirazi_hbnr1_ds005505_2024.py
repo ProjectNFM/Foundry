@@ -2,10 +2,10 @@ from typing import Callable, Optional
 from pathlib import Path
 
 from torch_brain.dataset import Dataset
-from .mixins import EEGDatasetMixin, ModalityMixin
+from .mixins import NeuralDatasetMixin, ModalityMixin
 
 
-class ShiraziHbnr1DS0055052024(ModalityMixin, EEGDatasetMixin, Dataset):
+class ShiraziHbnr1DS0055052024(ModalityMixin, NeuralDatasetMixin, Dataset):
     MODALITIES = {}
     """Healthy Brain Network (HBN) EEG Dataset from OpenNeuro (Shirazi et al., 2024).
 
