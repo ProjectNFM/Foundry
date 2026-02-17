@@ -203,6 +203,11 @@ class POYOEEGModel(nn.Module):
 
         return output
 
+    @property
+    def readout_specs(self) -> dict[str, ModalitySpec]:
+        # Returns task specs
+        return self.readout_specs
+
     def tokenize(self, data: Data) -> dict:
         """
         Tokenize the input data. Assumes data has already been patched.
@@ -316,6 +321,22 @@ class POYOEEGModel(nn.Module):
         }
 
         return tokenized_data
+
+    def initialize_vocabs(self, vocab_info: dict):
+        """Initialize vocabularies from dataset information.
+
+        Args:
+            vocab_info: Dictionary with 'session_ids' and 'channel_ids' keys
+        """
+        if "session_ids" in vocab_info and self.session_emb.is_lazy():
+            self.session_emb.initialize_vocab(vocab_info["session_ids"])
+
+        if "channel_ids" in vocab_info and self.channel_emb.is_lazy():
+            self.channel_emb.initialize_vocab(vocab_info["channel_ids"])
+
+    def has_lazy_vocabs(self) -> bool:
+        """Check if vocabularies are still lazy (uninitialized)."""
+        return self.channel_emb.is_lazy() or self.session_emb.is_lazy()
 
     def _validate_vocab_initialization(self):
         """Validate that vocabularies have been properly initialized."""
