@@ -2,11 +2,11 @@ from typing import Callable, Optional, Literal
 from pathlib import Path
 
 from torch_brain.dataset import Dataset
-from .mixins import NeuralDatasetMixin, ModalityMixin
+from .mixins import EEGDatasetMixin, ModalityMixin
 from .modalities import SLEEP_STAGE_5CLASS
 
 
-class KempSleepEDF2013(ModalityMixin, NeuralDatasetMixin, Dataset):
+class KempSleepEDF2013(ModalityMixin, EEGDatasetMixin, Dataset):
     MODALITIES = {"sleep_stage_5class": SLEEP_STAGE_5CLASS}
     def __init__(
         self,

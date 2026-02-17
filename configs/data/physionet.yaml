@@ -8,8 +8,9 @@ window_length: ${hyperparameters.window_length}
 seed: 42
 
 transform:
-  - _target_: foundry.transforms.RescaleEEG
+  - _target_: foundry.transforms.RescaleSignal
     factor: 1e5
+    field: eeg
   - _target_: foundry.transforms.Patching
     patch_duration: ${hyperparameters.patch_duration}
 

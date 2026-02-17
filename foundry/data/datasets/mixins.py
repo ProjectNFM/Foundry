@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Literal
+from typing import TYPE_CHECKING
 
 import numpy as np
 from temporaldata import Data
@@ -9,27 +9,22 @@ if TYPE_CHECKING:
     from torch_brain.registry import ModalitySpec
 
 
-class NeuralDatasetMixin:
+class EEGDatasetMixin:
     """
-    Mixin class for dataset subclasses containing neural data.
-
-    This mixin is modality-agnostic and works with any neural data source
-    (EEG, iEEG, fMRI, PET, etc.). It provides methods for retrieving channel
-    and session identifiers.
+    Mixin class for :class:`torch_brain.dataset.Dataset` subclasses containing EEG data.
 
     Provides:
         - ``get_channel_ids()`` for retrieving IDs of all included channels.
-        - ``get_recording_ids()`` for retrieving IDs of all recordings/sessions.
-        - If the class attribute ``neural_dataset_mixin_uniquify_channel_ids`` is set to ``True``,
+        - If the class attribute ``eeg_dataset_mixin_uniquify_channel_ids`` is set to ``True``,
           channel IDs will be made unique across recordings by prefixing each channel ID with the
           corresponding ``session.id``. This helps avoid collisions when combining data from
           multiple sessions. (default: ``False``)
     """
 
-    neural_dataset_mixin_uniquify_channel_ids: bool = False
+    eeg_dataset_mixin_uniquify_channel_ids: bool = False
 
     def get_recording_hook(self, data: Data):
-        if self.neural_dataset_mixin_uniquify_channel_ids:
+        if self.eeg_dataset_mixin_uniquify_channel_ids:
             data.channels.id = np_string_prefix(
                 f"{data.session.id}/",
                 data.channels.id.astype(str),
@@ -46,111 +41,6 @@ class NeuralDatasetMixin:
     def get_recording_ids(self) -> list[str]:
         """Return a sorted list of all recording IDs in the dataset."""
         return np.sort(np.array(self.recording_ids)).tolist()
-
-
-class FoldedDatasetMixin:
-    """Mixin for datasets that support fold-based cross-validation splits.
-    
-    Provides shared logic for intra-subject and inter-subject fold handling,
-    reducing duplication across dataset implementations.
-    """
-
-    TASK_CONFIGS: dict[str, list[str]] = {}  # Override in subclass if needed
-
-    def get_sampling_intervals_intra_subject(
-        self,
-        split: Optional[Literal["train", "valid", "test"]] = None,
-        fold_number: Optional[int] = None,
-        task_type: Optional[str] = None,
-    ):
-        """Get sampling intervals for intra-subject fold splits.
-        
-        Args:
-            split: Which split to return ("train", "valid", "test")
-            fold_number: Which fold to use
-            task_type: Task configuration name (optional, if dataset supports task configs)
-            
-        Returns:
-            Dictionary mapping recording IDs to their sampling intervals
-        """
-        if fold_number is None:
-            return {
-                rid: self.get_recording(rid).domain
-                for rid in self.recording_ids
-            }
-
-        if split not in ["train", "valid", "test"]:
-            raise ValueError(
-                f"Invalid split '{split}'. Must be one of ['train', 'valid', 'test']."
-            )
-
-        if task_type:
-            key = f"splits.{task_type}.fold_{fold_number}.{split}"
-        else:
-            key = f"splits.fold_{fold_number}.{split}"
-
-        return {
-            rid: self.get_recording(rid).get_nested_attribute(key)
-            for rid in self.recording_ids
-        }
-
-    def get_sampling_intervals_inter_subject(
-        self,
-        split: Optional[Literal["train", "valid", "test"]] = None,
-        fold_number: Optional[int] = None,
-        task_type: Optional[str] = None,
-        movement_field: Optional[str] = None,
-    ):
-        """Get sampling intervals for inter-subject fold splits.
-        
-        Args:
-            split: Which split to return ("train", "valid", "test")
-            fold_number: Which fold to use
-            task_type: Task configuration name (optional, for filtering movements)
-            movement_field: Field name containing movement/task labels (optional)
-            
-        Returns:
-            Dictionary mapping recording IDs to their sampling intervals
-        """
-        if split not in ["train", "valid", "test"]:
-            raise ValueError(
-                f"Invalid split '{split}'. Must be one of ['train', 'valid', 'test']."
-            )
-
-        key = f"splits.SubjectSplit_fold{fold_number}"
-        res = {}
-
-        for rid in self.recording_ids:
-            recording = self.get_recording(rid)
-            
-            # Check if recording belongs to this split
-            if recording.get_nested_attribute(key) != split:
-                continue
-
-            # If task_type is specified, filter by valid movements/tasks
-            if task_type and movement_field and self.TASK_CONFIGS:
-                valid_movements = self.TASK_CONFIGS.get(task_type, [])
-                movements = recording.get_nested_attribute(movement_field)
-                mask = np.isin(movements, valid_movements)
-                intervals = recording.get_nested_attribute(movement_field)
-                res[rid] = intervals.select_by_mask(mask)
-            else:
-                res[rid] = recording.domain
-
-        return res
-
-
-# Backward compatibility alias
-class EEGDatasetMixin(NeuralDatasetMixin):
-    """Deprecated: Use NeuralDatasetMixin instead."""
-
-    @property
-    def eeg_dataset_mixin_uniquify_channel_ids(self):
-        return self.neural_dataset_mixin_uniquify_channel_ids
-
-    @eeg_dataset_mixin_uniquify_channel_ids.setter
-    def eeg_dataset_mixin_uniquify_channel_ids(self, value):
-        self.neural_dataset_mixin_uniquify_channel_ids = value
 
 
 class ModalityMixin:

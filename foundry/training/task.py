@@ -1,9 +1,3 @@
-"""PyTorch Lightning modules for neural data training.
-
-This module provides Lightning wrappers for training neural models on temporal
-data from any modality (EEG, iEEG, fMRI, PET, etc.).
-"""
-
 from typing import Any, Dict
 
 import lightning as L
@@ -50,16 +44,11 @@ def _create_task_metrics(num_classes: int, prefix: str) -> MetricCollection:
     )
 
 
-class NeuralTask(L.LightningModule):
+class EEGTask(L.LightningModule):
     """
-    PyTorch Lightning wrapper for neural model training.
+    PyTorch Lightning wrapper for EEG model training.
 
-    Handles training and validation loops, loss computation, and optimizer
-    configuration for models that support multitask learning on neural data.
-
-    This class is modality-agnostic and works with any model that has:
-    - A forward() method returning task-specific predictions
-    - A readout_specs property with ModalitySpec objects for each task
+    Handles training and validation loops, loss computation, and optimizer configuration.
     """
 
     def __init__(
@@ -70,7 +59,7 @@ class NeuralTask(L.LightningModule):
     ):
         """
         Args:
-            model: Neural model instance to train
+            model: EEG model instance to train
             learning_rate: Learning rate for optimizer
             weight_decay: Weight decay for optimizer
         """
@@ -383,7 +372,3 @@ class NeuralTask(L.LightningModule):
         ax.set_ylabel("True")
         plt.tight_layout()
         return fig
-
-
-# Keep EEGTask as an alias for backward compatibility
-EEGTask = NeuralTask
