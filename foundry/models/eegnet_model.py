@@ -255,6 +255,7 @@ class EEGNetModel(nn.Module):
         Returns:
             dict with model_inputs, target_values, target_weights, and metadata
         """
+        # TODO: this should probably be separated out so that models can reuse it.
         if not hasattr(data, "config") or data.config is None:
             data.config = {}
 

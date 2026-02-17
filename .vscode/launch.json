@@ -30,7 +30,8 @@
                 "--config-name",
                 "config",
                 "logger=csv",
-                "model=eegnet"
+                "model=eegnet",
+                "data=physionet_eegnet"
             ]
         }
     ]

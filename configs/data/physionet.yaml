@@ -2,7 +2,7 @@ _target_: foundry.data.datamodules.PhysionetDataModule
 
 root: ./data/processed/
 batch_size: ${hyperparameters.batch_size}
-num_workers: 5
+num_workers: 0
 pin_memory: false 
 window_length: ${hyperparameters.window_length}
 seed: 42

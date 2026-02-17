@@ -5,13 +5,13 @@ readout_specs:
   - motor_imagery_right_feet
 
 # EEGNet input dimensions
-in_chans: 64        # Will be set dynamically or from data config
-in_times: 160       # window_length * sampling_rate
+in_chans: 64
+in_times: 160
 
 # EEGNet architecture hyperparameters
-F1: 8               # Temporal filters
-D: 2                # Depth multiplier
-F2: null            # Auto: F1 * D = 16
+F1: 8
+D: 2
+F2: null
 kernel_time: 64
 kernel_time_separable: 16
 pool_time_size_1: 4
