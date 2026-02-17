@@ -10,3 +10,9 @@ logger: ${logger}
 callbacks:
   - _target_: lightning.pytorch.callbacks.RichModelSummary
   - _target_: lightning.pytorch.callbacks.RichProgressBar
+  - _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    monitor: val/loss
+    mode: min
+    save_top_k: 3
+    filename: "{epoch:02d}-{val_loss:.3f}"
+    save_last: true
