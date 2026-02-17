@@ -35,3 +35,12 @@ class RescaleSignal:
         signal_data.signal *= self.factor
 
         return data
+
+
+# Backward compatibility alias
+class RescaleEEG(RescaleSignal):
+    """Deprecated: Use RescaleSignal instead."""
+
+    def __init__(self, factor: float = 1e5):
+        super().__init__(factor=factor, field="eeg")
+
