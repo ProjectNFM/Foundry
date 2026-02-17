@@ -1,3 +1,9 @@
+"""PyTorch Lightning modules for neural data training.
+
+This module provides Lightning wrappers for training neural models on temporal
+data from any modality (EEG, iEEG, fMRI, PET, etc.).
+"""
+
 from typing import Any, Dict
 
 import lightning as L
@@ -25,8 +31,7 @@ def _create_task_metrics(num_classes: int, prefix: str) -> MetricCollection:
     Returns:
         MetricCollection with accuracy, F1, AUROC, precision, and recall
     """
-    # task_type = "binary" if num_classes == 2 else "multiclass"
-    task_type = "multiclass"
+    task_type = "binary" if num_classes == 2 else "multiclass"
     return MetricCollection(
         {
             "acc": Accuracy(task=task_type, num_classes=num_classes),
@@ -45,11 +50,16 @@ def _create_task_metrics(num_classes: int, prefix: str) -> MetricCollection:
     )
 
 
-class EEGTask(L.LightningModule):
+class NeuralTask(L.LightningModule):
     """
-    PyTorch Lightning wrapper for EEG model training.
+    PyTorch Lightning wrapper for neural model training.
 
-    Handles training and validation loops, loss computation, and optimizer configuration.
+    Handles training and validation loops, loss computation, and optimizer
+    configuration for models that support multitask learning on neural data.
+
+    This class is modality-agnostic and works with any model that has:
+    - A forward() method returning task-specific predictions
+    - A readout_specs property with ModalitySpec objects for each task
     """
 
     def __init__(
@@ -60,7 +70,7 @@ class EEGTask(L.LightningModule):
     ):
         """
         Args:
-            model: EEGModel instance to train
+            model: Neural model instance to train
             learning_rate: Learning rate for optimizer
             weight_decay: Weight decay for optimizer
         """
@@ -77,8 +87,7 @@ class EEGTask(L.LightningModule):
 
         for task_name, spec in model.readout_specs.items():
             num_classes = spec.dim
-            # task_type = "binary" if num_classes == 2 else "multiclass"
-            task_type = "multiclass"
+            task_type = "binary" if num_classes == 2 else "multiclass"
 
             self.train_metrics[task_name] = _create_task_metrics(
                 num_classes, f"train/{task_name}_"
@@ -202,13 +211,31 @@ class EEGTask(L.LightningModule):
         return total_loss
 
     def configure_optimizers(self):
-        """Configure AdamW optimizer."""
+        """Configure optimizer and learning rate scheduler.
+        
+        Uses AdamW optimizer with optional cosine annealing learning rate scheduler
+        for improved convergence on EEG tasks.
+        """
         optimizer = torch.optim.AdamW(
             self.parameters(),
             lr=self.learning_rate,
             weight_decay=self.weight_decay,
         )
-        return optimizer
+        
+        # Optional: add learning rate scheduler for better convergence
+        # Cosine annealing is commonly used and often improves EEG model training
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=self.trainer.max_epochs if self.trainer else 100
+        )
+        
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",
+                "frequency": 1,
+            },
+        }
 
     def on_validation_epoch_end(self):
         """Log confusion matrices at the end of validation epoch."""
@@ -259,7 +286,11 @@ class EEGTask(L.LightningModule):
         self, target: torch.Tensor, task_name: str
     ) -> torch.Tensor:
         """
-        Apply label mapping if the task uses MappedCrossEntropyLoss.
+        Apply label mapping if the task's loss function requires it.
+
+        This method centralizes label mapping logic to avoid duplication between
+        the loss function and metric computation. Metrics should always use the
+        mapped labels that the loss function expects.
 
         Args:
             target: Target tensor with original label IDs
@@ -274,6 +305,7 @@ class EEGTask(L.LightningModule):
         loss_fn = spec.loss_fn
 
         if isinstance(loss_fn, MappedCrossEntropyLoss):
+            # Use the loss function's mapping directly to avoid duplication
             mapped_target = torch.zeros_like(target)
             for i, key in enumerate(loss_fn._keys):
                 mask = target == key
@@ -351,3 +383,7 @@ class EEGTask(L.LightningModule):
         ax.set_ylabel("True")
         plt.tight_layout()
         return fig
+
+
+# Keep EEGTask as an alias for backward compatibility
+EEGTask = NeuralTask

@@ -1,3 +1,3 @@
-from foundry.training.task import EEGTask
+from foundry.training.task import NeuralTask, EEGTask
 
-__all__ = ["EEGTask"]
+__all__ = ["NeuralTask", "EEGTask"]
