@@ -37,19 +37,21 @@ def main(cfg: DictConfig):
     logger.info(f"Starting training: {cfg.experiment.name}")
 
     model = instantiate(cfg.model)
-    
+
     # Instantiate datamodule without passing model
     # Tokenization is now handled via transforms parameter
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)
 
     task = EEGTask(model=model, **cfg.task)
-    
+
     # Instantiate trainer and add VocabInitializer callback if not already present
     trainer = instantiate(cfg.trainer)
-    if not any(isinstance(cb, VocabInitializerCallback) for cb in trainer.callbacks):
+    if not any(
+        isinstance(cb, VocabInitializerCallback) for cb in trainer.callbacks
+    ):
         trainer.callbacks.append(VocabInitializerCallback())
-    
+
     trainer.fit(task, datamodule)
 
 

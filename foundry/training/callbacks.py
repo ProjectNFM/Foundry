@@ -1,9 +1,7 @@
 """Lightning callbacks for Foundry model training."""
 
-from typing import Optional
 import lightning as L
 from lightning import Trainer
-from lightning.pytorch.utilities.types import STEP_OUTPUT
 
 from foundry.core import VocabManager
 
@@ -19,7 +17,9 @@ class VocabInitializerCallback(L.Callback):
         trainer = Trainer(callbacks=[VocabInitializerCallback()])
     """
 
-    def on_fit_start(self, trainer: Trainer, pl_module: L.LightningModule) -> None:
+    def on_fit_start(
+        self, trainer: Trainer, pl_module: L.LightningModule
+    ) -> None:
         """Initialize vocabularies at the start of training.
 
         Args:
@@ -53,7 +53,7 @@ class VocabInitializerCallback(L.Callback):
         dataset = datamodule.dataset
 
         # Initialize vocabularies
-        vocab_info = {}  
+        vocab_info = {}
         if hasattr(dataset, "get_recording_ids"):
             vocab_info["session_ids"] = dataset.get_recording_ids()
 

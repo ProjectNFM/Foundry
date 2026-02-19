@@ -5,7 +5,7 @@ and optional tokenization/vocab initialization. It decouples data loading from
 model-specific preprocessing.
 """
 
-from typing import Callable, Optional, Literal, Any
+from typing import Callable, Optional, Literal
 
 import torch
 from torch.utils.data import DataLoader
