@@ -84,7 +84,7 @@ class POYOEEGModel(nn.Module):
         self.num_latents_per_step = num_latents_per_step
         self.context_mode = context_mode
 
-        self.readout_specs = self._resolve_readout_specs(readout_specs)
+        self._readout_specs = self._resolve_readout_specs(readout_specs)
         self.global_to_local_task_id = {
             spec.id: idx for idx, spec in enumerate(self.readout_specs.values())
         }
@@ -206,7 +206,7 @@ class POYOEEGModel(nn.Module):
     @property
     def readout_specs(self) -> dict[str, ModalitySpec]:
         # Returns task specs
-        return self.readout_specs
+        return self._readout_specs
 
     def tokenize(self, data: Data) -> dict:
         """

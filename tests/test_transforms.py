@@ -242,7 +242,7 @@ class TestRescaleSignal:
 
         transform = RescaleSignal(factor=2.0)
 
-        with pytest.raises(ValueError, match="Data must have an 'eeg' field"):
+        with pytest.raises(ValueError, match="Data must have a 'eeg' field"):
             transform(data)
 
     def test_rescale_none_eeg_field(self):
@@ -251,7 +251,7 @@ class TestRescaleSignal:
 
         transform = RescaleSignal(factor=2.0)
 
-        with pytest.raises(ValueError, match="Data must have an 'eeg' field"):
+        with pytest.raises(ValueError, match="Data must have a 'eeg' field"):
             transform(data)
 
     def test_rescale_negative_factor(self):
