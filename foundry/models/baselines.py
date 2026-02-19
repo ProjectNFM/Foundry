@@ -12,7 +12,7 @@ from torch_brain.data import chain, pad8
 from torch_brain.nn import MultitaskReadout, prepare_for_multitask_readout
 from torch_brain.registry import ModalitySpec
 from temporaldata import Data
-from typing import Dict, Optional, list, abstractmethod
+from typing import Dict, Optional
 
 from foundry.models.utils import resolve_readout_specs
 
@@ -27,8 +27,70 @@ class BaselineModel(nn.Module):
 
     @property
     def readout_specs(self) -> dict[str, ModalitySpec]:
-        # Returns task specs
         return self._readout_specs
+
+    def tokenize(self, data: Data) -> dict:
+        """Tokenize input data for EEG classification.
+
+        Args:
+            data: TemporalData object containing the raw EEG signal.
+                  If data.config["multitask_readout"] is set by the dataset, it will be
+                  intersected with the model's readout_specs to use only supported modalities.
+
+        Returns:
+            dict with model inputs, target values, target weights, and metadata.
+        """
+        if not hasattr(data, "config") or data.config is None:
+            data.config = {}
+
+        if "multitask_readout" not in data.config:
+            data.config["multitask_readout"] = [
+                {"readout_id": spec_id} for spec_id in self.readout_specs.keys()
+            ]
+        else:
+            available = [
+                cfg["readout_id"] for cfg in data.config["multitask_readout"]
+            ]
+            data.config["multitask_readout"] = [
+                {"readout_id": name}
+                for name in available
+                if name in self.readout_specs
+            ]
+
+        if not hasattr(data, "eeg") or data.eeg is None:
+            raise ValueError("Data must have an 'eeg' field")
+
+        signal = data.eeg.signal
+
+        modality_field = (
+            data.channels.types.astype(str)
+            if hasattr(data.channels, "types")
+            else np.array(["EEG"] * len(data.channels)).astype(str)
+        )
+        modality_mask = np.char.lower(modality_field) == "eeg"
+
+        x = torch.from_numpy(signal[:, modality_mask]).float()
+
+        (
+            output_timestamps,
+            output_values,
+            output_task_index,
+            output_weights,
+            output_eval_mask,
+        ) = prepare_for_multitask_readout(
+            data,
+            self.readout_specs,
+        )
+
+        return {
+            "x": x,
+            "output_decoder_index": pad8(output_task_index),
+            "target_values": chain(output_values, allow_missing_keys=True),
+            "target_weights": chain(output_weights, allow_missing_keys=True),
+            "session_id": data.session.id,
+            "absolute_start": data.absolute_start,
+            "eval_mask": chain(output_eval_mask, allow_missing_keys=True),
+        }
 
 
 class SimpleEEGClassifier(BaselineModel):
@@ -41,37 +103,44 @@ class SimpleEEGClassifier(BaselineModel):
 
     def __init__(
         self,
-        num_channels: int,
-        num_classes: int,
+        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
+        num_channels: int = 64,
         num_filters: int = 32,
         kernel_size: int = 64,
     ):
         """
         Args:
+            readout_specs: Task-specific readout specifications
             num_channels: Number of EEG channels
-            num_classes: Number of output classes
             num_filters: Number of convolutional filters
             kernel_size: Temporal kernel size
         """
-        super().__init__()
+        super().__init__(readout_specs)
         self.num_channels = num_channels
-        self.num_classes = num_classes
 
         self.conv = nn.Conv1d(num_channels, num_filters, kernel_size, padding="same")
         self.bn = nn.BatchNorm1d(num_filters)
         self.act = nn.ReLU()
         self.pool = nn.AdaptiveAvgPool1d(1)
-        self.fc = nn.Linear(num_filters, num_classes)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        self.readout = MultitaskReadout(
+            dim=num_filters,
+            readout_specs=self._readout_specs,
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        output_decoder_index: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
         """
         Args:
-            x: Input tensor of shape (batch, channels, time) or (batch, time, channels)
+            x: Input tensor of shape (B, C, T) or (B, T, C)
+            output_decoder_index: Task index tensor of shape (B, n_out) for MultitaskReadout
 
         Returns:
-            Output tensor of shape (batch, num_classes)
+            Dictionary of task outputs from MultitaskReadout
         """
-        # Handle both (batch, channels, time) and (batch, time, channels)
         if x.shape[-1] == self.num_channels:
             x = x.transpose(1, 2)
 
@@ -80,8 +149,16 @@ class SimpleEEGClassifier(BaselineModel):
         x = self.act(x)
         x = self.pool(x)
         x = x.view(x.size(0), -1)
-        x = self.fc(x)
-        return x
+        
+        batch_size = x.shape[0]
+        n_out = output_decoder_index.shape[1]
+        x = x.unsqueeze(1).expand(batch_size, n_out, -1)
+        
+        return self.readout(
+            output_embs=x,
+            output_readout_index=output_decoder_index,
+            unpack_output=False,
+        )
 
 
 class ShallowConvNet(BaselineModel):
@@ -93,23 +170,24 @@ class ShallowConvNet(BaselineModel):
 
     def __init__(
         self,
-        num_channels: int,
-        num_classes: int,
+        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
+        num_channels: int = 64,
+        num_samples: int = 128,
         dropout_rate: float = 0.5,
         kernel_length: int = 13,
         F1: int = 40,
     ):
         """
         Args:
+            readout_specs: Task-specific readout specifications
             num_channels: Number of EEG channels
-            num_classes: Number of output classes
+            num_samples: Number of time samples per trial
             dropout_rate: Dropout rate
             kernel_length: Length of temporal convolution kernel
             F1: Number of spatial filters
         """
-        super().__init__()
+        super().__init__(readout_specs)
         self.num_channels = num_channels
-        self.num_classes = num_classes
 
         # Temporal convolution
         self.conv1 = nn.Conv2d(1, F1, (1, kernel_length), padding="same", bias=False)
@@ -121,22 +199,30 @@ class ShallowConvNet(BaselineModel):
         self.act = nn.ELU()
         self.pool = nn.AvgPool2d((1, 35))
         self.dropout = nn.Dropout(dropout_rate)
-
-        # Classification
         self.flatten = nn.Flatten()
-        self.fc = None
-        self.num_classes = num_classes
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
+        out_dim = F1 * (num_samples // 35)
+        self.readout = MultitaskReadout(
+            dim=out_dim,
+            readout_specs=self._readout_specs,
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        output_decoder_index: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
+        """Forward pass for ShallowConvNet.
+
         Args:
-            x: Input tensor of shape (batch, channels, time)
+            x: Input tensor of shape (B, T, C)
+            output_decoder_index: Task index tensor of shape (B, n_out) for MultitaskReadout
 
         Returns:
-            Output tensor of shape (batch, num_classes)
+            Dictionary of task outputs from MultitaskReadout
         """
-        # Add channel dimension if needed
         if x.ndim == 3:
+            x = x.transpose(1, 2)  # (batch, channels, time)
             x = x.unsqueeze(1)  # (batch, 1, channels, time)
 
         x = self.conv1(x)
@@ -146,14 +232,17 @@ class ShallowConvNet(BaselineModel):
         x = self.act(x)
         x = self.pool(x)
         x = self.dropout(x)
-
         x = self.flatten(x)
-
-        if self.fc is None:
-            self.fc = nn.Linear(x.shape[1], self.num_classes).to(x.device)
-
-        x = self.fc(x)
-        return x
+        
+        batch_size = x.shape[0]
+        n_out = output_decoder_index.shape[1]
+        x = x.unsqueeze(1).expand(batch_size, n_out, -1)
+        
+        return self.readout(
+            output_embs=x,
+            output_readout_index=output_decoder_index,
+            unpack_output=False,
+        )
 
 
 class SeparableConv2d(nn.Module):
@@ -190,14 +279,13 @@ class SeparableConv2d(nn.Module):
         )
 
     def forward(self, x):
-        """
-        Forward pass for separable convolution.
+        """Forward pass for separable convolution.
         
         Args:
-            x (torch.Tensor): Input tensor of shape (Batch, Channels, H, W)
+            x: Input tensor of shape (B, C, H, W)
             
         Returns:
-            torch.Tensor: Output tensor after depthwise and pointwise convolutions.
+            Output tensor after depthwise and pointwise convolutions of shape (B, out_C, H, W)
         """
         x = self.depthwise(x)
         x = self.pointwise(x)
@@ -295,28 +383,25 @@ class EEGNetEncoder(BaselineModel):
         # Classifier Head
         # ----------------------------------------------------------------------
         out_dim = self._calculate_out_dim(num_channels, num_samples) # CHECK: out_dim == F2
-        
+
         # MultitaskReadout replaces the final classifier
         self.readout = MultitaskReadout(
             dim=out_dim,
             readout_specs=self._readout_specs,
         )
 
-    @property
-    def readout_specs(self) -> dict[str, ModalitySpec]:
-        # Returns task specs
-        return self._readout_specs
-
     def _calculate_out_dim(self, channels, samples):
-        """
-        Dynamically calculates the number of features entering the classifier.
+        """Dynamically calculate the flattened output dimension.
+
+        Computes the output dimension after passing through block1 and block2 by
+        using a dummy input tensor.
         
         Args:
-            channels (int): Number of EEG channels.
-            samples (int): Number of time samples.
+            channels: Number of EEG channels (C)
+            samples: Number of time samples (T)
             
         Returns:
-            int: The flattened dimension size for the Linear layer.
+            The flattened feature dimension for the readout layer
         """
         with torch.no_grad():
             dummy_input = torch.zeros(1, 1, channels, samples)
@@ -325,17 +410,21 @@ class EEGNetEncoder(BaselineModel):
             return x.numel() 
 
     def extract_features(self, x):
-        """
-        Extracts deep embeddings from the EEG input without classifying them.
+        """Extract deep embeddings from the EEG input without classification.
+
         Useful for self-supervised learning, transfer learning, or clustering.
+        Handles multiple input formats by automatically transposing if needed.
 
         Args:
-            x (torch.Tensor): EEG input tensor. Can be shape (B, C, T) or (B, 1, C, T).
+            x: EEG input tensor of shape (B, C, T) or (B, T, C) or (B, 1, C, T)
             
         Returns:
-            torch.Tensor: High-level feature maps before the flattening layer.
+            High-level feature maps of shape (B, F, H, W) before the flattening layer
         """
         if len(x.shape) == 3:
+            # Check if last dimension matches num_channels (B, T, C format)
+            if x.shape[-1] == self.num_channels:
+                x = x.transpose(1, 2)  # Convert (B, T, C) to (B, C, T)
             # Auto-unsqueeze to add the channel dimension required by Conv2d
             x = x.unsqueeze(1)
             
@@ -348,86 +437,24 @@ class EEGNetEncoder(BaselineModel):
         x, 
         output_decoder_index: torch.Tensor,
     ) -> Dict[str, torch.Tensor]:
-        """
-        Standard forward pass for classification.
+        """Forward pass for EEGNetEncoder.
 
         Args:
-            x (torch.Tensor): EEG input tensor of shape (B, 1, C, T) or (B, C, T).
+            x: EEG input tensor of shape (B, C, T) or (B, T, C) or (B, 1, C, T)
+            output_decoder_index: Task index tensor of shape (B, n_out) for MultitaskReadout
             
         Returns:
-            torch.Tensor: Logits for each class of shape (B, num_classes).
+            Dictionary of task outputs from MultitaskReadout
         """
         x = self.extract_features(x)
-        x = self.readout(
+        
+        batch_size = x.shape[0]
+        n_out = output_decoder_index.shape[1]
+        x = x.view(batch_size, -1)
+        x = x.unsqueeze(1).expand(batch_size, n_out, -1)
+        
+        return self.readout(
             output_embs=x,
             output_readout_index=output_decoder_index,
             unpack_output=False,
         )
-        return x
-
-    def tokenize(self, data: Data) -> dict:
-        """
-        Tokenize the input data for EEGNet classification.
-
-        Args:
-            data: TemporalData object containing the raw EEG signal.
-                  If data.config["multitask_readout"] is set by the dataset, it will be
-                  intersected with the model's readout_specs to use only supported modalities.
-
-        Returns:
-            dict with model inputs (x, output_decoder_index), target values,
-            target weights, and metadata.
-        """
-        if not hasattr(data, "config") or data.config is None:
-            data.config = {}
-
-        if "multitask_readout" not in data.config:
-            data.config["multitask_readout"] = [
-                {"readout_id": spec_id} for spec_id in self.readout_specs.keys()
-            ]
-        else:
-            available = [
-                cfg["readout_id"] for cfg in data.config["multitask_readout"]
-            ]
-            data.config["multitask_readout"] = [
-                {"readout_id": name}
-                for name in available
-                if name in self.readout_specs
-            ]
-
-        if not hasattr(data, "eeg") or data.eeg is None:
-            raise ValueError("Data must have an 'eeg' field")
-
-        signal = data.eeg.signal
-
-        modality_field = (
-            data.channels.types.astype(str)
-            if hasattr(data.channels, "types")
-            else np.array(["EEG"] * len(data.channels)).astype(str)
-        )
-        modality_mask = np.char.lower(modality_field) == "eeg"
-
-        x = torch.from_numpy(signal[modality_mask]).float()
-
-        (
-            output_timestamps,
-            output_values,
-            output_task_index,
-            output_weights,
-            output_eval_mask,
-        ) = prepare_for_multitask_readout(
-            data,
-            self.readout_specs,
-        )
-
-        tokenized_data = {
-            "x": x,
-            "output_decoder_index": pad8(output_task_index),
-            "target_values": chain(output_values, allow_missing_keys=True),
-            "target_weights": chain(output_weights, allow_missing_keys=True),
-            "session_id": data.session.id,
-            "absolute_start": data.absolute_start,
-            "eval_mask": chain(output_eval_mask, allow_missing_keys=True),
-        }
-
-        return tokenized_data
