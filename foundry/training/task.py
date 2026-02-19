@@ -25,8 +25,7 @@ def _create_task_metrics(num_classes: int, prefix: str) -> MetricCollection:
     Returns:
         MetricCollection with accuracy, F1, AUROC, precision, and recall
     """
-    # task_type = "binary" if num_classes == 2 else "multiclass"
-    task_type = "multiclass"
+    task_type = "binary" if num_classes == 2 else "multiclass"
     return MetricCollection(
         {
             "acc": Accuracy(task=task_type, num_classes=num_classes),
@@ -77,8 +76,7 @@ class EEGTask(L.LightningModule):
 
         for task_name, spec in model.readout_specs.items():
             num_classes = spec.dim
-            # task_type = "binary" if num_classes == 2 else "multiclass"
-            task_type = "multiclass"
+            task_type = "binary" if num_classes == 2 else "multiclass"
 
             self.train_metrics[task_name] = _create_task_metrics(
                 num_classes, f"train/{task_name}_"
@@ -202,13 +200,31 @@ class EEGTask(L.LightningModule):
         return total_loss
 
     def configure_optimizers(self):
-        """Configure AdamW optimizer."""
+        """Configure optimizer and learning rate scheduler.
+        
+        Uses AdamW optimizer with optional cosine annealing learning rate scheduler
+        for improved convergence on EEG tasks.
+        """
         optimizer = torch.optim.AdamW(
             self.parameters(),
             lr=self.learning_rate,
             weight_decay=self.weight_decay,
         )
-        return optimizer
+        
+        # Optional: add learning rate scheduler for better convergence
+        # Cosine annealing is commonly used and often improves EEG model training
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=self.trainer.max_epochs if self.trainer else 100
+        )
+        
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",
+                "frequency": 1,
+            },
+        }
 
     def on_validation_epoch_end(self):
         """Log confusion matrices at the end of validation epoch."""
