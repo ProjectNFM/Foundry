@@ -5,8 +5,8 @@ from torch_brain.data import collate
 from torch_brain.registry import register_modality, DataType, MODALITY_REGISTRY
 from torch_brain.nn.loss import CrossEntropyLoss
 
-from foundry.models import EEGModel, LinearEmbedding
-from foundry.transforms import Patching
+from foundry.models import POYOEEGModel, LinearEmbedding
+from foundry.data.transforms import Patching
 
 
 class MockChannels:
@@ -99,7 +99,7 @@ class TestContextModes:
     def test_add_mode(self, readout_specs, embed_dim):
         """Test that add mode works correctly."""
         input_embedding = LinearEmbedding(embed_dim=embed_dim)
-        model = EEGModel(
+        model = POYOEEGModel(
             input_embedding=input_embedding,
             readout_specs=readout_specs,
             embed_dim=embed_dim,
@@ -130,7 +130,7 @@ class TestContextModes:
     def test_concat_mode(self, readout_specs, embed_dim):
         """Test that concat mode works correctly."""
         input_embedding = LinearEmbedding(embed_dim=embed_dim)
-        model = EEGModel(
+        model = POYOEEGModel(
             input_embedding=input_embedding,
             readout_specs=readout_specs,
             embed_dim=embed_dim,
@@ -167,7 +167,7 @@ class TestContextModes:
         with pytest.raises(
             ValueError, match="context_mode must be 'add' or 'concat'"
         ):
-            EEGModel(
+            POYOEEGModel(
                 input_embedding=input_embedding,
                 readout_specs=readout_specs,
                 embed_dim=embed_dim,
@@ -187,7 +187,7 @@ class TestContextModes:
         patched1 = patching(data1)
         patched2 = patching(data2)
 
-        model_add = EEGModel(
+        model_add = POYOEEGModel(
             input_embedding=LinearEmbedding(embed_dim=embed_dim),
             readout_specs=readout_specs,
             embed_dim=embed_dim,
@@ -195,7 +195,7 @@ class TestContextModes:
             context_mode="add",
         )
 
-        model_concat = EEGModel(
+        model_concat = POYOEEGModel(
             input_embedding=LinearEmbedding(embed_dim=embed_dim),
             readout_specs=readout_specs,
             embed_dim=embed_dim,
@@ -221,7 +221,7 @@ class TestContextModes:
     ):
         """Test concat mode works with heterogeneous channel counts."""
         input_embedding = LinearEmbedding(embed_dim=embed_dim)
-        model = EEGModel(
+        model = POYOEEGModel(
             input_embedding=input_embedding,
             readout_specs=readout_specs,
             embed_dim=embed_dim,

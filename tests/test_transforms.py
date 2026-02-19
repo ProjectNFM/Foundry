@@ -2,16 +2,16 @@ import numpy as np
 import pytest
 from temporaldata import Data, Interval, RegularTimeSeries
 
-from foundry.transforms import RescaleEEG
+from foundry.data.transforms import RescaleSignal
 
 
-class TestRescaleEEG:
+class TestRescaleSignal:
     def test_initialization_default(self):
-        transform = RescaleEEG()
+        transform = RescaleSignal()
         assert transform.factor == 1e5
 
     def test_initialization_custom_factor(self):
-        transform = RescaleEEG(factor=2.0)
+        transform = RescaleSignal(factor=2.0)
         assert transform.factor == 2.0
 
     def test_rescale_with_default_factor(self):
@@ -27,7 +27,7 @@ class TestRescaleEEG:
             domain=Interval(0.0, 1.0),
         )
 
-        transform = RescaleEEG()
+        transform = RescaleSignal()
         result = transform(data)
 
         assert np.allclose(result.eeg.signal, expected)
@@ -45,7 +45,7 @@ class TestRescaleEEG:
             domain=Interval(0.0, 1.0),
         )
 
-        transform = RescaleEEG(factor=2.0)
+        transform = RescaleSignal(factor=2.0)
         result = transform(data)
 
         assert np.allclose(result.eeg.signal, expected)
@@ -63,7 +63,7 @@ class TestRescaleEEG:
             domain=Interval(0.0, 1.0),
         )
 
-        transform = RescaleEEG(factor=0.5)
+        transform = RescaleSignal(factor=0.5)
         result = transform(data)
 
         assert np.allclose(result.eeg.signal, expected)
@@ -79,7 +79,7 @@ class TestRescaleEEG:
             domain=Interval(0.0, 1.0),
         )
 
-        transform = RescaleEEG(factor=1.0)
+        transform = RescaleSignal(factor=1.0)
         result = transform(data)
 
         assert np.allclose(result.eeg.signal, data_array)
@@ -97,7 +97,7 @@ class TestRescaleEEG:
             domain=Interval(0.0, 1.0),
         )
 
-        transform = RescaleEEG(factor=2.0)
+        transform = RescaleSignal(factor=2.0)
         result = transform(data)
 
         assert np.allclose(result.eeg.signal, expected)
@@ -113,7 +113,7 @@ class TestRescaleEEG:
             domain=Interval(0.0, 1.0),
         )
 
-        transform = RescaleEEG(factor=10.0)
+        transform = RescaleSignal(factor=10.0)
         result = transform(data)
 
         assert np.allclose(result.eeg.signal, 0.0)
@@ -134,7 +134,7 @@ class TestRescaleEEG:
         original_id = id(data)
         original_signal_id = id(data.eeg.signal)
 
-        transform = RescaleEEG(factor=2.0)
+        transform = RescaleSignal(factor=2.0)
         result = transform(data)
 
         assert id(result) == original_id
@@ -153,7 +153,7 @@ class TestRescaleEEG:
             domain=domain,
         )
 
-        transform = RescaleEEG(factor=3.0)
+        transform = RescaleSignal(factor=3.0)
         result = transform(data)
 
         assert result.eeg.domain.start == domain.start
@@ -173,7 +173,7 @@ class TestRescaleEEG:
             domain=Interval(0.0, 1.0),
         )
 
-        transform = RescaleEEG(factor=0.1)
+        transform = RescaleSignal(factor=0.1)
         result = transform(data)
 
         assert result.eeg.sampling_rate == sampling_rate
@@ -189,7 +189,7 @@ class TestRescaleEEG:
             domain=Interval(0.0, 1.0),
         )
 
-        transform = RescaleEEG(factor=5.0)
+        transform = RescaleSignal(factor=5.0)
         result = transform(data)
 
         assert result.eeg.signal.shape == data_array.shape
@@ -207,7 +207,7 @@ class TestRescaleEEG:
             domain=Interval(0.0, 1.0),
         )
 
-        transform = RescaleEEG(factor=1e6)
+        transform = RescaleSignal(factor=1e6)
         result = transform(data)
 
         assert np.allclose(result.eeg.signal, expected)
@@ -225,7 +225,7 @@ class TestRescaleEEG:
             domain=Interval(0.0, 1.0),
         )
 
-        transform = RescaleEEG(factor=0.001)
+        transform = RescaleSignal(factor=0.001)
         result = transform(data)
 
         assert np.allclose(result.eeg.signal, expected)
@@ -240,18 +240,18 @@ class TestRescaleEEG:
             domain=Interval(0.0, 1.0),
         )
 
-        transform = RescaleEEG(factor=2.0)
+        transform = RescaleSignal(factor=2.0)
 
-        with pytest.raises(ValueError, match="Data must have an 'eeg' field"):
+        with pytest.raises(ValueError, match="Data must have a 'eeg' field"):
             transform(data)
 
     def test_rescale_none_eeg_field(self):
         data = Data(domain=Interval(0.0, 1.0))
         data.eeg = None
 
-        transform = RescaleEEG(factor=2.0)
+        transform = RescaleSignal(factor=2.0)
 
-        with pytest.raises(ValueError, match="Data must have an 'eeg' field"):
+        with pytest.raises(ValueError, match="Data must have a 'eeg' field"):
             transform(data)
 
     def test_rescale_negative_factor(self):
@@ -267,7 +267,7 @@ class TestRescaleEEG:
             domain=Interval(0.0, 1.0),
         )
 
-        transform = RescaleEEG(factor=-2.0)
+        transform = RescaleSignal(factor=-2.0)
         result = transform(data)
 
         assert np.allclose(result.eeg.signal, expected)
@@ -283,7 +283,7 @@ class TestRescaleEEG:
             domain=Interval(0.0, 1.0),
         )
 
-        transform = RescaleEEG(factor=0.0)
+        transform = RescaleSignal(factor=0.0)
         result = transform(data)
 
         assert np.allclose(result.eeg.signal, 0.0)
@@ -306,7 +306,7 @@ class TestRescaleEEG:
             domain=Interval(0.0, 1.0),
         )
 
-        transform = RescaleEEG(factor=3.0)
+        transform = RescaleSignal(factor=3.0)
         result = transform(data)
 
         assert np.allclose(result.eeg.signal, eeg_array * 3.0)

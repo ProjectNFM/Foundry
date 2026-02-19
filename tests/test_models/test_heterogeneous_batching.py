@@ -5,8 +5,13 @@ from torch_brain.data import collate
 from torch_brain.registry import register_modality, DataType, MODALITY_REGISTRY
 from torch_brain.nn.loss import CrossEntropyLoss
 
-from foundry.models import EEGModel, LinearEmbedding, CNNEmbedding, MLPEmbedding
-from foundry.transforms import Patching
+from foundry.models import (
+    POYOEEGModel,
+    LinearEmbedding,
+    CNNEmbedding,
+    MLPEmbedding,
+)
+from foundry.data.transforms import Patching
 
 
 class MockChannels:
@@ -38,7 +43,7 @@ def readout_specs():
 @pytest.fixture
 def model_with_linear(readout_specs, embed_dim):
     input_embedding = LinearEmbedding(embed_dim=embed_dim)
-    model = EEGModel(
+    model = POYOEEGModel(
         input_embedding=input_embedding,
         readout_specs=readout_specs,
         embed_dim=embed_dim,
@@ -54,7 +59,7 @@ def model_with_cnn(readout_specs, embed_dim):
     input_embedding = CNNEmbedding(
         embed_dim=embed_dim, num_filters=32, kernel_size=3
     )
-    model = EEGModel(
+    model = POYOEEGModel(
         input_embedding=input_embedding,
         readout_specs=readout_specs,
         embed_dim=embed_dim,
@@ -70,7 +75,7 @@ def model_with_mlp(readout_specs, embed_dim):
     input_embedding = MLPEmbedding(
         embed_dim=embed_dim, hidden_dims=[128, 64], activation="gelu"
     )
-    model = EEGModel(
+    model = POYOEEGModel(
         input_embedding=input_embedding,
         readout_specs=readout_specs,
         embed_dim=embed_dim,

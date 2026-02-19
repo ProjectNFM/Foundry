@@ -14,7 +14,7 @@ dependencies = [
     "ipykernel>=7.1.0",
     "lightning>=2.0.0",
     "torch>=2.9.1",
-    "pytorch-brain",
+    "torch-brain",
     "matplotlib>=3.10.8",
     "torchmetrics>=1.8.2",
     "wandb>=0.24.0",
@@ -24,8 +24,8 @@ dependencies = [
 dev = ["pre-commit>=4.5.1", "pytest>=8.0.0", "ruff>=0.14.14"]
 
 [tool.uv.sources]
-pytorch-brain = { git = "ssh://git@github.com/neuro-galaxy/torch_brain", branch = "vinam/dataset_overhaul" }
-brainsets = { git = "ssh://git@github.com/neuro-galaxy/brainsets", branch = "vinam/datasets" }
+torch-brain = { git = "https://github.com/neuro-galaxy/torch_brain", branch = "main" }
+brainsets = { git = "https://github.com/neuro-galaxy/brainsets", branch = "main" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

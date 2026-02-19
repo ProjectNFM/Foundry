@@ -4,7 +4,7 @@ This module provides modality-agnostic base classes and protocols for working
 with neural data from any source (EEG, iEEG, fMRI, PET, etc.).
 """
 
-from typing import Protocol, Any, Dict, Optional
+from typing import Protocol, Any, Dict
 
 import torch
 from temporaldata import Data

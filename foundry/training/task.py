@@ -201,7 +201,7 @@ class EEGTask(L.LightningModule):
 
     def configure_optimizers(self):
         """Configure optimizer and learning rate scheduler.
-        
+
         Uses AdamW optimizer with optional cosine annealing learning rate scheduler
         for improved convergence on EEG tasks.
         """
@@ -210,13 +210,13 @@ class EEGTask(L.LightningModule):
             lr=self.learning_rate,
             weight_decay=self.weight_decay,
         )
-        
+
         # Optional: add learning rate scheduler for better convergence
         # Cosine annealing is commonly used and often improves EEG model training
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=self.trainer.max_epochs if self.trainer else 100
         )
-        
+
         return {
             "optimizer": optimizer,
             "lr_scheduler": {

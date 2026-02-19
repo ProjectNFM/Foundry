@@ -8,6 +8,7 @@ from .modalities import SLEEP_STAGE_5CLASS
 
 class KempSleepEDF2013(ModalityMixin, EEGDatasetMixin, Dataset):
     MODALITIES = {"sleep_stage_5class": SLEEP_STAGE_5CLASS}
+
     def __init__(
         self,
         root: str,

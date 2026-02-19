@@ -1,12 +1,5 @@
 from typing import Callable, Optional, Literal
 
-import torch
-from torch.utils.data import DataLoader
-from torch_brain.data import collate
-
-from torch_brain.data.sampler import RandomFixedWindowSampler
-from lightning import LightningDataModule
-from torch_brain.transforms import Compose
 
 from foundry.data.datasets.schalk_wolpaw_physionet_2009 import (
     SchalkWolpawPhysionet2009,
