@@ -5,15 +5,86 @@ against the foundation model. They are simpler architectures that work well
 on standard EEG classification tasks.
 """
 
+import numpy as np
 import torch
 import torch.nn as nn
+from torch_brain.data import chain, pad8
 from torch_brain.nn import MultitaskReadout, prepare_for_multitask_readout
 from torch_brain.registry import ModalitySpec
 from temporaldata import Data
-from typing import Dict, Optional, list
+from typing import Dict, Optional, list, abstractmethod
+
+from foundry.models.utils import resolve_readout_specs
 
 
-class ShallowConvNet(nn.Module):
+class BaselineModel(nn.Module):
+    """
+    Base class for all baseline models.
+    """
+    def __init__(self, readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec]):
+        super().__init__()
+        self._readout_specs = resolve_readout_specs(readout_specs)
+
+    @property
+    def readout_specs(self) -> dict[str, ModalitySpec]:
+        # Returns task specs
+        return self._readout_specs
+
+
+class SimpleEEGClassifier(BaselineModel):
+    """Simple baseline classifier for EEG data.
+    
+    A minimal model useful for testing and debugging, consisting of
+    a single temporal convolution followed by global average pooling
+    and a linear classifier.
+    """
+
+    def __init__(
+        self,
+        num_channels: int,
+        num_classes: int,
+        num_filters: int = 32,
+        kernel_size: int = 64,
+    ):
+        """
+        Args:
+            num_channels: Number of EEG channels
+            num_classes: Number of output classes
+            num_filters: Number of convolutional filters
+            kernel_size: Temporal kernel size
+        """
+        super().__init__()
+        self.num_channels = num_channels
+        self.num_classes = num_classes
+
+        self.conv = nn.Conv1d(num_channels, num_filters, kernel_size, padding="same")
+        self.bn = nn.BatchNorm1d(num_filters)
+        self.act = nn.ReLU()
+        self.pool = nn.AdaptiveAvgPool1d(1)
+        self.fc = nn.Linear(num_filters, num_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: Input tensor of shape (batch, channels, time) or (batch, time, channels)
+
+        Returns:
+            Output tensor of shape (batch, num_classes)
+        """
+        # Handle both (batch, channels, time) and (batch, time, channels)
+        if x.shape[-1] == self.num_channels:
+            x = x.transpose(1, 2)
+
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.act(x)
+        x = self.pool(x)
+        x = x.view(x.size(0), -1)
+        x = self.fc(x)
+        return x
+
+
+class ShallowConvNet(BaselineModel):
     """ShallowConvNet: A Shallow Deep Learning Architecture for EEG-based Brain-Computer Interfaces.
     
     A simpler alternative to DeepConvNet that performs well with limited training data.
@@ -85,59 +156,6 @@ class ShallowConvNet(nn.Module):
         return x
 
 
-class SimpleEEGClassifier(nn.Module):
-    """Simple baseline classifier for EEG data.
-    
-    A minimal model useful for testing and debugging, consisting of
-    a single temporal convolution followed by global average pooling
-    and a linear classifier.
-    """
-
-    def __init__(
-        self,
-        num_channels: int,
-        num_classes: int,
-        num_filters: int = 32,
-        kernel_size: int = 64,
-    ):
-        """
-        Args:
-            num_channels: Number of EEG channels
-            num_classes: Number of output classes
-            num_filters: Number of convolutional filters
-            kernel_size: Temporal kernel size
-        """
-        super().__init__()
-        self.num_channels = num_channels
-        self.num_classes = num_classes
-
-        self.conv = nn.Conv1d(num_channels, num_filters, kernel_size, padding="same")
-        self.bn = nn.BatchNorm1d(num_filters)
-        self.act = nn.ReLU()
-        self.pool = nn.AdaptiveAvgPool1d(1)
-        self.fc = nn.Linear(num_filters, num_classes)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: Input tensor of shape (batch, channels, time) or (batch, time, channels)
-
-        Returns:
-            Output tensor of shape (batch, num_classes)
-        """
-        # Handle both (batch, channels, time) and (batch, time, channels)
-        if x.shape[-1] == self.num_channels:
-            x = x.transpose(1, 2)
-
-        x = self.conv(x)
-        x = self.bn(x)
-        x = self.act(x)
-        x = self.pool(x)
-        x = x.view(x.size(0), -1)
-        x = self.fc(x)
-        return x
-
-
 class SeparableConv2d(nn.Module):
     """
     Depthwise Separable Convolution.
@@ -186,7 +204,7 @@ class SeparableConv2d(nn.Module):
         return x
 
 
-class EEGNetEncoder(nn.Module):
+class EEGNetEncoder(BaselineModel):
     """
     EEGNet: A Compact Convolutional Network for EEG-based Brain-Computer Interfaces.
     Reference: Lawhern et al., J. Neural Eng. 2018. (https://arxiv.org/abs/1611.08024)
@@ -195,7 +213,7 @@ class EEGNetEncoder(nn.Module):
     (P300, ERD/ERS, MRCP) while remaining highly parameter-efficient.
 
     Args:
-        num_classes (int): Number of output classes for classification. Defaults to 4.
+        readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): List of modality specs or dict of modality specs.
         num_channels (int): Number of EEG electrodes/channels. Defaults to 64.
         num_samples (int): Number of time samples in a single EEG trial/window. Defaults to 128.
         F1 (int): Number of temporal filters. Acts analogously to bandpass filters. Defaults to 8.
@@ -208,7 +226,7 @@ class EEGNetEncoder(nn.Module):
     """
     def __init__(
         self,
-        num_classes: int = 4,
+        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
         num_channels: int = 64,
         num_samples: int = 128,
         F1: int = 8,
@@ -217,9 +235,7 @@ class EEGNetEncoder(nn.Module):
         kernel_length: int = 64,
         dropout_rate: float = 0.5,
     ):
-        super().__init__()
-        
-        self.num_classes = num_classes
+        super().__init__(readout_specs)
         self.num_channels = num_channels
         
         # ----------------------------------------------------------------------
@@ -278,14 +294,18 @@ class EEGNetEncoder(nn.Module):
         # ----------------------------------------------------------------------
         # Classifier Head
         # ----------------------------------------------------------------------
-        out_dim = self._calculate_out_dim(num_channels, num_samples)
-        print(out_dim == F2, out_dim, F2)
+        out_dim = self._calculate_out_dim(num_channels, num_samples) # CHECK: out_dim == F2
         
-        self.classifier = nn.Sequential(
-            nn.Flatten(),
-            # Note: The original paper applies a MaxNorm constraint of <= 0.25 here
-            nn.Linear(out_dim, num_classes)
+        # MultitaskReadout replaces the final classifier
+        self.readout = MultitaskReadout(
+            dim=out_dim,
+            readout_specs=self._readout_specs,
         )
+
+    @property
+    def readout_specs(self) -> dict[str, ModalitySpec]:
+        # Returns task specs
+        return self._readout_specs
 
     def _calculate_out_dim(self, channels, samples):
         """
@@ -323,7 +343,11 @@ class EEGNetEncoder(nn.Module):
         x = self.block2(x)
         return x
 
-    def forward(self, x):
+    def forward(
+        self,
+        x, 
+        output_decoder_index: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
         """
         Standard forward pass for classification.
 
@@ -334,5 +358,76 @@ class EEGNetEncoder(nn.Module):
             torch.Tensor: Logits for each class of shape (B, num_classes).
         """
         x = self.extract_features(x)
-        x = self.classifier(x)
+        x = self.readout(
+            output_embs=x,
+            output_readout_index=output_decoder_index,
+            unpack_output=False,
+        )
         return x
+
+    def tokenize(self, data: Data) -> dict:
+        """
+        Tokenize the input data for EEGNet classification.
+
+        Args:
+            data: TemporalData object containing the raw EEG signal.
+                  If data.config["multitask_readout"] is set by the dataset, it will be
+                  intersected with the model's readout_specs to use only supported modalities.
+
+        Returns:
+            dict with model inputs (x, output_decoder_index), target values,
+            target weights, and metadata.
+        """
+        if not hasattr(data, "config") or data.config is None:
+            data.config = {}
+
+        if "multitask_readout" not in data.config:
+            data.config["multitask_readout"] = [
+                {"readout_id": spec_id} for spec_id in self.readout_specs.keys()
+            ]
+        else:
+            available = [
+                cfg["readout_id"] for cfg in data.config["multitask_readout"]
+            ]
+            data.config["multitask_readout"] = [
+                {"readout_id": name}
+                for name in available
+                if name in self.readout_specs
+            ]
+
+        if not hasattr(data, "eeg") or data.eeg is None:
+            raise ValueError("Data must have an 'eeg' field")
+
+        signal = data.eeg.signal
+
+        modality_field = (
+            data.channels.types.astype(str)
+            if hasattr(data.channels, "types")
+            else np.array(["EEG"] * len(data.channels)).astype(str)
+        )
+        modality_mask = np.char.lower(modality_field) == "eeg"
+
+        x = torch.from_numpy(signal[modality_mask]).float()
+
+        (
+            output_timestamps,
+            output_values,
+            output_task_index,
+            output_weights,
+            output_eval_mask,
+        ) = prepare_for_multitask_readout(
+            data,
+            self.readout_specs,
+        )
+
+        tokenized_data = {
+            "x": x,
+            "output_decoder_index": pad8(output_task_index),
+            "target_values": chain(output_values, allow_missing_keys=True),
+            "target_weights": chain(output_weights, allow_missing_keys=True),
+            "session_id": data.session.id,
+            "absolute_start": data.absolute_start,
+            "eval_mask": chain(output_eval_mask, allow_missing_keys=True),
+        }
+
+        return tokenized_data
