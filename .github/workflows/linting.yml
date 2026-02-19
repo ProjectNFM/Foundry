@@ -1,0 +1,25 @@
+name: Testing
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "*" ]
+
+permissions:
+  contents: read
+
+jobs:
+  linting:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Ruff Check
+      uses: astral-sh/ruff-action@v3
+      with:
+        args: "--fix"
+
+    - name: Ruff Format
+      uses: astral-sh/ruff-action@v3
+      with:
+        args: "format --check --diff"
