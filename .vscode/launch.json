@@ -17,6 +17,20 @@
                 // "logger=csv"
                 "logger=wandb"
             ]
+        },
+        {
+            "name": "Ajile",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "main.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "--config-name",
+                "config",
+                "data=ajile",
+                "logger=csv"
+            ]
         }
     ]
 }

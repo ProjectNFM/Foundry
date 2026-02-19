@@ -19,4 +19,3 @@ uniquify_channel_ids: true
 task_type: RightHandFeetImagery
 fold_number: ${hyperparameters.fold_number}
 fold_type: inter-subject
-dirname: schalk_wolpaw_physionet_2009
