@@ -184,8 +184,8 @@ wheels = [
 
 [[package]]
 name = "brainsets"
-version = "0.1.3"
-source = { git = "ssh://git@github.com/neuro-galaxy/brainsets?branch=vinam%2Fdatasets#ad8b1c3799307ac8d6d25f9722a8888c94f08721" }
+version = "0.2.1.dev4+g073ac8ac5"
+source = { git = "ssh://git@github.com/neuro-galaxy/brainsets?branch=main#073ac8ac5d9499decce2579ff9fa992eae82ba17" }
 dependencies = [
     { name = "click" },
     { name = "jsonschema" },
@@ -617,8 +617,8 @@ dependencies = [
     { name = "ipykernel" },
     { name = "lightning" },
     { name = "matplotlib" },
-    { name = "pytorch-brain" },
     { name = "torch" },
+    { name = "torch-brain" },
     { name = "torchmetrics" },
     { name = "wandb" },
 ]
@@ -632,13 +632,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "brainsets", git = "ssh://git@github.com/neuro-galaxy/brainsets?branch=vinam%2Fdatasets" },
+    { name = "brainsets", git = "ssh://git@github.com/neuro-galaxy/brainsets?branch=main" },
     { name = "hydra-core", specifier = ">=1.3.0" },
     { name = "ipykernel", specifier = ">=7.1.0" },
     { name = "lightning", specifier = ">=2.0.0" },
     { name = "matplotlib", specifier = ">=3.10.8" },
-    { name = "pytorch-brain", git = "ssh://git@github.com/neuro-galaxy/torch_brain?branch=vinam%2Fdataset_overhaul" },
     { name = "torch", specifier = ">=2.9.1" },
+    { name = "torch-brain", git = "ssh://git@github.com/neuro-galaxy/torch_brain?branch=main" },
     { name = "torchmetrics", specifier = ">=1.8.2" },
     { name = "wandb", specifier = ">=0.24.0" },
 ]
@@ -2360,22 +2360,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pytorch-brain"
-version = "0.1.0"
-source = { git = "ssh://git@github.com/neuro-galaxy/torch_brain?branch=vinam%2Fdataset_overhaul#954a0aa1d98052f0c6ccd32ce1af81e8c0238bfb" }
-dependencies = [
-    { name = "einops" },
-    { name = "hydra-core" },
-    { name = "numpy" },
-    { name = "pydantic" },
-    { name = "rich" },
-    { name = "temporaldata" },
-    { name = "torch" },
-    { name = "torchmetrics" },
-    { name = "torchtyping" },
-]
-
-[[package]]
 name = "pytorch-lightning"
 version = "2.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3004,6 +2988,22 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/86/5c/5b2e5d84f5b9850cd1e71af07524d8cbb74cba19379800f1f9f7c997fc70/torch-2.9.1-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:0a2bd769944991c74acf0c4ef23603b9c777fdf7637f115605a4b2d8023110c7", size = 104145788, upload-time = "2025-11-12T15:23:52.109Z" },
     { url = "https://files.pythonhosted.org/packages/a9/8c/3da60787bcf70add986c4ad485993026ac0ca74f2fc21410bc4eb1bb7695/torch-2.9.1-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:07c8a9660bc9414c39cac530ac83b1fb1b679d7155824144a40a54f4a47bfa73", size = 899735500, upload-time = "2025-11-12T15:24:08.788Z" },
     { url = "https://files.pythonhosted.org/packages/db/2b/f7818f6ec88758dfd21da46b6cd46af9d1b3433e53ddbb19ad1e0da17f9b/torch-2.9.1-cp314-cp314t-win_amd64.whl", hash = "sha256:c88d3299ddeb2b35dcc31753305612db485ab6f1823e37fb29451c8b2732b87e", size = 111163659, upload-time = "2025-11-12T15:23:20.009Z" },
+]
+
+[[package]]
+name = "torch-brain"
+version = "0.1.0"
+source = { git = "ssh://git@github.com/neuro-galaxy/torch_brain?branch=main#0e2a69c32fb2d92d96b3f7bf55464e471c5a8e90" }
+dependencies = [
+    { name = "einops" },
+    { name = "hydra-core" },
+    { name = "numpy" },
+    { name = "pydantic" },
+    { name = "rich" },
+    { name = "temporaldata" },
+    { name = "torch" },
+    { name = "torchmetrics" },
+    { name = "torchtyping" },
 ]
 
 [[package]]

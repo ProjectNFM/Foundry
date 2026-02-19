@@ -24,7 +24,7 @@ class RescaleSignal:
 
         Returns:
             A new Data object with rescaled time series fields.
-        
+
         Raises:
             ValueError: If the specified field does not exist or is None.
         """
