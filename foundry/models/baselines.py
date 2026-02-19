@@ -158,7 +158,7 @@ class SeparableConv2d(nn.Module):
         self.depthwise = nn.Conv2d(
             in_channels, 
             in_channels, 
-            kernel_size=kernel_size,
+            kernel_size=kernel_size, # CHECK: kernel_size
             padding="same", # CHECK: padding=(0, kernel_size // 2)
             groups=in_channels, 
             bias=bias,
@@ -246,12 +246,13 @@ class EEGNetEncoder(nn.Module):
                 kernel_size=(num_channels, 1),
                 groups=F1,
                 bias=False,
+                # CHECK: max_norm=0.25
             ),
-            nn.BatchNorm2d(F1 * D),
+            nn.BatchNorm2d(F1 * D), # CHECK: momentum=0.01, eps=1e-3
             nn.ELU(), # ELU performs better than ReLU for EEG signals
             
             # Downsample to reduce dimensionality and aggregate temporal information
-            nn.AvgPool2d(kernel_size=(1, 4)),
+            nn.AvgPool2d(kernel_size=(1, 4)), # CHECK: kernel_size
             nn.Dropout(dropout_rate)
         )
         
@@ -262,9 +263,14 @@ class EEGNetEncoder(nn.Module):
             # Separable Convolution
             # Intuition: Efficiently summarizes temporal patterns within each feature map 
             # before mixing them to form final high-level representations.
-            SeparableConv2d(F1 * D, F2, kernel_size=(1, 16), bias=False),
-            nn.BatchNorm2d(F2),
-            nn.ELU(),
+            SeparableConv2d(
+                F1 * D, 
+                F2, 
+                kernel_size=(1, 16), 
+                bias=False,
+            ),
+            nn.BatchNorm2d(F2), # CHECK: momentum=0.01, eps=1e-3
+            nn.ELU(), # CHECK: Is there ELU?
             nn.AvgPool2d(kernel_size=(1, 8)),
             nn.Dropout(dropout_rate)
         )
@@ -273,6 +279,7 @@ class EEGNetEncoder(nn.Module):
         # Classifier Head
         # ----------------------------------------------------------------------
         out_dim = self._calculate_out_dim(num_channels, num_samples)
+        print(out_dim == F2, out_dim, F2)
         
         self.classifier = nn.Sequential(
             nn.Flatten(),
