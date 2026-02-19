@@ -156,12 +156,19 @@ class SeparableConv2d(nn.Module):
         super().__init__()
         # Depthwise: Learns temporal summary features individually per spatial filter map
         self.depthwise = nn.Conv2d(
-            in_channels, in_channels, kernel_size=kernel_size,
-            groups=in_channels, padding="same", bias=bias
+            in_channels, 
+            in_channels, 
+            kernel_size=kernel_size,
+            padding="same", # CHECK: padding=(0, kernel_size // 2)
+            groups=in_channels, 
+            bias=bias,
         )
         # Pointwise: Optimally mixes the summary features across channels
         self.pointwise = nn.Conv2d(
-            in_channels, out_channels, kernel_size=(1, 1), bias=bias
+            in_channels, 
+            out_channels, 
+            kernel_size=(1, 1), 
+            bias=bias,
         )
 
     def forward(self, x):
@@ -221,13 +228,25 @@ class EEGNetEncoder(nn.Module):
         self.block1 = nn.Sequential(
             # 1. Temporal Convolution
             # Intuition: Learns frequency-specific bandpass filters (e.g., Alpha, Beta bands)
-            nn.Conv2d(1, F1, kernel_size=(1, kernel_length), padding="same", bias=False),
-            nn.BatchNorm2d(F1),
+            nn.Conv2d(
+                1,
+                F1,
+                kernel_size=(1, kernel_length),
+                padding="same", # CHECK: padding=(0, kernel_length // 2)
+                bias=False,
+            ),
+            nn.BatchNorm2d(F1), # CHECK: momentum=0.01, eps=1e-3
             
             # 2. Depthwise Spatial Convolution
             # Intuition: Acts as a data-driven spatial filter (similar to CSP).
             # Using groups=F1 ensures each temporal bandpass filter gets 'D' dedicated spatial filters.
-            nn.Conv2d(F1, F1 * D, kernel_size=(num_channels, 1), groups=F1, bias=False),
+            nn.Conv2d(
+                F1,
+                F1 * D,
+                kernel_size=(num_channels, 1),
+                groups=F1,
+                bias=False,
+            ),
             nn.BatchNorm2d(F1 * D),
             nn.ELU(), # ELU performs better than ReLU for EEG signals
             
