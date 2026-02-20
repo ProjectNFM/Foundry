@@ -33,9 +33,7 @@ class EEGDatasetMixin:
 
     def get_channel_ids(self) -> list[str]:
         """Return a sorted list of all channel IDs across all recordings in the dataset."""
-        ans = [
-            self.get_recording(rid).channels.id for rid in self.recording_ids
-        ]
+        ans = [self.get_recording(rid).channels.id for rid in self.recording_ids]
         return np.sort(np.concatenate(ans)).tolist()
 
     def get_recording_ids(self) -> list[str]:
@@ -65,17 +63,13 @@ class ModalityMixin:
         """Get a single modality spec by name."""
         if name not in cls.MODALITIES:
             available = cls.get_modality_names()
-            raise ValueError(
-                f"Unknown modality '{name}'. Available: {available}"
-            )
+            raise ValueError(f"Unknown modality '{name}'. Available: {available}")
         from torch_brain.registry import MODALITY_REGISTRY
 
         return MODALITY_REGISTRY[name]
 
     @classmethod
-    def get_modalities(
-        cls, names: list[str] | None = None
-    ) -> list["ModalitySpec"]:
+    def get_modalities(cls, names: list[str] | None = None) -> list["ModalitySpec"]:
         """Get modality specs as list. If names is None, returns all available."""
         if names is None:
             names = list(cls.MODALITIES.keys())

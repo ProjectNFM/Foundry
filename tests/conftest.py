@@ -21,9 +21,7 @@ def batch_size():
     return 2
 
 
-def skip_if_missing_dataset(
-    dataset_name: str, data_root: Path
-) -> pytest.MarkDecorator:
+def skip_if_missing_dataset(dataset_name: str, data_root: Path) -> pytest.MarkDecorator:
     """
     Create a pytest skip marker if the dataset folder doesn't exist.
 

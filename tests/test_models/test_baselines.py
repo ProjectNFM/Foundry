@@ -19,47 +19,47 @@ from foundry.models import (
 from foundry.data.transforms import Patching
 
 
-def compute_multitask_loss(model, outputs, target_values, target_weights, output_decoder_index):
+def compute_multitask_loss(
+    model, outputs, target_values, target_weights, output_decoder_index
+):
     """Compute multitask loss for baseline models.
-    
+
     Simplified version of the logic from foundry/training/task.py.
-    
+
     Args:
         model: The baseline model with readout_specs
         outputs: Dict of model outputs per task
         target_values: Dict of target values per task
         target_weights: Dict of target weights per task
         output_decoder_index: Tensor indicating which task each output belongs to
-        
+
     Returns:
         Scalar loss tensor
     """
     loss_total = torch.tensor(0.0, dtype=torch.float32)
     total_sequences = 0
-    
+
     for readout_id, task_output in outputs.items():
         if readout_id not in target_values:
             continue
-        
+
         target = target_values[readout_id]
         if target.numel() == 0:
             continue
-        
+
         spec = model.readout_specs[readout_id]
         weights = target_weights.get(readout_id, 1.0)
-        
+
         task_loss = spec.loss_fn(task_output, target, weights)
-        
-        num_sequences = torch.any(
-            output_decoder_index == spec.id, dim=1
-        ).sum()
-        
+
+        num_sequences = torch.any(output_decoder_index == spec.id, dim=1).sum()
+
         loss_total = loss_total + task_loss * num_sequences
         total_sequences += num_sequences
-    
+
     if total_sequences > 0:
         loss_total = loss_total / total_sequences
-    
+
     return loss_total
 
 
@@ -90,9 +90,7 @@ def readout_specs():
     return {"test_baseline_task": MODALITY_REGISTRY["test_baseline_task"]}
 
 
-def create_baseline_data_sample(
-    num_channels=4, num_samples=200, session_id="session1"
-):
+def create_baseline_data_sample(num_channels=4, num_samples=200, session_id="session1"):
     """Create a mock baseline data sample with raw EEG signal.
 
     Args:
@@ -217,9 +215,7 @@ class TestBaselineTokenize:
         """Test that tokenize respects multitask_readout config."""
         data = create_baseline_data_sample()
 
-        data.config["multitask_readout"] = [
-            {"readout_id": "test_baseline_task"}
-        ]
+        data.config["multitask_readout"] = [{"readout_id": "test_baseline_task"}]
 
         tokens = simple_model.tokenize(data)
 
@@ -249,9 +245,7 @@ class TestBaselineTokenize:
             values = np.array([0])
 
         data.test_baseline_task = TestTask()
-        data.config = {
-            "multitask_readout": [{"readout_id": "test_baseline_task"}]
-        }
+        data.config = {"multitask_readout": [{"readout_id": "test_baseline_task"}]}
 
         tokens = simple_model.tokenize(data)
 
@@ -528,13 +522,13 @@ class TestEEGNetEncoder:
         assert has_gradients
 
     def test_forward_backward_batched(self, eegnet_model):
-        """Test forward + backward with batched samples."""        
+        """Test forward + backward with batched samples."""
         data1 = create_baseline_data_sample(num_channels=4, num_samples=512)
         data2 = create_baseline_data_sample(num_channels=4, num_samples=512)
-        
+
         tokens1 = eegnet_model.tokenize(data1)
         tokens2 = eegnet_model.tokenize(data2)
-        
+
         batch = collate([tokens1, tokens2])
 
         x = batch["x"]

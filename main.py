@@ -17,9 +17,7 @@ def setup_logging(log_level: str):
         level=log_level,
         format="%(message)s",
         datefmt="[%X]",
-        handlers=[
-            RichHandler(rich_tracebacks=True, markup=True, show_path=False)
-        ],
+        handlers=[RichHandler(rich_tracebacks=True, markup=True, show_path=False)],
         force=True,
     )
 
@@ -47,9 +45,7 @@ def main(cfg: DictConfig):
 
     # Instantiate trainer and add VocabInitializer callback if not already present
     trainer = instantiate(cfg.trainer)
-    if not any(
-        isinstance(cb, VocabInitializerCallback) for cb in trainer.callbacks
-    ):
+    if not any(isinstance(cb, VocabInitializerCallback) for cb in trainer.callbacks):
         trainer.callbacks.append(VocabInitializerCallback())
 
     trainer.fit(task, datamodule)

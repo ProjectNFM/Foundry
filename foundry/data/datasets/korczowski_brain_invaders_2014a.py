@@ -71,10 +71,7 @@ class KorczowskiBrainInvaders2014a(ModalityMixin, EEGDatasetMixin, Dataset):
             Dictionary mapping recording IDs to their sampling intervals.
         """
         if self.fold_number is None:
-            return {
-                rid: self.get_recording(rid).domain
-                for rid in self.recording_ids
-            }
+            return {rid: self.get_recording(rid).domain for rid in self.recording_ids}
 
         if self.fold_type == "intra-subject":
             key = f"splits.fold_{self.fold_number}.{split}"

@@ -53,8 +53,6 @@ class LinearEmbedding(nn.Module):
         projection = self.get_projection(patch_samples)
 
         flattened = input_values.view(batch_size * num_tokens, patch_samples)
-        embeddings = projection(flattened).view(
-            batch_size, num_tokens, self.embed_dim
-        )
+        embeddings = projection(flattened).view(batch_size, num_tokens, self.embed_dim)
 
         return embeddings

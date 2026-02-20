@@ -1,7 +1,8 @@
 from torch_brain.registry import ModalitySpec, MODALITY_REGISTRY
 
+
 def resolve_readout_specs(
-    readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec]
+    readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
 ) -> dict[str, ModalitySpec]:
     """Resolve string modality names to ModalitySpec objects.
 

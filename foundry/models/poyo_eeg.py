@@ -18,6 +18,7 @@ from torch_brain.utils import create_linspace_latent_tokens
 from foundry.models.backbones import PerceiverIOBackbone
 from foundry.models.utils import resolve_readout_specs
 
+
 class POYOEEGModel(nn.Module):
     """
     POYO-style EEG model with built-in Perceiver architecture.
@@ -125,9 +126,7 @@ class POYOEEGModel(nn.Module):
         )
 
         if self.context_mode == "concat":
-            self.context_projection = nn.Linear(
-                3 * self.embed_dim, self.embed_dim
-            )
+            self.context_projection = nn.Linear(3 * self.embed_dim, self.embed_dim)
             nn.init.xavier_uniform_(self.context_projection.weight, gain=1.0)
             nn.init.zeros_(self.context_projection.bias)
 
@@ -229,13 +228,9 @@ class POYOEEGModel(nn.Module):
                 {"readout_id": spec_id} for spec_id in self.readout_specs.keys()
             ]
         else:
-            available = [
-                cfg["readout_id"] for cfg in data.config["multitask_readout"]
-            ]
+            available = [cfg["readout_id"] for cfg in data.config["multitask_readout"]]
             data.config["multitask_readout"] = [
-                {"readout_id": name}
-                for name in available
-                if name in self.readout_specs
+                {"readout_id": name} for name in available if name in self.readout_specs
             ]
 
         start, end = 0, self.sequence_length
@@ -294,17 +289,13 @@ class POYOEEGModel(nn.Module):
         # HACK: We put the timestamps to zero here because for classification tasks we do not want to use them.
         output_timestamps = torch.zeros_like(output_timestamps)
 
-        output_session_index = np.repeat(
-            input_session_index, len(output_timestamps)
-        )
+        output_session_index = np.repeat(input_session_index, len(output_timestamps))
 
         input_mask = torch.ones(num_channels * num_patches, dtype=torch.bool)
 
         tokenized_data = {
             "input_values": pad2d(torch.from_numpy(flattened_patches).float()),
-            "input_timestamps": pad8(
-                torch.from_numpy(timestamps_expanded).float()
-            ),
+            "input_timestamps": pad8(torch.from_numpy(timestamps_expanded).float()),
             "input_channel_index": pad8(channel_index_expanded),
             "input_session_index": input_session_index,
             "input_mask": pad8(input_mask),

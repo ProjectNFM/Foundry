@@ -21,6 +21,7 @@ class BaselineEEGModel(nn.Module):
     """
     Base class for all baseline EEG models.
     """
+
     def __init__(
         self,
         num_channels: int,
@@ -54,7 +55,7 @@ class BaselineEEGModel(nn.Module):
             if x.shape[-1] == self.num_channels:
                 x = x.transpose(1, 2)
         return x
-    
+
     def _check_input_shape_conv2d(self, x: torch.Tensor) -> torch.Tensor:
         """
         Ensures input tensor has correct shape for Conv2d layer: (B, 1, C, T).
@@ -106,13 +107,9 @@ class BaselineEEGModel(nn.Module):
                 {"readout_id": spec_id} for spec_id in self.readout_specs.keys()
             ]
         else:
-            available = [
-                cfg["readout_id"] for cfg in data.config["multitask_readout"]
-            ]
+            available = [cfg["readout_id"] for cfg in data.config["multitask_readout"]]
             data.config["multitask_readout"] = [
-                {"readout_id": name}
-                for name in available
-                if name in self.readout_specs
+                {"readout_id": name} for name in available if name in self.readout_specs
             ]
 
         if not hasattr(data, "eeg") or data.eeg is None:
@@ -207,11 +204,11 @@ class SimpleEEGClassifier(BaselineEEGModel):
         x = self.act(x)
         x = self.pool(x)
         x = x.view(x.size(0), -1)
-        
+
         batch_size = x.shape[0]
         n_out = output_decoder_index.shape[1]
         x = x.unsqueeze(1).expand(batch_size, n_out, -1)
-        
+
         return self.readout(
             output_embs=x,
             output_readout_index=output_decoder_index,
@@ -290,11 +287,11 @@ class ShallowConvNet(BaselineEEGModel):
         x = self.pool(x)
         x = self.dropout(x)
         x = self.flatten(x)
-        
+
         batch_size = x.shape[0]
         n_out = output_decoder_index.shape[1]
         x = x.unsqueeze(1).expand(batch_size, n_out, -1)
-        
+
         return self.readout(
             output_embs=x,
             output_readout_index=output_decoder_index,
@@ -304,9 +301,9 @@ class ShallowConvNet(BaselineEEGModel):
 
 class SeparableConv2d(nn.Module):
     """
-    Depthwise Separable 2D Convolution layer as used in EEGNet. 
-    This is used to decouple the learning of temporal dynamics 
-    from the optimal mixing of feature maps, significantly reducing 
+    Depthwise Separable 2D Convolution layer as used in EEGNet.
+    This is used to decouple the learning of temporal dynamics
+    from the optimal mixing of feature maps, significantly reducing
     the number of parameters compared to a standard 2D convolution.
 
     This layer applies a depthwise (per feature map) 2D convolution,
@@ -319,6 +316,7 @@ class SeparableConv2d(nn.Module):
         kernel_size (tuple): Depthwise convolution kernel size.
         bias (bool, optional): Whether to add bias to conv layers. Default: False.
     """
+
     def __init__(
         self,
         in_channels,
@@ -329,18 +327,18 @@ class SeparableConv2d(nn.Module):
         super().__init__()
         # Depthwise: Learns temporal summary features individually per spatial filter map
         self.depthwise = nn.Conv2d(
-            in_channels, 
-            in_channels, 
-            kernel_size=kernel_size, # CHECK: kernel_size
-            padding="same", # CHECK: padding=(0, kernel_size // 2)
-            groups=in_channels, 
+            in_channels,
+            in_channels,
+            kernel_size=kernel_size,  # CHECK: kernel_size
+            padding="same",  # CHECK: padding=(0, kernel_size // 2)
+            groups=in_channels,
             bias=bias,
         )
         # Pointwise: Optimally mixes the summary features across channels
         self.pointwise = nn.Conv2d(
-            in_channels, 
-            out_channels, 
-            kernel_size=(1, 1), 
+            in_channels,
+            out_channels,
+            kernel_size=(1, 1),
             bias=bias,
         )
 
@@ -380,6 +378,7 @@ class EEGNetEncoder(BaselineEEGModel):
         kernel_length (int, optional): Temporal filter kernel length. Default: 64.
         dropout_rate (float, optional): Dropout probability. Default: 0.5.
     """
+
     def __init__(
         self,
         readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
@@ -392,7 +391,7 @@ class EEGNetEncoder(BaselineEEGModel):
         dropout_rate: float = 0.5,
     ):
         super().__init__(num_channels, readout_specs)
-        
+
         # ----------------------------------------------------------------------
         # Block 1: Bandpass & Spatial Filtering
         # ----------------------------------------------------------------------
@@ -403,11 +402,10 @@ class EEGNetEncoder(BaselineEEGModel):
                 1,
                 F1,
                 kernel_size=(1, kernel_length),
-                padding="same", # CHECK: padding=(0, kernel_length // 2)
+                padding="same",  # CHECK: padding=(0, kernel_length // 2)
                 bias=False,
             ),
-            nn.BatchNorm2d(F1), # CHECK: momentum=0.01, eps=1e-3
-            
+            nn.BatchNorm2d(F1),  # CHECK: momentum=0.01, eps=1e-3
             # 2. Depthwise Spatial Convolution
             # Intuition: Acts as a data-driven spatial filter (similar to CSP).
             # Using groups=F1 ensures each temporal bandpass filter gets 'D' dedicated spatial filters.
@@ -419,37 +417,38 @@ class EEGNetEncoder(BaselineEEGModel):
                 bias=False,
                 # CHECK: max_norm=0.25
             ),
-            nn.BatchNorm2d(F1 * D), # CHECK: momentum=0.01, eps=1e-3
-            nn.ELU(), # ELU performs better than ReLU for EEG signals
-            
+            nn.BatchNorm2d(F1 * D),  # CHECK: momentum=0.01, eps=1e-3
+            nn.ELU(),  # ELU performs better than ReLU for EEG signals
             # Downsample to reduce dimensionality and aggregate temporal information
-            nn.AvgPool2d(kernel_size=(1, 4)), # CHECK: kernel_size
-            nn.Dropout(dropout_rate)
+            nn.AvgPool2d(kernel_size=(1, 4)),  # CHECK: kernel_size
+            nn.Dropout(dropout_rate),
         )
-        
+
         # ----------------------------------------------------------------------
         # Block 2: Feature Mixing & Downsampling
         # ----------------------------------------------------------------------
         self.block2 = nn.Sequential(
             # Separable Convolution
-            # Intuition: Efficiently summarizes temporal patterns within each feature map 
+            # Intuition: Efficiently summarizes temporal patterns within each feature map
             # before mixing them to form final high-level representations.
             SeparableConv2d(
-                F1 * D, 
-                F2, 
-                kernel_size=(1, 16), 
+                F1 * D,
+                F2,
+                kernel_size=(1, 16),
                 bias=False,
             ),
-            nn.BatchNorm2d(F2), # CHECK: momentum=0.01, eps=1e-3
-            nn.ELU(), # CHECK: Is there ELU?
+            nn.BatchNorm2d(F2),  # CHECK: momentum=0.01, eps=1e-3
+            nn.ELU(),  # CHECK: Is there ELU?
             nn.AvgPool2d(kernel_size=(1, 8)),
-            nn.Dropout(dropout_rate)
+            nn.Dropout(dropout_rate),
         )
 
         # ----------------------------------------------------------------------
         # Classifier Head
         # ----------------------------------------------------------------------
-        out_dim = self._calculate_out_dim(num_channels, num_samples) # CHECK: out_dim == F2
+        out_dim = self._calculate_out_dim(
+            num_channels, num_samples
+        )  # CHECK: out_dim == F2
 
         # MultitaskReadout replaces the final classifier
         self.readout = MultitaskReadout(
@@ -462,7 +461,7 @@ class EEGNetEncoder(BaselineEEGModel):
 
         Computes the output dimension after passing through block1 and block2 by
         using a dummy input tensor.
-        
+
         Args:
             channels (int): Number of EEG channels (C).
             samples (int): Number of time samples (T).
@@ -474,10 +473,11 @@ class EEGNetEncoder(BaselineEEGModel):
             dummy_input = torch.zeros(1, 1, channels, samples)
             x = self.block1(dummy_input)
             x = self.block2(x)
-            return x.numel() 
+            return x.numel()
 
     def extract_features(
-        self, x: torch.Tensor,
+        self,
+        x: torch.Tensor,
     ) -> torch.Tensor:
         """
         Extracts deep feature representation (before readout head).
@@ -498,7 +498,7 @@ class EEGNetEncoder(BaselineEEGModel):
 
     def forward(
         self,
-        x: torch.Tensor, 
+        x: torch.Tensor,
         output_decoder_index: torch.Tensor,
     ) -> Dict[str, torch.Tensor]:
         """
@@ -512,12 +512,12 @@ class EEGNetEncoder(BaselineEEGModel):
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
         """
         x = self.extract_features(x)
-        
+
         batch_size = x.shape[0]
         n_out = output_decoder_index.shape[1]
         x = x.view(batch_size, -1)
         x = x.unsqueeze(1).expand(batch_size, n_out, -1)
-        
+
         return self.readout(
             output_embs=x,
             output_readout_index=output_decoder_index,
