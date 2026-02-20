@@ -89,7 +89,9 @@ def readout_specs():
     return {"test_baseline_task": MODALITY_REGISTRY["test_baseline_task"]}
 
 
-def create_baseline_data_sample(num_channels=4, num_samples=200, session_id="session1"):
+def create_baseline_data_sample(
+    num_channels=4, num_samples=200, session_id="session1"
+):
     """Create a mock baseline data sample with raw EEG signal.
 
     Args:
@@ -214,7 +216,9 @@ class TestBaselineTokenize:
         """Test that tokenize respects multitask_readout config."""
         data = create_baseline_data_sample()
 
-        data.config["multitask_readout"] = [{"readout_id": "test_baseline_task"}]
+        data.config["multitask_readout"] = [
+            {"readout_id": "test_baseline_task"}
+        ]
 
         tokens = simple_model.tokenize(data)
 
@@ -244,7 +248,9 @@ class TestBaselineTokenize:
             values = np.array([0])
 
         data.test_baseline_task = TestTask()
-        data.config = {"multitask_readout": [{"readout_id": "test_baseline_task"}]}
+        data.config = {
+            "multitask_readout": [{"readout_id": "test_baseline_task"}]
+        }
 
         tokens = simple_model.tokenize(data)
 
@@ -295,7 +301,11 @@ class TestSimpleEEGClassifier:
         assert "test_baseline_task" in outputs
 
         loss = compute_multitask_loss(
-            simple_model, outputs, target_values, target_weights, output_decoder_index
+            simple_model,
+            outputs,
+            target_values,
+            target_weights,
+            output_decoder_index,
         )
 
         assert loss.requires_grad
@@ -328,7 +338,11 @@ class TestSimpleEEGClassifier:
         )
 
         loss = compute_multitask_loss(
-            simple_model, outputs, target_values, target_weights, output_decoder_index
+            simple_model,
+            outputs,
+            target_values,
+            target_weights,
+            output_decoder_index,
         )
 
         assert loss.requires_grad
@@ -399,7 +413,11 @@ class TestShallowConvNet:
         assert "test_baseline_task" in outputs
 
         loss = compute_multitask_loss(
-            shallow_model, outputs, target_values, target_weights, output_decoder_index
+            shallow_model,
+            outputs,
+            target_values,
+            target_weights,
+            output_decoder_index,
         )
 
         assert loss.requires_grad
@@ -432,7 +450,11 @@ class TestShallowConvNet:
         )
 
         loss = compute_multitask_loss(
-            shallow_model, outputs, target_values, target_weights, output_decoder_index
+            shallow_model,
+            outputs,
+            target_values,
+            target_weights,
+            output_decoder_index,
         )
 
         assert loss.requires_grad
@@ -507,7 +529,11 @@ class TestEEGNetEncoder:
         assert "test_baseline_task" in outputs
 
         loss = compute_multitask_loss(
-            eegnet_model, outputs, target_values, target_weights, output_decoder_index
+            eegnet_model,
+            outputs,
+            target_values,
+            target_weights,
+            output_decoder_index,
         )
 
         assert loss.requires_grad
@@ -541,7 +567,11 @@ class TestEEGNetEncoder:
         )
 
         loss = compute_multitask_loss(
-            eegnet_model, outputs, target_values, target_weights, output_decoder_index
+            eegnet_model,
+            outputs,
+            target_values,
+            target_weights,
+            output_decoder_index,
         )
 
         assert loss.requires_grad

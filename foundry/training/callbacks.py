@@ -17,7 +17,9 @@ class VocabInitializerCallback(L.Callback):
         trainer = Trainer(callbacks=[VocabInitializerCallback()])
     """
 
-    def on_fit_start(self, trainer: Trainer, pl_module: L.LightningModule) -> None:
+    def on_fit_start(
+        self, trainer: Trainer, pl_module: L.LightningModule
+    ) -> None:
         """Initialize vocabularies at the start of training.
 
         Args:

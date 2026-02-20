@@ -164,7 +164,9 @@ class TestContextModes:
         """Test that invalid context mode raises error."""
         input_embedding = LinearEmbedding(embed_dim=embed_dim)
 
-        with pytest.raises(ValueError, match="context_mode must be 'add' or 'concat'"):
+        with pytest.raises(
+            ValueError, match="context_mode must be 'add' or 'concat'"
+        ):
             POYOEEGModel(
                 input_embedding=input_embedding,
                 readout_specs=readout_specs,
@@ -176,8 +178,12 @@ class TestContextModes:
     def test_both_modes_produce_output(self, readout_specs, embed_dim):
         """Test that both modes produce outputs of the same shape."""
         patching = Patching(patch_duration=0.5, stride=0.5)
-        data1 = create_data_sample(num_channels=4, sampling_rate=100.0, session_id="s1")
-        data2 = create_data_sample(num_channels=4, sampling_rate=100.0, session_id="s2")
+        data1 = create_data_sample(
+            num_channels=4, sampling_rate=100.0, session_id="s1"
+        )
+        data2 = create_data_sample(
+            num_channels=4, sampling_rate=100.0, session_id="s2"
+        )
         patched1 = patching(data1)
         patched2 = patching(data2)
 
@@ -210,7 +216,9 @@ class TestContextModes:
             assert "test_context_task" in output
             assert output["test_context_task"].shape[0] == 2
 
-    def test_concat_mode_with_heterogeneous_data(self, readout_specs, embed_dim):
+    def test_concat_mode_with_heterogeneous_data(
+        self, readout_specs, embed_dim
+    ):
         """Test concat mode works with heterogeneous channel counts."""
         input_embedding = LinearEmbedding(embed_dim=embed_dim)
         model = POYOEEGModel(
@@ -222,8 +230,12 @@ class TestContextModes:
         )
 
         patching = Patching(patch_duration=0.5, stride=0.5)
-        data1 = create_data_sample(num_channels=4, sampling_rate=100.0, session_id="s1")
-        data2 = create_data_sample(num_channels=8, sampling_rate=100.0, session_id="s2")
+        data1 = create_data_sample(
+            num_channels=4, sampling_rate=100.0, session_id="s1"
+        )
+        data2 = create_data_sample(
+            num_channels=8, sampling_rate=100.0, session_id="s2"
+        )
 
         patched1 = patching(data1)
         patched2 = patching(data2)

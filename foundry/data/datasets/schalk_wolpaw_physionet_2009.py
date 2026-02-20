@@ -96,7 +96,10 @@ class SchalkWolpawPhysionet2009(ModalityMixin, EEGDatasetMixin, Dataset):
             Dictionary mapping recording IDs to their sampling intervals.
         """
         if self.task_type is None or self.fold_number is None:
-            return {rid: self.get_recording(rid).domain for rid in self.recording_ids}
+            return {
+                rid: self.get_recording(rid).domain
+                for rid in self.recording_ids
+            }
 
         if split not in ["train", "valid", "test"]:
             raise ValueError(

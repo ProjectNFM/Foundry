@@ -35,7 +35,10 @@ class KempSleepEDF2013(ModalityMixin, EEGDatasetMixin, Dataset):
         split: Optional[Literal["train", "valid", "test"]] = None,
     ):
         if self.fold_number is None:
-            return {rid: self.get_recording(rid).domain for rid in self.recording_ids}
+            return {
+                rid: self.get_recording(rid).domain
+                for rid in self.recording_ids
+            }
 
         if self.fold_number not in [0, 1, 2, 3, 4]:
             raise ValueError(

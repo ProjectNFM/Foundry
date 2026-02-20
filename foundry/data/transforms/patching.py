@@ -71,7 +71,9 @@ class Patching:
                 - S: samples per patch (patch_duration * sampling_rate)
         """
         if data.domain is None:
-            raise ValueError("Data object must have a domain to apply patching.")
+            raise ValueError(
+                "Data object must have a domain to apply patching."
+            )
 
         out = Data()
 
@@ -166,10 +168,13 @@ class Patching:
             num_patches = 1
         else:
             num_patches = (
-                int(np.ceil((time_samples - patch_samples) / stride_samples)) + 1
+                int(np.ceil((time_samples - patch_samples) / stride_samples))
+                + 1
             )
 
-        total_samples_needed = (num_patches - 1) * stride_samples + patch_samples
+        total_samples_needed = (
+            num_patches - 1
+        ) * stride_samples + patch_samples
 
         # indices shape: (P, S) - each row contains sample indices for one patch
         indices = (
@@ -181,9 +186,9 @@ class Patching:
         for key, attr_data in array_attrs.items():
             # attr_data shape: (T, C, ...)
             if time_samples < total_samples_needed:
-                pad_width = [(0, total_samples_needed - time_samples)] + [(0, 0)] * (
-                    attr_data.ndim - 1
-                )
+                pad_width = [(0, total_samples_needed - time_samples)] + [
+                    (0, 0)
+                ] * (attr_data.ndim - 1)
                 padded_data = np.pad(
                     attr_data, pad_width, mode="constant", constant_values=0
                 )
@@ -222,7 +227,9 @@ class Patching:
 
         return patched_ts
 
-    def _is_regularly_spaced(self, ts: IrregularTimeSeries, tolerance=1e-6) -> bool:
+    def _is_regularly_spaced(
+        self, ts: IrregularTimeSeries, tolerance=1e-6
+    ) -> bool:
         """Check if timestamps are regularly spaced.
 
         Args:

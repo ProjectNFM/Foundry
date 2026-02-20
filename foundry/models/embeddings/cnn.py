@@ -89,6 +89,8 @@ class CNNEmbedding(nn.Module):
 
         reshaped = input_values.view(batch_size * num_tokens, 1, patch_samples)
 
-        embeddings = projection(reshaped).view(batch_size, num_tokens, self.embed_dim)
+        embeddings = projection(reshaped).view(
+            batch_size, num_tokens, self.embed_dim
+        )
 
         return embeddings

@@ -29,12 +29,16 @@ def _create_task_metrics(num_classes: int, prefix: str) -> MetricCollection:
     return MetricCollection(
         {
             "acc": Accuracy(task=task_type, num_classes=num_classes),
-            "f1": F1Score(task=task_type, num_classes=num_classes, average="macro"),
+            "f1": F1Score(
+                task=task_type, num_classes=num_classes, average="macro"
+            ),
             "auroc": AUROC(task=task_type, num_classes=num_classes),
             "precision": Precision(
                 task=task_type, num_classes=num_classes, average="macro"
             ),
-            "recall": Recall(task=task_type, num_classes=num_classes, average="macro"),
+            "recall": Recall(
+                task=task_type, num_classes=num_classes, average="macro"
+            ),
         },
         prefix=prefix,
     )
@@ -88,7 +92,9 @@ class EEGTask(L.LightningModule):
         """Forward pass through the model."""
         return self.model(**kwargs)
 
-    def training_step(self, batch: Dict[str, Any], batch_idx: int) -> torch.Tensor:
+    def training_step(
+        self, batch: Dict[str, Any], batch_idx: int
+    ) -> torch.Tensor:
         """
         Training step that computes loss for the batch.
 
@@ -139,7 +145,9 @@ class EEGTask(L.LightningModule):
 
         return total_loss
 
-    def validation_step(self, batch: Dict[str, Any], batch_idx: int) -> torch.Tensor:
+    def validation_step(
+        self, batch: Dict[str, Any], batch_idx: int
+    ) -> torch.Tensor:
         """
         Validation step that computes loss and metrics for the batch.
 
@@ -323,9 +331,13 @@ class EEGTask(L.LightningModule):
             spec = self.model.readout_specs[readout_id]
             weights = target_weights.get(readout_id, 1.0)
 
-            taskwise_loss[readout_id] = spec.loss_fn(task_output, target, weights)
+            taskwise_loss[readout_id] = spec.loss_fn(
+                task_output, target, weights
+            )
 
-            num_sequences = torch.any(output_decoder_index == spec.id, dim=1).sum()
+            num_sequences = torch.any(
+                output_decoder_index == spec.id, dim=1
+            ).sum()
 
             loss_mt = loss_mt + taskwise_loss[readout_id] * num_sequences
             total_sequences += num_sequences

@@ -47,7 +47,9 @@ class TestKempSleepEDF2013:
 class TestSchalkWolpawPhysionet2009:
     @pytest.fixture(autouse=True)
     def _skip_if_missing(self, data_root):
-        skip_marker = skip_if_missing_dataset("schalk_wolpaw_physionet_2009", data_root)
+        skip_marker = skip_if_missing_dataset(
+            "schalk_wolpaw_physionet_2009", data_root
+        )
         if skip_marker.args[0]:
             pytest.skip(skip_marker.kwargs["reason"])
 
@@ -77,7 +79,9 @@ class TestSchalkWolpawPhysionet2009:
 
     def test_task_config_validation(self, data_root):
         with pytest.raises(ValueError, match="Invalid task_type"):
-            SchalkWolpawPhysionet2009(root=str(data_root), task_type="InvalidTask")
+            SchalkWolpawPhysionet2009(
+                root=str(data_root), task_type="InvalidTask"
+            )
 
 
 class TestKorczowskiBrainInvaders2014a:
@@ -115,13 +119,17 @@ class TestKorczowskiBrainInvaders2014a:
 
     def test_fold_type_validation(self, data_root):
         with pytest.raises(ValueError, match="Invalid fold_type"):
-            KorczowskiBrainInvaders2014a(root=str(data_root), fold_type="invalid")
+            KorczowskiBrainInvaders2014a(
+                root=str(data_root), fold_type="invalid"
+            )
 
 
 class TestKlinzingSleepDS0055552024:
     @pytest.fixture(autouse=True)
     def _skip_if_missing(self, data_root):
-        skip_marker = skip_if_missing_dataset("klinzing_sleep_ds005555_2024", data_root)
+        skip_marker = skip_if_missing_dataset(
+            "klinzing_sleep_ds005555_2024", data_root
+        )
         if skip_marker.args[0]:
             pytest.skip(skip_marker.kwargs["reason"])
 
@@ -151,7 +159,9 @@ class TestKlinzingSleepDS0055552024:
 class TestShiraziHbnr1DS0055052024:
     @pytest.fixture(autouse=True)
     def _skip_if_missing(self, data_root):
-        skip_marker = skip_if_missing_dataset("shirazi_hbnr1_ds005505_2024", data_root)
+        skip_marker = skip_if_missing_dataset(
+            "shirazi_hbnr1_ds005505_2024", data_root
+        )
         if skip_marker.args[0]:
             pytest.skip(skip_marker.kwargs["reason"])
 

@@ -107,9 +107,13 @@ class BaselineEEGModel(nn.Module):
                 {"readout_id": spec_id} for spec_id in self.readout_specs.keys()
             ]
         else:
-            available = [cfg["readout_id"] for cfg in data.config["multitask_readout"]]
+            available = [
+                cfg["readout_id"] for cfg in data.config["multitask_readout"]
+            ]
             data.config["multitask_readout"] = [
-                {"readout_id": name} for name in available if name in self.readout_specs
+                {"readout_id": name}
+                for name in available
+                if name in self.readout_specs
             ]
 
         if not hasattr(data, "eeg") or data.eeg is None:
@@ -173,7 +177,9 @@ class SimpleEEGClassifier(BaselineEEGModel):
         """
         super().__init__(num_channels, readout_specs)
 
-        self.conv = nn.Conv1d(num_channels, num_filters, kernel_size, padding="same")
+        self.conv = nn.Conv1d(
+            num_channels, num_filters, kernel_size, padding="same"
+        )
         self.bn = nn.BatchNorm1d(num_filters)
         self.act = nn.ReLU()
         self.pool = nn.AdaptiveAvgPool1d(1)
@@ -246,7 +252,9 @@ class ShallowConvNet(BaselineEEGModel):
         super().__init__(num_channels, readout_specs)
 
         # Temporal convolution
-        self.conv1 = nn.Conv2d(1, F1, (1, kernel_length), padding="same", bias=False)
+        self.conv1 = nn.Conv2d(
+            1, F1, (1, kernel_length), padding="same", bias=False
+        )
         self.bn1 = nn.BatchNorm2d(F1)
 
         # Spatial convolution

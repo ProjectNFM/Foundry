@@ -230,5 +230,10 @@ class TestCNNEmbedding:
 
         assert output_50.device.type == "cuda"
         assert output_100.device.type == "cuda"
-        assert next(embedding.projections["50"].parameters()).device.type == "cuda"
-        assert next(embedding.projections["100"].parameters()).device.type == "cuda"
+        assert (
+            next(embedding.projections["50"].parameters()).device.type == "cuda"
+        )
+        assert (
+            next(embedding.projections["100"].parameters()).device.type
+            == "cuda"
+        )
