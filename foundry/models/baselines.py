@@ -1,8 +1,8 @@
 """Classic baseline models for EEG classification.
 
-These models serve as reference implementations and benchmarks for comparing
-against the foundation model. They are simpler architectures that work well
-on standard EEG classification tasks.
+These models serve as reference implementations and benchmarks for evaluating the
+performance of the foundation model. The provided architectures are intentionally
+simple and are widely used on standard EEG classification tasks.
 """
 
 import numpy as np
@@ -19,26 +19,84 @@ from foundry.models.utils import resolve_readout_specs
 
 class BaselineModel(nn.Module):
     """
-    Base class for all baseline models.
+    Base class for all baseline EEG models.
     """
-    def __init__(self, readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec]):
+    def __init__(
+        self,
+        num_channels: int,
+        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
+    ):
+        """
+        Args:
+            num_channels (int): Number of EEG channels.
+            readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s) for multitask head.
+        """
         super().__init__()
+        self.num_channels = num_channels
         self._readout_specs = resolve_readout_specs(readout_specs)
 
     @property
     def readout_specs(self) -> dict[str, ModalitySpec]:
         return self._readout_specs
 
-    def tokenize(self, data: Data) -> dict:
-        """Tokenize input data for EEG classification.
+    def _check_input_shape_conv1d(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Ensures input tensor has correct shape for Conv1d layer: (B, C, T).
 
         Args:
-            data: TemporalData object containing the raw EEG signal.
-                  If data.config["multitask_readout"] is set by the dataset, it will be
-                  intersected with the model's readout_specs to use only supported modalities.
+            x (torch.Tensor): Input of shape (B, C, T) or (B, T, C).
 
         Returns:
-            dict with model inputs, target values, target weights, and metadata.
+            torch.Tensor: Input tensor of shape (B, C, T).
+        """
+        if len(x.shape) == 3:
+            # Convert (B, T, C) to (B, C, T) if needed.
+            if x.shape[-1] == self.num_channels:
+                x = x.transpose(1, 2)
+        return x
+    
+    def _check_input_shape_conv2d(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Ensures input tensor has correct shape for Conv2d layer: (B, 1, C, T).
+
+        Args:
+            x (torch.Tensor): Input of shape (B, C, T) or (B, T, C).
+
+        Returns:
+            torch.Tensor: Input tensor of shape (B, 1, C, T).
+        """
+        if len(x.shape) == 3:
+            # Convert (B, T, C) to (B, C, T) if needed.
+            if x.shape[-1] == self.num_channels:
+                x = x.transpose(1, 2)
+            # Add extra channel dimension
+            x = x.unsqueeze(1)
+        return x
+
+    def tokenize(self, data: Data) -> dict[str, torch.Tensor]:
+        """
+        Converts a TemporalData EEG sample to model-ready tensors and multitask readout targets.
+
+        Args:
+            data (temporaldata.Data): Input data structure containing fields such as "eeg", "channels", and "config".
+                If data.config["multitask_readout"] is present, it is intersected with model-supported modalities.
+
+        Returns:
+            dict: {
+                "x" (torch.Tensor): Model input of shape (T, C),
+                "output_decoder_index" (torch.Tensor): Target output decoder indices,
+                "target_values" (dict[str, torch.Tensor] or similar): Multitask target values,
+                "target_weights" (dict[str, torch.Tensor] or similar): Multitask target weights,
+                "session_id" (Any): Session identifier,
+                "absolute_start" (Any): Absolute segment start time,
+                "eval_mask" (dict[str, torch.Tensor] or similar): Mask for which outputs should be evaluated,
+            }
+
+        Note:
+            The tokenized data will retain the same tensor dimensions and layout as present in `data`.
+            Input shape normalization and conversion (e.g., unsqueezing or channel placement for Conv1d/Conv2d)
+            is handled by the forward model methods, not at tokenization time.
+
         """
         if not hasattr(data, "config") or data.config is None:
             data.config = {}
@@ -94,11 +152,12 @@ class BaselineModel(nn.Module):
 
 
 class SimpleEEGClassifier(BaselineModel):
-    """Simple baseline classifier for EEG data.
-    
-    A minimal model useful for testing and debugging, consisting of
-    a single temporal convolution followed by global average pooling
-    and a linear classifier.
+    """
+    A simple baseline classifier for EEG data.
+
+    A minimal model consisting of a single temporal convolution, batch normalization, ReLU,
+    global average pooling, and a multitask linear readout. Particularly useful
+    for quick debugging and as a basic performance reference.
     """
 
     def __init__(
@@ -110,13 +169,12 @@ class SimpleEEGClassifier(BaselineModel):
     ):
         """
         Args:
-            readout_specs: Task-specific readout specifications
-            num_channels: Number of EEG channels
-            num_filters: Number of convolutional filters
-            kernel_size: Temporal kernel size
+            readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s).
+            num_channels (int, optional): Number of EEG channels. Default: 64.
+            num_filters (int, optional): Number of convolutional filters. Default: 32.
+            kernel_size (int, optional): Temporal kernel size for Conv1d. Default: 64.
         """
-        super().__init__(readout_specs)
-        self.num_channels = num_channels
+        super().__init__(num_channels, readout_specs)
 
         self.conv = nn.Conv1d(num_channels, num_filters, kernel_size, padding="same")
         self.bn = nn.BatchNorm1d(num_filters)
@@ -134,16 +192,16 @@ class SimpleEEGClassifier(BaselineModel):
         output_decoder_index: torch.Tensor,
     ) -> Dict[str, torch.Tensor]:
         """
+        Forward pass for the SimpleEEGClassifier.
+
         Args:
-            x: Input tensor of shape (B, C, T) or (B, T, C)
-            output_decoder_index: Task index tensor of shape (B, n_out) for MultitaskReadout
+            x (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
+            output_decoder_index (torch.Tensor): Task index tensor of shape (B, n_out).
 
         Returns:
-            Dictionary of task outputs from MultitaskReadout
+            Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
         """
-        if x.shape[-1] == self.num_channels:
-            x = x.transpose(1, 2)
-
+        x = self._check_input_shape_conv1d(x)
         x = self.conv(x)
         x = self.bn(x)
         x = self.act(x)
@@ -162,9 +220,11 @@ class SimpleEEGClassifier(BaselineModel):
 
 
 class ShallowConvNet(BaselineModel):
-    """ShallowConvNet: A Shallow Deep Learning Architecture for EEG-based Brain-Computer Interfaces.
-    
-    A simpler alternative to DeepConvNet that performs well with limited training data.
+    """
+    ShallowConvNet: A Shallow Deep Learning Architecture for EEG-based BCIs.
+
+    This efficient network is a simpler alternative to DeepConvNet and is recommended
+    for small datasets or when less capacity is appropriate.
     Reference: https://arxiv.org/abs/1703.05051
     """
 
@@ -179,15 +239,14 @@ class ShallowConvNet(BaselineModel):
     ):
         """
         Args:
-            readout_specs: Task-specific readout specifications
-            num_channels: Number of EEG channels
-            num_samples: Number of time samples per trial
-            dropout_rate: Dropout rate
-            kernel_length: Length of temporal convolution kernel
-            F1: Number of spatial filters
+            readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s).
+            num_channels (int, optional): Number of EEG channels. Default: 64.
+            num_samples (int, optional): Number of samples (length of EEG input). Default: 128.
+            dropout_rate (float, optional): Dropout rate after pooling. Default: 0.5.
+            kernel_length (int, optional): Temporal convolution kernel length. Default: 13.
+            F1 (int, optional): Number of spatial/temporal filters. Default: 40.
         """
-        super().__init__(readout_specs)
-        self.num_channels = num_channels
+        super().__init__(num_channels, readout_specs)
 
         # Temporal convolution
         self.conv1 = nn.Conv2d(1, F1, (1, kernel_length), padding="same", bias=False)
@@ -212,19 +271,17 @@ class ShallowConvNet(BaselineModel):
         x: torch.Tensor,
         output_decoder_index: torch.Tensor,
     ) -> Dict[str, torch.Tensor]:
-        """Forward pass for ShallowConvNet.
+        """
+        Forward pass for ShallowConvNet.
 
         Args:
-            x: Input tensor of shape (B, T, C)
-            output_decoder_index: Task index tensor of shape (B, n_out) for MultitaskReadout
+            x (torch.Tensor): EEG input tensor, shape (B, T, C).
+            output_decoder_index (torch.Tensor): Task index tensor (B, n_out).
 
         Returns:
-            Dictionary of task outputs from MultitaskReadout
+            Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
         """
-        if x.ndim == 3:
-            x = x.transpose(1, 2)  # (batch, channels, time)
-            x = x.unsqueeze(1)  # (batch, 1, channels, time)
-
+        x = self._check_input_shape_conv2d(x)
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.conv2(x)
@@ -247,19 +304,28 @@ class ShallowConvNet(BaselineModel):
 
 class SeparableConv2d(nn.Module):
     """
-    Depthwise Separable Convolution.
-    
-    In EEGNet, this is used to decouple the learning of temporal dynamics 
-    from the optimal mixing of feature maps, significantly reducing the 
-    number of parameters compared to a standard 2D convolution.
+    Depthwise Separable 2D Convolution layer as used in EEGNet. 
+    This is used to decouple the learning of temporal dynamics 
+    from the optimal mixing of feature maps, significantly reducing 
+    the number of parameters compared to a standard 2D convolution.
+
+    This layer applies a depthwise (per feature map) 2D convolution,
+    followed by a pointwise (1x1) convolution to mix feature maps,
+    greatly reducing parameter count compared to standard convolutions.
 
     Args:
-        in_channels (int): Number of input channels/feature maps.
-        out_channels (int): Number of output channels/feature maps.
-        kernel_size (tuple): Size of the depthwise convolving kernel.
-        bias (bool, optional): If True, adds a learnable bias to the output. Defaults to False.
+        in_channels (int): Number of input feature maps.
+        out_channels (int): Number of output feature maps.
+        kernel_size (tuple): Depthwise convolution kernel size.
+        bias (bool, optional): Whether to add bias to conv layers. Default: False.
     """
-    def __init__(self, in_channels, out_channels, kernel_size, bias=False):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        bias=False,
+    ):
         super().__init__()
         # Depthwise: Learns temporal summary features individually per spatial filter map
         self.depthwise = nn.Conv2d(
@@ -278,14 +344,18 @@ class SeparableConv2d(nn.Module):
             bias=bias,
         )
 
-    def forward(self, x):
-        """Forward pass for separable convolution.
-        
+    def forward(
+        self,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Forward pass for depthwise separable 2D convolution.
+
         Args:
-            x: Input tensor of shape (B, C, H, W)
-            
+            x (torch.Tensor): Input of shape (B, C, H, W).
+
         Returns:
-            Output tensor after depthwise and pointwise convolutions of shape (B, out_C, H, W)
+            torch.Tensor: Output tensor of shape (B, out_C, H, W).
         """
         x = self.depthwise(x)
         x = self.pointwise(x)
@@ -294,23 +364,21 @@ class SeparableConv2d(nn.Module):
 
 class EEGNetEncoder(BaselineModel):
     """
-    EEGNet: A Compact Convolutional Network for EEG-based Brain-Computer Interfaces.
-    Reference: Lawhern et al., J. Neural Eng. 2018. (https://arxiv.org/abs/1611.08024)
+    EEGNet: Compact Convolutional Neural Network for EEG-based BCIs.
 
-    This architecture is designed to generalize across various BCI paradigms 
-    (P300, ERD/ERS, MRCP) while remaining highly parameter-efficient.
+    Reference: Lawhern et al., J. Neural Eng. 2018 (https://arxiv.org/abs/1611.08024).
+    Designed to generalize across BCI tasks (P300, ERD/ERS, MRCP) while maintaining
+    efficiency and strong performance.
 
     Args:
-        readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): List of modality specs or dict of modality specs.
-        num_channels (int): Number of EEG electrodes/channels. Defaults to 64.
-        num_samples (int): Number of time samples in a single EEG trial/window. Defaults to 128.
-        F1 (int): Number of temporal filters. Acts analogously to bandpass filters. Defaults to 8.
-        D (int): Depth multiplier. Number of spatial filters learned per temporal filter. Defaults to 2.
-        F2 (int): Number of pointwise filters in Block 2. Usually set to F1 * D. Defaults to 16.
-        kernel_length (int): Length of the temporal convolution kernel. 
-            Recommendation: Set to half the sampling rate (e.g., 64 for 128Hz). Defaults to 64.
-        dropout_rate (float): Dropout probability. 
-            Recommendation: 0.25 for within-subject, 0.5 for cross-subject. Defaults to 0.5.
+        readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s).
+        num_channels (int, optional): Number of EEG electrodes/channels. Default: 64.
+        num_samples (int, optional): Number of samples in an EEG trial/window. Default: 128.
+        F1 (int, optional): Temporal filter count ("bandpass" filters). Default: 8.
+        D (int, optional): Depthwise spatial multiplier (# spatial filters per F1). Default: 2.
+        F2 (int, optional): Pointwise filter count. Typically F1*D. Default: 16.
+        kernel_length (int, optional): Temporal filter kernel length. Default: 64.
+        dropout_rate (float, optional): Dropout probability. Default: 0.5.
     """
     def __init__(
         self,
@@ -323,8 +391,7 @@ class EEGNetEncoder(BaselineModel):
         kernel_length: int = 64,
         dropout_rate: float = 0.5,
     ):
-        super().__init__(readout_specs)
-        self.num_channels = num_channels
+        super().__init__(num_channels, readout_specs)
         
         # ----------------------------------------------------------------------
         # Block 1: Bandpass & Spatial Filtering
@@ -397,11 +464,11 @@ class EEGNetEncoder(BaselineModel):
         using a dummy input tensor.
         
         Args:
-            channels: Number of EEG channels (C)
-            samples: Number of time samples (T)
-            
+            channels (int): Number of EEG channels (C).
+            samples (int): Number of time samples (T).
+
         Returns:
-            The flattened feature dimension for the readout layer
+            int: Number of flattened features to be fed into the readout.
         """
         with torch.no_grad():
             dummy_input = torch.zeros(1, 1, channels, samples)
@@ -409,42 +476,40 @@ class EEGNetEncoder(BaselineModel):
             x = self.block2(x)
             return x.numel() 
 
-    def extract_features(self, x):
-        """Extract deep embeddings from the EEG input without classification.
+    def extract_features(
+        self, x: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Extracts deep feature representation (before readout head).
 
-        Useful for self-supervised learning, transfer learning, or clustering.
-        Handles multiple input formats by automatically transposing if needed.
+        Useful for transfer/self-supervised learning, feature extraction, or clustering, etc.
+        Accepts flexible input shapes and corrects them as needed.
 
         Args:
-            x: EEG input tensor of shape (B, C, T) or (B, T, C) or (B, 1, C, T)
-            
+            x (torch.Tensor): EEG batch; (B, C, T), (B, T, C), or (B, 1, C, T).
+
         Returns:
-            High-level feature maps of shape (B, F, H, W) before the flattening layer
+            torch.Tensor: 4D feature tensor (B, F, H, W) prior to flattening.
         """
-        if len(x.shape) == 3:
-            # Check if last dimension matches num_channels (B, T, C format)
-            if x.shape[-1] == self.num_channels:
-                x = x.transpose(1, 2)  # Convert (B, T, C) to (B, C, T)
-            # Auto-unsqueeze to add the channel dimension required by Conv2d
-            x = x.unsqueeze(1)
-            
+        x = self._check_input_shape_conv2d(x)
         x = self.block1(x)
         x = self.block2(x)
         return x
 
     def forward(
         self,
-        x, 
+        x: torch.Tensor, 
         output_decoder_index: torch.Tensor,
     ) -> Dict[str, torch.Tensor]:
-        """Forward pass for EEGNetEncoder.
+        """
+        Forward pass for EEGNetEncoder.
 
         Args:
-            x: EEG input tensor of shape (B, C, T) or (B, T, C) or (B, 1, C, T)
-            output_decoder_index: Task index tensor of shape (B, n_out) for MultitaskReadout
-            
+            x (torch.Tensor): EEG batch, (B, C, T), (B, T, C), or (B, 1, C, T).
+            output_decoder_index (torch.Tensor): Task index tensor (B, n_out).
+
         Returns:
-            Dictionary of task outputs from MultitaskReadout
+            Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
         """
         x = self.extract_features(x)
         
