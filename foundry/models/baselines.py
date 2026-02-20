@@ -12,7 +12,7 @@ from torch_brain.data import chain, pad8
 from torch_brain.nn import MultitaskReadout, prepare_for_multitask_readout
 from torch_brain.registry import ModalitySpec
 from temporaldata import Data
-from typing import Dict, Optional
+from typing import Dict
 
 from foundry.models.utils import resolve_readout_specs
 

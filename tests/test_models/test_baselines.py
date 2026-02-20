@@ -16,7 +16,6 @@ from foundry.models import (
     ShallowConvNet,
     EEGNetEncoder,
 )
-from foundry.data.transforms import Patching
 
 
 def compute_multitask_loss(
