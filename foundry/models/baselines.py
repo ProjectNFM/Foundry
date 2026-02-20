@@ -17,7 +17,7 @@ from typing import Dict, Optional
 from foundry.models.utils import resolve_readout_specs
 
 
-class BaselineModel(nn.Module):
+class BaselineEEGModel(nn.Module):
     """
     Base class for all baseline EEG models.
     """
@@ -151,7 +151,7 @@ class BaselineModel(nn.Module):
         }
 
 
-class SimpleEEGClassifier(BaselineModel):
+class SimpleEEGClassifier(BaselineEEGModel):
     """
     A simple baseline classifier for EEG data.
 
@@ -219,7 +219,7 @@ class SimpleEEGClassifier(BaselineModel):
         )
 
 
-class ShallowConvNet(BaselineModel):
+class ShallowConvNet(BaselineEEGModel):
     """
     ShallowConvNet: A Shallow Deep Learning Architecture for EEG-based BCIs.
 
@@ -362,7 +362,7 @@ class SeparableConv2d(nn.Module):
         return x
 
 
-class EEGNetEncoder(BaselineModel):
+class EEGNetEncoder(BaselineEEGModel):
     """
     EEGNet: Compact Convolutional Neural Network for EEG-based BCIs.
 
