@@ -9,6 +9,8 @@ from typing import Protocol, Any, Dict
 import torch
 from temporaldata import Data
 
+from typing_extensions import runtime_checkable
+
 
 class NeuralModel(Protocol):
     """Protocol for neural data models.
@@ -58,6 +60,7 @@ class Tokenizable(Protocol):
         ...
 
 
+@runtime_checkable
 class VocabManager(Protocol):
     """Protocol for managing vocabularies (e.g., session IDs, channel IDs).
 

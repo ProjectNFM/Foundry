@@ -7,7 +7,7 @@ pin_memory: false
 window_length: ${hyperparameters.window_length}
 seed: 42
 
-split_type: intersubject
+split_type: intrasession
 task_type: behavior
 fold_num: ${hyperparameters.fold_number}
 
