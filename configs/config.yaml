@@ -1,12 +1,12 @@
 defaults:
-  - model: eeg
+  - model: poyo_eeg
   - data: physionet
   - trainer: default
   - logger: wandb
   - _self_
 
 experiment:
-  name: physionet_right_hand_feet_imagery_more_dropout
+  name: placeholder_name
   group: DEBUGGING 
   tags: [eeg, training, debugging]
   seed: 42
