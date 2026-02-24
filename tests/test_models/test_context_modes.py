@@ -6,7 +6,6 @@ from torch_brain.registry import register_modality, DataType, MODALITY_REGISTRY
 from torch_brain.nn.loss import CrossEntropyLoss
 
 from foundry.models import POYOEEGModel, LinearEmbedding
-from foundry.data.transforms import Patching
 
 
 class MockChannels:
@@ -104,6 +103,8 @@ class TestContextModes:
             readout_specs=readout_specs,
             embed_dim=embed_dim,
             sequence_length=2.0,
+            patch_duration=0.5,
+            stride=0.5,
             latent_step=0.5,
             num_latents_per_step=1,
             context_mode="add",
@@ -112,14 +113,12 @@ class TestContextModes:
         assert model.context_mode == "add"
         assert not hasattr(model, "context_projection")
 
-        patching = Patching(patch_duration=0.5, stride=0.5)
         data = create_data_sample(num_channels=4, sampling_rate=100.0)
-        patched = patching(data)
 
         model.session_emb.initialize_vocab(["session1"])
         model.channel_emb.initialize_vocab([f"ch{i}" for i in range(4)])
 
-        tokens = model.tokenize(patched)
+        tokens = model.tokenize(data)
         batch = collate([tokens])
 
         output = model(**extract_model_inputs(batch))
@@ -135,6 +134,8 @@ class TestContextModes:
             readout_specs=readout_specs,
             embed_dim=embed_dim,
             sequence_length=2.0,
+            patch_duration=0.5,
+            stride=0.5,
             latent_step=0.5,
             num_latents_per_step=1,
             context_mode="concat",
@@ -145,14 +146,12 @@ class TestContextModes:
         assert model.context_projection.in_features == 3 * embed_dim
         assert model.context_projection.out_features == embed_dim
 
-        patching = Patching(patch_duration=0.5, stride=0.5)
         data = create_data_sample(num_channels=4, sampling_rate=100.0)
-        patched = patching(data)
 
         model.session_emb.initialize_vocab(["session1"])
         model.channel_emb.initialize_vocab([f"ch{i}" for i in range(4)])
 
-        tokens = model.tokenize(patched)
+        tokens = model.tokenize(data)
         batch = collate([tokens])
 
         output = model(**extract_model_inputs(batch))
@@ -172,26 +171,26 @@ class TestContextModes:
                 readout_specs=readout_specs,
                 embed_dim=embed_dim,
                 sequence_length=2.0,
+                patch_duration=0.5,
                 context_mode="invalid",
             )
 
     def test_both_modes_produce_output(self, readout_specs, embed_dim):
         """Test that both modes produce outputs of the same shape."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
         data1 = create_data_sample(
             num_channels=4, sampling_rate=100.0, session_id="s1"
         )
         data2 = create_data_sample(
             num_channels=4, sampling_rate=100.0, session_id="s2"
         )
-        patched1 = patching(data1)
-        patched2 = patching(data2)
 
         model_add = POYOEEGModel(
             input_embedding=LinearEmbedding(embed_dim=embed_dim),
             readout_specs=readout_specs,
             embed_dim=embed_dim,
             sequence_length=2.0,
+            patch_duration=0.5,
+            stride=0.5,
             context_mode="add",
         )
 
@@ -200,6 +199,8 @@ class TestContextModes:
             readout_specs=readout_specs,
             embed_dim=embed_dim,
             sequence_length=2.0,
+            patch_duration=0.5,
+            stride=0.5,
             context_mode="concat",
         )
 
@@ -207,8 +208,8 @@ class TestContextModes:
             model.session_emb.initialize_vocab(["s1", "s2"])
             model.channel_emb.initialize_vocab([f"ch{i}" for i in range(4)])
 
-            tokens1 = model.tokenize(patched1)
-            tokens2 = model.tokenize(patched2)
+            tokens1 = model.tokenize(data1)
+            tokens2 = model.tokenize(data2)
             batch = collate([tokens1, tokens2])
 
             output = model(**extract_model_inputs(batch))
@@ -226,10 +227,11 @@ class TestContextModes:
             readout_specs=readout_specs,
             embed_dim=embed_dim,
             sequence_length=2.0,
+            patch_duration=0.5,
+            stride=0.5,
             context_mode="concat",
         )
 
-        patching = Patching(patch_duration=0.5, stride=0.5)
         data1 = create_data_sample(
             num_channels=4, sampling_rate=100.0, session_id="s1"
         )
@@ -237,14 +239,11 @@ class TestContextModes:
             num_channels=8, sampling_rate=100.0, session_id="s2"
         )
 
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-
         model.session_emb.initialize_vocab(["s1", "s2"])
         model.channel_emb.initialize_vocab([f"ch{i}" for i in range(8)])
 
-        tokens1 = model.tokenize(patched1)
-        tokens2 = model.tokenize(patched2)
+        tokens1 = model.tokenize(data1)
+        tokens2 = model.tokenize(data2)
         batch = collate([tokens1, tokens2])
 
         output = model(**extract_model_inputs(batch))

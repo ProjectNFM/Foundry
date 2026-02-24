@@ -11,7 +11,6 @@ from foundry.models import (
     CNNEmbedding,
     MLPEmbedding,
 )
-from foundry.data.transforms import Patching
 
 
 class MockChannels:
@@ -48,6 +47,8 @@ def model_with_linear(readout_specs, embed_dim):
         readout_specs=readout_specs,
         embed_dim=embed_dim,
         sequence_length=2.0,
+        patch_duration=0.5,
+        stride=0.5,
         latent_step=0.5,
         num_latents_per_step=1,
     )
@@ -64,6 +65,8 @@ def model_with_cnn(readout_specs, embed_dim):
         readout_specs=readout_specs,
         embed_dim=embed_dim,
         sequence_length=2.0,
+        patch_duration=0.5,
+        stride=0.5,
         latent_step=0.5,
         num_latents_per_step=1,
     )
@@ -80,6 +83,8 @@ def model_with_mlp(readout_specs, embed_dim):
         readout_specs=readout_specs,
         embed_dim=embed_dim,
         sequence_length=2.0,
+        patch_duration=0.5,
+        stride=0.5,
         latent_step=0.5,
         num_latents_per_step=1,
     )
@@ -151,21 +156,16 @@ def create_data_sample(
 class TestHeterogeneousBatching:
     def test_tokenize_different_channel_counts(self, model_with_linear):
         """Test tokenization with samples having different channel counts."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
         data1 = create_data_sample(num_channels=4, sampling_rate=100.0)
         data2 = create_data_sample(num_channels=8, sampling_rate=100.0)
-
-        patched1 = patching(data1)
-        patched2 = patching(data2)
 
         model_with_linear.session_emb.initialize_vocab(["session1"])
         model_with_linear.channel_emb.initialize_vocab(
             [f"ch{i}" for i in range(8)]
         )
 
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
+        tokens1 = model_with_linear.tokenize(data1)
+        tokens2 = model_with_linear.tokenize(data2)
 
         assert tokens1["input_values"].obj.shape[0] == 4 * 4
         assert tokens2["input_values"].obj.shape[0] == 4 * 8
@@ -175,29 +175,22 @@ class TestHeterogeneousBatching:
 
     def test_tokenize_different_sampling_rates(self, model_with_linear):
         """Test tokenization with samples having different sampling rates."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
         data1 = create_data_sample(num_channels=4, sampling_rate=100.0)
         data2 = create_data_sample(num_channels=4, sampling_rate=250.0)
-
-        patched1 = patching(data1)
-        patched2 = patching(data2)
 
         model_with_linear.session_emb.initialize_vocab(["session1"])
         model_with_linear.channel_emb.initialize_vocab(
             [f"ch{i}" for i in range(4)]
         )
 
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
+        tokens1 = model_with_linear.tokenize(data1)
+        tokens2 = model_with_linear.tokenize(data2)
 
         assert tokens1["input_values"].obj.shape[1] == 50
         assert tokens2["input_values"].obj.shape[1] == 125
 
     def test_collate_heterogeneous_channels(self, model_with_linear):
         """Test collation of batch with different channel counts."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
         data1 = create_data_sample(
             num_channels=4, sampling_rate=100.0, session_id="s1"
         )
@@ -205,16 +198,13 @@ class TestHeterogeneousBatching:
             num_channels=8, sampling_rate=100.0, session_id="s2"
         )
 
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-
         model_with_linear.session_emb.initialize_vocab(["s1", "s2"])
         model_with_linear.channel_emb.initialize_vocab(
             [f"ch{i}" for i in range(8)]
         )
 
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
+        tokens1 = model_with_linear.tokenize(data1)
+        tokens2 = model_with_linear.tokenize(data2)
 
         batch = collate([tokens1, tokens2])
 
@@ -227,8 +217,6 @@ class TestHeterogeneousBatching:
 
     def test_collate_heterogeneous_sampling_rates(self, model_with_linear):
         """Test collation of batch with different sampling rates."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
         data1 = create_data_sample(
             num_channels=4, sampling_rate=100.0, session_id="s1"
         )
@@ -236,16 +224,13 @@ class TestHeterogeneousBatching:
             num_channels=4, sampling_rate=250.0, session_id="s2"
         )
 
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-
         model_with_linear.session_emb.initialize_vocab(["s1", "s2"])
         model_with_linear.channel_emb.initialize_vocab(
             [f"ch{i}" for i in range(4)]
         )
 
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
+        tokens1 = model_with_linear.tokenize(data1)
+        tokens2 = model_with_linear.tokenize(data2)
 
         batch = collate([tokens1, tokens2])
 
@@ -258,8 +243,6 @@ class TestHeterogeneousBatching:
 
     def test_collate_fully_heterogeneous(self, model_with_linear):
         """Test collation with both different channels and sampling rates."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
         data1 = create_data_sample(
             num_channels=4, sampling_rate=100.0, session_id="s1"
         )
@@ -270,18 +253,14 @@ class TestHeterogeneousBatching:
             num_channels=6, sampling_rate=128.0, session_id="s3"
         )
 
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-        patched3 = patching(data3)
-
         model_with_linear.session_emb.initialize_vocab(["s1", "s2", "s3"])
         model_with_linear.channel_emb.initialize_vocab(
             [f"ch{i}" for i in range(8)]
         )
 
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
-        tokens3 = model_with_linear.tokenize(patched3)
+        tokens1 = model_with_linear.tokenize(data1)
+        tokens2 = model_with_linear.tokenize(data2)
+        tokens3 = model_with_linear.tokenize(data3)
 
         batch = collate([tokens1, tokens2, tokens3])
 
@@ -291,8 +270,6 @@ class TestHeterogeneousBatching:
 
     def test_forward_heterogeneous_channels_linear(self, model_with_linear):
         """Test forward pass with heterogeneous channels using LinearEmbedding."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
         data1 = create_data_sample(
             num_channels=4, sampling_rate=100.0, session_id="s1"
         )
@@ -300,16 +277,13 @@ class TestHeterogeneousBatching:
             num_channels=8, sampling_rate=100.0, session_id="s2"
         )
 
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-
         model_with_linear.session_emb.initialize_vocab(["s1", "s2"])
         model_with_linear.channel_emb.initialize_vocab(
             [f"ch{i}" for i in range(8)]
         )
 
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
+        tokens1 = model_with_linear.tokenize(data1)
+        tokens2 = model_with_linear.tokenize(data2)
 
         batch = collate([tokens1, tokens2])
 
@@ -322,8 +296,6 @@ class TestHeterogeneousBatching:
         self, model_with_linear
     ):
         """Test forward pass with heterogeneous sampling rates using LinearEmbedding."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
         data1 = create_data_sample(
             num_channels=4, sampling_rate=100.0, session_id="s1"
         )
@@ -331,16 +303,13 @@ class TestHeterogeneousBatching:
             num_channels=4, sampling_rate=250.0, session_id="s2"
         )
 
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-
         model_with_linear.session_emb.initialize_vocab(["s1", "s2"])
         model_with_linear.channel_emb.initialize_vocab(
             [f"ch{i}" for i in range(4)]
         )
 
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
+        tokens1 = model_with_linear.tokenize(data1)
+        tokens2 = model_with_linear.tokenize(data2)
 
         batch = collate([tokens1, tokens2])
 
@@ -351,8 +320,6 @@ class TestHeterogeneousBatching:
 
     def test_forward_fully_heterogeneous_linear(self, model_with_linear):
         """Test forward pass with both different channels and sampling rates."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
         data1 = create_data_sample(
             num_channels=4, sampling_rate=100.0, session_id="s1"
         )
@@ -363,18 +330,14 @@ class TestHeterogeneousBatching:
             num_channels=6, sampling_rate=128.0, session_id="s3"
         )
 
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-        patched3 = patching(data3)
-
         model_with_linear.session_emb.initialize_vocab(["s1", "s2", "s3"])
         model_with_linear.channel_emb.initialize_vocab(
             [f"ch{i}" for i in range(8)]
         )
 
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
-        tokens3 = model_with_linear.tokenize(patched3)
+        tokens1 = model_with_linear.tokenize(data1)
+        tokens2 = model_with_linear.tokenize(data2)
+        tokens3 = model_with_linear.tokenize(data3)
 
         batch = collate([tokens1, tokens2, tokens3])
 
@@ -385,8 +348,6 @@ class TestHeterogeneousBatching:
 
     def test_forward_heterogeneous_cnn(self, model_with_cnn):
         """Test forward pass with heterogeneous batch using CNNEmbedding."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
         data1 = create_data_sample(
             num_channels=4, sampling_rate=100.0, session_id="s1"
         )
@@ -394,16 +355,13 @@ class TestHeterogeneousBatching:
             num_channels=8, sampling_rate=250.0, session_id="s2"
         )
 
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-
         model_with_cnn.session_emb.initialize_vocab(["s1", "s2"])
         model_with_cnn.channel_emb.initialize_vocab(
             [f"ch{i}" for i in range(8)]
         )
 
-        tokens1 = model_with_cnn.tokenize(patched1)
-        tokens2 = model_with_cnn.tokenize(patched2)
+        tokens1 = model_with_cnn.tokenize(data1)
+        tokens2 = model_with_cnn.tokenize(data2)
 
         batch = collate([tokens1, tokens2])
 
@@ -414,8 +372,6 @@ class TestHeterogeneousBatching:
 
     def test_forward_heterogeneous_mlp(self, model_with_mlp):
         """Test forward pass with heterogeneous batch using MLPEmbedding."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
         data1 = create_data_sample(
             num_channels=4, sampling_rate=100.0, session_id="s1"
         )
@@ -423,16 +379,13 @@ class TestHeterogeneousBatching:
             num_channels=8, sampling_rate=250.0, session_id="s2"
         )
 
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-
         model_with_mlp.session_emb.initialize_vocab(["s1", "s2"])
         model_with_mlp.channel_emb.initialize_vocab(
             [f"ch{i}" for i in range(8)]
         )
 
-        tokens1 = model_with_mlp.tokenize(patched1)
-        tokens2 = model_with_mlp.tokenize(patched2)
+        tokens1 = model_with_mlp.tokenize(data1)
+        tokens2 = model_with_mlp.tokenize(data2)
 
         batch = collate([tokens1, tokens2])
 
@@ -443,26 +396,21 @@ class TestHeterogeneousBatching:
 
     def test_embedding_projection_caching(self, model_with_linear):
         """Test that different patch sizes create separate cached projections."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
         data1 = create_data_sample(num_channels=4, sampling_rate=100.0)
         data2 = create_data_sample(num_channels=4, sampling_rate=250.0)
-
-        patched1 = patching(data1)
-        patched2 = patching(data2)
 
         model_with_linear.session_emb.initialize_vocab(["session1"])
         model_with_linear.channel_emb.initialize_vocab(
             [f"ch{i}" for i in range(4)]
         )
 
-        model_with_linear.tokenize(patched1)
-        model_with_linear.tokenize(patched2)
+        model_with_linear.tokenize(data1)
+        model_with_linear.tokenize(data2)
 
         assert len(model_with_linear.input_embedding.projections) == 0
 
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
+        tokens1 = model_with_linear.tokenize(data1)
+        tokens2 = model_with_linear.tokenize(data2)
 
         batch1 = collate([tokens1])
         batch2 = collate([tokens2])

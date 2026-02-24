@@ -11,8 +11,6 @@ transform:
   - _target_: foundry.data.transforms.RescaleSignal
     factor: 1e5
     field: eeg
-  - _target_: foundry.data.transforms.Patching
-    patch_duration: ${hyperparameters.patch_duration}
 
 recording_ids: null
 uniquify_channel_ids: true

@@ -15,6 +15,7 @@ from torch_brain.nn import (
 from torch_brain.registry import ModalitySpec
 from torch_brain.utils import create_linspace_latent_tokens
 
+from foundry.data.transforms import Patching
 from foundry.models.backbones import PerceiverIOBackbone
 
 
@@ -33,6 +34,8 @@ class POYOEEGModel(nn.Module):
         readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
         embed_dim: int,
         sequence_length: float,
+        patch_duration: float,
+        stride: Optional[float] = None,
         latent_step: float = 0.1,
         num_latents_per_step: int = 1,
         depth: int = 2,
@@ -54,6 +57,8 @@ class POYOEEGModel(nn.Module):
                 Can be ModalitySpec objects or string names that resolve from registry.
             embed_dim: Embedding dimension (must match components)
             sequence_length: Length of sequences in seconds
+            patch_duration: Duration of each patch in seconds (for internal patching)
+            stride: Step size between patches in seconds. Defaults to patch_duration (non-overlapping).
             latent_step: Time step between latent tokens in seconds
             num_latents_per_step: Number of latent tokens per time step
             depth: Number of processor layers
@@ -83,6 +88,11 @@ class POYOEEGModel(nn.Module):
         self.latent_step = latent_step
         self.num_latents_per_step = num_latents_per_step
         self.context_mode = context_mode
+
+        self.patching = Patching(
+            patch_duration=patch_duration,
+            stride=stride if stride is not None else patch_duration,
+        )
 
         self._readout_specs = self._resolve_readout_specs(readout_specs)
         self.global_to_local_task_id = {
@@ -210,17 +220,19 @@ class POYOEEGModel(nn.Module):
 
     def tokenize(self, data: Data) -> dict:
         """
-        Tokenize the input data. Assumes data has already been patched.
+        Tokenize the input data. Performs patching internally and converts to model tokens.
 
         Args:
-            data: TemporalData object containing patched EEG signal and timestamps.
+            data: TemporalData object containing raw EEG signal and timestamps.
+                  Patching is applied automatically as the first step.
                   If data.config["multitask_readout"] is set by the dataset, it will be
                   intersected with the model's readout_specs to use only supported modalities.
-                  The data.eeg field should already be patched (use Patching transform).
 
         Returns:
             dict with model_inputs, target_values, target_weights, and metadata
         """
+        data = self.patching(data)
+
         if not hasattr(data, "config") or data.config is None:
             data.config = {}
 
@@ -242,13 +254,6 @@ class POYOEEGModel(nn.Module):
 
         if not hasattr(data, "eeg") or data.eeg is None:
             raise ValueError("Data must have an 'eeg' field")
-
-        if data.eeg.signal.ndim != 3:
-            raise ValueError(
-                f"Data must be patched before tokenization. Expected 3D signal "
-                f"(num_patches, channels, patch_samples), got {data.eeg.signal.ndim}D "
-                f"with shape {data.eeg.signal.shape}. Use Patching transform first."
-            )
 
         modality_field = (
             data.channels.types.astype(str)
