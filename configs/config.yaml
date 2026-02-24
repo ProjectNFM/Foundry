@@ -1,16 +1,10 @@
 defaults:
-  - model: eeg
-  - data: physionet
-  - trainer: default
+  - model: null
+  - data: null
   - logger: wandb
   - _self_
-
-experiment:
-  name: physionet_right_hand_feet_imagery_more_dropout
-  group: DEBUGGING 
-  tags: [eeg, training, debugging]
-  seed: 42
-  log_level: INFO
+  - trainer: default
+  - experiment: default
 
 hyperparameters:
   batch_size: 256
