@@ -17,6 +17,7 @@ from torch_brain.utils import create_linspace_latent_tokens
 
 from foundry.data.transforms import Patching
 from foundry.models.backbones import PerceiverIOBackbone
+from foundry.models.utils import resolve_readout_specs
 
 
 class POYOEEGModel(nn.Module):
@@ -94,7 +95,7 @@ class POYOEEGModel(nn.Module):
             stride=stride if stride is not None else patch_duration,
         )
 
-        self._readout_specs = self._resolve_readout_specs(readout_specs)
+        self._readout_specs = resolve_readout_specs(readout_specs)
         self.global_to_local_task_id = {
             spec.id: idx for idx, spec in enumerate(self.readout_specs.values())
         }
@@ -355,42 +356,6 @@ class POYOEEGModel(nn.Module):
                 "Session vocabulary has not been initialized, please use "
                 "`model.session_emb.initialize_vocab(session_ids)`"
             )
-
-    def _resolve_readout_specs(
-        self, readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec]
-    ) -> dict[str, ModalitySpec]:
-        """Resolve string modality names to ModalitySpec objects.
-
-        Args:
-            readout_specs: List or dict of ModalitySpec objects or string modality names
-
-        Returns:
-            Dictionary mapping modality names to ModalitySpec objects
-        """
-        from torch_brain.registry import MODALITY_REGISTRY
-
-        if isinstance(readout_specs, dict):
-            return readout_specs
-
-        resolved = {}
-        for spec in readout_specs:
-            if isinstance(spec, str):
-                if spec not in MODALITY_REGISTRY:
-                    raise ValueError(
-                        f"Unknown modality '{spec}' in registry. "
-                        f"Available: {list(MODALITY_REGISTRY.keys())}"
-                    )
-                resolved[spec] = MODALITY_REGISTRY[spec]
-            else:
-                for name, registry_spec in MODALITY_REGISTRY.items():
-                    if registry_spec.id == spec.id:
-                        resolved[name] = spec
-                        break
-                else:
-                    raise ValueError(
-                        f"ModalitySpec with id {spec.id} not found in registry"
-                    )
-        return resolved
 
     def _add_context_embeddings(
         self,

@@ -1,0 +1,12 @@
+_target_: foundry.models.ShallowConvNet
+
+readout_specs:
+  - behavior_4class
+
+# These parameters are based on the ShallowConvNet paper: https://arxiv.org/abs/1804.03209.
+# They need to be tuned for the specific dataset.
+num_channels: 64
+num_samples: 128
+dropout_rate: 0.5
+kernel_length: 13
+F1: 40

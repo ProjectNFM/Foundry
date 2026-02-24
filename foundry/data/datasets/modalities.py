@@ -83,11 +83,11 @@ MOTOR_IMAGERY_RIGHT_FEET = register_modality(
     loss_fn=MappedCrossEntropyLoss({2: 0, 3: 1}),
 )
 
-AJILE_BEHAVIOR = register_modality(
-    "ajile_behavior",
-    dim=5,
-    type=DataType.MULTILABEL,
-    timestamp_key="ajile_behavior.timestamps",
-    value_key="ajile_behavior.values",
+AJILE = register_modality(
+    "behavior_4class",
+    dim=4,
+    type=DataType.MULTINOMIAL,
+    timestamp_key="behavior_trials.start",
+    value_key="behavior_trials.behavior_labels",
     loss_fn=CrossEntropyLoss(),
 )
