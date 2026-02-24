@@ -1,6 +1,6 @@
 """Test suite for baseline EEG classification models.
 
-Tests SimpleEEGClassifier, ShallowConvNet, and EEGNetEncoder models.
+Tests SimpleClassifier, ShallowConvNet, and EEGNetEncoder models.
 """
 
 import numpy as np
@@ -12,7 +12,7 @@ from torch_brain.registry import register_modality, DataType, MODALITY_REGISTRY
 from torch_brain.nn.loss import CrossEntropyLoss
 
 from foundry.models import (
-    SimpleEEGClassifier,
+    SimpleClassifier,
     ShallowConvNet,
     EEGNetEncoder,
 )
@@ -66,7 +66,7 @@ class MockChannels:
     def __init__(self, channel_ids, types=None):
         self.id = np.array(channel_ids)
         if types is not None:
-            self.types = np.array(types)
+            self.type = np.array(types, dtype=str)
 
 
 class MockSession:
@@ -137,8 +137,8 @@ def create_baseline_data_sample(
 
 @pytest.fixture
 def simple_model(readout_specs):
-    """Create SimpleEEGClassifier instance."""
-    return SimpleEEGClassifier(
+    """Create SimpleClassifier instance."""
+    return SimpleClassifier(
         readout_specs=readout_specs,
         num_channels=4,
         num_filters=32,
@@ -181,7 +181,7 @@ class TestBaselineTokenize:
         tokens = simple_model.tokenize(data)
 
         expected_keys = {
-            "x",
+            "input_values",
             "output_decoder_index",
             "target_values",
             "target_weights",
@@ -191,8 +191,8 @@ class TestBaselineTokenize:
         }
         assert set(tokens.keys()) == expected_keys
 
-    def test_tokenize_x_shape(self, simple_model):
-        """Test that tokenized x has expected shape (time, channels)."""
+    def test_tokenize_input_values_shape(self, simple_model):
+        """Test that tokenized input_values has expected shape (time, channels)."""
         num_channels = 4
         num_samples = 200
         data = create_baseline_data_sample(
@@ -200,16 +200,18 @@ class TestBaselineTokenize:
         )
         tokens = simple_model.tokenize(data)
 
-        assert tokens["x"].shape == (num_samples, num_channels)
-        assert tokens["x"].dtype == torch.float32
+        assert tokens["input_values"].obj.shape == (num_samples, num_channels)
+        assert tokens["input_values"].obj.dtype == torch.float32
 
-    def test_tokenize_raises_without_eeg(self, simple_model):
-        """Test that tokenize raises ValueError without eeg field."""
+    def test_tokenize_raises_without_eeg_or_ecog_channels(self, simple_model):
+        """Test that tokenize raises ValueError without eeg or ecog field."""
         data = Data()
         data.channels = MockChannels(["ch0", "ch1", "ch2", "ch3"])
         data.session = MockSession("session1")
 
-        with pytest.raises(ValueError, match="Data must have an 'eeg' field"):
+        with pytest.raises(
+            ValueError, match="Data must have an 'eeg' or 'ecog' field"
+        ):
             simple_model.tokenize(data)
 
     def test_tokenize_respects_multitask_config(self, simple_model):
@@ -254,20 +256,20 @@ class TestBaselineTokenize:
 
         tokens = simple_model.tokenize(data)
 
-        assert tokens["x"].shape == (200, 3)
+        assert tokens["input_values"].obj.shape == (200, 3)
 
 
 # ============================================================================
-# SimpleEEGClassifier Tests
+# SimpleClassifier Tests
 # ============================================================================
 
 
-class TestSimpleEEGClassifier:
-    """Test SimpleEEGClassifier model."""
+class TestSimpleClassifier:
+    """Test SimpleClassifier model."""
 
     def test_init(self, readout_specs):
-        """Test SimpleEEGClassifier initialization."""
-        model = SimpleEEGClassifier(
+        """Test SimpleClassifier initialization."""
+        model = SimpleClassifier(
             readout_specs=readout_specs,
             num_channels=4,
             num_filters=32,
@@ -287,13 +289,13 @@ class TestSimpleEEGClassifier:
         tokens = simple_model.tokenize(data)
         batch = collate([tokens])
 
-        x = batch["x"]
+        x = batch["input_values"]
         output_decoder_index = batch["output_decoder_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = simple_model(
-            x=x,
+            input_values=x,
             output_decoder_index=output_decoder_index,
         )
 
@@ -327,13 +329,13 @@ class TestSimpleEEGClassifier:
         tokens2 = simple_model.tokenize(data2)
         batch = collate([tokens1, tokens2])
 
-        x = batch["x"]
+        x = batch["input_values"]
         output_decoder_index = batch["output_decoder_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = simple_model(
-            x=x,
+            input_values=x,
             output_decoder_index=output_decoder_index,
         )
 
@@ -399,13 +401,13 @@ class TestShallowConvNet:
         tokens = shallow_model.tokenize(data)
         batch = collate([tokens])
 
-        x = batch["x"]
+        x = batch["input_values"]
         output_decoder_index = batch["output_decoder_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = shallow_model(
-            x=x,
+            input_values=x,
             output_decoder_index=output_decoder_index,
         )
 
@@ -439,13 +441,13 @@ class TestShallowConvNet:
         tokens2 = shallow_model.tokenize(data2)
         batch = collate([tokens1, tokens2])
 
-        x = batch["x"]
+        x = batch["input_values"]
         output_decoder_index = batch["output_decoder_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = shallow_model(
-            x=x,
+            input_values=x,
             output_decoder_index=output_decoder_index,
         )
 
@@ -493,7 +495,7 @@ class TestEEGNetEncoder:
         """Test extract_features returns feature maps without classification."""
         x = torch.randn(1, 4, 128)
 
-        features = eegnet_model.extract_features(x)
+        features = eegnet_model.extract_features(input_values=x)
 
         assert features.ndim == 4
         assert features.shape[0] == 1
@@ -515,13 +517,13 @@ class TestEEGNetEncoder:
         tokens = eegnet_model.tokenize(data)
         batch = collate([tokens])
 
-        x = batch["x"]
+        x = batch["input_values"]
         output_decoder_index = batch["output_decoder_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = eegnet_model(
-            x=x,
+            input_values=x,
             output_decoder_index=output_decoder_index,
         )
 
@@ -556,13 +558,13 @@ class TestEEGNetEncoder:
 
         batch = collate([tokens1, tokens2])
 
-        x = batch["x"]
+        x = batch["input_values"]
         output_decoder_index = batch["output_decoder_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = eegnet_model(
-            x=x,
+            input_values=x,
             output_decoder_index=output_decoder_index,
         )
 
@@ -594,28 +596,28 @@ class TestBaselineIntegration:
     """Integration tests for tokenize and models."""
 
     def test_tokenize_then_forward_simple(self, simple_model):
-        """Test tokenize output can be used with SimpleEEGClassifier."""
+        """Test tokenize output can be used with SimpleClassifier."""
         data = create_baseline_data_sample(num_channels=4, num_samples=200)
         tokens = simple_model.tokenize(data)
 
-        assert "x" in tokens
+        assert "input_values" in tokens
         assert "output_decoder_index" in tokens
-        assert tokens["x"].shape == (200, 4)
+        assert tokens["input_values"].obj.shape == (200, 4)
 
     def test_tokenize_then_forward_shallow(self, shallow_model):
         """Test tokenize output can be used with ShallowConvNet."""
         data = create_baseline_data_sample(num_channels=4, num_samples=3500)
         tokens = shallow_model.tokenize(data)
 
-        assert "x" in tokens
+        assert "input_values" in tokens
         assert "output_decoder_index" in tokens
-        assert tokens["x"].shape == (3500, 4)
+        assert tokens["input_values"].obj.shape == (3500, 4)
 
     def test_tokenize_then_forward_eegnet(self, eegnet_model):
         """Test tokenize output can be used with EEGNetEncoder."""
         data = create_baseline_data_sample(num_channels=4, num_samples=512)
         tokens = eegnet_model.tokenize(data)
 
-        assert "x" in tokens
+        assert "input_values" in tokens
         assert "output_decoder_index" in tokens
-        assert tokens["x"].shape == (512, 4)
+        assert tokens["input_values"].obj.shape == (512, 4)

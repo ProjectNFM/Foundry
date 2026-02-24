@@ -392,9 +392,7 @@ class SeparableConv2d(nn.Module):
 
     def forward(
         self,
-        *,
         input_values: torch.Tensor,
-        **kwargs,
     ) -> torch.Tensor:
         """
         Forward pass for depthwise separable 2D convolution.
