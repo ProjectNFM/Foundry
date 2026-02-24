@@ -1,0 +1,38 @@
+# @package _global_
+
+defaults:
+  - override /model: null
+  - override /data: ajile
+
+model:
+  _target_: foundry.models.EEGNetEncoder
+  readout_specs:
+    - behavior_4class
+  num_channels: 94 # Depends on the number of channels in the dataset
+  num_samples: 500 # Depends on the sampling rate of the dataset
+
+experiment:
+  name: ajile_baselines
+  group: BASELINES
+  tags: [baselines, training, eeg_net_encoder, ajile]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 256
+  window_length: 1.0
+  fold_number: 0
+
+task:
+  learning_rate: 1e-4
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 1000
+  log_every_n_steps: 10
+  enable_progress_bar: true
+  enable_model_summary: true
+  logger: ${logger}
+  callbacks:
+    - _target_: lightning.pytorch.callbacks.RichModelSummary
+    - _target_: lightning.pytorch.callbacks.RichProgressBar
