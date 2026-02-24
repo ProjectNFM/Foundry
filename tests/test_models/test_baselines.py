@@ -1,6 +1,6 @@
 """Test suite for baseline EEG classification models.
 
-Tests SimpleClassifier, ShallowConvNet, and EEGNetEncoder models.
+Tests TemporalConvAvgPoolClassifier, ShallowConvNet, and EEGNetEncoder models.
 """
 
 import numpy as np
@@ -12,7 +12,7 @@ from torch_brain.registry import register_modality, DataType, MODALITY_REGISTRY
 from torch_brain.nn.loss import CrossEntropyLoss
 
 from foundry.models import (
-    SimpleClassifier,
+    TemporalConvAvgPoolClassifier,
     ShallowConvNet,
     EEGNetEncoder,
 )
@@ -138,7 +138,7 @@ def create_baseline_data_sample(
 @pytest.fixture
 def simple_model(readout_specs):
     """Create SimpleClassifier instance."""
-    return SimpleClassifier(
+    return TemporalConvAvgPoolClassifier(
         readout_specs=readout_specs,
         num_channels=4,
         num_filters=32,
@@ -264,12 +264,12 @@ class TestBaselineTokenize:
 # ============================================================================
 
 
-class TestSimpleClassifier:
-    """Test SimpleClassifier model."""
+class TestTemporalConvAvgPoolClassifier:
+    """Test TemporalConvAvgPoolClassifier model."""
 
     def test_init(self, readout_specs):
-        """Test SimpleClassifier initialization."""
-        model = SimpleClassifier(
+        """Test TemporalConvAvgPoolClassifier initialization."""
+        model = TemporalConvAvgPoolClassifier(
             readout_specs=readout_specs,
             num_channels=4,
             num_filters=32,
@@ -596,7 +596,7 @@ class TestBaselineIntegration:
     """Integration tests for tokenize and models."""
 
     def test_tokenize_then_forward_simple(self, simple_model):
-        """Test tokenize output can be used with SimpleClassifier."""
+        """Test tokenize output can be used with TemporalConvAvgPoolClassifier."""
         data = create_baseline_data_sample(num_channels=4, num_samples=200)
         tokens = simple_model.tokenize(data)
 

@@ -19,7 +19,7 @@ from foundry.models.utils import resolve_readout_specs
 
 class BaselineEEGModel(nn.Module):
     """
-    Base class for all baseline EEG models.
+    Base class for all baseline EEG/iEEG models.
     """
 
     SUPPORTED_MODALITIES = {"eeg", "ecog"}
@@ -188,7 +188,7 @@ class BaselineEEGModel(nn.Module):
         return model_inputs, target_values, target_weights, output_decoder_index
 
 
-class SimpleClassifier(BaselineEEGModel):
+class TemporalConvAvgPoolClassifier(BaselineEEGModel):
     """
     A simple baseline classifier for EEG data.
 
