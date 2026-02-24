@@ -12,14 +12,14 @@ from foundry.models.embeddings import (
 
 from foundry.models.poyo_eeg import POYOEEGModel
 from foundry.models.baselines import (
-    SimpleEEGClassifier,
+    SimpleClassifier,
     ShallowConvNet,
     EEGNetEncoder,
 )
 
 __all__ = [
     "POYOEEGModel",
-    "SimpleEEGClassifier",
+    "SimpleClassifier",
     "ShallowConvNet",
     "EEGNetEncoder",
     "LinearEmbedding",
