@@ -8,11 +8,11 @@ simple and are widely used on standard EEG classification tasks.
 import numpy as np
 import torch
 import torch.nn as nn
-from torch_brain.data import chain, pad8
+from torch_brain.data import chain, pad8, pad2d
 from torch_brain.nn import MultitaskReadout, prepare_for_multitask_readout
 from torch_brain.registry import ModalitySpec
 from temporaldata import Data
-from typing import Dict
+from typing import Dict, Any
 
 from foundry.models.utils import resolve_readout_specs
 
@@ -21,6 +21,8 @@ class BaselineEEGModel(nn.Module):
     """
     Base class for all baseline EEG models.
     """
+
+    SUPPORTED_MODALITIES = {"eeg", "ecog"}
 
     def __init__(
         self,
@@ -76,15 +78,16 @@ class BaselineEEGModel(nn.Module):
 
     def tokenize(self, data: Data) -> dict[str, torch.Tensor]:
         """
-        Converts a TemporalData EEG sample to model-ready tensors and multitask readout targets.
+        Converts a TemporalData EEG/ECoG sample to model-ready tensors and multitask readout targets.
 
         Args:
-            data (temporaldata.Data): Input data structure containing fields such as "eeg", "channels", and "config".
+            data (temporaldata.Data): Input data structure containing an "eeg" or "ecog" field,
+                along with "channels" and "config".
                 If data.config["multitask_readout"] is present, it is intersected with model-supported modalities.
 
         Returns:
             dict: {
-                "x" (torch.Tensor): Model input of shape (T, C),
+                "input_values" (torch.Tensor): Model input of shape (T, C),
                 "output_decoder_index" (torch.Tensor): Target output decoder indices,
                 "target_values" (dict[str, torch.Tensor] or similar): Multitask target values,
                 "target_weights" (dict[str, torch.Tensor] or similar): Multitask target weights,
@@ -116,19 +119,30 @@ class BaselineEEGModel(nn.Module):
                 if name in self.readout_specs
             ]
 
-        if not hasattr(data, "eeg") or data.eeg is None:
-            raise ValueError("Data must have an 'eeg' field")
+        has_eeg = hasattr(data, "eeg") and data.eeg is not None
+        has_ecog = hasattr(data, "ecog") and data.ecog is not None
 
-        signal = data.eeg.signal
+        if not has_eeg and not has_ecog:
+            raise ValueError("Data must have an 'eeg' or 'ecog' field")
+
+        if has_eeg:
+            signal = data.eeg.signal
+            default_type = "EEG"
+        else:
+            signal = data.ecog.signal
+            default_type = "ECOG"
 
         modality_field = (
-            data.channels.types.astype(str)
-            if hasattr(data.channels, "types")
-            else np.array(["EEG"] * len(data.channels)).astype(str)
+            data.channels.type.astype(str)
+            if hasattr(data.channels, "type")
+            else np.array([default_type] * len(data.channels)).astype(str)
         )
-        modality_mask = np.char.lower(modality_field) == "eeg"
+        modality_mask = np.isin(
+            np.char.lower(modality_field), list(self.SUPPORTED_MODALITIES)
+        )
 
-        x = torch.from_numpy(signal[:, modality_mask]).float()
+        signal = np.asarray(signal, dtype=np.float32)
+        x = torch.from_numpy(signal[:, modality_mask])
 
         (
             output_timestamps,
@@ -142,17 +156,39 @@ class BaselineEEGModel(nn.Module):
         )
 
         return {
-            "x": x,
+            "input_values": pad2d(x),
             "output_decoder_index": pad8(output_task_index),
             "target_values": chain(output_values, allow_missing_keys=True),
             "target_weights": chain(output_weights, allow_missing_keys=True),
             "session_id": data.session.id,
-            "absolute_start": data.absolute_start,
+            "absolute_start": float(data.absolute_start),
             "eval_mask": chain(output_eval_mask, allow_missing_keys=True),
         }
 
+    def unpack_batch(self, batch: Dict[str, Any]) -> tuple:
+        """Extract model inputs and targets from batch.
 
-class SimpleEEGClassifier(BaselineEEGModel):
+        Args:
+            batch: Batch dictionary from dataloader
+
+        Returns:
+            Tuple of (model_inputs, target_values, target_weights, output_decoder_index)
+        """
+        target_values = batch.pop("target_values")
+        target_weights = batch.pop("target_weights")
+        batch.pop("session_id", None)
+        batch.pop("absolute_start", None)
+        batch.pop("eval_mask", None)
+        output_decoder_index = batch["output_decoder_index"]
+
+        model_inputs = {
+            "input_values": batch["input_values"],
+            "output_decoder_index": output_decoder_index,
+        }
+        return model_inputs, target_values, target_weights, output_decoder_index
+
+
+class SimpleClassifier(BaselineEEGModel):
     """
     A simple baseline classifier for EEG data.
 
@@ -191,20 +227,22 @@ class SimpleEEGClassifier(BaselineEEGModel):
 
     def forward(
         self,
-        x: torch.Tensor,
+        *,
+        input_values: torch.Tensor,
         output_decoder_index: torch.Tensor,
+        **kwargs,
     ) -> Dict[str, torch.Tensor]:
         """
         Forward pass for the SimpleEEGClassifier.
 
         Args:
-            x (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
+            input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
             output_decoder_index (torch.Tensor): Task index tensor of shape (B, n_out).
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
         """
-        x = self._check_input_shape_conv1d(x)
+        x = self._check_input_shape_conv1d(input_values)
         x = self.conv(x)
         x = self.bn(x)
         x = self.act(x)
@@ -273,20 +311,22 @@ class ShallowConvNet(BaselineEEGModel):
 
     def forward(
         self,
-        x: torch.Tensor,
+        *,
+        input_values: torch.Tensor,
         output_decoder_index: torch.Tensor,
+        **kwargs,
     ) -> Dict[str, torch.Tensor]:
         """
         Forward pass for ShallowConvNet.
 
         Args:
-            x (torch.Tensor): EEG input tensor, shape (B, T, C).
+            input_values (torch.Tensor): EEG input tensor, shape (B, T, C).
             output_decoder_index (torch.Tensor): Task index tensor (B, n_out).
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
         """
-        x = self._check_input_shape_conv2d(x)
+        x = self._check_input_shape_conv2d(input_values)
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.conv2(x)
@@ -352,18 +392,20 @@ class SeparableConv2d(nn.Module):
 
     def forward(
         self,
-        x: torch.Tensor,
+        *,
+        input_values: torch.Tensor,
+        **kwargs,
     ) -> torch.Tensor:
         """
         Forward pass for depthwise separable 2D convolution.
 
         Args:
-            x (torch.Tensor): Input of shape (B, C, H, W).
+            input_values (torch.Tensor): Input of shape (B, C, H, W).
 
         Returns:
             torch.Tensor: Output tensor of shape (B, out_C, H, W).
         """
-        x = self.depthwise(x)
+        x = self.depthwise(input_values)
         x = self.pointwise(x)
         return x
 
@@ -485,7 +527,7 @@ class EEGNetEncoder(BaselineEEGModel):
 
     def extract_features(
         self,
-        x: torch.Tensor,
+        input_values: torch.Tensor,
     ) -> torch.Tensor:
         """
         Extracts deep feature representation (before readout head).
@@ -499,27 +541,29 @@ class EEGNetEncoder(BaselineEEGModel):
         Returns:
             torch.Tensor: 4D feature tensor (B, F, H, W) prior to flattening.
         """
-        x = self._check_input_shape_conv2d(x)
+        x = self._check_input_shape_conv2d(input_values)
         x = self.block1(x)
         x = self.block2(x)
         return x
 
     def forward(
         self,
-        x: torch.Tensor,
+        *,
+        input_values: torch.Tensor,
         output_decoder_index: torch.Tensor,
+        **kwargs,
     ) -> Dict[str, torch.Tensor]:
         """
         Forward pass for EEGNetEncoder.
 
         Args:
-            x (torch.Tensor): EEG batch, (B, C, T), (B, T, C), or (B, 1, C, T).
+            input_values (torch.Tensor): EEG batch, (B, C, T), (B, T, C), or (B, 1, C, T).
             output_decoder_index (torch.Tensor): Task index tensor (B, n_out).
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
         """
-        x = self.extract_features(x)
+        x = self.extract_features(input_values)
 
         batch_size = x.shape[0]
         n_out = output_decoder_index.shape[1]
