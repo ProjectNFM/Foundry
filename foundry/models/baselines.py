@@ -22,7 +22,7 @@ class BaselineEEGModel(nn.Module):
     Base class for all baseline EEG/iEEG models.
     """
 
-    SUPPORTED_MODALITIES = {"eeg", "ecog"}
+    SUPPORTED_MODALITIES = {"eeg", "ecog", "seeg"}
 
     def __init__(
         self,
@@ -121,16 +121,24 @@ class BaselineEEGModel(nn.Module):
 
         has_eeg = hasattr(data, "eeg") and data.eeg is not None
         has_ecog = hasattr(data, "ecog") and data.ecog is not None
+        has_seeg = hasattr(data, "seeg") and data.seeg is not None
 
-        if not has_eeg and not has_ecog:
-            raise ValueError("Data must have an 'eeg' or 'ecog' field")
+        if not has_eeg and not has_ecog and not has_seeg:
+            raise ValueError(
+                "Data must have an 'eeg', 'ecog', or 'seeg' channel type"
+            )
 
         if has_eeg:
             signal = data.eeg.signal
             default_type = "EEG"
-        else:
+        elif has_ecog:
             signal = data.ecog.signal
             default_type = "ECOG"
+        elif has_seeg:
+            signal = data.seeg.signal
+            default_type = "SEEG"
+        else:
+            raise ValueError(f"Data must have an '{default_type}' channel type")
 
         modality_field = (
             data.channels.type.astype(str)

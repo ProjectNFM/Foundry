@@ -203,14 +203,17 @@ class TestBaselineTokenize:
         assert tokens["input_values"].obj.shape == (num_samples, num_channels)
         assert tokens["input_values"].obj.dtype == torch.float32
 
-    def test_tokenize_raises_without_eeg_or_ecog_channels(self, simple_model):
-        """Test that tokenize raises ValueError without eeg or ecog field."""
+    def test_tokenize_raises_without_eeg_or_ecog_or_seeg_channels(
+        self, simple_model
+    ):
+        """Test that tokenize raises ValueError without eeg or ecog or seeg field."""
         data = Data()
         data.channels = MockChannels(["ch0", "ch1", "ch2", "ch3"])
         data.session = MockSession("session1")
 
         with pytest.raises(
-            ValueError, match="Data must have an 'eeg' or 'ecog' field"
+            ValueError,
+            match="Data must have an 'eeg', 'ecog', or 'seeg' channel type",
         ):
             simple_model.tokenize(data)
 
