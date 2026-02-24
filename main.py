@@ -7,7 +7,6 @@ from omegaconf import DictConfig
 from rich.logging import RichHandler
 
 from foundry.training import EEGTask
-from foundry.training.callbacks import VocabInitializerCallback
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +31,9 @@ def main(cfg: DictConfig):
     Args:
         cfg: Hydra configuration object
     """
-    setup_logging(cfg.experiment.log_level)
-    seed_everything(cfg.experiment.seed, workers=True)
-    logger.info(f"Starting training: {cfg.experiment.name}")
+    setup_logging(cfg.run.log_level)
+    seed_everything(cfg.run.seed, workers=True)
+    logger.info(f"Starting training: {cfg.run.name}")
 
     model = instantiate(cfg.model)
 
@@ -45,13 +44,7 @@ def main(cfg: DictConfig):
 
     task = EEGTask(model=model, **cfg.task)
 
-    # Instantiate trainer and add VocabInitializer callback if not already present
     trainer = instantiate(cfg.trainer)
-    if not any(
-        isinstance(cb, VocabInitializerCallback) for cb in trainer.callbacks
-    ):
-        trainer.callbacks.append(VocabInitializerCallback())
-
     trainer.fit(task, datamodule)
 
 

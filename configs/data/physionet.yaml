@@ -7,7 +7,7 @@ pin_memory: false
 window_length: ${hyperparameters.window_length}
 seed: 42
 
-transform:
+transforms:
   - _target_: foundry.data.transforms.RescaleSignal
     factor: 1e5
     field: eeg

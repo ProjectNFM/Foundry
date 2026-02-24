@@ -20,12 +20,12 @@ class AjileDataModule(NeuralDataModule):
         task_type: Optional[
             Literal["active_vs_inactive", "behavior", "pose_estimation"]
         ] = "behavior",
-        fold_num: Optional[int] = 0,
+        fold_number: Optional[int] = 0,
     ):
         dataset_kwargs = {
             "split_type": split_type,
             "task_type": task_type,
-            "fold_num": fold_num,
+            "fold_num": fold_number,
         }
         super().__init__(
             dataset_class=PetersonBruntonPoseTrajectory2022,

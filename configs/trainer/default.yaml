@@ -8,5 +8,6 @@ enable_progress_bar: true
 enable_model_summary: true  
 logger: ${logger}
 callbacks:
+  - _target_: foundry.training.callbacks.VocabInitializerCallback
   - _target_: lightning.pytorch.callbacks.RichModelSummary
   - _target_: lightning.pytorch.callbacks.RichProgressBar
