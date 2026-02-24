@@ -88,6 +88,19 @@ class EEGTask(L.LightningModule):
                 task=task_type, num_classes=num_classes
             )
 
+    def transfer_batch_to_device(self, batch, device, dataloader_idx):
+        """Downcast float64 tensors to float32 for MPS compatibility."""
+        # TODO: Remove this once MPS supports float64
+        from lightning.fabric.utilities.apply_func import move_data_to_device
+        from lightning_utilities.core.apply_func import apply_to_collection
+
+        batch = apply_to_collection(
+            batch,
+            dtype=torch.Tensor,
+            function=lambda t: t.float() if t.dtype == torch.float64 else t,
+        )
+        return move_data_to_device(batch, device)
+
     def forward(self, **kwargs) -> Dict[str, Any]:
         """Forward pass through the model."""
         return self.model(**kwargs)

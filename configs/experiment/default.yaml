@@ -1,0 +1,7 @@
+# @package _global_
+experiment:
+  name: default
+  group: DEFAULT
+  tags: [default]
+  seed: 42
+  log_level: INFO

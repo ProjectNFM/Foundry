@@ -1,0 +1,8 @@
+_target_: foundry.models.SimpleClassifier
+
+readout_specs:
+  - behavior_4class
+
+num_channels: 64
+num_filters: 32
+kernel_size: 64

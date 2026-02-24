@@ -4,7 +4,7 @@ This module provides modality-agnostic base classes and protocols for working
 with neural data from any source (EEG, iEEG, fMRI, PET, etc.).
 """
 
-from typing import Protocol, Any, Dict
+from typing import Protocol, Any, Dict, runtime_checkable
 
 import torch
 from temporaldata import Data
@@ -58,6 +58,7 @@ class Tokenizable(Protocol):
         ...
 
 
+@runtime_checkable
 class VocabManager(Protocol):
     """Protocol for managing vocabularies (e.g., session IDs, channel IDs).
 
