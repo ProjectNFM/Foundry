@@ -1,22 +1,24 @@
 # @package _global_
 
 defaults:
-  - override /model: null
+  - override /model: eeg_net_encoder
   - override /data: ajile
 
 model:
-  _target_: foundry.models.EEGNetEncoder
   readout_specs:
-    - behavior_4class
+    - ajile_inactive_active
   num_channels: 94
   num_samples: 500
 
 run:
-  name: ajile_baselines
+  name: ajile_eegnet_classifier
   group: BASELINES
   tags: [baselines, training, eeg_net_encoder, ajile]
   seed: 42
   log_level: INFO
 
-trainer:
-  max_epochs: 1000
+hyperparameters:
+  batch_size: 64 
+  window_length: 1.0
+  patch_duration: 0.1
+  fold_number: 0

@@ -4,13 +4,13 @@ defaults:
   - logger: wandb
   - _self_
   - trainer: default
-  - experiment: default
+  - experiment: ???
 
 hyperparameters:
-  batch_size: 256
-  window_length: 1.0
-  patch_duration: 0.1
-  fold_number: 0
+  batch_size: ???
+  window_length: ???
+  patch_duration: ???
+  fold_number: ???
 
 task:
   learning_rate: 1e-4
