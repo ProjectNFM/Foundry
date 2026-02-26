@@ -87,8 +87,8 @@ AJILE_INACTIVE_ACTIVE = register_modality(
     "ajile_inactive_active",
     dim=2,
     type=DataType.BINARY,
-    timestamp_key="behavior_trials.start",
-    value_key="behavior_trials.behavior_ids",
+    timestamp_key="active_vs_inactive_trials.timestamps",
+    value_key="active_vs_inactive_trials.behavior_id",
     loss_fn=CrossEntropyLoss(),
 )
 

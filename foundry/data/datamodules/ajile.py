@@ -21,8 +21,10 @@ class AjileDataModule(NeuralDataModule):
             Literal["active_vs_inactive", "behavior", "pose_estimation"]
         ] = "behavior",
         fold_number: Optional[int] = 0,
+        recording_ids: Optional[list[str]] = None,
     ):
         dataset_kwargs = {
+            "recording_ids": recording_ids,
             "split_type": split_type,
             "task_type": task_type,
             "fold_num": fold_number,

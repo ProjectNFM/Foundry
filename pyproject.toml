@@ -15,6 +15,7 @@ dependencies = [
     "lightning>=2.0.0",
     "torch>=2.9.1",
     "torch-brain",
+    "temporaldata",
     "matplotlib>=3.10.8",
     "torchmetrics>=1.8.2",
     "wandb>=0.24.0",
@@ -26,6 +27,7 @@ dev = ["pre-commit>=4.5.1", "pytest>=8.0.0", "ruff>=0.14.14"]
 [tool.uv.sources]
 torch-brain = { git = "https://github.com/neuro-galaxy/torch_brain", branch = "main" }
 brainsets = { git = "https://github.com/neuro-galaxy/brainsets", branch = "mila/dev-main" }
+temporaldata = { git = "https://github.com/neuro-galaxy/temporaldata", branch = "main" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
