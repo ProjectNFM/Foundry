@@ -1,0 +1,24 @@
+# @package _global_
+
+defaults:
+  - override /model: eeg_net_encoder
+  - override /data: ajile
+
+model:
+  readout_specs:
+    - ajile_inactive_active
+  num_channels: 94
+  num_samples: 500
+
+run:
+  name: ajile_eegnet_classifier
+  group: BASELINES
+  tags: [baselines, training, eeg_net_encoder, ajile]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 64 
+  window_length: 1.0
+  patch_duration: 0.1
+  fold_number: 0

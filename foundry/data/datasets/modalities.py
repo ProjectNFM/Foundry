@@ -83,6 +83,15 @@ MOTOR_IMAGERY_RIGHT_FEET = register_modality(
     loss_fn=MappedCrossEntropyLoss({2: 0, 3: 1}),
 )
 
+AJILE_INACTIVE_ACTIVE = register_modality(
+    "ajile_inactive_active",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="active_vs_inactive_trials.timestamps",
+    value_key="active_vs_inactive_trials.behavior_id",
+    loss_fn=CrossEntropyLoss(),
+)
+
 AJILE = register_modality(
     "behavior_4class",
     dim=4,

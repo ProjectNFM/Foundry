@@ -22,7 +22,7 @@ class BaselineEEGModel(nn.Module):
     Base class for all baseline EEG/iEEG models.
     """
 
-    SUPPORTED_MODALITIES = {"eeg", "ecog", "seeg"}
+    SUPPORTED_MODALITIES = {"eeg", "ecog", "seeg", "ieeg"}
 
     def __init__(
         self,

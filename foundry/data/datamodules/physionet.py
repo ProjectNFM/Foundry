@@ -22,7 +22,7 @@ class PhysionetDataModule(NeuralDataModule):
         num_workers: int = 0,
         pin_memory: bool = False,
         window_length: Optional[float] = None,
-        transform: Optional[list[Callable]] = None,
+        transforms: Optional[list[Callable]] = None,
         tokenizer: Optional[Callable] = None,
         seed: int = 42,
         # Dataset specific args
@@ -43,7 +43,7 @@ class PhysionetDataModule(NeuralDataModule):
             num_workers: Number of worker processes for DataLoaders.
             pin_memory: Whether to pin memory in DataLoaders.
             window_length: Length of windows for RandomFixedWindowSampler in seconds.
-            transform: Optional list of transforms to apply to each sample before tokenization.
+            transforms: Optional list of transforms to apply to each sample before tokenization.
             tokenizer: Optional tokenizer (e.g., model.tokenize) to apply as final transform.
             seed: Random seed for sampling.
             recording_ids: Optional list of recording IDs to include.
@@ -69,7 +69,7 @@ class PhysionetDataModule(NeuralDataModule):
             num_workers=num_workers,
             pin_memory=pin_memory,
             window_length=window_length,
-            transforms=transform,
+            transforms=transforms,
             tokenizer=tokenizer,
             seed=seed,
             dataset_kwargs=dataset_kwargs,

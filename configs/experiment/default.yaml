@@ -1,5 +1,5 @@
 # @package _global_
-experiment:
+run:
   name: default
   group: DEFAULT
   tags: [default]
