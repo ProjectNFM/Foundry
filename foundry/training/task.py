@@ -139,7 +139,7 @@ class EEGTask(L.LightningModule):
             if target.numel() == 0:
                 continue
 
-            probs = torch.softmax(task_output, dim=-1)
+            probs = self._get_metric_preds(task_output, task_name)
             mapped_target = self._apply_label_mapping(target, task_name)
 
             self.train_metrics[task_name].update(probs, mapped_target)
@@ -192,7 +192,7 @@ class EEGTask(L.LightningModule):
             if target.numel() == 0:
                 continue
 
-            probs = torch.softmax(task_output, dim=-1)
+            probs = self._get_metric_preds(task_output, task_name)
             mapped_target = self._apply_label_mapping(target, task_name)
 
             self.val_metrics[task_name].update(probs, mapped_target)
@@ -283,6 +283,20 @@ class EEGTask(L.LightningModule):
 
         output_decoder_index = batch["output_decoder_index"]
         return batch, target_values, target_weights, output_decoder_index
+
+    def _get_metric_preds(
+        self, task_output: torch.Tensor, task_name: str
+    ) -> torch.Tensor:
+        """Convert raw logits to the format expected by torchmetrics.
+
+        Binary metrics expect a 1-D tensor of positive-class probabilities,
+        while multiclass metrics expect the full [N, C] probability matrix.
+        """
+        probs = torch.softmax(task_output, dim=-1)
+        spec = self.model.readout_specs[task_name]
+        if spec.dim == 2:
+            return probs[:, 1]
+        return probs
 
     def _apply_label_mapping(
         self, target: torch.Tensor, task_name: str
