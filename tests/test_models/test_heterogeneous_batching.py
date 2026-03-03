@@ -11,14 +11,25 @@ from foundry.models import (
     CNNEmbedding,
     MLPEmbedding,
 )
-from foundry.data.transforms import Patching
+
+
+SAMPLING_RATE = 100.0
+PATCH_DURATION = 0.5
+STRIDE = 0.5
+SEQUENCE_LENGTH = 2.0
+NUM_CHANNELS = 8
+PATCH_SAMPLES = int(PATCH_DURATION * SAMPLING_RATE)
+NUM_PATCHES = int(SEQUENCE_LENGTH / STRIDE)
 
 
 class MockChannels:
     def __init__(self, channel_ids, types=None):
         self.id = np.array(channel_ids)
         if types is not None:
-            self.types = np.array(types)
+            self.type = np.array(types)
+
+    def __len__(self):
+        return len(self.id)
 
 
 class MockSession:
@@ -42,12 +53,18 @@ def readout_specs():
 
 @pytest.fixture
 def model_with_linear(readout_specs, embed_dim):
-    input_embedding = LinearEmbedding(embed_dim=embed_dim)
+    input_embedding = LinearEmbedding(
+        embed_dim=embed_dim,
+        num_channels=NUM_CHANNELS,
+        patch_samples=PATCH_SAMPLES,
+    )
     model = POYOEEGModel(
         input_embedding=input_embedding,
         readout_specs=readout_specs,
         embed_dim=embed_dim,
-        sequence_length=2.0,
+        sequence_length=SEQUENCE_LENGTH,
+        patch_duration=PATCH_DURATION,
+        stride=STRIDE,
         latent_step=0.5,
         num_latents_per_step=1,
     )
@@ -57,13 +74,19 @@ def model_with_linear(readout_specs, embed_dim):
 @pytest.fixture
 def model_with_cnn(readout_specs, embed_dim):
     input_embedding = CNNEmbedding(
-        embed_dim=embed_dim, num_filters=32, kernel_size=3
+        embed_dim=embed_dim,
+        num_channels=NUM_CHANNELS,
+        patch_samples=PATCH_SAMPLES,
+        num_filters=32,
+        kernel_size=3,
     )
     model = POYOEEGModel(
         input_embedding=input_embedding,
         readout_specs=readout_specs,
         embed_dim=embed_dim,
-        sequence_length=2.0,
+        sequence_length=SEQUENCE_LENGTH,
+        patch_duration=PATCH_DURATION,
+        stride=STRIDE,
         latent_step=0.5,
         num_latents_per_step=1,
     )
@@ -73,13 +96,19 @@ def model_with_cnn(readout_specs, embed_dim):
 @pytest.fixture
 def model_with_mlp(readout_specs, embed_dim):
     input_embedding = MLPEmbedding(
-        embed_dim=embed_dim, hidden_dims=[128, 64], activation="gelu"
+        embed_dim=embed_dim,
+        num_channels=NUM_CHANNELS,
+        patch_samples=PATCH_SAMPLES,
+        hidden_dims=[128, 64],
+        activation="gelu",
     )
     model = POYOEEGModel(
         input_embedding=input_embedding,
         readout_specs=readout_specs,
         embed_dim=embed_dim,
-        sequence_length=2.0,
+        sequence_length=SEQUENCE_LENGTH,
+        patch_duration=PATCH_DURATION,
+        stride=STRIDE,
         latent_step=0.5,
         num_latents_per_step=1,
     )
@@ -107,26 +136,22 @@ def extract_model_inputs(batch):
     }
 
 
-def create_data_sample(
-    num_channels, sampling_rate, duration=2.0, session_id="session1"
-):
-    """
-    Create a mock data sample with specified channel count and sampling rate.
-    """
-    num_samples = int(duration * sampling_rate)
+def create_data_sample(num_channels, session_id="session1"):
+    """Create a mock data sample with specified channel count."""
+    num_samples = int(SEQUENCE_LENGTH * SAMPLING_RATE)
     signal = np.random.randn(num_samples, num_channels).astype(np.float32)
 
     eeg = RegularTimeSeries(
         signal=signal,
-        sampling_rate=sampling_rate,
-        domain=Interval(0.0, duration),
+        sampling_rate=SAMPLING_RATE,
+        domain=Interval(0.0, SEQUENCE_LENGTH),
     )
 
     channel_ids = [f"ch{i}" for i in range(num_channels)]
     channels = MockChannels(channel_ids, types=["EEG"] * num_channels)
     session = MockSession(session_id)
 
-    data = Data(eeg=eeg, domain=Interval(0.0, duration))
+    data = Data(eeg=eeg, domain=Interval(0.0, SEQUENCE_LENGTH))
     data.channels = channels
     data.session = session
     data._absolute_start = 0.0
@@ -137,338 +162,190 @@ def create_data_sample(
 
     data.test_task = TestTask()
 
-    data.config = {
-        "multitask_readout": [
-            {
-                "readout_id": "test_task1",
-            }
-        ]
-    }
+    data.config = {"multitask_readout": [{"readout_id": "test_task1"}]}
 
     return data
 
 
+class TestTokenizerOutput:
+    def test_tokenize_shape(self, model_with_linear):
+        """Tokenizer outputs signal in (P, C_padded, S) shape."""
+        model_with_linear.session_emb.initialize_vocab(["session1"])
+        model_with_linear.channel_emb.initialize_vocab(
+            [f"ch{i}" for i in range(NUM_CHANNELS)]
+        )
+
+        data = create_data_sample(num_channels=4)
+        tokens = model_with_linear.tokenize(data)
+
+        assert tokens["input_values"].shape == (
+            NUM_PATCHES,
+            NUM_CHANNELS,
+            PATCH_SAMPLES,
+        )
+        assert tokens["input_timestamps"].shape == (NUM_PATCHES,)
+        assert tokens["input_channel_index"].shape == (NUM_CHANNELS,)
+        assert tokens["input_mask"].shape == (NUM_CHANNELS,)
+
+    def test_channel_padding(self, model_with_linear):
+        """Channels are zero-padded and mask tracks valid channels."""
+        model_with_linear.session_emb.initialize_vocab(["session1"])
+        model_with_linear.channel_emb.initialize_vocab(
+            [f"ch{i}" for i in range(NUM_CHANNELS)]
+        )
+
+        data = create_data_sample(num_channels=4)
+        tokens = model_with_linear.tokenize(data)
+
+        assert tokens["input_mask"][:4].all()
+        assert not tokens["input_mask"][4:].any()
+
+        assert (tokens["input_values"][:, 4:, :] == 0).all()
+
+    def test_full_channels_no_padding(self, model_with_linear):
+        """When data has max channels, no padding is needed."""
+        model_with_linear.session_emb.initialize_vocab(["session1"])
+        model_with_linear.channel_emb.initialize_vocab(
+            [f"ch{i}" for i in range(NUM_CHANNELS)]
+        )
+
+        data = create_data_sample(num_channels=NUM_CHANNELS)
+        tokens = model_with_linear.tokenize(data)
+
+        assert tokens["input_mask"].all()
+
+    def test_too_many_channels_raises(self, model_with_linear):
+        """Tokenizer raises if data has more channels than model expects."""
+        model_with_linear.session_emb.initialize_vocab(["session1"])
+        model_with_linear.channel_emb.initialize_vocab(
+            [f"ch{i}" for i in range(NUM_CHANNELS + 4)]
+        )
+
+        data = create_data_sample(num_channels=NUM_CHANNELS + 4)
+
+        with pytest.raises(ValueError, match="channels but model expects"):
+            model_with_linear.tokenize(data)
+
+
 class TestHeterogeneousBatching:
     def test_tokenize_different_channel_counts(self, model_with_linear):
-        """Test tokenization with samples having different channel counts."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
-        data1 = create_data_sample(num_channels=4, sampling_rate=100.0)
-        data2 = create_data_sample(num_channels=8, sampling_rate=100.0)
-
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-
+        """Samples with different channel counts are padded to the same shape."""
         model_with_linear.session_emb.initialize_vocab(["session1"])
         model_with_linear.channel_emb.initialize_vocab(
-            [f"ch{i}" for i in range(8)]
+            [f"ch{i}" for i in range(NUM_CHANNELS)]
         )
 
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
+        data1 = create_data_sample(num_channels=4)
+        data2 = create_data_sample(num_channels=NUM_CHANNELS)
 
-        assert tokens1["input_values"].obj.shape[0] == 4 * 4
-        assert tokens2["input_values"].obj.shape[0] == 4 * 8
+        tokens1 = model_with_linear.tokenize(data1)
+        tokens2 = model_with_linear.tokenize(data2)
 
-        assert tokens1["input_channel_index"].obj.shape[0] == 4 * 4
-        assert tokens2["input_channel_index"].obj.shape[0] == 4 * 8
-
-    def test_tokenize_different_sampling_rates(self, model_with_linear):
-        """Test tokenization with samples having different sampling rates."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
-        data1 = create_data_sample(num_channels=4, sampling_rate=100.0)
-        data2 = create_data_sample(num_channels=4, sampling_rate=250.0)
-
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-
-        model_with_linear.session_emb.initialize_vocab(["session1"])
-        model_with_linear.channel_emb.initialize_vocab(
-            [f"ch{i}" for i in range(4)]
+        assert tokens1["input_values"].shape == tokens2["input_values"].shape
+        assert (
+            tokens1["input_channel_index"].shape
+            == tokens2["input_channel_index"].shape
         )
-
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
-
-        assert tokens1["input_values"].obj.shape[1] == 50
-        assert tokens2["input_values"].obj.shape[1] == 125
 
     def test_collate_heterogeneous_channels(self, model_with_linear):
-        """Test collation of batch with different channel counts."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
-        data1 = create_data_sample(
-            num_channels=4, sampling_rate=100.0, session_id="s1"
-        )
-        data2 = create_data_sample(
-            num_channels=8, sampling_rate=100.0, session_id="s2"
-        )
-
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-
+        """Collation produces correct batch shapes with padded channels."""
         model_with_linear.session_emb.initialize_vocab(["s1", "s2"])
         model_with_linear.channel_emb.initialize_vocab(
-            [f"ch{i}" for i in range(8)]
+            [f"ch{i}" for i in range(NUM_CHANNELS)]
         )
 
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
+        data1 = create_data_sample(num_channels=4, session_id="s1")
+        data2 = create_data_sample(num_channels=NUM_CHANNELS, session_id="s2")
+
+        tokens1 = model_with_linear.tokenize(data1)
+        tokens2 = model_with_linear.tokenize(data2)
 
         batch = collate([tokens1, tokens2])
 
-        assert batch["input_values"].shape[0] == 2
-        assert batch["input_values"].shape[1] == max(4 * 4, 4 * 8)
-        assert batch["input_values"].shape[2] == 50
-
-        assert batch["input_mask"].shape[0] == 2
-        assert batch["input_mask"].shape[1] == max(4 * 4, 4 * 8)
-
-    def test_collate_heterogeneous_sampling_rates(self, model_with_linear):
-        """Test collation of batch with different sampling rates."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
-        data1 = create_data_sample(
-            num_channels=4, sampling_rate=100.0, session_id="s1"
+        assert batch["input_values"].shape == (
+            2,
+            NUM_PATCHES,
+            NUM_CHANNELS,
+            PATCH_SAMPLES,
         )
-        data2 = create_data_sample(
-            num_channels=4, sampling_rate=250.0, session_id="s2"
-        )
-
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-
-        model_with_linear.session_emb.initialize_vocab(["s1", "s2"])
-        model_with_linear.channel_emb.initialize_vocab(
-            [f"ch{i}" for i in range(4)]
-        )
-
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
-
-        batch = collate([tokens1, tokens2])
-
-        assert batch["input_values"].shape[0] == 2
-        assert batch["input_values"].shape[1] == 4 * 4
-        assert batch["input_values"].shape[2] == max(50, 125)
-
-        assert batch["input_mask"].shape[0] == 2
-        assert batch["input_mask"].shape[1] == 4 * 4
-
-    def test_collate_fully_heterogeneous(self, model_with_linear):
-        """Test collation with both different channels and sampling rates."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
-        data1 = create_data_sample(
-            num_channels=4, sampling_rate=100.0, session_id="s1"
-        )
-        data2 = create_data_sample(
-            num_channels=8, sampling_rate=250.0, session_id="s2"
-        )
-        data3 = create_data_sample(
-            num_channels=6, sampling_rate=128.0, session_id="s3"
-        )
-
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-        patched3 = patching(data3)
-
-        model_with_linear.session_emb.initialize_vocab(["s1", "s2", "s3"])
-        model_with_linear.channel_emb.initialize_vocab(
-            [f"ch{i}" for i in range(8)]
-        )
-
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
-        tokens3 = model_with_linear.tokenize(patched3)
-
-        batch = collate([tokens1, tokens2, tokens3])
-
-        assert batch["input_values"].shape[0] == 3
-        assert batch["input_values"].shape[1] == max(4 * 4, 4 * 8, 4 * 6)
-        assert batch["input_values"].shape[2] == max(50, 125, 64)
+        assert batch["input_timestamps"].shape == (2, NUM_PATCHES)
+        assert batch["input_channel_index"].shape == (2, NUM_CHANNELS)
+        assert batch["input_mask"].shape == (2, NUM_CHANNELS)
 
     def test_forward_heterogeneous_channels_linear(self, model_with_linear):
-        """Test forward pass with heterogeneous channels using LinearEmbedding."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
-        data1 = create_data_sample(
-            num_channels=4, sampling_rate=100.0, session_id="s1"
-        )
-        data2 = create_data_sample(
-            num_channels=8, sampling_rate=100.0, session_id="s2"
-        )
-
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-
+        """Forward pass works with batched samples of different channel counts."""
         model_with_linear.session_emb.initialize_vocab(["s1", "s2"])
         model_with_linear.channel_emb.initialize_vocab(
-            [f"ch{i}" for i in range(8)]
+            [f"ch{i}" for i in range(NUM_CHANNELS)]
         )
 
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
+        data1 = create_data_sample(num_channels=4, session_id="s1")
+        data2 = create_data_sample(num_channels=NUM_CHANNELS, session_id="s2")
+
+        tokens1 = model_with_linear.tokenize(data1)
+        tokens2 = model_with_linear.tokenize(data2)
 
         batch = collate([tokens1, tokens2])
-
         output = model_with_linear(**extract_model_inputs(batch))
 
         assert "test_task1" in output
         assert output["test_task1"].shape[0] == 2
-
-    def test_forward_heterogeneous_sampling_rates_linear(
-        self, model_with_linear
-    ):
-        """Test forward pass with heterogeneous sampling rates using LinearEmbedding."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
-        data1 = create_data_sample(
-            num_channels=4, sampling_rate=100.0, session_id="s1"
-        )
-        data2 = create_data_sample(
-            num_channels=4, sampling_rate=250.0, session_id="s2"
-        )
-
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-
-        model_with_linear.session_emb.initialize_vocab(["s1", "s2"])
-        model_with_linear.channel_emb.initialize_vocab(
-            [f"ch{i}" for i in range(4)]
-        )
-
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
-
-        batch = collate([tokens1, tokens2])
-
-        output = model_with_linear(**extract_model_inputs(batch))
-
-        assert "test_task1" in output
-        assert output["test_task1"].shape[0] == 2
-
-    def test_forward_fully_heterogeneous_linear(self, model_with_linear):
-        """Test forward pass with both different channels and sampling rates."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
-        data1 = create_data_sample(
-            num_channels=4, sampling_rate=100.0, session_id="s1"
-        )
-        data2 = create_data_sample(
-            num_channels=8, sampling_rate=250.0, session_id="s2"
-        )
-        data3 = create_data_sample(
-            num_channels=6, sampling_rate=128.0, session_id="s3"
-        )
-
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-        patched3 = patching(data3)
-
-        model_with_linear.session_emb.initialize_vocab(["s1", "s2", "s3"])
-        model_with_linear.channel_emb.initialize_vocab(
-            [f"ch{i}" for i in range(8)]
-        )
-
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
-        tokens3 = model_with_linear.tokenize(patched3)
-
-        batch = collate([tokens1, tokens2, tokens3])
-
-        output = model_with_linear(**extract_model_inputs(batch))
-
-        assert "test_task1" in output
-        assert output["test_task1"].shape[0] == 3
 
     def test_forward_heterogeneous_cnn(self, model_with_cnn):
-        """Test forward pass with heterogeneous batch using CNNEmbedding."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
-        data1 = create_data_sample(
-            num_channels=4, sampling_rate=100.0, session_id="s1"
-        )
-        data2 = create_data_sample(
-            num_channels=8, sampling_rate=250.0, session_id="s2"
-        )
-
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-
+        """Forward pass works with CNNEmbedding and heterogeneous channels."""
         model_with_cnn.session_emb.initialize_vocab(["s1", "s2"])
         model_with_cnn.channel_emb.initialize_vocab(
-            [f"ch{i}" for i in range(8)]
+            [f"ch{i}" for i in range(NUM_CHANNELS)]
         )
 
-        tokens1 = model_with_cnn.tokenize(patched1)
-        tokens2 = model_with_cnn.tokenize(patched2)
+        data1 = create_data_sample(num_channels=4, session_id="s1")
+        data2 = create_data_sample(num_channels=NUM_CHANNELS, session_id="s2")
+
+        tokens1 = model_with_cnn.tokenize(data1)
+        tokens2 = model_with_cnn.tokenize(data2)
 
         batch = collate([tokens1, tokens2])
-
         output = model_with_cnn(**extract_model_inputs(batch))
 
         assert "test_task1" in output
         assert output["test_task1"].shape[0] == 2
 
     def test_forward_heterogeneous_mlp(self, model_with_mlp):
-        """Test forward pass with heterogeneous batch using MLPEmbedding."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
-        data1 = create_data_sample(
-            num_channels=4, sampling_rate=100.0, session_id="s1"
-        )
-        data2 = create_data_sample(
-            num_channels=8, sampling_rate=250.0, session_id="s2"
-        )
-
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-
+        """Forward pass works with MLPEmbedding and heterogeneous channels."""
         model_with_mlp.session_emb.initialize_vocab(["s1", "s2"])
         model_with_mlp.channel_emb.initialize_vocab(
-            [f"ch{i}" for i in range(8)]
+            [f"ch{i}" for i in range(NUM_CHANNELS)]
         )
 
-        tokens1 = model_with_mlp.tokenize(patched1)
-        tokens2 = model_with_mlp.tokenize(patched2)
+        data1 = create_data_sample(num_channels=4, session_id="s1")
+        data2 = create_data_sample(num_channels=NUM_CHANNELS, session_id="s2")
+
+        tokens1 = model_with_mlp.tokenize(data1)
+        tokens2 = model_with_mlp.tokenize(data2)
 
         batch = collate([tokens1, tokens2])
-
         output = model_with_mlp(**extract_model_inputs(batch))
 
         assert "test_task1" in output
         assert output["test_task1"].shape[0] == 2
 
-    def test_embedding_projection_caching(self, model_with_linear):
-        """Test that different patch sizes create separate cached projections."""
-        patching = Patching(patch_duration=0.5, stride=0.5)
-
-        data1 = create_data_sample(num_channels=4, sampling_rate=100.0)
-        data2 = create_data_sample(num_channels=4, sampling_rate=250.0)
-
-        patched1 = patching(data1)
-        patched2 = patching(data2)
-
-        model_with_linear.session_emb.initialize_vocab(["session1"])
+    def test_forward_three_samples(self, model_with_linear):
+        """Forward pass works with 3 samples of varying channel counts."""
+        model_with_linear.session_emb.initialize_vocab(["s1", "s2", "s3"])
         model_with_linear.channel_emb.initialize_vocab(
-            [f"ch{i}" for i in range(4)]
+            [f"ch{i}" for i in range(NUM_CHANNELS)]
         )
 
-        model_with_linear.tokenize(patched1)
-        model_with_linear.tokenize(patched2)
+        data1 = create_data_sample(num_channels=2, session_id="s1")
+        data2 = create_data_sample(num_channels=6, session_id="s2")
+        data3 = create_data_sample(num_channels=NUM_CHANNELS, session_id="s3")
 
-        assert len(model_with_linear.input_embedding.projections) == 0
+        tokens1 = model_with_linear.tokenize(data1)
+        tokens2 = model_with_linear.tokenize(data2)
+        tokens3 = model_with_linear.tokenize(data3)
 
-        tokens1 = model_with_linear.tokenize(patched1)
-        tokens2 = model_with_linear.tokenize(patched2)
+        batch = collate([tokens1, tokens2, tokens3])
+        output = model_with_linear(**extract_model_inputs(batch))
 
-        batch1 = collate([tokens1])
-        batch2 = collate([tokens2])
-
-        model_with_linear(**extract_model_inputs(batch1))
-        assert len(model_with_linear.input_embedding.projections) == 1
-
-        model_with_linear(**extract_model_inputs(batch2))
-        assert len(model_with_linear.input_embedding.projections) == 2
+        assert "test_task1" in output
+        assert output["test_task1"].shape[0] == 3

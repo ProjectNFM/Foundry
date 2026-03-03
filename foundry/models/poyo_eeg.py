@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from temporaldata import Data
-from torch_brain.data import chain, pad8, pad2d
+from torch_brain.data import chain, pad8
 from torch_brain.nn import (
     Embedding,
     InfiniteVocabEmbedding,
@@ -51,11 +51,11 @@ class POYOEEGModel(nn.Module):
         emb_init_scale: float = 0.02,
         t_min: float = 1e-4,
         t_max: float = 2.0627,
-        context_mode: str = "add",
     ):
         """
         Args:
-            input_embedding: Module that converts raw inputs to embeddings
+            input_embedding: Module that converts raw inputs to embeddings.
+                Receives (batch, num_patches, num_channels, patch_samples).
             readout_specs: List/dict of task specifications for multitask readout.
                 Can be ModalitySpec objects or string names that resolve from registry.
             embed_dim: Embedding dimension (must match components)
@@ -74,28 +74,16 @@ class POYOEEGModel(nn.Module):
             emb_init_scale: Initialization scale for embeddings
             t_min: Minimum time value for rotary encoding
             t_max: Maximum time value for rotary encoding
-            context_mode: How to combine context embeddings with input embeddings.
-                'add': Add channel and session embeddings to input embeddings
-                'concat': Concatenate embeddings and project back to embed_dim
         """
         super().__init__()
-
-        if context_mode not in ["add", "concat"]:
-            raise ValueError(
-                f"context_mode must be 'add' or 'concat', got '{context_mode}'"
-            )
 
         self.input_embedding = input_embedding
         self.embed_dim = embed_dim
         self.sequence_length = sequence_length
         self.latent_step = latent_step
         self.num_latents_per_step = num_latents_per_step
-        self.context_mode = context_mode
 
-        self.patching = Patching(
-            patch_duration=patch_duration,
-            stride=stride if stride is not None else patch_duration,
-        )
+        self.patching = Patching(patch_duration=patch_duration, stride=stride)
 
         self._readout_specs = resolve_readout_specs(readout_specs)
         self.global_to_local_task_id = {
@@ -137,13 +125,6 @@ class POYOEEGModel(nn.Module):
             readout_specs=self.readout_specs,
         )
 
-        if self.context_mode == "concat":
-            self.context_projection = nn.Linear(
-                3 * self.embed_dim, self.embed_dim
-            )
-            nn.init.xavier_uniform_(self.context_projection.weight, gain=1.0)
-            nn.init.zeros_(self.context_projection.bias)
-
     def forward(
         self,
         *,
@@ -163,11 +144,11 @@ class POYOEEGModel(nn.Module):
         Forward pass through the model.
 
         Args:
-            input_values: Flattened input tokens (batch_size, n_tokens, patch_samples)
-            input_timestamps: Timestamps per token (batch_size, n_tokens)
-            input_channel_index: Channel index per token (batch_size, n_tokens)
+            input_values: Patched signal (batch_size, num_patches, num_channels, patch_samples)
+            input_timestamps: Timestamps per patch (batch_size, num_patches)
+            input_channel_index: Channel tokens (batch_size, num_channels)
             input_session_index: Session index for input (batch_size,)
-            input_mask: Optional mask for input tokens (batch_size, n_tokens, patch_samples)
+            input_mask: Optional channel validity mask (batch_size, num_channels)
             latent_index: Indices for latent tokens (batch_size, n_latent)
             latent_timestamps: Timestamps for latent tokens (batch_size, n_latent)
             output_session_index: Session indices for output queries (batch_size, n_out)
@@ -180,19 +161,15 @@ class POYOEEGModel(nn.Module):
         """
         self._validate_vocab_initialization()
 
-        inputs = self.input_embedding(input_values)
-
-        # pad2d and pad8 can produce different sequence lengths when token
-        # count is not a multiple of 8; align 1-D tensors to match inputs.
-        n_tokens = inputs.shape[1]
-        input_timestamps = input_timestamps[:, :n_tokens]
-        input_channel_index = input_channel_index[:, :n_tokens]
-        if input_mask is not None:
-            input_mask = input_mask[:, :n_tokens]
-
-        inputs = self._add_context_embeddings(
-            inputs, input_channel_index, input_session_index
+        inputs = self.input_embedding(
+            input_values,
+            input_channel_index=input_channel_index,
+            input_mask=input_mask,
         )
+
+        session_emb = self.session_emb(input_session_index).unsqueeze(1)
+        inputs = inputs + session_emb
+
         input_timestamp_emb = self.rotary_emb(input_timestamps)
 
         latents = self.latent_emb(latent_index)
@@ -214,7 +191,6 @@ class POYOEEGModel(nn.Module):
             latent_timestamp_emb=latent_timestamp_emb,
             output_queries=output_queries,
             output_timestamp_emb=output_timestamp_emb,
-            input_mask=input_mask,
         )
 
         output = self.readout(
@@ -251,6 +227,9 @@ class POYOEEGModel(nn.Module):
     def tokenize(self, data: Data) -> dict:
         """
         Tokenize the input data. Performs patching internally and converts to model tokens.
+
+        The signal is kept in its natural (num_patches, num_channels, patch_samples) shape.
+        Only the channel dimension is padded to match the embedding layer's num_channels.
 
         Args:
             data: TemporalData object containing raw EEG/ECoG/sEEG signal.
@@ -296,16 +275,30 @@ class POYOEEGModel(nn.Module):
         patch_center_times = signal_source.timestamps
 
         channel_ids = data.channels.id[modality_mask].astype(str)
-        channel_tokens = self.channel_emb.tokenizer(channel_ids)
+        channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
 
-        num_patches, num_channels, patch_samples = patches_array.shape
+        num_patches, num_channels_actual, patch_samples = patches_array.shape
+        num_channels = self.input_embedding.num_channels
 
-        flattened_patches = patches_array.transpose(1, 0, 2).reshape(
-            num_channels * num_patches, patch_samples
+        if num_channels_actual > num_channels:
+            raise ValueError(
+                f"Data has {num_channels_actual} channels but model expects "
+                f"at most {num_channels}"
+            )
+
+        padded_signal = np.zeros(
+            (num_patches, num_channels, patch_samples),
+            dtype=patches_array.dtype,
         )
+        padded_signal[:, :num_channels_actual, :] = patches_array
 
-        channel_index_expanded = np.repeat(channel_tokens, num_patches)
-        timestamps_expanded = np.tile(patch_center_times, num_channels)
+        padded_channel_tokens = np.zeros(
+            num_channels, dtype=channel_tokens.dtype
+        )
+        padded_channel_tokens[:num_channels_actual] = channel_tokens
+
+        channel_mask = np.zeros(num_channels, dtype=bool)
+        channel_mask[:num_channels_actual] = True
 
         latent_index, latent_timestamps = create_linspace_latent_tokens(
             start,
@@ -332,16 +325,16 @@ class POYOEEGModel(nn.Module):
             input_session_index, len(output_timestamps)
         )
 
-        input_mask = torch.ones(num_channels * num_patches, dtype=torch.bool)
-
-        tokenized_data = {
-            "input_values": pad2d(torch.from_numpy(flattened_patches).float()),
-            "input_timestamps": pad8(
-                torch.from_numpy(timestamps_expanded).float()
-            ),
-            "input_channel_index": pad8(channel_index_expanded),
+        return {
+            "input_values": torch.from_numpy(padded_signal).float(),
+            "input_timestamps": torch.from_numpy(
+                np.asarray(patch_center_times)
+            ).float(),
+            "input_channel_index": torch.from_numpy(
+                padded_channel_tokens
+            ).long(),
             "input_session_index": input_session_index,
-            "input_mask": pad8(input_mask),
+            "input_mask": torch.from_numpy(channel_mask),
             "latent_index": latent_index,
             "latent_timestamps": latent_timestamps,
             "output_session_index": pad8(output_session_index),
@@ -353,8 +346,6 @@ class POYOEEGModel(nn.Module):
             "absolute_start": data.absolute_start,
             "eval_mask": chain(output_eval_mask, allow_missing_keys=True),
         }
-
-        return tokenized_data
 
     def initialize_vocabs(self, vocab_info: dict):
         """Initialize vocabularies from dataset information.
@@ -384,33 +375,3 @@ class POYOEEGModel(nn.Module):
                 "Session vocabulary has not been initialized, please use "
                 "`model.session_emb.initialize_vocab(session_ids)`"
             )
-
-    def _add_context_embeddings(
-        self,
-        inputs: torch.Tensor,
-        input_channel_index: torch.Tensor,
-        input_session_index: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Combine channel and session embeddings with input token embeddings.
-
-        Args:
-            inputs: Token embeddings (batch_size, n_tokens, embed_dim)
-            input_channel_index: Channel indices per token (batch_size, n_tokens)
-            input_session_index: Session index (batch_size,)
-
-        Returns:
-            Inputs with channel and session context (batch_size, n_tokens, embed_dim)
-        """
-        channel_emb = self.channel_emb(input_channel_index)
-        session_emb = self.session_emb(input_session_index).unsqueeze(1)
-
-        if self.context_mode == "add":
-            return inputs + channel_emb + session_emb
-        else:
-            batch_size, n_tokens, _ = inputs.shape
-            session_emb_expanded = session_emb.expand(batch_size, n_tokens, -1)
-            concatenated = torch.cat(
-                [inputs, channel_emb, session_emb_expanded], dim=-1
-            )
-            return self.context_projection(concatenated)
