@@ -7,8 +7,8 @@ pin_memory: false
 window_length: ${hyperparameters.window_length}
 seed: 42
 
-split_type: intersubject
-task_type: behavior
+split_type: intrasession
+task_type: active_vs_inactive
 fold_number: ${hyperparameters.fold_number}
 recording_ids: 
  - "AJILE12_P01_20000102_ses3_pose_trajectories"

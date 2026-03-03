@@ -2,7 +2,7 @@
 
 defaults:
   - override /model: eeg_net_encoder
-  - override /data: ajile
+  - override /data: ajile_active_inactive_singlesess
 
 model:
   readout_specs:
@@ -12,8 +12,8 @@ model:
 
 run:
   name: ajile_eegnet_classifier
-  group: BASELINES
-  tags: [baselines, training, eeg_net_encoder, ajile]
+  group: DEBUG
+  tags: [debug, baselines, training, eeg_net_encoder, ajile]
   seed: 42
   log_level: INFO
 
