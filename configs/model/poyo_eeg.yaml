@@ -10,6 +10,7 @@ readout_specs:
 
 embed_dim: 128
 sequence_length: 1.0
+patch_duration: 0.1
 latent_step: 0.1
 num_latents_per_step: 1
 depth: 2

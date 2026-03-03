@@ -15,6 +15,7 @@ from torch_brain.nn import (
 from torch_brain.registry import ModalitySpec
 from torch_brain.utils import create_linspace_latent_tokens
 
+from foundry.data.transforms import Patching
 from foundry.models.backbones import PerceiverIOBackbone
 from foundry.models.utils import resolve_readout_specs
 
@@ -28,12 +29,16 @@ class POYOEEGModel(nn.Module):
     (encoder, processor, decoder) are built-in.
     """
 
+    SUPPORTED_MODALITIES = {"eeg", "ecog", "seeg", "ieeg"}
+
     def __init__(
         self,
         input_embedding: nn.Module,
         readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
         embed_dim: int,
         sequence_length: float,
+        patch_duration: float,
+        stride: Optional[float] = None,
         latent_step: float = 0.1,
         num_latents_per_step: int = 1,
         depth: int = 2,
@@ -55,6 +60,8 @@ class POYOEEGModel(nn.Module):
                 Can be ModalitySpec objects or string names that resolve from registry.
             embed_dim: Embedding dimension (must match components)
             sequence_length: Length of sequences in seconds
+            patch_duration: Duration of each patch in seconds
+            stride: Step size between patches in seconds. Defaults to patch_duration (non-overlapping).
             latent_step: Time step between latent tokens in seconds
             num_latents_per_step: Number of latent tokens per time step
             depth: Number of processor layers
@@ -84,6 +91,11 @@ class POYOEEGModel(nn.Module):
         self.latent_step = latent_step
         self.num_latents_per_step = num_latents_per_step
         self.context_mode = context_mode
+
+        self.patching = Patching(
+            patch_duration=patch_duration,
+            stride=stride if stride is not None else patch_duration,
+        )
 
         self._readout_specs = resolve_readout_specs(readout_specs)
         self.global_to_local_task_id = {
@@ -169,6 +181,15 @@ class POYOEEGModel(nn.Module):
         self._validate_vocab_initialization()
 
         inputs = self.input_embedding(input_values)
+
+        # pad2d and pad8 can produce different sequence lengths when token
+        # count is not a multiple of 8; align 1-D tensors to match inputs.
+        n_tokens = inputs.shape[1]
+        input_timestamps = input_timestamps[:, :n_tokens]
+        input_channel_index = input_channel_index[:, :n_tokens]
+        if input_mask is not None:
+            input_mask = input_mask[:, :n_tokens]
+
         inputs = self._add_context_embeddings(
             inputs, input_channel_index, input_session_index
         )
@@ -209,19 +230,38 @@ class POYOEEGModel(nn.Module):
         # Returns task specs
         return self._readout_specs
 
+    def _resolve_signal_source(self, data: Data):
+        """Find the signal source and default modality type from the data.
+
+        Searches for the first available modality field (eeg, ecog, seeg) on
+        the data object.
+
+        Returns:
+            Tuple of (signal_source, default_type) where signal_source is the
+            time series object and default_type is the uppercase modality name
+            used when channels.type is absent.
+        """
+        for modality in ["eeg", "ecog", "seeg"]:
+            signal = getattr(data, modality, None)
+            if signal is not None:
+                return signal, modality.upper()
+
+        raise ValueError("Data must have an 'eeg', 'ecog', or 'seeg' field")
+
     def tokenize(self, data: Data) -> dict:
         """
-        Tokenize the input data. Assumes data has already been patched.
+        Tokenize the input data. Performs patching internally and converts to model tokens.
 
         Args:
-            data: TemporalData object containing patched EEG signal and timestamps.
+            data: TemporalData object containing raw EEG/ECoG/sEEG signal.
                   If data.config["multitask_readout"] is set by the dataset, it will be
                   intersected with the model's readout_specs to use only supported modalities.
-                  The data.eeg field should already be patched (use Patching transform).
 
         Returns:
             dict with model_inputs, target_values, target_weights, and metadata
         """
+        data = self.patching(data)
+
         if not hasattr(data, "config") or data.config is None:
             data.config = {}
 
@@ -241,27 +281,21 @@ class POYOEEGModel(nn.Module):
 
         start, end = 0, self.sequence_length
 
-        if not hasattr(data, "eeg") or data.eeg is None:
-            raise ValueError("Data must have an 'eeg' field")
-
-        if data.eeg.signal.ndim != 3:
-            raise ValueError(
-                f"Data must be patched before tokenization. Expected 3D signal "
-                f"(num_patches, channels, patch_samples), got {data.eeg.signal.ndim}D "
-                f"with shape {data.eeg.signal.shape}. Use Patching transform first."
-            )
+        signal_source, default_type = self._resolve_signal_source(data)
 
         modality_field = (
-            data.channels.types.astype(str)
-            if hasattr(data.channels, "types")
-            else np.array(["EEG"] * len(data.channels)).astype(str)
+            data.channels.type.astype(str)
+            if hasattr(data.channels, "type")
+            else np.array([default_type] * len(data.channels)).astype(str)
         )
-        modality_mask = np.char.lower(modality_field) == "eeg"
+        modality_mask = np.isin(
+            np.char.lower(modality_field), list(self.SUPPORTED_MODALITIES)
+        )
 
-        patches_array = data.eeg.signal[:, modality_mask, :]
-        patch_center_times = data.eeg.timestamps
+        patches_array = signal_source.signal[:, modality_mask, :]
+        patch_center_times = signal_source.timestamps
 
-        channel_ids = data.channels.id[modality_mask]
+        channel_ids = data.channels.id[modality_mask].astype(str)
         channel_tokens = self.channel_emb.tokenizer(channel_ids)
 
         num_patches, num_channels, patch_samples = patches_array.shape
@@ -292,7 +326,6 @@ class POYOEEGModel(nn.Module):
             data,
             self.readout_specs,
         )
-        # HACK: We put the timestamps to zero here because for classification tasks we do not want to use them.
         output_timestamps = torch.zeros_like(output_timestamps)
 
         output_session_index = np.repeat(
