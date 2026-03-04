@@ -1,4 +1,4 @@
-max_epochs: 2
+max_epochs: 1
 output_dir: ./profiling_output
 
 schedule:
@@ -8,8 +8,8 @@ schedule:
   repeat: 1
 
 record_shapes: false
-profile_memory: true
+profile_memory: false
 with_stack: true
-with_flops: true
+with_flops: false
 row_limit: 30
 sort_by_key: cuda_time_total

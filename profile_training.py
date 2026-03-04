@@ -51,7 +51,7 @@ def main(cfg: DictConfig):
     """Training profiling entry point using PyTorch Lightning's PyTorchProfiler.
 
     Runs a real training loop with torch.profiler recording CPU and GPU activity,
-    producing Chrome/Perfetto traces and per-function summary tables.
+    producing Chrome/Perfetto traces viewable in TensorBoard.
     """
     setup_logging(cfg.run.log_level)
     seed_everything(cfg.run.seed, workers=True)
