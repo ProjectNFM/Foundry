@@ -4,6 +4,7 @@ defaults:
   - logger: wandb
   - _self_
   - trainer: default
+  - profiling: default
   - experiment: ???
 
 hyperparameters:
@@ -11,6 +12,7 @@ hyperparameters:
   window_length: ???
   patch_duration: ???
   fold_number: ???
+  num_workers: ???
 
 task:
   learning_rate: 1e-4
