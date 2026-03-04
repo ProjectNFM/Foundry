@@ -5,81 +5,46 @@ from foundry.models.embeddings.utils import get_activation
 
 
 class MLPEmbedding(nn.Module):
-    """
-    Converts variable-sized EEG tokens to fixed-size embeddings using MLP.
+    """Converts patched EEG signal to embeddings via MLP.
 
-    Uses dynamic MLP networks created on-the-fly based on input dimensions.
-    Each unique patch_samples size gets its own MLP.
+    Flattens the (channels, time) dimensions and passes through hidden layers.
     """
 
     def __init__(
         self,
         embed_dim: int,
+        num_channels: int,
+        patch_samples: int,
         hidden_dims: list[int],
         activation: str = "gelu",
     ):
-        """
-        Args:
-            embed_dim: Dimension of output embeddings
-            hidden_dims: List of hidden layer dimensions
-            activation: Activation function name (relu, gelu, silu, tanh, etc.)
-        """
         super().__init__()
         self.embed_dim = embed_dim
-        self.hidden_dims = hidden_dims
-        self.activation = activation
-        self.projections = nn.ModuleDict()
-        self.register_buffer("_device_tracker", torch.zeros(1))
+        self.num_channels = num_channels
+        self.patch_samples = patch_samples
 
-    def get_projection(self, patch_samples: int) -> nn.Module:
+        layers = []
+        input_dim = num_channels * patch_samples
+        for hidden_dim in hidden_dims:
+            layers.append(nn.Linear(input_dim, hidden_dim))
+            layers.append(get_activation(activation))
+            input_dim = hidden_dim
+        layers.append(nn.Linear(input_dim, embed_dim))
+
+        self.mlp = nn.Sequential(*layers)
+
+        for module in self.mlp:
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight, gain=1.0)
+                nn.init.zeros_(module.bias)
+
+    def forward(self, input_values: torch.Tensor, **kwargs) -> torch.Tensor:
         """
-        Get or create MLP projection for given patch size.
-
         Args:
-            patch_samples: Number of samples in each patch
+            input_values: (batch, num_patches, num_channels, patch_samples)
 
         Returns:
-            MLP that maps patches to embed_dim
+            (batch, num_patches, embed_dim)
         """
-        key = str(patch_samples)
-        if key not in self.projections:
-            layers = []
-            input_dim = patch_samples
-
-            for hidden_dim in self.hidden_dims:
-                layers.append(nn.Linear(input_dim, hidden_dim))
-                layers.append(get_activation(self.activation))
-                input_dim = hidden_dim
-
-            layers.append(nn.Linear(input_dim, self.embed_dim))
-
-            mlp = nn.Sequential(*layers)
-
-            for module in mlp:
-                if isinstance(module, nn.Linear):
-                    nn.init.xavier_uniform_(module.weight, gain=1.0)
-                    nn.init.zeros_(module.bias)
-
-            mlp = mlp.to(self._device_tracker.device)
-            self.projections[key] = mlp
-        return self.projections[key]
-
-    def forward(self, input_values: torch.Tensor) -> torch.Tensor:
-        """
-        Convert tokens to embeddings.
-
-        Args:
-            input_values: Tokens of shape (batch_size, num_tokens, patch_samples)
-
-        Returns:
-            Embeddings of shape (batch_size, num_tokens, embed_dim)
-        """
-        batch_size, num_tokens, patch_samples = input_values.shape
-        projection = self.get_projection(patch_samples)
-
-        flattened = input_values.view(batch_size * num_tokens, patch_samples)
-        embeddings = projection(flattened).view(
-            batch_size, num_tokens, self.embed_dim
-        )
-
-        return embeddings
+        batch, P, C, S = input_values.shape
+        return self.mlp(input_values.reshape(batch, P, C * S))

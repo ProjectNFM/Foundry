@@ -1,19 +1,21 @@
 # @package _global_
 
 defaults:
-  - override /model: eeg_net_encoder
+  - override /model: poyo_eeg
   - override /data: ajile_active_inactive_singlesess
 
 model:
   readout_specs:
     - ajile_inactive_active
-  num_channels: 94
-  num_samples: 500
+  patch_duration: ${hyperparameters.patch_duration}
+  input_embedding:
+    num_channels: 94
+    patch_samples: 50 
 
 run:
-  name: ajile_eegnet_classifier
+  name: ajile_poyo_eeg_classifier
   group: DEBUG
-  tags: [debug, baselines, training, eeg_net_encoder, ajile]
+  tags: [debug, baselines, training, poyo_eeg, ajile]
   seed: 42
   log_level: INFO
 
@@ -22,3 +24,4 @@ hyperparameters:
   window_length: 1.0
   patch_duration: 0.1
   fold_number: 0
+  num_workers: 5

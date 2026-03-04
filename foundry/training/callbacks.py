@@ -43,21 +43,17 @@ class VocabInitializerCallback(L.Callback):
                 "Call trainer.fit(module, datamodule=dm) or set trainer.datamodule."
             )
 
-        # Get dataset from datamodule
-        if not hasattr(datamodule, "dataset") or datamodule.dataset is None:
-            raise RuntimeError(
-                "VocabInitializerCallback requires datamodule.dataset to be set during setup(). "
-                "Ensure setup() is called before training."
-            )
-
-        dataset = datamodule.dataset
-
-        # Initialize vocabularies
+        # Initialize vocabularies from datamodule or its underlying dataset
         vocab_info = {}
-        if hasattr(dataset, "get_recording_ids"):
-            vocab_info["session_ids"] = dataset.get_recording_ids()
+        dataset = getattr(datamodule, "dataset", None)
 
-        if hasattr(dataset, "get_channel_ids"):
-            vocab_info["channel_ids"] = dataset.get_channel_ids()
+        for method_name, key in [
+            ("get_recording_ids", "session_ids"),
+            ("get_channel_ids", "channel_ids"),
+        ]:
+            if hasattr(datamodule, method_name):
+                vocab_info[key] = getattr(datamodule, method_name)()
+            elif dataset is not None and hasattr(dataset, method_name):
+                vocab_info[key] = getattr(dataset, method_name)()
 
         model.initialize_vocabs(vocab_info)
