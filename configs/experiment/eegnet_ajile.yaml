@@ -22,3 +22,4 @@ hyperparameters:
   window_length: 1.0
   patch_duration: 0.1
   fold_number: 0
+  num_workers: 0

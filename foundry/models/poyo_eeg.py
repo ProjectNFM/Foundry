@@ -82,6 +82,14 @@ class POYOEEGModel(nn.Module):
         self.sequence_length = sequence_length
         self.latent_step = latent_step
         self.num_latents_per_step = num_latents_per_step
+        self._latent_index, self._latent_timestamps = (
+            create_linspace_latent_tokens(
+                0,
+                self.sequence_length,
+                step=self.latent_step,
+                num_latents_per_step=self.num_latents_per_step,
+            )
+        )
 
         self.patching = Patching(patch_duration=patch_duration, stride=stride)
 
@@ -258,8 +266,6 @@ class POYOEEGModel(nn.Module):
                 if name in self.readout_specs
             ]
 
-        start, end = 0, self.sequence_length
-
         signal_source, default_type = self._resolve_signal_source(data)
 
         modality_field = (
@@ -300,12 +306,8 @@ class POYOEEGModel(nn.Module):
         channel_mask = np.zeros(num_channels, dtype=bool)
         channel_mask[:num_channels_actual] = True
 
-        latent_index, latent_timestamps = create_linspace_latent_tokens(
-            start,
-            end,
-            step=self.latent_step,
-            num_latents_per_step=self.num_latents_per_step,
-        )
+        latent_index = self._latent_index
+        latent_timestamps = self._latent_timestamps
 
         input_session_index = self.session_emb.tokenizer(data.session.id)
 
@@ -321,8 +323,8 @@ class POYOEEGModel(nn.Module):
         )
         output_timestamps = torch.zeros_like(output_timestamps)
 
-        output_session_index = np.repeat(
-            input_session_index, len(output_timestamps)
+        output_session_index = np.full(
+            len(output_timestamps), input_session_index
         )
 
         return {
