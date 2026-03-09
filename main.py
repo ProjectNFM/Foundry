@@ -1,14 +1,19 @@
 import logging
+import os
 
 import hydra
 from hydra.utils import instantiate
 from lightning import seed_everything
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from rich.logging import RichHandler
 
+from foundry.tools.stage_data import stage_data
 from foundry.training import EEGTask
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_SOURCE_ROOT = "../scratch/brainsets/processed"
+DEFAULT_COMPRESSED_ROOT = "../scratch/brainsets/compressed"
 
 
 def setup_logging(log_level: str):
@@ -35,10 +40,25 @@ def main(cfg: DictConfig):
     seed_everything(cfg.run.seed, workers=True)
     logger.info(f"Starting training: {cfg.run.name}")
 
+    slurm_tmpdir = os.environ.get("SLURM_TMPDIR")
+    if slurm_tmpdir:
+        stage_cfg = OmegaConf.to_container(
+            cfg.get("stage", OmegaConf.create({})), resolve=True
+        )
+        new_root = stage_data(
+            data_cfg=cfg.data,
+            source_root=stage_cfg.get("source_root", DEFAULT_SOURCE_ROOT),
+            compressed_root=stage_cfg.get(
+                "compressed_root", DEFAULT_COMPRESSED_ROOT
+            ),
+            dest_root=slurm_tmpdir,
+            compress=stage_cfg.get("compress", False),
+        )
+        OmegaConf.update(cfg, "data.root", new_root)
+        logger.info("Data staged to %s", new_root)
+
     model = instantiate(cfg.model)
 
-    # Instantiate datamodule without passing model
-    # Tokenization is now handled via transforms parameter
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)
 
