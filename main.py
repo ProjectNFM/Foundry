@@ -52,6 +52,7 @@ def main(cfg: DictConfig):
                 "compressed_root", DEFAULT_COMPRESSED_ROOT
             ),
             dest_root=slurm_tmpdir,
+            compress=stage_cfg.get("compress", False),
         )
         OmegaConf.update(cfg, "data.root", new_root)
         logger.info("Data staged to %s", new_root)
