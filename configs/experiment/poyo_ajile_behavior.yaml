@@ -5,8 +5,6 @@ defaults:
   - override /data: ajile_singlesess
 
 model:
-  readout_specs:
-    - ajile_active_behavior
   patch_duration: ${hyperparameters.patch_duration}
   input_embedding:
     num_channels: 94

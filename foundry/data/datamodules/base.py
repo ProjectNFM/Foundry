@@ -23,6 +23,9 @@ class NeuralDataModule(LightningDataModule):
     `get_recording_ids()` methods. Model-specific preprocessing (tokenization)
     is applied as a transform, making the datamodule reusable.
 
+    Subclasses should define ``TASK_TO_READOUT`` to map their task_type values
+    to the corresponding readout spec names used by the model.
+
     Usage:
         dm = NeuralDataModule(
             dataset_class=MyDataset,
@@ -34,6 +37,21 @@ class NeuralDataModule(LightningDataModule):
         )
         trainer.fit(module, dm)
     """
+
+    TASK_TO_READOUT: dict[str, list[str]] = {}
+
+    @classmethod
+    def get_readout_specs_for_task(cls, task_type: str) -> list[str]:
+        if not cls.TASK_TO_READOUT:
+            raise ValueError(
+                f"{cls.__name__} does not define a TASK_TO_READOUT mapping"
+            )
+        if task_type not in cls.TASK_TO_READOUT:
+            raise ValueError(
+                f"Unknown task_type '{task_type}' for {cls.__name__}. "
+                f"Available: {list(cls.TASK_TO_READOUT.keys())}"
+            )
+        return cls.TASK_TO_READOUT[task_type]
 
     def __init__(
         self,

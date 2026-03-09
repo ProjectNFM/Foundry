@@ -5,6 +5,11 @@ from typing import Optional, Callable, Literal
 
 
 class AjileDataModule(NeuralDataModule):
+    TASK_TO_READOUT = {
+        "active_vs_inactive": ["ajile_inactive_active"],
+        "behavior": ["ajile_active_behavior"],
+    }
+
     def __init__(
         self,
         root: str,

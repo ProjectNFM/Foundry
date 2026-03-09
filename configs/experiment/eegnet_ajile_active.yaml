@@ -5,8 +5,6 @@ defaults:
   - override /data: ajile_singlesess
 
 model:
-  readout_specs:
-    - ajile_inactive_active
   num_channels: 94
   num_samples: 500
 
