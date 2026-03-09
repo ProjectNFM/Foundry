@@ -6,9 +6,9 @@ import hydra
 import torch
 import torch.profiler
 from hydra.core.hydra_config import HydraConfig
-from hydra.utils import instantiate
+from hydra.utils import get_class, instantiate
 from lightning import seed_everything
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from rich.logging import RichHandler
 
 from foundry.training import EEGTask
@@ -58,6 +58,13 @@ def main(cfg: DictConfig):
 
     run_tag = _build_run_tag(cfg)
     logger.info(f"Starting profiling run: {run_tag}")
+
+    if OmegaConf.select(cfg, "data.task_type") is not None:
+        DataModuleClass = get_class(cfg.data._target_)
+        readout_specs = DataModuleClass.get_readout_specs_for_task(
+            cfg.data.task_type
+        )
+        OmegaConf.update(cfg, "model.readout_specs", readout_specs)
 
     model = instantiate(cfg.model)
 
