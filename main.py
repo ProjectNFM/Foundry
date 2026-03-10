@@ -57,14 +57,12 @@ def main(cfg: DictConfig):
         OmegaConf.update(cfg, "data.root", new_root)
         logger.info("Data staged to %s", new_root)
 
-    if OmegaConf.select(cfg, "data.task_type") is not None:
-        DataModuleClass = get_class(cfg.data._target_)
-        readout_specs = DataModuleClass.get_readout_specs_for_task(
-            cfg.data.task_type
-        )
-        OmegaConf.update(cfg, "model.readout_specs", readout_specs)
+    DataModuleClass = get_class(cfg.data._target_)
+    readout_specs = DataModuleClass.get_readout_specs_for_task(
+        cfg.data.task_type
+    )
 
-    model = instantiate(cfg.model)
+    model = instantiate(cfg.model, readout_specs=readout_specs)
 
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)
