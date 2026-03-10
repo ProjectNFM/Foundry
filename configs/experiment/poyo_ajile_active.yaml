@@ -2,15 +2,17 @@
 
 defaults:
   - override /model: poyo_eeg
-  - override /data: ajile_active_inactive_singlesess
+  - override /data: ajile_singlesess
 
 model:
-  readout_specs:
-    - ajile_inactive_active
   patch_duration: ${hyperparameters.patch_duration}
   input_embedding:
     num_channels: 94
     patch_samples: 50 
+
+data:
+  split_type: intrasession
+  task_type: active_vs_inactive
 
 run:
   name: ajile_poyo_eeg_classifier

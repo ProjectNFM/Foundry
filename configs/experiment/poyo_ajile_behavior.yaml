@@ -1,0 +1,29 @@
+# @package _global_
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: ajile_singlesess
+
+model:
+  patch_duration: ${hyperparameters.patch_duration}
+  input_embedding:
+    num_channels: 94
+    patch_samples: 50 
+
+data:
+  split_type: intrasession
+  task_type: behavior
+
+run:
+  name: ajile_poyo_eeg_behavior_classifier
+  group: DEBUG
+  tags: [debug, baselines, training, poyo_eeg, ajile]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 64 
+  window_length: 1.0
+  patch_duration: 0.1
+  fold_number: 0
+  num_workers: 5

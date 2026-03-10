@@ -2,13 +2,15 @@
 
 defaults:
   - override /model: eeg_net_encoder
-  - override /data: ajile_active_inactive_singlesess
+  - override /data: ajile_singlesess
 
 model:
-  readout_specs:
-    - ajile_inactive_active
   num_channels: 94
   num_samples: 500
+
+data:
+  split_type: intrasession
+  task_type: active_vs_inactive
 
 run:
   name: ajile_eegnet_classifier
@@ -22,4 +24,4 @@ hyperparameters:
   window_length: 1.0
   patch_duration: 0.1
   fold_number: 0
-  num_workers: 0
+  num_workers: 5

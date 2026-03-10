@@ -15,6 +15,12 @@ class PhysionetDataModule(NeuralDataModule):
     initialization via callbacks rather than tight coupling to the model.
     """
 
+    TASK_TO_READOUT = {
+        "MotorImagery": ["motor_imagery_5class"],
+        "LeftRightImagery": ["motor_imagery_left_right"],
+        "RightHandFeetImagery": ["motor_imagery_right_feet"],
+    }
+
     def __init__(
         self,
         root: str,

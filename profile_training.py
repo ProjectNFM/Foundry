@@ -6,7 +6,7 @@ import hydra
 import torch
 import torch.profiler
 from hydra.core.hydra_config import HydraConfig
-from hydra.utils import instantiate
+from hydra.utils import get_class, instantiate
 from lightning import seed_everything
 from omegaconf import DictConfig
 from rich.logging import RichHandler
@@ -59,7 +59,12 @@ def main(cfg: DictConfig):
     run_tag = _build_run_tag(cfg)
     logger.info(f"Starting profiling run: {run_tag}")
 
-    model = instantiate(cfg.model)
+    DataModuleClass = get_class(cfg.data._target_)
+    readout_specs = DataModuleClass.get_readout_specs_for_task(
+        cfg.data.task_type
+    )
+
+    model = instantiate(cfg.model, readout_specs=readout_specs)
 
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)

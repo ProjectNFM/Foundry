@@ -2,7 +2,7 @@ import logging
 import os
 
 import hydra
-from hydra.utils import instantiate
+from hydra.utils import get_class, instantiate
 from lightning import seed_everything
 from omegaconf import DictConfig, OmegaConf
 from rich.logging import RichHandler
@@ -57,7 +57,12 @@ def main(cfg: DictConfig):
         OmegaConf.update(cfg, "data.root", new_root)
         logger.info("Data staged to %s", new_root)
 
-    model = instantiate(cfg.model)
+    DataModuleClass = get_class(cfg.data._target_)
+    readout_specs = DataModuleClass.get_readout_specs_for_task(
+        cfg.data.task_type
+    )
+
+    model = instantiate(cfg.model, readout_specs=readout_specs)
 
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)
