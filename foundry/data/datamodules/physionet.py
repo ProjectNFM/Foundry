@@ -21,6 +21,19 @@ class PhysionetDataModule(NeuralDataModule):
         "RightHandFeetImagery": ["motor_imagery_right_feet"],
     }
 
+    # TODO: Add the actual class names for these
+    READOUT_CLASS_NAMES: dict[str, list[str]] = {
+        "motor_imagery_5class": [
+            "Rest",
+            "Left hand",
+            "Right hand",
+            "Feet",
+            "Tongue",
+        ],
+        "motor_imagery_left_right": ["Left hand", "Right hand"],
+        "motor_imagery_right_feet": ["Right hand", "Feet"],
+    }
+
     def __init__(
         self,
         root: str,

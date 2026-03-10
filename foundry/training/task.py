@@ -56,17 +56,21 @@ class EEGTask(L.LightningModule):
         model: nn.Module,
         learning_rate: float = 1e-4,
         weight_decay: float = 0.01,
+        class_names: dict[str, list[str]] | None = None,
     ):
         """
         Args:
             model: EEGModel instance to train
             learning_rate: Learning rate for optimizer
             weight_decay: Weight decay for optimizer
+            class_names: Optional mapping of readout name -> list of class labels
+                         for confusion matrix display (e.g. from DataModule.get_class_names_for_task)
         """
         super().__init__()
         self.model = model
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
+        self._class_names = class_names or {}
 
         self.save_hyperparameters(ignore=["model"])
 
@@ -246,7 +250,8 @@ class EEGTask(L.LightningModule):
 
         for task_name, cm in self.val_confusion_matrices.items():
             matrix = cm.compute()
-            fig = self._plot_confusion_matrix(matrix, task_name)
+            class_names = self._class_names.get(task_name)
+            fig = self._plot_confusion_matrix(matrix, task_name, class_names)
 
             if self.logger:
                 if isinstance(self.logger, WandbLogger):
@@ -374,23 +379,67 @@ class EEGTask(L.LightningModule):
 
         return loss_mt, taskwise_loss
 
-    def _plot_confusion_matrix(self, matrix: torch.Tensor, task_name: str):
-        """
-        Create a matplotlib figure for the confusion matrix.
+    def _plot_confusion_matrix(
+        self,
+        matrix: torch.Tensor,
+        task_name: str,
+        class_names: list[str] | None = None,
+    ):
+        """Create a matplotlib figure for the confusion matrix.
 
-        Args:
-            matrix: Confusion matrix tensor
-            task_name: Name of the task for the title
-
-        Returns:
-            matplotlib Figure object
+        Displays per-cell counts and row-normalized percentages, with class
+        labels and per-class sample totals on the axes.
         """
         import matplotlib.pyplot as plt
+        import numpy as np
 
-        fig, ax = plt.subplots(figsize=(8, 8))
-        ax.imshow(matrix.cpu().numpy(), cmap="Blues")
-        ax.set_title(f"{task_name} Confusion Matrix")
+        cm = matrix.cpu().numpy()
+        n_classes = cm.shape[0]
+        row_sums = cm.sum(axis=1)
+        total_samples = int(cm.sum())
+
+        cm_normalized = np.zeros_like(cm, dtype=float)
+        for i in range(n_classes):
+            if row_sums[i] > 0:
+                cm_normalized[i] = cm[i] / row_sums[i]
+
+        if class_names is None:
+            class_names = [str(i) for i in range(n_classes)]
+
+        fig, ax = plt.subplots(
+            figsize=(max(6, n_classes + 2), max(6, n_classes + 2))
+        )
+        im = ax.imshow(cm_normalized, cmap="Blues", vmin=0, vmax=1)
+
+        for i in range(n_classes):
+            for j in range(n_classes):
+                count = int(cm[i, j])
+                pct = cm_normalized[i, j] * 100
+                color = "white" if cm_normalized[i, j] > 0.5 else "black"
+                ax.text(
+                    j,
+                    i,
+                    f"{count}\n{pct:.1f}%",
+                    ha="center",
+                    va="center",
+                    color=color,
+                    fontsize=10,
+                )
+
+        y_labels = [
+            f"{name} (n={int(row_sums[i])})"
+            for i, name in enumerate(class_names)
+        ]
+
+        ax.set_xticks(range(n_classes))
+        ax.set_yticks(range(n_classes))
+        ax.set_xticklabels(class_names, rotation=45, ha="right")
+        ax.set_yticklabels(y_labels)
+
         ax.set_xlabel("Predicted")
         ax.set_ylabel("True")
+        ax.set_title(f"{task_name} (N={total_samples})")
+
+        fig.colorbar(im, ax=ax, label="Row-normalized ratio", shrink=0.8)
         plt.tight_layout()
         return fig

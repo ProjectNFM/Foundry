@@ -10,6 +10,11 @@ class AjileDataModule(NeuralDataModule):
         "behavior": ["ajile_active_behavior"],
     }
 
+    READOUT_CLASS_NAMES: dict[str, list[str]] = {
+        "ajile_inactive_active": ["Active", "Inactive"],
+        "ajile_active_behavior": ["Eat", "Talk", "TV", "Computer/Phone"],
+    }
+
     def __init__(
         self,
         root: str,
