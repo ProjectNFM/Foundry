@@ -39,6 +39,16 @@ class NeuralDataModule(LightningDataModule):
     """
 
     TASK_TO_READOUT: dict[str, list[str]] = {}
+    READOUT_CLASS_NAMES: dict[str, list[str]] = {}
+
+    @classmethod
+    def get_class_names_for_task(cls, task_type: str) -> dict[str, list[str]]:
+        readout_names = cls.get_readout_specs_for_task(task_type)
+        return {
+            name: cls.READOUT_CLASS_NAMES[name]
+            for name in readout_names
+            if name in cls.READOUT_CLASS_NAMES
+        }
 
     @classmethod
     def get_readout_specs_for_task(cls, task_type: str) -> list[str]:
