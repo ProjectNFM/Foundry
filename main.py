@@ -7,6 +7,7 @@ from lightning import seed_everything
 from omegaconf import DictConfig, OmegaConf
 from rich.logging import RichHandler
 
+from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
 from foundry.tools.stage_data import stage_data
 from foundry.training import EEGTask
 
@@ -29,13 +30,8 @@ def setup_logging(log_level: str):
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
+@hydra_main_wrapper
 def main(cfg: DictConfig):
-    """
-    Main training entry point using Hydra configuration.
-
-    Args:
-        cfg: Hydra configuration object
-    """
     setup_logging(cfg.run.log_level)
     seed_everything(cfg.run.seed, workers=True)
     logger.info(f"Starting training: {cfg.run.name}")
@@ -74,4 +70,5 @@ def main(cfg: DictConfig):
 
 
 if __name__ == "__main__":
+    register_resolvers()
     main()

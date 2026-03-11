@@ -11,6 +11,7 @@ from lightning import seed_everything
 from omegaconf import DictConfig
 from rich.logging import RichHandler
 
+from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
 from foundry.training import EEGTask
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ def _build_run_tag(cfg: DictConfig) -> str:
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
+@hydra_main_wrapper
 def main(cfg: DictConfig):
     """Training profiling entry point using PyTorch Lightning's PyTorchProfiler.
 
@@ -119,4 +121,5 @@ def main(cfg: DictConfig):
 
 
 if __name__ == "__main__":
+    register_resolvers()
     main()

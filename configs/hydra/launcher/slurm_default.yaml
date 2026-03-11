@@ -1,0 +1,18 @@
+defaults:
+  - submitit_slurm
+
+_target_: hydra_plugins.foundry_launcher.packed_launcher.SlurmLauncher
+submitit_folder: ${hydra.sweep.dir}/%j
+stderr_to_stdout: true
+timeout_min: 720
+tasks_per_node: 1
+cpus_per_task: ${hyperparameters.num_workers}
+nodes: 1
+mem_gb: 32
+gres: gpu:1
+array_parallelism: 256
+setup:
+  - "set -a"
+  - "source .env"
+  - "set +a"
+  - "export RANK=0"
