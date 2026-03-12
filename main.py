@@ -10,7 +10,6 @@ from rich.logging import RichHandler
 
 from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
 from foundry.tools.stage_data import stage_data
-from foundry.training import EEGTask
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +26,7 @@ def _log_config_to_wandb(trainer, cfg: DictConfig):
         "hyperparameters",
         "model",
         "data",
-        "task",
+        "module",
         "trainer",
     ]
     config_to_log = {
@@ -86,11 +85,11 @@ def main(cfg: DictConfig):
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)
 
-    task = EEGTask(model=model, **cfg.task)
+    eeg_module = instantiate(cfg.module, model=model)
 
     trainer = instantiate(cfg.trainer)
     _log_config_to_wandb(trainer, cfg)
-    trainer.fit(task, datamodule)
+    trainer.fit(eeg_module, datamodule)
 
 
 if __name__ == "__main__":

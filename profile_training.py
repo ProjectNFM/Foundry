@@ -12,7 +12,6 @@ from omegaconf import DictConfig
 from rich.logging import RichHandler
 
 from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
-from foundry.training import EEGTask
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +70,7 @@ def main(cfg: DictConfig):
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)
 
-    task = EEGTask(model=model, **cfg.task)
+    eeg_module = instantiate(cfg.module, model=model)
 
     prof_cfg = cfg.profiling
     output_dir = Path(prof_cfg.output_dir) / run_tag
@@ -115,7 +114,7 @@ def main(cfg: DictConfig):
     )
 
     logger.info(f"Running profiling for {prof_cfg.max_epochs} epoch(s)")
-    trainer.fit(task, datamodule)
+    trainer.fit(eeg_module, datamodule)
 
     logger.info(f"Profiling complete. Traces saved to: {output_dir}/")
 

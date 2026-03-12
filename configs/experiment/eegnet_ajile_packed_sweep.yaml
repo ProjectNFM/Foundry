@@ -31,7 +31,7 @@ data:
   task_type: active_vs_inactive
 
 run:
-  name: eegnet_packed_lr${task.learning_rate}_bs${hyperparameters.batch_size}_fold${hyperparameters.fold_number}
+  name: eegnet_packed_lr${hyperparameters.learning_rate}_bs${hyperparameters.batch_size}_fold${hyperparameters.fold_number}
   group: EEGNET_AJILE_PACKED_SWEEP
   tags: [sweep, packed, eegnet, ajile]
   seed: 42
@@ -43,10 +43,7 @@ hyperparameters:
   patch_duration: 0.1
   fold_number: 0
   num_workers: 4
-
-task:
   learning_rate: 1e-3
-  weight_decay: 0.01
 
 stage:
   skip: true
@@ -54,8 +51,8 @@ stage:
 hydra:
   sweeper:
     params:
-      task.learning_rate: choice(1e-3, 5e-4, 1e-4)
-      hyperparameters.batch_size: choice(32, 64)
+      hyperparameters.learning_rate: choice(1e-3, 5e-4, 1e-4)
+      hyperparameters.batch_size: choice(32, 64, 128)
   launcher:
     tasks_per_node: 3
     cpus_per_task: 4

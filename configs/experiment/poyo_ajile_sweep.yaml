@@ -24,7 +24,7 @@ data:
   task_type: active_vs_inactive
 
 run:
-  name: ajile_poyo_sweep_bs${hyperparameters.batch_size}_lr${task.learning_rate}
+  name: ajile_poyo_sweep_bs${hyperparameters.batch_size}_lr${hyperparameters.learning_rate}
   group: POYO_AJILE_SWEEP
   tags: [sweep, poyo_eeg, ajile]
   seed: 42
@@ -37,15 +37,11 @@ hyperparameters:
   fold_number: 0
   num_workers: 5
 
-task:
-  learning_rate: 1e-4
-  weight_decay: 0.01
-
 hydra:
   sweeper:
     params:
       hyperparameters.batch_size: choice(32, 64, 128)
-      task.learning_rate: choice(1e-3, 1e-4, 5e-4)
+      hyperparameters.learning_rate: choice(1e-3, 1e-4, 5e-4)
   launcher:
     mem_gb: 48
     gres: gpu:l40s:1

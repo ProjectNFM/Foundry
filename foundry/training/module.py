@@ -44,7 +44,7 @@ def _create_task_metrics(num_classes: int, prefix: str) -> MetricCollection:
     )
 
 
-class EEGTask(L.LightningModule):
+class EEGModule(L.LightningModule):
     """
     PyTorch Lightning wrapper for EEG model training.
 

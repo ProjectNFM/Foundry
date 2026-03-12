@@ -23,7 +23,7 @@ def compute_multitask_loss(
 ):
     """Compute multitask loss for baseline models.
 
-    Simplified version of the logic from foundry/training/task.py.
+    Simplified version of the logic from foundry/training/module.py.
 
     Args:
         model: The baseline model with readout_specs

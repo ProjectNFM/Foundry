@@ -11,3 +11,8 @@ callbacks:
   - _target_: foundry.training.callbacks.VocabInitializerCallback
   - _target_: lightning.pytorch.callbacks.RichModelSummary
   - _target_: lightning.pytorch.callbacks.RichProgressBar
+  - _target_: lightning.pytorch.callbacks.EarlyStopping
+    monitor: val/loss
+    patience: 10
+    mode: min
+    verbose: true
