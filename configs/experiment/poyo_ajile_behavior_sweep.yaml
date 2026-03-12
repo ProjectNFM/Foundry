@@ -18,33 +18,44 @@
 #   uv run python main.py experiment=eegnet_ajile_packed_sweep -m
 
 defaults:
-  - override /model: eeg_net_encoder
+  - override /model: poyo_eeg
   - override /data: ajile_singlesess
   - override /hydra/launcher: slurm_default
 
 model:
-  num_channels: 94
+  patch_duration: ${hyperparameters.patch_duration}
+  input_embedding:
+    num_channels: 94
+    patch_samples: 50 
 
 data:
   root: ${oc.env:SLURM_TMPDIR}/brainsets/processed
   split_type: intrasession
-  task_type: active_vs_inactive
+  task_type: behavior
 
 run:
-  name: eegnet_packed_lr${hyperparameters.learning_rate}_bs${hyperparameters.batch_size}_fold${hyperparameters.fold_number}
-  group: EEGNET_AJILE_PACKED_SWEEP
-  tags: [sweep, packed, eegnet, ajile]
+  name: poyo_ajile_behavior_sweep_lr${hyperparameters.learning_rate}_bs${hyperparameters.batch_size}_cw${module.class_weights}
+  group: POYO_AJILE_BEHAVIOR_SWEEP
+  tags: [sweep, poyo_eeg, ajile]
   seed: 42
   log_level: INFO
 
 hyperparameters:
-  batch_size: 32
+  batch_size: 64
   window_length: 1.0
   patch_duration: 0.1
   fold_number: 0
   num_workers: 4
-  learning_rate: 1e-3
+  learning_rate: 1e-4
 
+trainer:
+  max_epochs: 1000
+  callbacks:
+    early_stopping:
+      monitor: val/ajile_active_behavior_f1
+      mode: max
+
+# No need to stage in main as staging is done in the launcher's setup commands.
 stage:
   skip: true
 
@@ -53,14 +64,15 @@ hydra:
     params:
       hyperparameters.learning_rate: choice(1e-3, 5e-4, 1e-4)
       hyperparameters.batch_size: choice(32, 64, 128)
+      module.class_weights: choice(auto, null)
   launcher:
     tasks_per_node: 3
     cpus_per_task: 4
-    mem_gb: 48
+    mem_gb: 128
     gres: gpu:l40s:1
     setup:
       - "set -a"
       - "source .env"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment eegnet_ajile_packed_sweep"
+      - "uv run python -m foundry.tools.stage_data --experiment poyo_ajile_behavior_sweep"

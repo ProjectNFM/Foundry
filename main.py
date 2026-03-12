@@ -98,6 +98,8 @@ def main(cfg: DictConfig):
         class_weights=class_weights,
     )
 
+    if OmegaConf.is_dict(cfg.trainer.get("callbacks")):
+        cfg.trainer.callbacks = list(cfg.trainer.callbacks.values())
     trainer = instantiate(cfg.trainer)
     _log_config_to_wandb(trainer, cfg)
     trainer.fit(lightning_module, datamodule)
