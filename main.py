@@ -85,24 +85,18 @@ def main(cfg: DictConfig):
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)
 
-    class_weights_cfg = OmegaConf.select(
-        cfg, "module.class_weights", default=None
-    )
-    class_weights = None
-    if class_weights_cfg == "auto":
-        datamodule.setup("fit")
-        class_weights = datamodule.compute_class_weights()
-    elif class_weights_cfg is not None:
-        # TODO: Fix this path
-        class_weights = OmegaConf.to_container(class_weights_cfg, resolve=True)
-
-    eeg_module = instantiate(
-        cfg.module, model=model, class_weights=class_weights
+    lightning_module = instantiate(
+        cfg.module,
+        model=model,
+        class_names=datamodule.get_class_names_for_task(cfg.data.task_type),
+        class_weights=datamodule.compute_class_weights()
+        if cfg.module.class_weights == "auto"
+        else None,
     )
 
     trainer = instantiate(cfg.trainer)
     _log_config_to_wandb(trainer, cfg)
-    trainer.fit(eeg_module, datamodule)
+    trainer.fit(lightning_module, datamodule)
 
 
 if __name__ == "__main__":
