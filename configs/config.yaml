@@ -18,6 +18,9 @@ task:
   learning_rate: 1e-4
   weight_decay: 0.01
 
+stage:
+  skip: false
+
 hydra:
   run:
     dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}

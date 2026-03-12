@@ -37,10 +37,10 @@ def main(cfg: DictConfig):
     logger.info(f"Starting training: {cfg.run.name}")
 
     slurm_tmpdir = os.environ.get("SLURM_TMPDIR")
-    if slurm_tmpdir:
-        stage_cfg = OmegaConf.to_container(
-            cfg.get("stage", OmegaConf.create({})), resolve=True
-        )
+    stage_cfg = OmegaConf.to_container(
+        cfg.get("stage", OmegaConf.create({})), resolve=True
+    )
+    if slurm_tmpdir and not stage_cfg.get("skip", False):
         new_root = stage_data(
             data_cfg=cfg.data,
             source_root=stage_cfg.get("source_root", DEFAULT_SOURCE_ROOT),

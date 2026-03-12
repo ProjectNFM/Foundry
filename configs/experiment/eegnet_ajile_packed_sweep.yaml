@@ -1,0 +1,70 @@
+# @package _global_
+#
+# Example: sweep with multiple jobs packed onto the same GPU node.
+#
+# The EEGNet baseline is small enough that several runs fit in the memory of a
+# single GPU.  Setting tasks_per_node > 1 tells the PackedSubmititLauncher to
+# bundle that many sweep jobs into one SLURM allocation, cutting queue wait
+# time and quota usage.
+#
+# Data staging is done once per node in the launcher's setup commands, before
+# any of the packed tasks start.  Each task then skips its own staging step
+# (stage.skip: true) and reads directly from the pre-staged path.
+#
+# Local dry-run (single combo, no SLURM):
+#   uv run python main.py experiment=eegnet_ajile_packed_sweep
+#
+# SLURM packed sweep (4 jobs share each GPU node):
+#   uv run python main.py experiment=eegnet_ajile_packed_sweep -m
+
+defaults:
+  - override /model: eeg_net_encoder
+  - override /data: ajile_singlesess
+  - override /hydra/launcher: slurm_default
+
+model:
+  num_channels: 94
+
+data:
+  root: ${oc.env:SLURM_TMPDIR}/brainsets/processed
+  split_type: intrasession
+  task_type: active_vs_inactive
+
+run:
+  name: eegnet_packed_lr${task.learning_rate}_bs${hyperparameters.batch_size}_fold${hyperparameters.fold_number}
+  group: EEGNET_AJILE_PACKED_SWEEP
+  tags: [sweep, packed, eegnet, ajile]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 32
+  window_length: 1.0
+  patch_duration: 0.1
+  fold_number: 0
+  num_workers: 2
+
+task:
+  learning_rate: 1e-3
+  weight_decay: 0.01
+
+stage:
+  skip: true
+
+hydra:
+  sweeper:
+    params:
+      task.learning_rate: choice(1e-3, 5e-4, 1e-4)
+      hyperparameters.batch_size: choice(32, 64)
+      hyperparameters.fold_number: range(0, 5)
+  launcher:
+    tasks_per_node: 4
+    cpus_per_task: 2
+    mem_gb: 48
+    gres: gpu:l40s:1
+    setup:
+      - "set -a"
+      - "source .env"
+      - "set +a"
+      - "export RANK=0"
+      - "uv run python -m foundry.tools.stage_data --experiment eegnet_ajile_packed_sweep"
