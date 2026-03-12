@@ -64,7 +64,7 @@ hydra:
     params:
       hyperparameters.learning_rate: choice(1e-3, 5e-4, 1e-4)
       hyperparameters.batch_size: choice(32, 64, 128)
-      module.class_weights: choice(auto, null)
+      module.class_weights: choice(auto, none)
   launcher:
     tasks_per_node: 3
     cpus_per_task: 4

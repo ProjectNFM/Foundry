@@ -91,6 +91,9 @@ def main(cfg: DictConfig):
     else:
         class_weights = None
 
+    if cfg.module.class_weights in (None, "none"):
+        OmegaConf.update(cfg, "module.class_weights", None)
+
     lightning_module = instantiate(
         cfg.module,
         model=model,
