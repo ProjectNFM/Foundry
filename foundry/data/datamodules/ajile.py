@@ -51,6 +51,7 @@ class AjileDataModule(NeuralDataModule):
             tokenizer=tokenizer,
             seed=seed,
             dataset_kwargs=dataset_kwargs,
+            task_type=task_type,
         )
 
     def get_recording_ids(self) -> list[str]:

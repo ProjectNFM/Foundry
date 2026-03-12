@@ -57,6 +57,7 @@ class EEGModule(L.LightningModule):
         learning_rate: float = 1e-4,
         weight_decay: float = 0.01,
         class_names: dict[str, list[str]] | None = None,
+        class_weights: dict[str, list[float]] | None = None,
     ):
         """
         Args:
@@ -65,12 +66,22 @@ class EEGModule(L.LightningModule):
             weight_decay: Weight decay for optimizer
             class_names: Optional mapping of readout name -> list of class labels
                          for confusion matrix display (e.g. from DataModule.get_class_names_for_task)
+            class_weights: Optional mapping of readout name -> per-class weight list
+                           for loss balancing (e.g. inverse frequency weights).
+                           Weights are indexed by class index [0, num_classes-1].
         """
         super().__init__()
         self.model = model
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self._class_names = class_names or {}
+
+        self._class_weights: dict[str, torch.Tensor] = {}
+        if class_weights:
+            for name, weights in class_weights.items():
+                self._class_weights[name] = torch.tensor(
+                    weights, dtype=torch.float32
+                )
 
         self.save_hyperparameters(ignore=["model"])
 
@@ -362,6 +373,15 @@ class EEGModule(L.LightningModule):
 
             spec = self.model.readout_specs[readout_id]
             weights = target_weights.get(readout_id, 1.0)
+
+            if readout_id in self._class_weights:
+                cw = self._class_weights[readout_id].to(target.device)
+                mapped_target = self._apply_label_mapping(target, readout_id)
+                sample_cw = cw[mapped_target.long()]
+                if isinstance(weights, torch.Tensor):
+                    weights = weights * sample_cw
+                else:
+                    weights = sample_cw
 
             taskwise_loss[readout_id] = spec.loss_fn(
                 task_output, target, weights

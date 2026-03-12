@@ -85,7 +85,20 @@ def main(cfg: DictConfig):
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)
 
-    eeg_module = instantiate(cfg.module, model=model)
+    class_weights_cfg = OmegaConf.select(
+        cfg, "module.class_weights", default=None
+    )
+    class_weights = None
+    if class_weights_cfg == "auto":
+        datamodule.setup("fit")
+        class_weights = datamodule.compute_class_weights()
+    elif class_weights_cfg is not None:
+        # TODO: Fix this path
+        class_weights = OmegaConf.to_container(class_weights_cfg, resolve=True)
+
+    eeg_module = instantiate(
+        cfg.module, model=model, class_weights=class_weights
+    )
 
     trainer = instantiate(cfg.trainer)
     _log_config_to_wandb(trainer, cfg)

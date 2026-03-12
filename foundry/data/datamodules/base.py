@@ -5,14 +5,19 @@ and optional tokenization/vocab initialization. It decouples data loading from
 model-specific preprocessing.
 """
 
+import logging
+from collections import Counter
 from typing import Callable, Optional, Literal
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from torch_brain.data import collate
 from torch_brain.data.sampler import RandomFixedWindowSampler
 from lightning import LightningDataModule
 from torch_brain.transforms import Compose
+
+logger = logging.getLogger(__name__)
 
 
 class NeuralDataModule(LightningDataModule):
@@ -75,21 +80,8 @@ class NeuralDataModule(LightningDataModule):
         tokenizer: Optional[Callable] = None,
         seed: int = 42,
         dataset_kwargs: Optional[dict] = None,
+        task_type: Optional[str] = None,
     ):
-        """Initialize NeuralDataModule.
-
-        Args:
-            dataset_class: Dataset class to instantiate (must have get_sampling_intervals method).
-            root: Root directory of the data.
-            batch_size: Batch size for DataLoaders.
-            num_workers: Number of worker processes for DataLoaders.
-            pin_memory: Whether to pin memory in DataLoaders.
-            window_length: Length of windows for RandomFixedWindowSampler in seconds.
-            transforms: Optional list of transforms to apply to each sample.
-            tokenizer: Optional tokenizer (e.g., model.tokenize) to apply after transforms.
-            seed: Random seed for sampling.
-            dataset_kwargs: Optional dict of kwargs to pass to dataset_class constructor.
-        """
         super().__init__()
         self.dataset_class = dataset_class
         self.root = root
@@ -99,6 +91,7 @@ class NeuralDataModule(LightningDataModule):
         self.window_length = window_length
         self.seed = seed
         self.dataset_kwargs = dataset_kwargs or {}
+        self.task_type = task_type
 
         # Build transform pipeline
         transform_list = transforms or []
@@ -129,6 +122,77 @@ class NeuralDataModule(LightningDataModule):
             transform=transform,
             **self.dataset_kwargs,
         )
+
+    def compute_class_weights(self) -> dict[str, list[float]]:
+        """Compute inverse-frequency class weights from the training split.
+
+        Scans training intervals to count label occurrences per readout, then
+        returns weights proportional to ``total / (num_classes * class_count)``
+        (the same formula used by scikit-learn's ``compute_class_weight``).
+
+        Must be called after :meth:`setup`.
+        """
+        from torch_brain.registry import MODALITY_REGISTRY
+        from foundry.data.datasets.modalities import MappedCrossEntropyLoss
+
+        if self.dataset is None:
+            raise RuntimeError("Call setup() before compute_class_weights()")
+        if self.task_type is None:
+            raise ValueError(
+                "task_type must be set to compute class weights automatically"
+            )
+
+        readout_names = self.TASK_TO_READOUT.get(self.task_type, [])
+        if not readout_names:
+            return {}
+
+        import foundry.data.datasets.modalities  # noqa: F401
+
+        train_intervals = self.dataset.get_sampling_intervals(split="train")
+
+        class_weights: dict[str, list[float]] = {}
+        for readout_name in readout_names:
+            spec = MODALITY_REGISTRY[readout_name]
+            value_field = spec.value_key.split(".")[-1]
+
+            counts: Counter = Counter()
+            for rid, intervals in train_intervals.items():
+                if not hasattr(intervals, value_field):
+                    continue
+                values = getattr(intervals, value_field)
+                unique_labels = np.unique(values)
+                for v in unique_labels:
+                    selected = intervals.select_by_mask(values == v)
+                    counts[int(v)] += sum(selected.end - selected.start)
+
+            if isinstance(spec.loss_fn, MappedCrossEntropyLoss):
+                key_map = dict(
+                    zip(
+                        spec.loss_fn._keys.tolist(),
+                        spec.loss_fn._values.tolist(),
+                    )
+                )
+                mapped_counts: Counter = Counter()
+                for label, count in counts.items():
+                    if label in key_map:
+                        mapped_counts[key_map[label]] += count
+                counts = mapped_counts
+
+            total = sum(counts.values())
+            num_classes = spec.dim
+            weights = [
+                total / (num_classes * max(counts.get(i, 0), 1))
+                for i in range(num_classes)
+            ]
+            class_weights[readout_name] = weights
+            logger.info(
+                "Class weights for %s: %s (counts: %s)",
+                readout_name,
+                [f"{w:.3f}" for w in weights],
+                dict(sorted(counts.items())),
+            )
+
+        return class_weights
 
     def _create_dataloader(
         self, split: Literal["train", "valid", "test"]
