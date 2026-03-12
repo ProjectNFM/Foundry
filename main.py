@@ -85,13 +85,17 @@ def main(cfg: DictConfig):
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)
 
+    if cfg.module.class_weights == "auto":
+        datamodule.setup("fit")
+        class_weights = datamodule.compute_class_weights()
+    else:
+        class_weights = None
+
     lightning_module = instantiate(
         cfg.module,
         model=model,
         class_names=datamodule.get_class_names_for_task(cfg.data.task_type),
-        class_weights=datamodule.compute_class_weights()
-        if cfg.module.class_weights == "auto"
-        else None,
+        class_weights=class_weights,
     )
 
     trainer = instantiate(cfg.trainer)
