@@ -4,6 +4,7 @@ import os
 import hydra
 from hydra.utils import get_class, instantiate
 from lightning import seed_everything
+from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
 from rich.logging import RichHandler
 
@@ -15,6 +16,28 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SOURCE_ROOT = "../scratch/brainsets/processed"
 DEFAULT_COMPRESSED_ROOT = "../scratch/brainsets/compressed"
+
+
+def _log_config_to_wandb(trainer, cfg: DictConfig):
+    if not isinstance(trainer.logger, WandbLogger):
+        return
+
+    loggable_keys = [
+        "run",
+        "hyperparameters",
+        "model",
+        "data",
+        "task",
+        "trainer",
+    ]
+    config_to_log = {
+        key: OmegaConf.to_container(cfg[key], resolve=True)
+        for key in loggable_keys
+        if key in cfg
+    }
+    trainer.logger.experiment.config.update(
+        config_to_log, allow_val_change=True
+    )
 
 
 def setup_logging(log_level: str):
@@ -66,6 +89,7 @@ def main(cfg: DictConfig):
     task = EEGTask(model=model, **cfg.task)
 
     trainer = instantiate(cfg.trainer)
+    _log_config_to_wandb(trainer, cfg)
     trainer.fit(task, datamodule)
 
 

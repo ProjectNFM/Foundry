@@ -42,7 +42,7 @@ hyperparameters:
   window_length: 1.0
   patch_duration: 0.1
   fold_number: 0
-  num_workers: 2
+  num_workers: 4
 
 task:
   learning_rate: 1e-3
@@ -56,10 +56,9 @@ hydra:
     params:
       task.learning_rate: choice(1e-3, 5e-4, 1e-4)
       hyperparameters.batch_size: choice(32, 64)
-      hyperparameters.fold_number: range(0, 5)
   launcher:
-    tasks_per_node: 4
-    cpus_per_task: 2
+    tasks_per_node: 3
+    cpus_per_task: 4
     mem_gb: 48
     gres: gpu:l40s:1
     setup:
