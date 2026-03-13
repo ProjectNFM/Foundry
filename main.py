@@ -1,7 +1,10 @@
+import hashlib
 import logging
 import os
+from pathlib import Path
 
 import hydra
+from hydra.core.hydra_config import HydraConfig
 from hydra.utils import get_class, instantiate
 from lightning import seed_everything
 from lightning.pytorch.loggers import WandbLogger
@@ -58,6 +61,33 @@ def main(cfg: DictConfig):
     seed_everything(cfg.run.seed, workers=True)
     logger.info(f"Starting training: {cfg.run.name}")
 
+    slurm_job_id = os.environ.get("SLURM_JOB_ID")
+    if slurm_job_id:
+        logger.info(
+            "SLURM job_id=%s array_task=%s restart_count=%s",
+            slurm_job_id,
+            os.environ.get("SLURM_ARRAY_TASK_ID"),
+            os.environ.get("SLURM_RESTART_COUNT", "0"),
+        )
+
+    # Hydra does not chdir by default (version_base=None), so resolve all
+    # output paths as absolute to avoid writing into the project root.
+    output_dir = HydraConfig.get().runtime.output_dir
+    checkpoint_dir = os.path.join(output_dir, "checkpoints")
+
+    if OmegaConf.select(cfg, "trainer.callbacks.model_checkpoint") is not None:
+        OmegaConf.update(
+            cfg, "trainer.callbacks.model_checkpoint.dirpath", checkpoint_dir
+        )
+    OmegaConf.update(cfg, "trainer.default_root_dir", output_dir)
+
+    # Deterministic WandB run ID so preempted jobs resume the same run
+    if "WandbLogger" in OmegaConf.select(cfg, "logger._target_", default=""):
+        OmegaConf.update(cfg, "logger.save_dir", output_dir)
+        if OmegaConf.select(cfg, "logger.id") is None:
+            wandb_run_id = hashlib.md5(cfg.run.name.encode()).hexdigest()[:8]
+            OmegaConf.update(cfg, "logger.id", wandb_run_id)
+
     slurm_tmpdir = os.environ.get("SLURM_TMPDIR")
     stage_cfg = OmegaConf.to_container(
         cfg.get("stage", OmegaConf.create({})), resolve=True
@@ -105,7 +135,16 @@ def main(cfg: DictConfig):
         cfg.trainer.callbacks = list(cfg.trainer.callbacks.values())
     trainer = instantiate(cfg.trainer)
     _log_config_to_wandb(trainer, cfg)
-    trainer.fit(lightning_module, datamodule)
+
+    ckpt_path = None
+    last_ckpt = Path(checkpoint_dir) / "last.ckpt"
+    if last_ckpt.exists():
+        ckpt_path = str(last_ckpt)
+        logger.info("Resuming from checkpoint: %s", ckpt_path)
+
+    trainer.fit(
+        lightning_module, datamodule, ckpt_path=ckpt_path, weights_only=False
+    )
 
 
 if __name__ == "__main__":

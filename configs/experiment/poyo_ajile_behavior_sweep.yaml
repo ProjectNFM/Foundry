@@ -54,6 +54,10 @@ trainer:
     early_stopping:
       monitor: val/ajile_active_behavior_f1
       mode: max
+    model_checkpoint:
+      monitor: val/ajile_active_behavior_f1
+      mode: max
+      filename: "best-epoch{epoch:03d}-{val/ajile_active_behavior_f1:.4f}"
 
 # No need to stage in main as staging is done in the launcher's setup commands.
 stage:

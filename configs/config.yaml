@@ -22,7 +22,7 @@ stage:
 
 hydra:
   run:
-    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ${oc.env:SCRATCH,./outputs}/runs/${run.group}/${run.name}
   sweep:
-    dir: outputs/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
-    subdir: ${hydra.job.num}
+    dir: ${oc.env:SCRATCH,./outputs}/runs/${run.group}
+    subdir: ${run.name}
