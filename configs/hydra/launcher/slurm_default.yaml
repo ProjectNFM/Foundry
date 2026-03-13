@@ -13,7 +13,7 @@ mem_gb: 32
 gres: gpu:1
 array_parallelism: 256
 additional_parameters:
-  requeue: ""
+  requeue: true
 setup:
   - "set -a"
   - "source .env"

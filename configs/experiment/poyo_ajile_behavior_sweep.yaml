@@ -54,6 +54,7 @@ trainer:
     early_stopping:
       monitor: val/ajile_active_behavior_f1
       mode: max
+      patience: 20
     model_checkpoint:
       monitor: val/ajile_active_behavior_f1
       mode: max
