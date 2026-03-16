@@ -45,7 +45,7 @@ hyperparameters:
   window_length: 1.0
   patch_duration: 0.1
   fold_number: 0
-  num_workers: 6
+  num_workers: 12
   learning_rate: 1e-4
 
 trainer:
@@ -60,6 +60,9 @@ trainer:
       mode: max
       filename: "best-epoch{epoch:03d}-{val/ajile_active_behavior_f1:.4f}"
 
+module:
+  class_weights: 'bf16-mixed'
+
 # No need to stage in main as staging is done in the launcher's setup commands.
 stage:
   skip: true
@@ -67,12 +70,11 @@ stage:
 hydra:
   sweeper:
     params:
-      hyperparameters.learning_rate: choice(1e-4, 5e-5, 1e-5)
-      hyperparameters.batch_size: choice(128, 256)
+      hyperparameters.batch_size: choice(1024, 2048)
       module.class_weights: choice(auto, none)
   launcher:
-    tasks_per_node: 2
-    cpus_per_task: 6
+    tasks_per_node: 1
+    cpus_per_task: 12
     mem_gb: 128
     gres: gpu:l40s:1
     setup:
