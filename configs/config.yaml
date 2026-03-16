@@ -1,6 +1,7 @@
 defaults:
   - model: null
   - data: null
+  - module: default
   - logger: wandb
   - _self_
   - trainer: default
@@ -13,7 +14,15 @@ hyperparameters:
   patch_duration: ???
   fold_number: ???
   num_workers: ???
-
-task:
   learning_rate: 1e-4
   weight_decay: 0.01
+
+stage:
+  skip: false
+
+hydra:
+  run:
+    dir: ${oc.env:SCRATCH,./outputs}/runs/${run.group}/${run.name}
+  sweep:
+    dir: ${oc.env:SCRATCH,./outputs}/runs/${run.group}
+    subdir: ${run.name}

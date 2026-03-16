@@ -92,4 +92,5 @@ class PhysionetDataModule(NeuralDataModule):
             tokenizer=tokenizer,
             seed=seed,
             dataset_kwargs=dataset_kwargs,
+            task_type=task_type,
         )

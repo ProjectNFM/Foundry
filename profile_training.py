@@ -11,7 +11,7 @@ from lightning import seed_everything
 from omegaconf import DictConfig
 from rich.logging import RichHandler
 
-from foundry.training import EEGTask
+from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,7 @@ def _build_run_tag(cfg: DictConfig) -> str:
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
+@hydra_main_wrapper
 def main(cfg: DictConfig):
     """Training profiling entry point using PyTorch Lightning's PyTorchProfiler.
 
@@ -69,7 +70,7 @@ def main(cfg: DictConfig):
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)
 
-    task = EEGTask(model=model, **cfg.task)
+    eeg_module = instantiate(cfg.module, model=model)
 
     prof_cfg = cfg.profiling
     output_dir = Path(prof_cfg.output_dir) / run_tag
@@ -113,10 +114,11 @@ def main(cfg: DictConfig):
     )
 
     logger.info(f"Running profiling for {prof_cfg.max_epochs} epoch(s)")
-    trainer.fit(task, datamodule)
+    trainer.fit(eeg_module, datamodule)
 
     logger.info(f"Profiling complete. Traces saved to: {output_dir}/")
 
 
 if __name__ == "__main__":
+    register_resolvers()
     main()

@@ -1,8 +1,10 @@
 _target_: lightning.pytorch.loggers.WandbLogger
-name: ${run.name}_${now:%Y-%m-%d_%H-%M-%S}
+name: ${run.name}
 project: foundry
-save_dir: logs/wandb
+save_dir: ${oc.env:SCRATCH,./outputs}
 offline: false
 log_model: all
 group: ${run.group}
 tags: ${run.tags}
+resume: allow
+id: null

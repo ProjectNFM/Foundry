@@ -1,19 +1,45 @@
+import hashlib
 import logging
 import os
+from pathlib import Path
 
 import hydra
+from hydra.core.hydra_config import HydraConfig
 from hydra.utils import get_class, instantiate
 from lightning import seed_everything
+from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
 from rich.logging import RichHandler
 
+from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
 from foundry.tools.stage_data import stage_data
-from foundry.training import EEGTask
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_SOURCE_ROOT = "../scratch/brainsets/processed"
 DEFAULT_COMPRESSED_ROOT = "../scratch/brainsets/compressed"
+
+
+def _log_config_to_wandb(trainer, cfg: DictConfig):
+    if not isinstance(trainer.logger, WandbLogger):
+        return
+
+    loggable_keys = [
+        "run",
+        "hyperparameters",
+        "model",
+        "data",
+        "module",
+        "trainer",
+    ]
+    config_to_log = {
+        key: OmegaConf.to_container(cfg[key], resolve=True)
+        for key in loggable_keys
+        if key in cfg
+    }
+    trainer.logger.experiment.config.update(
+        config_to_log, allow_val_change=True
+    )
 
 
 def setup_logging(log_level: str):
@@ -29,22 +55,44 @@ def setup_logging(log_level: str):
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
+@hydra_main_wrapper
 def main(cfg: DictConfig):
-    """
-    Main training entry point using Hydra configuration.
-
-    Args:
-        cfg: Hydra configuration object
-    """
     setup_logging(cfg.run.log_level)
     seed_everything(cfg.run.seed, workers=True)
     logger.info(f"Starting training: {cfg.run.name}")
 
-    slurm_tmpdir = os.environ.get("SLURM_TMPDIR")
-    if slurm_tmpdir:
-        stage_cfg = OmegaConf.to_container(
-            cfg.get("stage", OmegaConf.create({})), resolve=True
+    slurm_job_id = os.environ.get("SLURM_JOB_ID")
+    if slurm_job_id:
+        logger.info(
+            "SLURM job_id=%s array_task=%s restart_count=%s",
+            slurm_job_id,
+            os.environ.get("SLURM_ARRAY_TASK_ID"),
+            os.environ.get("SLURM_RESTART_COUNT", "0"),
         )
+
+    # Hydra does not chdir by default (version_base=None), so resolve all
+    # output paths as absolute to avoid writing into the project root.
+    output_dir = HydraConfig.get().runtime.output_dir
+    checkpoint_dir = os.path.join(output_dir, "checkpoints")
+
+    if OmegaConf.select(cfg, "trainer.callbacks.model_checkpoint") is not None:
+        OmegaConf.update(
+            cfg, "trainer.callbacks.model_checkpoint.dirpath", checkpoint_dir
+        )
+    OmegaConf.update(cfg, "trainer.default_root_dir", output_dir)
+
+    # Deterministic WandB run ID so preempted jobs resume the same run
+    if "WandbLogger" in OmegaConf.select(cfg, "logger._target_", default=""):
+        OmegaConf.update(cfg, "logger.save_dir", output_dir)
+        if OmegaConf.select(cfg, "logger.id") is None:
+            wandb_run_id = hashlib.md5(cfg.run.name.encode()).hexdigest()[:8]
+            OmegaConf.update(cfg, "logger.id", wandb_run_id)
+
+    slurm_tmpdir = os.environ.get("SLURM_TMPDIR")
+    stage_cfg = OmegaConf.to_container(
+        cfg.get("stage", OmegaConf.create({})), resolve=True
+    )
+    if slurm_tmpdir and not stage_cfg.get("skip", False):
         new_root = stage_data(
             data_cfg=cfg.data,
             source_root=stage_cfg.get("source_root", DEFAULT_SOURCE_ROOT),
@@ -67,11 +115,38 @@ def main(cfg: DictConfig):
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)
 
-    task = EEGTask(model=model, **cfg.task)
+    if cfg.module.class_weights == "auto":
+        datamodule.setup("fit")
+        class_weights = datamodule.compute_class_weights()
+    else:
+        class_weights = None
 
+    if cfg.module.class_weights in (None, "none"):
+        OmegaConf.update(cfg, "module.class_weights", None)
+
+    lightning_module = instantiate(
+        cfg.module,
+        model=model,
+        class_names=datamodule.get_class_names_for_task(cfg.data.task_type),
+        class_weights=class_weights,
+    )
+
+    if OmegaConf.is_dict(cfg.trainer.get("callbacks")):
+        cfg.trainer.callbacks = list(cfg.trainer.callbacks.values())
     trainer = instantiate(cfg.trainer)
-    trainer.fit(task, datamodule)
+    _log_config_to_wandb(trainer, cfg)
+
+    ckpt_path = None
+    last_ckpt = Path(checkpoint_dir) / "last.ckpt"
+    if last_ckpt.exists():
+        ckpt_path = str(last_ckpt)
+        logger.info("Resuming from checkpoint: %s", ckpt_path)
+
+    trainer.fit(
+        lightning_module, datamodule, ckpt_path=ckpt_path, weights_only=False
+    )
 
 
 if __name__ == "__main__":
+    register_resolvers()
     main()
