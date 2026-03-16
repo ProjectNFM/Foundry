@@ -12,10 +12,10 @@
 # (stage.skip: true) and reads directly from the pre-staged path.
 #
 # Local dry-run (single combo, no SLURM):
-#   uv run python main.py experiment=eegnet_ajile_packed_sweep
+#   uv run python main.py experiment=poyo_ajile_behavior_sweep
 #
 # SLURM packed sweep (4 jobs share each GPU node):
-#   uv run python main.py experiment=eegnet_ajile_packed_sweep -m
+#   uv run python main.py experiment=poyo_ajile_behavior_sweep -m
 
 defaults:
   - override /model: poyo_eeg
@@ -41,11 +41,11 @@ run:
   log_level: INFO
 
 hyperparameters:
-  batch_size: 64
+  batch_size: 128
   window_length: 1.0
   patch_duration: 0.1
   fold_number: 0
-  num_workers: 4
+  num_workers: 6
   learning_rate: 1e-4
 
 trainer:
@@ -67,12 +67,12 @@ stage:
 hydra:
   sweeper:
     params:
-      hyperparameters.learning_rate: choice(1e-3, 5e-4, 1e-4)
-      hyperparameters.batch_size: choice(32, 64, 128)
+      hyperparameters.learning_rate: choice(1e-4, 5e-5, 1e-5)
+      hyperparameters.batch_size: choice(128, 256)
       module.class_weights: choice(auto, none)
   launcher:
-    tasks_per_node: 3
-    cpus_per_task: 4
+    tasks_per_node: 2
+    cpus_per_task: 6
     mem_gb: 128
     gres: gpu:l40s:1
     setup:
