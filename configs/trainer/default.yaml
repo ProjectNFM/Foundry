@@ -1,6 +1,10 @@
 _target_: lightning.Trainer
 
 max_epochs: 100
+# 32-true  — full FP32, safest baseline (all GPUs)
+# 16-mixed — FP16 mixed precision, needs grad scaling (RTX 8000, A100, L40S)
+# bf16-mixed — BF16 mixed precision, most stable speedup (A100, L40S only — NOT RTX 8000)
+precision: 32-true
 accelerator: auto
 devices: auto
 default_root_dir: .
