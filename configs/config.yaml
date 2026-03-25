@@ -20,6 +20,11 @@ hyperparameters:
 stage:
   skip: false
 
+run:
+  # Keep fresh runs deterministic unless resume is explicitly requested.
+  # SLURM restarts still auto-resume from last.ckpt in main.py.
+  resume_if_checkpoint_exists: false
+
 hydra:
   run:
     dir: ${oc.env:SCRATCH,./outputs}/runs/${run.group}/${run.name}
