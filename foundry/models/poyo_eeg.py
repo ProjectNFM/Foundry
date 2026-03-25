@@ -233,16 +233,17 @@ class POYOEEGModel(nn.Module):
         raise ValueError("Data must have an 'eeg', 'ecog', or 'seeg' field")
 
     def tokenize(self, data: Data) -> dict:
-        """
-        Tokenize the input data. Performs patching internally and converts to model tokens.
+        """Tokenize the input data.
 
-        The signal is kept in its natural (num_patches, num_channels, patch_samples) shape.
-        Only the channel dimension is padded to match the embedding layer's num_channels.
+        Applies patching, then delegates signal preparation to the embedding's
+        ``pretokenize`` method so that each embedding type can control how the
+        patched signal is shaped, padded, or otherwise transformed.
 
         Args:
             data: TemporalData object containing raw EEG/ECoG/sEEG signal.
-                  If data.config["multitask_readout"] is set by the dataset, it will be
-                  intersected with the model's readout_specs to use only supported modalities.
+                  If data.config["multitask_readout"] is set by the dataset, it
+                  will be intersected with the model's readout_specs to use only
+                  supported modalities.
 
         Returns:
             dict with model_inputs, target_values, target_weights, and metadata
@@ -283,33 +284,9 @@ class POYOEEGModel(nn.Module):
         channel_ids = data.channels.id[modality_mask].astype(str)
         channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
 
-        num_patches, num_channels_actual, patch_samples = patches_array.shape
-        num_channels = self.input_embedding.num_channels
-
-        if num_channels_actual > num_channels:
-            # raise ValueError(
-            #     f"Data has {num_channels_actual} channels but model expects "
-            #     f"at most {num_channels}"
-            # )
-            # When there are too many channels, we just use the first num_channels channels
-            patches_array = patches_array[:, :num_channels, :]
-            channel_ids = channel_ids[:num_channels]
-            channel_tokens = channel_tokens[:num_channels]
-            num_channels_actual = num_channels
-
-        padded_signal = np.zeros(
-            (num_patches, num_channels, patch_samples),
-            dtype=patches_array.dtype,
+        pretokenized = self.input_embedding.pretokenize(
+            patches_array, channel_tokens
         )
-        padded_signal[:, :num_channels_actual, :] = patches_array
-
-        padded_channel_tokens = np.zeros(
-            num_channels, dtype=channel_tokens.dtype
-        )
-        padded_channel_tokens[:num_channels_actual] = channel_tokens
-
-        channel_mask = np.zeros(num_channels, dtype=bool)
-        channel_mask[:num_channels_actual] = True
 
         latent_index = self._latent_index
         latent_timestamps = self._latent_timestamps
@@ -333,15 +310,11 @@ class POYOEEGModel(nn.Module):
         )
 
         return {
-            "input_values": torch.from_numpy(padded_signal).float(),
+            **pretokenized,
             "input_timestamps": torch.from_numpy(
                 np.asarray(patch_center_times)
             ).float(),
-            "input_channel_index": torch.from_numpy(
-                padded_channel_tokens
-            ).long(),
             "input_session_index": input_session_index,
-            "input_mask": torch.from_numpy(channel_mask),
             "latent_index": latent_index,
             "latent_timestamps": latent_timestamps,
             "output_session_index": pad8(output_session_index),

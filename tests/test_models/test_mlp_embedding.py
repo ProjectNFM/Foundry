@@ -1,10 +1,20 @@
 import pytest
 import torch
 
-from foundry.models import MLPEmbedding
+from foundry.models import MLPEmbedding, FixedChannelWindowEmbedding
 
 
 class TestMLPEmbedding:
+    def test_class_hierarchy(self):
+        embedding = MLPEmbedding(
+            embed_dim=64,
+            num_channels=8,
+            patch_samples=50,
+            hidden_dims=[128],
+            activation="gelu",
+        )
+        assert isinstance(embedding, FixedChannelWindowEmbedding)
+
     def test_initialization(self, embed_dim):
         hidden_dims = [128, 64]
         embedding = MLPEmbedding(

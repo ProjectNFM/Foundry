@@ -1,10 +1,20 @@
 import pytest
 import torch
 
-from foundry.models import CNNEmbedding
+from foundry.models import CNNEmbedding, FixedChannelWindowEmbedding
 
 
 class TestCNNEmbedding:
+    def test_class_hierarchy(self):
+        embedding = CNNEmbedding(
+            embed_dim=64,
+            num_channels=8,
+            patch_samples=50,
+            num_filters=32,
+            kernel_size=3,
+        )
+        assert isinstance(embedding, FixedChannelWindowEmbedding)
+
     def test_initialization(self, embed_dim):
         embedding = CNNEmbedding(
             embed_dim=embed_dim,

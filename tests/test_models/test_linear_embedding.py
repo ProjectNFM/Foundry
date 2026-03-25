@@ -1,9 +1,21 @@
+import numpy as np
 import torch
 
-from foundry.models import LinearEmbedding
+from foundry.models import (
+    LinearEmbedding,
+    FixedChannelWindowEmbedding,
+    EmbeddingBase,
+)
 
 
 class TestLinearEmbedding:
+    def test_class_hierarchy(self):
+        embedding = LinearEmbedding(
+            embed_dim=64, num_channels=8, patch_samples=50
+        )
+        assert isinstance(embedding, FixedChannelWindowEmbedding)
+        assert isinstance(embedding, EmbeddingBase)
+
     def test_initialization(self, embed_dim):
         embedding = LinearEmbedding(
             embed_dim=embed_dim, num_channels=8, patch_samples=50
@@ -133,3 +145,61 @@ class TestLinearEmbedding:
 
         output = embedding(input_values, input_channel_index=channel_index)
         assert output.shape == (batch_size, 4, embed_dim)
+
+
+class TestFixedChannelWindowPretokenize:
+    def test_pretokenize_pads_channels(self):
+        embedding = LinearEmbedding(
+            embed_dim=64, num_channels=8, patch_samples=50
+        )
+        patches = np.random.randn(4, 3, 50).astype(np.float32)
+        tokens = np.array([10, 20, 30])
+
+        result = embedding.pretokenize(patches, tokens)
+
+        assert result["input_values"].shape == (4, 8, 50)
+        assert result["input_channel_index"].shape == (8,)
+        assert result["input_mask"].shape == (8,)
+        assert result["input_mask"][:3].all()
+        assert not result["input_mask"][3:].any()
+        assert (result["input_values"][:, 3:, :] == 0).all()
+
+    def test_pretokenize_truncates_channels(self):
+        embedding = LinearEmbedding(
+            embed_dim=64, num_channels=4, patch_samples=50
+        )
+        patches = np.random.randn(4, 8, 50).astype(np.float32)
+        tokens = np.arange(8)
+
+        result = embedding.pretokenize(patches, tokens)
+
+        assert result["input_values"].shape == (4, 4, 50)
+        assert result["input_channel_index"].shape == (4,)
+        assert result["input_mask"].all()
+
+    def test_pretokenize_exact_channels(self):
+        embedding = LinearEmbedding(
+            embed_dim=64, num_channels=8, patch_samples=50
+        )
+        patches = np.random.randn(4, 8, 50).astype(np.float32)
+        tokens = np.arange(8)
+
+        result = embedding.pretokenize(patches, tokens)
+
+        assert result["input_values"].shape == (4, 8, 50)
+        assert result["input_mask"].all()
+        np.testing.assert_array_equal(result["input_values"].numpy(), patches)
+
+    def test_pretokenize_preserves_channel_tokens(self):
+        embedding = LinearEmbedding(
+            embed_dim=64, num_channels=8, patch_samples=50
+        )
+        patches = np.random.randn(4, 5, 50).astype(np.float32)
+        tokens = np.array([100, 200, 300, 400, 500])
+
+        result = embedding.pretokenize(patches, tokens)
+
+        np.testing.assert_array_equal(
+            result["input_channel_index"][:5].numpy(), tokens
+        )
+        assert (result["input_channel_index"][5:] == 0).all()

@@ -5,6 +5,8 @@ from foundry.models.backbones import (
     PerceiverProcessor,
 )
 from foundry.models.embeddings import (
+    EmbeddingBase,
+    FixedChannelWindowEmbedding,
     CNNEmbedding,
     MLPEmbedding,
     LinearEmbedding,
@@ -22,6 +24,8 @@ __all__ = [
     "TemporalConvAvgPoolClassifier",
     "ShallowConvNet",
     "EEGNetEncoder",
+    "EmbeddingBase",
+    "FixedChannelWindowEmbedding",
     "LinearEmbedding",
     "MLPEmbedding",
     "CNNEmbedding",
