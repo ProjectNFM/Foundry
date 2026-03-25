@@ -1,247 +1,97 @@
-import copy
-
 import numpy as np
 
-from temporaldata import IrregularTimeSeries, RegularTimeSeries, Interval, Data
 
-
-class Patching:
-    r"""Patching transform that creates patches from temporal data along the time dimension.
-
-    This transform takes a temporalData object and performs patching along the time dimension
-    for all RegularTimeSeries objects. The data is reshaped from (time, channels, ...) to
-    (num_patches, channels, patch_samples, ...).
+def patch_time_series(
+    signal: np.ndarray,
+    timestamps: np.ndarray,
+    patch_duration: float,
+    stride: float | None = None,
+    timestamp_mode: str = "middle",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Patch a 2D time series into fixed-duration windows.
 
     Args:
-        patch_duration (float): Duration of each patch in seconds.
-        stride (float, optional): Step size between patches in seconds. Defaults to
-            patch_duration (non-overlapping). Can be smaller than patch_duration to
-            create overlapping patches.
-        timestamp_mode (str, optional): How to assign timestamps to patches. Options:
-            - "start": Use the start time of the patch
-            - "middle": Use the middle time of the patch (default)
+        signal: Time series with shape (num_samples, num_channels).
+        timestamps: Timestamps for each sample with shape (num_samples,).
+        patch_duration: Duration of each patch in seconds.
+        stride: Step size between patches in seconds. Defaults to patch_duration.
+        timestamp_mode: Patch timestamp convention:
+            - "start": timestamp at each patch start
+            - "middle": timestamp at each patch center
 
-    Example:
-        >>> data = Data(
-        ...     eeg=RegularTimeSeries(
-        ...         data=np.random.randn(500, 32),  # shape: (T=500, C=32)
-        ...         sampling_rate=250.0,
-        ...         domain=Interval(0.0, 2.0),
-        ...     ),
-        ...     domain=Interval(0.0, 2.0),
-        ... )
-        >>> # Non-overlapping patches: 2 patches of 250 samples each
-        >>> transform = Patching(patch_duration=1.0, stride=1.0)
-        >>> patched_data = transform(data)
-        >>> patched_data.eeg.data.shape  # (P=2, C=32, S=250)
-
-        >>> # Overlapping patches (50% overlap): 2 patches of 500 samples each
-        >>> transform = Patching(patch_duration=2.0, stride=1.0)
-        >>> patched_data = transform(data)
-        >>> patched_data.eeg.data.shape  # (P=2, C=32, S=500)
+    Returns:
+        Tuple of:
+            - patched_signal with shape (num_patches, num_channels, patch_samples)
+            - patch_timestamps with shape (num_patches,)
     """
-
-    def __init__(
-        self,
-        patch_duration: float,
-        stride: float = None,
-        timestamp_mode: str = "middle",
-    ):
-        self.patch_duration = patch_duration
-        self.stride = stride if stride is not None else patch_duration
-        self.timestamp_mode = timestamp_mode
-
-        if timestamp_mode not in ["start", "middle"]:
-            raise ValueError(
-                f"timestamp_mode must be 'start' or 'middle', got '{timestamp_mode}'"
-            )
-
-    def __call__(self, data: Data) -> Data:
-        """Apply patching transform to the data.
-
-        Args:
-            data: The temporalData object to patch.
-
-        Returns:
-            A new Data object with patched time series fields. Each RegularTimeSeries
-            attribute is transformed from shape (T, C, ...) to (P, C, S, ...) where:
-                - T: original number of time samples
-                - C: number of channels
-                - P: number of patches
-                - S: samples per patch (patch_duration * sampling_rate)
-        """
-        if data.domain is None:
-            raise ValueError(
-                "Data object must have a domain to apply patching."
-            )
-
-        out = Data()
-
-        for key, value in data.__dict__.items():
-            if key in ["_domain", "_absolute_start"]:
-                continue
-            elif isinstance(value, RegularTimeSeries):
-                out.__dict__[key] = self._patch_time_series(value)
-            elif isinstance(value, IrregularTimeSeries):
-                if self._is_regularly_spaced(value):
-                    out.__dict__[key] = self._patch_time_series(value)
-                else:
-                    out.__dict__[key] = copy.copy(value)
-            elif isinstance(value, Interval):
-                out.__dict__[key] = copy.copy(value)
-            elif isinstance(value, Data) and value.domain is not None:
-                out.__dict__[key] = self(value)
-            else:
-                out.__dict__[key] = copy.copy(value)
-
-        patched_domain = None
-        for key, value in out.__dict__.items():
-            if isinstance(value, (RegularTimeSeries, IrregularTimeSeries)):
-                patched_domain = value.domain
-                break
-
-        if patched_domain is not None:
-            out._domain = patched_domain
-        else:
-            out._domain = copy.copy(data._domain)
-
-        out._absolute_start = data._absolute_start
-
-        return out
-
-    def _patch_time_series(self, ts):
-        """Patch a time series object (RegularTimeSeries or IrregularTimeSeries).
-
-        Shape transformation:
-            Input:  (T, C, ...) where T is time samples, C is channels
-            Output: (P, C, S, ...) where P is num_patches, S is samples_per_patch
-
-        The output sampling_rate becomes 1/stride (patches per second), and each
-        patch contains patch_duration * original_sampling_rate samples.
-
-        Args:
-            ts: The time series to patch (RegularTimeSeries or IrregularTimeSeries).
-                Data arrays must have shape (T, C, ...) with T >= 1.
-
-        Returns:
-            A new time series of the same type with patched data arrays of shape
-            (P, C, S, ...). Returns a copy unchanged if no patchable arrays exist.
-        """
-        array_attrs = {}
-
-        if isinstance(ts, RegularTimeSeries):
-            sampling_rate = ts.sampling_rate
-            start_time = ts.domain.start[0] if ts.domain else 0.0
-
-            for key in ts.keys():
-                attr = getattr(ts, key)
-                if isinstance(attr, np.ndarray) and attr.ndim >= 2:
-                    array_attrs[key] = attr
-
-        elif isinstance(ts, IrregularTimeSeries):
-            for key in ts.keys():
-                if key == "timestamps":
-                    continue
-                attr = getattr(ts, key)
-                if isinstance(attr, np.ndarray) and attr.ndim >= 2:
-                    array_attrs[key] = attr
-
-            if not array_attrs or len(ts.timestamps) < 2:
-                return copy.copy(ts)
-
-            time_diffs = np.diff(ts.timestamps)
-            sampling_rate = 1.0 / np.mean(time_diffs)
-            start_time = ts.timestamps[0]
-        else:
-            return copy.copy(ts)
-
-        if not array_attrs:
-            return copy.copy(ts)
-
-        first_attr = array_attrs[list(array_attrs.keys())[0]]
-        time_samples = first_attr.shape[0]
-
-        patch_samples = int(np.round(self.patch_duration * sampling_rate))
-        stride_samples = int(np.round(self.stride * sampling_rate))
-
-        if time_samples <= patch_samples:
-            num_patches = 1
-        else:
-            num_patches = (
-                int(np.ceil((time_samples - patch_samples) / stride_samples))
-                + 1
-            )
-
-        total_samples_needed = (
-            num_patches - 1
-        ) * stride_samples + patch_samples
-
-        # indices shape: (P, S) - each row contains sample indices for one patch
-        indices = (
-            np.arange(patch_samples)[None, :]
-            + stride_samples * np.arange(num_patches)[:, None]
+    if signal.ndim != 2:
+        raise ValueError(
+            f"signal must be 2D with shape (time, channels), got {signal.shape}"
+        )
+    if timestamps.ndim != 1:
+        raise ValueError(
+            f"timestamps must be 1D with shape (time,), got {timestamps.shape}"
+        )
+    if len(signal) != len(timestamps):
+        raise ValueError(
+            "signal and timestamps must have the same number of samples"
+        )
+    if len(timestamps) < 2:
+        raise ValueError(
+            "at least 2 timestamps are required to infer sampling rate"
+        )
+    if patch_duration <= 0:
+        raise ValueError("patch_duration must be > 0")
+    if timestamp_mode not in {"start", "middle"}:
+        raise ValueError(
+            f"timestamp_mode must be 'start' or 'middle', got '{timestamp_mode}'"
         )
 
-        patched_attrs = {}
-        for key, attr_data in array_attrs.items():
-            # attr_data shape: (T, C, ...)
-            if time_samples < total_samples_needed:
-                pad_width = [(0, total_samples_needed - time_samples)] + [
-                    (0, 0)
-                ] * (attr_data.ndim - 1)
-                padded_data = np.pad(
-                    attr_data, pad_width, mode="constant", constant_values=0
-                )
-            else:
-                padded_data = attr_data
+    stride_seconds = patch_duration if stride is None else stride
+    if stride_seconds <= 0:
+        raise ValueError("stride must be > 0")
 
-            # After indexing: (P, S, C, ...) -> moveaxis -> (P, C, S, ...)
-            patches = padded_data[indices]
-            patches = np.moveaxis(patches, 2, 1)
-            patched_attrs[key] = patches
+    sample_deltas = np.diff(timestamps)
+    if np.any(sample_deltas <= 0):
+        raise ValueError("timestamps must be strictly increasing")
+    if not np.allclose(sample_deltas, sample_deltas[0], atol=1e-6):
+        raise ValueError(
+            "timestamps must be regularly spaced to create fixed-sample patches"
+        )
 
-        new_sampling_rate = 1.0 / self.stride
+    sampling_rate = 1.0 / float(sample_deltas[0])
+    patch_samples = int(np.round(patch_duration * sampling_rate))
+    stride_samples = int(np.round(stride_seconds * sampling_rate))
+    patch_samples = max(patch_samples, 1)
+    stride_samples = max(stride_samples, 1)
 
-        if self.timestamp_mode == "start":
-            domain_start = start_time
-            domain_end = domain_start + (num_patches - 1) / new_sampling_rate
-        elif self.timestamp_mode == "middle":
-            domain_start = start_time + self.patch_duration / 2
-            domain_end = domain_start + (num_patches - 1) / new_sampling_rate
+    num_samples = signal.shape[0]
+    if num_samples <= patch_samples:
+        num_patches = 1
+    else:
+        num_patches = (
+            int(np.ceil((num_samples - patch_samples) / stride_samples)) + 1
+        )
 
-        new_domain = Interval(start=domain_start, end=domain_end)
+    total_samples_needed = (num_patches - 1) * stride_samples + patch_samples
+    pad_amount = max(total_samples_needed - num_samples, 0)
+    padded_signal = (
+        np.pad(signal, ((0, pad_amount), (0, 0)), mode="constant")
+        if pad_amount > 0
+        else signal
+    )
 
-        if isinstance(ts, RegularTimeSeries):
-            patched_ts = RegularTimeSeries.__new__(RegularTimeSeries)
-            for key, value in patched_attrs.items():
-                patched_ts.__dict__[key] = value
-            patched_ts._sampling_rate = new_sampling_rate
-            patched_ts._domain = new_domain
-        else:
-            new_timestamps = np.linspace(domain_start, domain_end, num_patches)
-            patched_ts = IrregularTimeSeries.__new__(IrregularTimeSeries)
-            patched_ts.__dict__["timestamps"] = new_timestamps
-            for key, value in patched_attrs.items():
-                patched_ts.__dict__[key] = value
-            patched_ts._domain = new_domain
+    patch_indices = (
+        np.arange(patch_samples)[None, :]
+        + stride_samples * np.arange(num_patches)[:, None]
+    )
+    patched_signal = np.moveaxis(padded_signal[patch_indices], 2, 1)
 
-        return patched_ts
+    start_time = float(timestamps[0])
+    patch_offsets = stride_seconds * np.arange(num_patches, dtype=np.float64)
+    if timestamp_mode == "start":
+        patch_timestamps = start_time + patch_offsets
+    else:
+        patch_timestamps = start_time + patch_offsets + patch_duration / 2
 
-    def _is_regularly_spaced(
-        self, ts: IrregularTimeSeries, tolerance=1e-6
-    ) -> bool:
-        """Check if timestamps are regularly spaced.
-
-        Args:
-            ts: IrregularTimeSeries object.
-            tolerance: Tolerance for checking regular spacing.
-
-        Returns:
-            True if timestamps are regularly spaced, False otherwise.
-        """
-        timestamps = ts.timestamps
-        if len(timestamps) < 2:
-            return True
-
-        diffs = np.diff(timestamps)
-        return np.allclose(diffs, diffs[0], atol=tolerance)
+    return patched_signal, patch_timestamps

@@ -15,7 +15,7 @@ from torch_brain.nn import (
 from torch_brain.registry import ModalitySpec
 from torch_brain.utils import create_linspace_latent_tokens
 
-from foundry.data.transforms import Patching
+from foundry.data.transforms import patch_time_series
 from foundry.models.backbones import PerceiverIOBackbone
 from foundry.models.utils import resolve_readout_specs
 
@@ -91,7 +91,8 @@ class POYOEEGModel(nn.Module):
             )
         )
 
-        self.patching = Patching(patch_duration=patch_duration, stride=stride)
+        self.patch_duration = patch_duration
+        self.patch_stride = stride if stride is not None else patch_duration
 
         self._readout_specs = resolve_readout_specs(readout_specs)
         self.global_to_local_task_id = {
@@ -248,8 +249,6 @@ class POYOEEGModel(nn.Module):
         Returns:
             dict with model_inputs, target_values, target_weights, and metadata
         """
-        data = self.patching(data)
-
         if not hasattr(data, "config") or data.config is None:
             data.config = {}
 
@@ -278,8 +277,13 @@ class POYOEEGModel(nn.Module):
             np.char.lower(modality_field), list(self.SUPPORTED_MODALITIES)
         )
 
-        patches_array = signal_source.signal[:, modality_mask, :]
-        patch_center_times = signal_source.timestamps
+        patches_array, patch_center_times = patch_time_series(
+            signal=signal_source.signal[:, modality_mask],
+            timestamps=signal_source.timestamps,
+            patch_duration=self.patch_duration,
+            stride=self.patch_stride,
+            timestamp_mode="middle",
+        )
 
         channel_ids = data.channels.id[modality_mask].astype(str)
         channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
