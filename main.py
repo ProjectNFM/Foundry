@@ -54,6 +54,63 @@ def setup_logging(log_level: str):
     )
 
 
+def _get_slurm_restart_count() -> int:
+    restart_count_raw = os.environ.get("SLURM_RESTART_COUNT", "0")
+    try:
+        return int(restart_count_raw)
+    except ValueError:
+        logger.warning(
+            "Invalid SLURM_RESTART_COUNT=%r; treating as 0.",
+            restart_count_raw,
+        )
+        return 0
+
+
+def _get_resume_checkpoint_path(
+    cfg: DictConfig,
+    checkpoint_dir: str,
+    slurm_restart_count: int,
+) -> str | None:
+    last_ckpt = Path(checkpoint_dir) / "last.ckpt"
+    if not last_ckpt.exists():
+        if slurm_restart_count > 0:
+            logger.warning(
+                "SLURM restart detected but checkpoint %s is missing; "
+                "starting from scratch.",
+                last_ckpt,
+            )
+        return None
+
+    if slurm_restart_count > 0:
+        ckpt_path = str(last_ckpt)
+        logger.info(
+            "SLURM restart detected (restart_count=%s). Resuming from %s.",
+            slurm_restart_count,
+            ckpt_path,
+        )
+        return ckpt_path
+
+    resume_if_checkpoint_exists = OmegaConf.select(
+        cfg,
+        "run.resume_if_checkpoint_exists",
+        default=False,
+    )
+    if resume_if_checkpoint_exists:
+        ckpt_path = str(last_ckpt)
+        logger.info(
+            "run.resume_if_checkpoint_exists=true. Resuming from %s.",
+            ckpt_path,
+        )
+        return ckpt_path
+
+    logger.info(
+        "Found checkpoint %s but run.resume_if_checkpoint_exists=false; "
+        "starting from scratch.",
+        last_ckpt,
+    )
+    return None
+
+
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 @hydra_main_wrapper
 def main(cfg: DictConfig):
@@ -62,12 +119,13 @@ def main(cfg: DictConfig):
     logger.info(f"Starting training: {cfg.run.name}")
 
     slurm_job_id = os.environ.get("SLURM_JOB_ID")
+    slurm_restart_count = _get_slurm_restart_count()
     if slurm_job_id:
         logger.info(
             "SLURM job_id=%s array_task=%s restart_count=%s",
             slurm_job_id,
             os.environ.get("SLURM_ARRAY_TASK_ID"),
-            os.environ.get("SLURM_RESTART_COUNT", "0"),
+            slurm_restart_count,
         )
 
     # Hydra does not chdir by default (version_base=None), so resolve all
@@ -139,11 +197,11 @@ def main(cfg: DictConfig):
     trainer = instantiate(cfg.trainer)
     _log_config_to_wandb(trainer, cfg)
 
-    ckpt_path = None
-    last_ckpt = Path(checkpoint_dir) / "last.ckpt"
-    if last_ckpt.exists():
-        ckpt_path = str(last_ckpt)
-        logger.info("Resuming from checkpoint: %s", ckpt_path)
+    ckpt_path = _get_resume_checkpoint_path(
+        cfg=cfg,
+        checkpoint_dir=checkpoint_dir,
+        slurm_restart_count=slurm_restart_count,
+    )
 
     trainer.fit(
         lightning_module, datamodule, ckpt_path=ckpt_path, weights_only=False

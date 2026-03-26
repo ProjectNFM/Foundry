@@ -287,10 +287,15 @@ class POYOEEGModel(nn.Module):
         num_channels = self.input_embedding.num_channels
 
         if num_channels_actual > num_channels:
-            raise ValueError(
-                f"Data has {num_channels_actual} channels but model expects "
-                f"at most {num_channels}"
-            )
+            # raise ValueError(
+            #     f"Data has {num_channels_actual} channels but model expects "
+            #     f"at most {num_channels}"
+            # )
+            # When there are too many channels, we just use the first num_channels channels
+            patches_array = patches_array[:, :num_channels, :]
+            channel_ids = channel_ids[:num_channels]
+            channel_tokens = channel_tokens[:num_channels]
+            num_channels_actual = num_channels
 
         padded_signal = np.zeros(
             (num_patches, num_channels, patch_samples),
