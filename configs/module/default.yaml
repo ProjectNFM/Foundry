@@ -3,3 +3,4 @@ _target_: foundry.training.EEGModule
 learning_rate: ${hyperparameters.learning_rate}
 weight_decay: ${hyperparameters.weight_decay}
 class_weights: null
+class_weight_smoothing: 1.0

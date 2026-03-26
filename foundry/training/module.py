@@ -58,6 +58,7 @@ class EEGModule(L.LightningModule):
         weight_decay: float = 0.01,
         class_names: dict[str, list[str]] | None = None,
         class_weights: dict[str, list[float]] | None = None,
+        class_weight_smoothing: float = 1.0,
     ):
         """
         Args:
@@ -69,6 +70,9 @@ class EEGModule(L.LightningModule):
             class_weights: Optional mapping of readout name -> per-class weight list
                            for loss balancing (e.g. inverse frequency weights).
                            Weights are indexed by class index [0, num_classes-1].
+            class_weight_smoothing: Exponent applied to class weights before use.
+                           Stored for hyperparameter logging only — the actual
+                           smoothing is applied during weight computation.
         """
         super().__init__()
         self.model = model
