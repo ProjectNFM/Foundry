@@ -1,30 +1,37 @@
 import torch
 import torch.nn as nn
 
-from foundry.models.embeddings.base import (
-    FixedChannelWindowEmbedding,
-    get_activation,
-)
+from foundry.models.embeddings.base import get_activation
 
 
-class MLPEmbedding(FixedChannelWindowEmbedding):
-    """Converts patched EEG signal to embeddings via MLP.
+class MLPEmbedding(nn.Module):
+    """Convert patched EEG signal to embeddings via MLP.
 
     Flattens the (channels, time) dimensions and passes through hidden layers.
+
+    Args:
+        embed_dim: Output embedding dimension.
+        num_input_channels: Number of input channels per patch.
+        patch_samples: Number of time samples per patch.
+        hidden_dims: List of hidden layer sizes.
+        activation: Activation function name.
     """
 
     def __init__(
         self,
         embed_dim: int,
-        num_channels: int,
+        num_input_channels: int,
         patch_samples: int,
         hidden_dims: list[int],
         activation: str = "gelu",
     ):
-        super().__init__(embed_dim, num_channels, patch_samples)
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.num_input_channels = num_input_channels
+        self.patch_samples = patch_samples
 
         layers = []
-        input_dim = num_channels * patch_samples
+        input_dim = num_input_channels * patch_samples
         for hidden_dim in hidden_dims:
             layers.append(nn.Linear(input_dim, hidden_dim))
             layers.append(get_activation(activation))
@@ -38,16 +45,16 @@ class MLPEmbedding(FixedChannelWindowEmbedding):
                 nn.init.xavier_uniform_(module.weight, gain=1.0)
                 nn.init.zeros_(module.bias)
 
-    def forward(self, input_values: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, patches: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Args:
-            input_values: (batch, num_patches, num_channels, patch_samples)
+            patches: (B, P, C, S)
 
         Returns:
-            (batch, num_patches, embed_dim)
+            (B, P, embed_dim)
         """
-        batch, P, C, S = input_values.shape
-        return self.mlp(input_values.reshape(batch, P, C * S))
+        B, P, C, S = patches.shape
+        return self.mlp(patches.reshape(B, P, C * S))
 
 
 __all__ = ["MLPEmbedding"]

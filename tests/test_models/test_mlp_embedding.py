@@ -1,31 +1,31 @@
 import pytest
 import torch
 
-from foundry.models import MLPEmbedding, FixedChannelWindowEmbedding
+from foundry.models import MLPEmbedding
 
 
 class TestMLPEmbedding:
-    def test_class_hierarchy(self):
+    def test_is_nn_module(self):
         embedding = MLPEmbedding(
             embed_dim=64,
-            num_channels=8,
+            num_input_channels=8,
             patch_samples=50,
             hidden_dims=[128],
             activation="gelu",
         )
-        assert isinstance(embedding, FixedChannelWindowEmbedding)
+        assert isinstance(embedding, torch.nn.Module)
 
     def test_initialization(self, embed_dim):
         hidden_dims = [128, 64]
         embedding = MLPEmbedding(
             embed_dim=embed_dim,
-            num_channels=8,
+            num_input_channels=8,
             patch_samples=50,
             hidden_dims=hidden_dims,
             activation="gelu",
         )
         assert embedding.embed_dim == embed_dim
-        assert embedding.num_channels == 8
+        assert embedding.num_input_channels == 8
         assert embedding.patch_samples == 50
 
     def test_forward_pass_basic(self, embed_dim, batch_size):
@@ -35,7 +35,7 @@ class TestMLPEmbedding:
 
         embedding = MLPEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
             hidden_dims=[128, 64],
             activation="relu",
@@ -55,7 +55,7 @@ class TestMLPEmbedding:
         for activation in ["relu", "gelu", "silu", "tanh"]:
             embedding = MLPEmbedding(
                 embed_dim=embed_dim,
-                num_channels=num_channels,
+                num_input_channels=num_channels,
                 patch_samples=patch_samples,
                 hidden_dims=[64],
                 activation=activation,
@@ -70,7 +70,7 @@ class TestMLPEmbedding:
         with pytest.raises(ValueError, match="Unknown activation"):
             MLPEmbedding(
                 embed_dim=embed_dim,
-                num_channels=8,
+                num_input_channels=8,
                 patch_samples=50,
                 hidden_dims=[64],
                 activation="invalid_activation",
@@ -82,7 +82,7 @@ class TestMLPEmbedding:
 
         embedding = MLPEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
             hidden_dims=[128],
             activation="relu",
@@ -97,7 +97,7 @@ class TestMLPEmbedding:
 
         embedding = MLPEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
             hidden_dims=[256, 128, 64],
             activation="gelu",
@@ -110,7 +110,7 @@ class TestMLPEmbedding:
         hidden_dims = [128, 64]
         embedding = MLPEmbedding(
             embed_dim=embed_dim,
-            num_channels=8,
+            num_input_channels=8,
             patch_samples=50,
             hidden_dims=hidden_dims,
             activation="relu",
@@ -126,7 +126,7 @@ class TestMLPEmbedding:
 
         embedding = MLPEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
             hidden_dims=[128],
             activation="gelu",
@@ -142,7 +142,7 @@ class TestMLPEmbedding:
 
         embedding = MLPEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
             hidden_dims=[128, 64],
             activation="silu",
@@ -157,7 +157,7 @@ class TestMLPEmbedding:
 
         embedding = MLPEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
             hidden_dims=[128],
             activation="relu",
@@ -179,7 +179,7 @@ class TestMLPEmbedding:
 
         embedding = MLPEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
             hidden_dims=[128],
             activation="relu",
@@ -200,7 +200,7 @@ class TestMLPEmbedding:
 
         embedding = MLPEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
             hidden_dims=[64],
             activation="gelu",

@@ -15,30 +15,48 @@ from torch_brain.nn import (
 from torch_brain.registry import ModalitySpec
 from torch_brain.utils import create_linspace_latent_tokens
 
-from foundry.data.transforms import patch_time_series
 from foundry.models.backbones import PerceiverIOBackbone
+from foundry.models.tokenizer import EEGTokenizer
 from foundry.models.utils import resolve_readout_specs
 
 
 class POYOEEGModel(nn.Module):
-    """
-    POYO-style EEG model with built-in Perceiver architecture.
+    """POYO-style EEG model with built-in Perceiver architecture.
 
-    This model uses a PerceiverIO backbone internally and only accepts
-    input_embedding as a configurable module. All other components
-    (encoder, processor, decoder) are built-in.
+    This model uses a PerceiverIO backbone internally and accepts an
+    :class:`EEGTokenizer` that composes a channel strategy with a
+    temporal embedding to convert raw EEG signal into token sequences.
+
+    Args:
+        tokenizer: Composable tokenizer handling channel strategy,
+            optional GPU patching, and temporal embedding.
+        readout_specs: List/dict of task specifications for multitask readout.
+            Can be ModalitySpec objects or string names that resolve from
+            the registry.
+        embed_dim: Embedding dimension (must match components).
+        sequence_length: Length of sequences in seconds.
+        latent_step: Time step between latent tokens in seconds.
+        num_latents_per_step: Number of latent tokens per time step.
+        depth: Number of processor layers.
+        dim_head: Dimension per attention head.
+        cross_heads: Number of attention heads for cross-attention.
+        self_heads: Number of attention heads for self-attention.
+        ffn_dropout: Dropout rate for feedforward networks.
+        lin_dropout: Dropout rate for linear layers in processor.
+        atn_dropout: Dropout rate for attention layers.
+        emb_init_scale: Initialization scale for embeddings.
+        t_min: Minimum time value for rotary encoding.
+        t_max: Maximum time value for rotary encoding.
     """
 
     SUPPORTED_MODALITIES = {"eeg", "ecog", "seeg", "ieeg"}
 
     def __init__(
         self,
-        input_embedding: nn.Module,
+        tokenizer: EEGTokenizer,
         readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
         embed_dim: int,
         sequence_length: float,
-        patch_duration: float,
-        stride: Optional[float] = None,
         latent_step: float = 0.1,
         num_latents_per_step: int = 1,
         depth: int = 2,
@@ -52,32 +70,9 @@ class POYOEEGModel(nn.Module):
         t_min: float = 1e-4,
         t_max: float = 2.0627,
     ):
-        """
-        Args:
-            input_embedding: Module that converts raw inputs to embeddings.
-                Receives (batch, num_patches, num_channels, patch_samples).
-            readout_specs: List/dict of task specifications for multitask readout.
-                Can be ModalitySpec objects or string names that resolve from registry.
-            embed_dim: Embedding dimension (must match components)
-            sequence_length: Length of sequences in seconds
-            patch_duration: Duration of each patch in seconds
-            stride: Step size between patches in seconds. Defaults to patch_duration (non-overlapping).
-            latent_step: Time step between latent tokens in seconds
-            num_latents_per_step: Number of latent tokens per time step
-            depth: Number of processor layers
-            dim_head: Dimension per attention head
-            cross_heads: Number of attention heads for cross-attention
-            self_heads: Number of attention heads for self-attention
-            ffn_dropout: Dropout rate for feedforward networks
-            lin_dropout: Dropout rate for linear layers in processor
-            atn_dropout: Dropout rate for attention layers
-            emb_init_scale: Initialization scale for embeddings
-            t_min: Minimum time value for rotary encoding
-            t_max: Maximum time value for rotary encoding
-        """
         super().__init__()
 
-        self.input_embedding = input_embedding
+        self.tokenizer = tokenizer
         self.embed_dim = embed_dim
         self.sequence_length = sequence_length
         self.latent_step = latent_step
@@ -90,9 +85,6 @@ class POYOEEGModel(nn.Module):
                 num_latents_per_step=self.num_latents_per_step,
             )
         )
-
-        self.patch_duration = patch_duration
-        self.patch_stride = stride if stride is not None else patch_duration
 
         self._readout_specs = resolve_readout_specs(readout_specs)
         self.global_to_local_task_id = {
@@ -151,38 +143,35 @@ class POYOEEGModel(nn.Module):
         output_decoder_index: torch.Tensor,
         unpack_output: bool = False,
     ) -> Dict:
-        """
-        Forward pass through the model.
+        """Forward pass through the model.
 
         Args:
-            input_values: Patched signal (batch_size, num_patches, num_channels, patch_samples)
-                or full signal (batch_size, num_channels, max_T) for CWT embeddings.
-            input_timestamps: Timestamps per patch (batch_size, num_patches)
-            input_channel_index: Channel tokens (batch_size, num_channels)
-            input_session_index: Session index for input (batch_size,)
-            input_mask: Optional channel validity mask (batch_size, num_channels)
-            input_sampling_rate: Optional per-item sampling rate (batch_size,).
-                Required by CWT embeddings, ignored by patch-based embeddings.
-            input_seq_len: Optional per-item true sample count (batch_size,).
-                Required by CWT embeddings, ignored by patch-based embeddings.
-            latent_index: Indices for latent tokens (batch_size, n_latent)
-            latent_timestamps: Timestamps for latent tokens (batch_size, n_latent)
-            output_session_index: Session indices for output queries (batch_size, n_out)
-            output_timestamps: Timestamps for output predictions (batch_size, n_out)
-            output_decoder_index: Task/decoder indices for each output (batch_size, n_out)
-            unpack_output: Whether to unpack outputs by batch sample
+            input_values: (B, C, T) raw signal (padded to max T in batch).
+            input_timestamps: (B, num_tokens) timestamps per token.
+            input_channel_index: (B, C) channel identity tokens.
+            input_session_index: (B,) session index for input.
+            input_mask: (B, C) channel validity mask.
+            input_sampling_rate: (B,) per-item sampling rate.
+            input_seq_len: (B,) per-item true sample count.
+            latent_index: (B, n_latent) indices for latent tokens.
+            latent_timestamps: (B, n_latent) timestamps for latent tokens.
+            output_session_index: (B, n_out) session indices for outputs.
+            output_timestamps: (B, n_out) timestamps for output predictions.
+            output_decoder_index: (B, n_out) task/decoder indices.
+            unpack_output: Whether to unpack outputs by batch sample.
 
         Returns:
-            Dictionary of task-specific outputs
+            Dictionary of task-specific outputs.
         """
         self._validate_vocab_initialization()
 
-        inputs = self.input_embedding(
+        inputs = self.tokenizer(
             input_values,
             input_channel_index=input_channel_index,
             input_mask=input_mask,
             input_sampling_rate=input_sampling_rate,
             input_seq_len=input_seq_len,
+            channel_emb_fn=self.channel_emb,
         )
 
         session_emb = self.session_emb(input_session_index).unsqueeze(1)
@@ -221,14 +210,10 @@ class POYOEEGModel(nn.Module):
 
     @property
     def readout_specs(self) -> dict[str, ModalitySpec]:
-        # Returns task specs
         return self._readout_specs
 
     def _resolve_signal_source(self, data: Data):
         """Find the signal source and default modality type from the data.
-
-        Searches for the first available modality field (eeg, ecog, seeg) on
-        the data object.
 
         Returns:
             Tuple of (signal_source, default_type) where signal_source is the
@@ -245,18 +230,19 @@ class POYOEEGModel(nn.Module):
     def tokenize(self, data: Data) -> dict:
         """Tokenize the input data.
 
-        Applies patching, then delegates signal preparation to the embedding's
-        ``pretokenize`` method so that each embedding type can control how the
-        patched signal is shaped, padded, or otherwise transformed.
+        Delegates signal preparation to the :class:`EEGTokenizer` which
+        handles channel strategy, optional GPU patching, and temporal
+        embedding concerns.
 
         Args:
             data: TemporalData object containing raw EEG/ECoG/sEEG signal.
-                  If data.config["multitask_readout"] is set by the dataset, it
-                  will be intersected with the model's readout_specs to use only
-                  supported modalities.
+                  If ``data.config["multitask_readout"]`` is set by the
+                  dataset, it will be intersected with the model's
+                  ``readout_specs`` to use only supported modalities.
 
         Returns:
-            dict with model_inputs, target_values, target_weights, and metadata
+            dict with model_inputs, target_values, target_weights, and
+            metadata.
         """
         if not hasattr(data, "config") or data.config is None:
             data.config = {}
@@ -289,31 +275,16 @@ class POYOEEGModel(nn.Module):
         channel_ids = data.channels.id[modality_mask].astype(str)
         channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
 
-        if getattr(self.input_embedding, "requires_patching", True):
-            patches_array, patch_center_times = patch_time_series(
-                signal=signal_source.signal[:, modality_mask],
-                timestamps=signal_source.timestamps,
-                patch_duration=self.patch_duration,
-                stride=self.patch_stride,
-                timestamp_mode="middle",
-            )
-            pretokenized = self.input_embedding.pretokenize(
-                patches_array, channel_tokens
-            )
-            input_timestamps = torch.from_numpy(
-                np.asarray(patch_center_times)
-            ).float()
-        else:
-            signal_array = signal_source.signal[:, modality_mask]
-            sample_deltas = np.diff(signal_source.timestamps)
-            sampling_rate = 1.0 / float(sample_deltas[0])
-            pretokenized = self.input_embedding.pretokenize(
-                signal_array,
-                channel_tokens,
-                sampling_rate=sampling_rate,
-                sequence_length=self.sequence_length,
-            )
-            input_timestamps = pretokenized.pop("input_timestamps")
+        sample_deltas = np.diff(signal_source.timestamps)
+        sampling_rate = 1.0 / float(sample_deltas[0])
+
+        pretokenized = self.tokenizer.pretokenize(
+            signal=signal_source.signal[:, modality_mask],
+            channel_tokens=channel_tokens,
+            sampling_rate=sampling_rate,
+            sequence_length=self.sequence_length,
+        )
+        input_timestamps = pretokenized.pop("input_timestamps")
 
         latent_index = self._latent_index
         latent_timestamps = self._latent_timestamps
@@ -356,7 +327,8 @@ class POYOEEGModel(nn.Module):
         """Initialize vocabularies from dataset information.
 
         Args:
-            vocab_info: Dictionary with 'session_ids' and 'channel_ids' keys
+            vocab_info: Dictionary with ``session_ids`` and ``channel_ids``
+                keys.
         """
         if "session_ids" in vocab_info and self.session_emb.is_lazy():
             self.session_emb.initialize_vocab(vocab_info["session_ids"])

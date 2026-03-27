@@ -5,10 +5,13 @@ defaults:
   - override /data: ajile_singlesess
 
 model:
-  patch_duration: ${hyperparameters.patch_duration}
-  input_embedding:
-    num_channels: 94
-    patch_samples: 5
+  tokenizer:
+    patch_duration: ${hyperparameters.patch_duration}
+    channel_strategy:
+      num_channels: 94
+    temporal_embedding:
+      num_input_channels: 94
+      patch_samples: 5
 
 data:
   split_type: intrasession

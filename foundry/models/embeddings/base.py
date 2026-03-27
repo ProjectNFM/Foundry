@@ -1,3 +1,4 @@
+import warnings
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -24,21 +25,25 @@ def get_activation(activation: str) -> nn.Module:
 
 
 class EmbeddingBase(nn.Module, ABC):
-    """Abstract base class for all input embedding layers.
+    """Abstract base class for input embedding layers.
 
-    Subclasses must implement ``pretokenize`` (data preparation during
-    tokenization) and ``forward`` (the embedding computation itself).
+    .. deprecated::
+        Use ``EEGTokenizer`` with a channel strategy and temporal embedding
+        instead.  Temporal embeddings now inherit directly from
+        ``nn.Module``.
     """
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        warnings.warn(
+            f"{cls.__name__} inherits from EmbeddingBase which is deprecated. "
+            "Temporal embeddings should inherit from nn.Module directly.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
     @property
     def requires_patching(self) -> bool:
-        """Whether the embedding expects patched input from ``patch_time_series``.
-
-        Patch-based embeddings (default) receive ``(num_patches, C, patch_samples)``
-        arrays in ``pretokenize``.  Embeddings that operate on the full time
-        series (e.g. CWT) override this to ``False`` and receive the raw signal
-        instead.
-        """
         return True
 
     @abstractmethod
@@ -46,34 +51,18 @@ class EmbeddingBase(nn.Module, ABC):
         self,
         patches_array: np.ndarray,
         channel_tokens: np.ndarray,
-    ) -> dict:
-        """Transform patched signal into the format expected by ``forward``.
-
-        Called once per sample during tokenization (before batching) so each
-        embedding type can reshape, pad, or otherwise prepare the data.
-
-        Args:
-            patches_array: ``(num_patches, num_channels_actual, patch_samples)``
-                raw patched signal containing only valid channels.
-            channel_tokens: ``(num_channels_actual,)`` integer channel-token
-                indices.
-
-        Returns:
-            dict with at minimum ``input_values``, ``input_channel_index``,
-            and ``input_mask`` tensors.
-        """
-        ...
+    ) -> dict: ...
 
     @abstractmethod
     def forward(self, input_values: torch.Tensor, **kwargs) -> torch.Tensor: ...
 
 
 class FixedChannelWindowEmbedding(EmbeddingBase):
-    """Base for embeddings that operate on a fixed channel count and patch size.
+    """Base for embeddings on a fixed channel count and patch size.
 
-    Handles channel padding / truncation during ``pretokenize`` so that
-    every sample presented to ``forward`` has exactly ``num_channels``
-    channels and ``patch_samples`` time steps per patch.
+    .. deprecated::
+        Use ``FixedChannelStrategy`` for channel handling and inherit
+        temporal embeddings from ``nn.Module`` directly.
     """
 
     def __init__(self, embed_dim: int, num_channels: int, patch_samples: int):

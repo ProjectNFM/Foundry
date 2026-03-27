@@ -2,13 +2,9 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-from foundry.models.embeddings.base import EmbeddingBase
-from foundry.models.embeddings.spatial import SessionSpatialProjector
 
 
 class ContinuousCWTLayer(nn.Module):
@@ -61,7 +57,6 @@ class ContinuousCWTLayer(nn.Module):
         device = x.device
         dtype = x.dtype
 
-        # -- wavelet generation --
         f = torch.clamp(self.freqs, min=0.1).view(1, F_dim, 1)
         n_c = torch.clamp(self.n_cycles, min=1.0).view(1, F_dim, 1)
 
@@ -87,7 +82,6 @@ class ContinuousCWTLayer(nn.Module):
         real_wavelet = real_wavelet / norm_factor
         imag_wavelet = imag_wavelet / norm_factor
 
-        # -- grouped convolution --
         x_reshaped = x.reshape(1, B * C, Max_T)
         weight_real = (
             real_wavelet.unsqueeze(1)
@@ -110,7 +104,6 @@ class ContinuousCWTLayer(nn.Module):
         out_real = out_real.view(B, C, F_dim, Max_T)
         out_imag = out_imag.view(B, C, F_dim, Max_T)
 
-        # -- continuous time projection via grid_sample --
         out_complex = torch.stack([out_real, out_imag], dim=2)
         out_complex_flat = out_complex.view(B, C * 2, F_dim, Max_T)
 
@@ -148,205 +141,70 @@ class ContinuousCWTLayer(nn.Module):
         return torch.stack([cont_mag, cont_phase], dim=2)
 
 
-class CWTEmbedding(EmbeddingBase):
-    """Embedding via spatial projection followed by learnable CWT.
+class CWTEmbedding(nn.Module):
+    """Temporal embedding via learnable CWT.
 
-    Unlike patch-based embeddings, this operates on the **full time series**
-    and produces a fixed number of time tokens through differentiable wavelet
+    Operates on spatially-projected signal (``num_sources`` channels) and
+    produces a fixed number of time tokens through differentiable wavelet
     analysis and time resampling.
 
-    When ``session_configs`` is ``None`` (the default), a single linear
-    spatial projection is used (channels are padded/truncated to
-    ``num_channels``, then projected to ``num_sources``).  When provided,
-    a :class:`SessionSpatialProjector` handles per-session variable channel
-    counts.
+    The spatial projection is handled by the upstream channel strategy;
+    this module is purely temporal.
 
     Args:
         embed_dim: Output embedding dimension per time token.
-        num_channels: Fixed channel count (pad/truncate) when session-specific
-            projection is not used.
-        num_sources: Number of latent spatial sources after projection.
+        num_sources: Number of input source channels (after spatial projection).
         init_freqs: Initial CWT center frequencies in Hz.
         target_time_tokens: Number of time tokens produced by the CWT layer.
         n_cycles: Initial wavelet width (time-frequency trade-off).
-        shared_spatial_hidden_dim: Optional hidden size between the spatial
-            projection and the source output.
-        session_configs: If provided, mapping of ``session_id`` (str) to its
-            channel count; enables per-session spatial projection.
     """
-
-    @property
-    def requires_patching(self) -> bool:
-        return False
 
     def __init__(
         self,
         embed_dim: int,
-        num_channels: int,
         num_sources: int,
         init_freqs: list[float],
         target_time_tokens: int = 128,
         n_cycles: float = 7.0,
-        shared_spatial_hidden_dim: int | None = None,
-        session_configs: dict[str, int] | None = None,
     ):
         super().__init__()
         self.embed_dim = embed_dim
-        self.num_channels = num_channels
         self.num_sources = num_sources
         self.target_time_tokens = target_time_tokens
         self._num_freqs = len(init_freqs)
 
-        # -- spatial projection --
-        if session_configs is not None:
-            self.spatial = SessionSpatialProjector(
-                session_configs=session_configs,
-                num_sources=num_sources,
-                shared_hidden_dim=shared_spatial_hidden_dim,
-            )
-            self._use_session_spatial = True
-        else:
-            if shared_spatial_hidden_dim is not None:
-                self.spatial = nn.Sequential(
-                    nn.Linear(num_channels, shared_spatial_hidden_dim),
-                    nn.GELU(),
-                    nn.Linear(shared_spatial_hidden_dim, num_sources),
-                )
-            else:
-                self.spatial = nn.Linear(num_channels, num_sources)
-            self._use_session_spatial = False
-
-        # -- CWT --
         self.cwt = ContinuousCWTLayer(
             init_freqs=init_freqs,
             target_time_tokens=target_time_tokens,
             n_cycles=n_cycles,
         )
 
-        # -- feature projection: (sources * 2 * freqs) -> embed_dim --
         feat_dim = num_sources * 2 * len(init_freqs)
         self.feature_proj = nn.Linear(feat_dim, embed_dim)
         nn.init.xavier_uniform_(self.feature_proj.weight, gain=1.0)
         nn.init.zeros_(self.feature_proj.bias)
 
-    # --------------------------------------------------------------------- #
-    # pretokenize (called per-sample before batching)
-    # --------------------------------------------------------------------- #
-    def pretokenize(
-        self,
-        signal: np.ndarray,
-        channel_tokens: np.ndarray,
-        *,
-        sampling_rate: float,
-        sequence_length: float,
-    ) -> dict:
-        """Prepare a single sample for the CWT embedding.
-
-        Unlike patch-based embeddings, this receives the full (unpatched)
-        signal as ``(num_samples, num_channels_actual)`` and returns it
-        in channel-first layout with channel padding/truncation.
-
-        Args:
-            signal: ``(num_samples, num_channels_actual)``
-            channel_tokens: ``(num_channels_actual,)``
-            sampling_rate: Sampling rate in Hz.
-            sequence_length: Duration of the context window in seconds.
-
-        Returns:
-            dict with ``input_values``, ``input_channel_index``,
-            ``input_mask``, ``input_sampling_rate``, ``input_seq_len``,
-            and ``input_timestamps``.
-        """
-        num_samples, num_channels_actual = signal.shape
-        num_channels = self.num_channels
-
-        if num_channels_actual > num_channels:
-            signal = signal[:, :num_channels]
-            channel_tokens = channel_tokens[:num_channels]
-            num_channels_actual = num_channels
-
-        padded = np.zeros((num_channels, num_samples), dtype=signal.dtype)
-        padded[:num_channels_actual, :] = signal.T[:num_channels_actual, :]
-
-        padded_channel_tokens = np.zeros(
-            num_channels, dtype=channel_tokens.dtype
-        )
-        padded_channel_tokens[:num_channels_actual] = channel_tokens
-
-        channel_mask = np.zeros(num_channels, dtype=bool)
-        channel_mask[:num_channels_actual] = True
-
-        timestamps = np.linspace(
-            0.0, sequence_length, self.target_time_tokens, dtype=np.float32
-        )
-
-        return {
-            "input_values": torch.from_numpy(padded).float(),
-            "input_channel_index": torch.from_numpy(
-                padded_channel_tokens
-            ).long(),
-            "input_mask": torch.from_numpy(channel_mask),
-            "input_sampling_rate": torch.tensor(
-                sampling_rate, dtype=torch.float32
-            ),
-            "input_seq_len": torch.tensor(num_samples, dtype=torch.long),
-            "input_timestamps": torch.from_numpy(timestamps).float(),
-        }
-
-    # --------------------------------------------------------------------- #
-    # forward (called on batched data)
-    # --------------------------------------------------------------------- #
     def forward(
         self,
-        input_values: torch.Tensor,
+        x: torch.Tensor,
         *,
-        input_sampling_rate: torch.Tensor | None = None,
-        input_seq_len: torch.Tensor | None = None,
-        **kwargs,
+        input_sampling_rate: torch.Tensor,
+        input_seq_len: torch.Tensor,
     ) -> torch.Tensor:
         """
         Args:
-            input_values: ``(batch, num_channels, max_T)``
-            input_sampling_rate: ``(batch,)`` sampling rate per item.
-            input_seq_len: ``(batch,)`` true sample count per item.
+            x: ``(B, num_sources, max_T)`` spatially-projected signal.
+            input_sampling_rate: ``(B,)`` sampling rate per item.
+            input_seq_len: ``(B,)`` true sample count per item.
 
         Returns:
-            ``(batch, target_time_tokens, embed_dim)``
+            ``(B, target_time_tokens, embed_dim)``
         """
-        B, C, Max_T = input_values.shape
-
-        if input_sampling_rate is None:
-            raise ValueError(
-                "CWTEmbedding requires input_sampling_rate "
-                "(pass sampling_rate through the tokenizer)."
-            )
-        if input_seq_len is None:
-            raise ValueError(
-                "CWTEmbedding requires input_seq_len "
-                "(pass seq_len through the tokenizer)."
-            )
-
-        # -- spatial projection --
-        if self._use_session_spatial:
-            session_ids = kwargs.get("input_session_ids")
-            channel_counts = kwargs.get("input_channel_counts")
-            sources = self.spatial(
-                input_values, session_ids, channel_counts, input_seq_len
-            )
-        else:
-            # (B, C, T) -> (B, T, C) -> linear -> (B, T, S) -> (B, S, T)
-            sources = self.spatial(input_values.transpose(1, 2)).transpose(1, 2)
-
-        # -- CWT --
         # (B, num_sources, 2, F, target_time_tokens)
-        cwt_out = self.cwt(sources, input_sampling_rate, input_seq_len)
+        cwt_out = self.cwt(x, input_sampling_rate, input_seq_len)
 
-        # -- flatten features per time token --
-        # permute to (B, target_time_tokens, num_sources, 2, F)
-        B2, S, two, F_dim, T = cwt_out.shape
-        cwt_flat = cwt_out.permute(0, 4, 1, 2, 3).reshape(
-            B2, T, S * two * F_dim
-        )
+        B, S, two, F_dim, T = cwt_out.shape
+        cwt_flat = cwt_out.permute(0, 4, 1, 2, 3).reshape(B, T, S * two * F_dim)
 
         return self.feature_proj(cwt_flat)
 
