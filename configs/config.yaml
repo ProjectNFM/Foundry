@@ -12,6 +12,7 @@ hyperparameters:
   batch_size: ???
   window_length: ???
   patch_duration: ???
+  sampling_rate: ???
   fold_number: ???
   num_workers: ???
   learning_rate: 1e-4
