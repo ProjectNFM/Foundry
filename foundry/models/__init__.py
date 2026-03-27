@@ -8,8 +8,11 @@ from foundry.models.embeddings import (
     EmbeddingBase,
     FixedChannelWindowEmbedding,
     CNNEmbedding,
+    ContinuousCWTLayer,
+    CWTEmbedding,
     MLPEmbedding,
     LinearEmbedding,
+    SessionSpatialProjector,
 )
 
 from foundry.models.poyo_eeg import POYOEEGModel
@@ -29,6 +32,9 @@ __all__ = [
     "LinearEmbedding",
     "MLPEmbedding",
     "CNNEmbedding",
+    "CWTEmbedding",
+    "ContinuousCWTLayer",
+    "SessionSpatialProjector",
     "PerceiverDecoder",
     "PerceiverEncoder",
     "PerceiverIOBackbone",

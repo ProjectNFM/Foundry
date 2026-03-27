@@ -142,6 +142,8 @@ class POYOEEGModel(nn.Module):
         input_channel_index: torch.Tensor,
         input_session_index: torch.Tensor,
         input_mask: Optional[torch.Tensor] = None,
+        input_sampling_rate: Optional[torch.Tensor] = None,
+        input_seq_len: Optional[torch.Tensor] = None,
         latent_index: torch.Tensor,
         latent_timestamps: torch.Tensor,
         output_session_index: torch.Tensor,
@@ -154,10 +156,15 @@ class POYOEEGModel(nn.Module):
 
         Args:
             input_values: Patched signal (batch_size, num_patches, num_channels, patch_samples)
+                or full signal (batch_size, num_channels, max_T) for CWT embeddings.
             input_timestamps: Timestamps per patch (batch_size, num_patches)
             input_channel_index: Channel tokens (batch_size, num_channels)
             input_session_index: Session index for input (batch_size,)
             input_mask: Optional channel validity mask (batch_size, num_channels)
+            input_sampling_rate: Optional per-item sampling rate (batch_size,).
+                Required by CWT embeddings, ignored by patch-based embeddings.
+            input_seq_len: Optional per-item true sample count (batch_size,).
+                Required by CWT embeddings, ignored by patch-based embeddings.
             latent_index: Indices for latent tokens (batch_size, n_latent)
             latent_timestamps: Timestamps for latent tokens (batch_size, n_latent)
             output_session_index: Session indices for output queries (batch_size, n_out)
@@ -174,6 +181,8 @@ class POYOEEGModel(nn.Module):
             input_values,
             input_channel_index=input_channel_index,
             input_mask=input_mask,
+            input_sampling_rate=input_sampling_rate,
+            input_seq_len=input_seq_len,
         )
 
         session_emb = self.session_emb(input_session_index).unsqueeze(1)
@@ -277,20 +286,34 @@ class POYOEEGModel(nn.Module):
             np.char.lower(modality_field), list(self.SUPPORTED_MODALITIES)
         )
 
-        patches_array, patch_center_times = patch_time_series(
-            signal=signal_source.signal[:, modality_mask],
-            timestamps=signal_source.timestamps,
-            patch_duration=self.patch_duration,
-            stride=self.patch_stride,
-            timestamp_mode="middle",
-        )
-
         channel_ids = data.channels.id[modality_mask].astype(str)
         channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
 
-        pretokenized = self.input_embedding.pretokenize(
-            patches_array, channel_tokens
-        )
+        if getattr(self.input_embedding, "requires_patching", True):
+            patches_array, patch_center_times = patch_time_series(
+                signal=signal_source.signal[:, modality_mask],
+                timestamps=signal_source.timestamps,
+                patch_duration=self.patch_duration,
+                stride=self.patch_stride,
+                timestamp_mode="middle",
+            )
+            pretokenized = self.input_embedding.pretokenize(
+                patches_array, channel_tokens
+            )
+            input_timestamps = torch.from_numpy(
+                np.asarray(patch_center_times)
+            ).float()
+        else:
+            signal_array = signal_source.signal[:, modality_mask]
+            sample_deltas = np.diff(signal_source.timestamps)
+            sampling_rate = 1.0 / float(sample_deltas[0])
+            pretokenized = self.input_embedding.pretokenize(
+                signal_array,
+                channel_tokens,
+                sampling_rate=sampling_rate,
+                sequence_length=self.sequence_length,
+            )
+            input_timestamps = pretokenized.pop("input_timestamps")
 
         latent_index = self._latent_index
         latent_timestamps = self._latent_timestamps
@@ -315,9 +338,7 @@ class POYOEEGModel(nn.Module):
 
         return {
             **pretokenized,
-            "input_timestamps": torch.from_numpy(
-                np.asarray(patch_center_times)
-            ).float(),
+            "input_timestamps": input_timestamps,
             "input_session_index": input_session_index,
             "latent_index": latent_index,
             "latent_timestamps": latent_timestamps,
