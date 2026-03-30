@@ -1,17 +1,7 @@
-_target_: foundry.models.POYOEEGModel
+defaults:
+  - tokenizer: patch_linear
 
-tokenizer:
-  _target_: foundry.models.tokenizer.EEGTokenizer
-  patch_duration: 0.1
-  embed_dim: ${model.embed_dim}
-  channel_strategy:
-    _target_: foundry.models.embeddings.FixedChannelStrategy
-    num_channels: ???
-  temporal_embedding:
-    _target_: foundry.models.embeddings.LinearEmbedding
-    embed_dim: ${model.embed_dim}
-    num_input_channels: ${model.tokenizer.channel_strategy.num_channels}
-    patch_samples: ${patch_samples:${model.tokenizer.patch_duration},${hyperparameters.sampling_rate}}
+_target_: foundry.models.POYOEEGModel
 
 embed_dim: 128
 sequence_length: 1.0
