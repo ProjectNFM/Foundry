@@ -43,6 +43,7 @@ class TestMode1FixedChannelPatched:
             "input_mask",
             "input_sampling_rate",
             "input_timestamps",
+            "input_seq_len",
         }
         assert set(result.keys()) == expected_keys
 
