@@ -1,4 +1,3 @@
-import numpy as np
 from brainsets.datasets import PetersonBruntonPoseTrajectory2022
 from foundry.data.datamodules.base import NeuralDataModule
 from typing import Optional, Callable, Literal
@@ -58,10 +57,4 @@ class AjileDataModule(NeuralDataModule):
         return sorted(self.dataset.recording_ids)
 
     def get_channel_ids(self) -> list[str]:
-        all_ids = []
-        for rid in self.dataset.recording_ids:
-            recording = self.dataset.get_recording(rid)
-            channels = recording.channels
-            ids = channels.ids if hasattr(channels, "ids") else channels.id
-            all_ids.append(ids.astype(str))
-        return np.sort(np.concatenate(all_ids)).tolist()
+        return sorted(self.dataset.get_channel_ids())

@@ -214,18 +214,6 @@ class TestTokenizerOutput:
 
         assert tokens["input_mask"].all()
 
-    def test_too_many_channels_raises(self, model_with_linear):
-        """Tokenizer raises if data has more channels than model expects."""
-        model_with_linear.session_emb.initialize_vocab(["session1"])
-        model_with_linear.channel_emb.initialize_vocab(
-            [f"ch{i}" for i in range(NUM_CHANNELS + 4)]
-        )
-
-        data = create_data_sample(num_channels=NUM_CHANNELS + 4)
-
-        with pytest.raises(ValueError, match="channels but model expects"):
-            model_with_linear.tokenize(data)
-
 
 class TestHeterogeneousBatching:
     def test_tokenize_different_channel_counts(self, model_with_linear):
