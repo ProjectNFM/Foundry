@@ -123,12 +123,21 @@ class NeuralDataModule(LightningDataModule):
             **self.dataset_kwargs,
         )
 
-    def compute_class_weights(self) -> dict[str, list[float]]:
+    def compute_class_weights(
+        self, smoothing: float = 1.0
+    ) -> dict[str, list[float]]:
         """Compute inverse-frequency class weights from the training split.
 
         Scans training intervals to count label occurrences per readout, then
         returns weights proportional to ``total / (num_classes * class_count)``
-        (the same formula used by scikit-learn's ``compute_class_weight``).
+        (the same formula used by scikit-learn's ``compute_class_weight``),
+        raised to the power of ``smoothing``.
+
+        A smoothing of 1.0 gives standard inverse-frequency weights. Values
+        below 1 (e.g. 0.5 for sqrt-inverse-frequency) dampen the correction
+        and reduce over-prediction of minority classes, which often improves
+        macro-F1 on imbalanced datasets. A smoothing of 0.0 produces uniform
+        weights.
 
         Must be called after :meth:`setup`.
         """
@@ -181,13 +190,14 @@ class NeuralDataModule(LightningDataModule):
             total = sum(counts.values())
             num_classes = spec.dim
             weights = [
-                total / (num_classes * max(counts.get(i, 0), 1))
+                (total / (num_classes * max(counts.get(i, 0), 1))) ** smoothing
                 for i in range(num_classes)
             ]
             class_weights[readout_name] = weights
             logger.info(
-                "Class weights for %s: %s (counts: %s)",
+                "Class weights for %s (smoothing=%.2f): %s (counts: %s)",
                 readout_name,
+                smoothing,
                 [f"{w:.3f}" for w in weights],
                 dict(sorted(counts.items())),
             )

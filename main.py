@@ -175,7 +175,10 @@ def main(cfg: DictConfig):
 
     if cfg.module.class_weights == "auto":
         datamodule.setup("fit")
-        class_weights = datamodule.compute_class_weights()
+        smoothing = OmegaConf.select(
+            cfg, "module.class_weight_smoothing", default=1.0
+        )
+        class_weights = datamodule.compute_class_weights(smoothing=smoothing)
     else:
         class_weights = None
 

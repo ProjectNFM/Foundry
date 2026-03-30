@@ -34,14 +34,14 @@ data:
   task_type: behavior
 
 run:
-  name: poyo_ajile_behavior_sweep_lr${hyperparameters.learning_rate}_bs${hyperparameters.batch_size}_cw${module.class_weights}
+  name: poyo_ajile_behavior_sweep_lr${hyperparameters.learning_rate}_bs${hyperparameters.batch_size}_cw${module.class_weights}_sm${module.class_weight_smoothing}
   group: POYO_AJILE_BEHAVIOR_SWEEP
   tags: [sweep, poyo_eeg, ajile]
   seed: 42
   log_level: INFO
 
 hyperparameters:
-  batch_size: 128
+  batch_size: 512
   window_length: 1.0
   patch_duration: 0.1
   sampling_rate: 500
@@ -51,6 +51,7 @@ hyperparameters:
 
 trainer:
   max_epochs: 1000
+  precision: bf16-mixed
   callbacks:
     early_stopping:
       monitor: val/ajile_active_behavior_f1
@@ -59,18 +60,22 @@ trainer:
     model_checkpoint:
       monitor: val/ajile_active_behavior_f1
       mode: max
-      filename: "best-epoch{epoch:03d}-{val/ajile_active_behavior_f1:.4f}"
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/ajile_active_behavior_f1:.4f}"
 
 # No need to stage in main as staging is done in the launcher's setup commands.
 stage:
   skip: true
 
+
+module:
+  class_weights: auto
+  class_weight_smoothing: 0.5
+
 hydra:
   sweeper:
     params:
-      hyperparameters.learning_rate: choice(1e-4, 5e-5, 1e-5)
-      hyperparameters.batch_size: choice(128, 256)
-      module.class_weights: choice(auto, none)
+      module.class_weight_smoothing: choice(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0)
   launcher:
     tasks_per_node: 2
     cpus_per_task: 6
