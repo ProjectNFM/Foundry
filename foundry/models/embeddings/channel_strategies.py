@@ -93,6 +93,7 @@ class FixedChannelStrategy(ChannelStrategy):
             "input_sampling_rate": torch.tensor(
                 sampling_rate, dtype=torch.float32
             ),
+            "input_seq_len": torch.tensor(T, dtype=torch.long),
         }
 
     def forward(self, input_values, **kwargs):

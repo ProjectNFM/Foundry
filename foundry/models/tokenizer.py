@@ -165,8 +165,17 @@ class EEGTokenizer(nn.Module):
             **kwargs,
         )
 
+        if self.uses_per_channel:
+            sr = input_sampling_rate.repeat_interleave(C_in)
+            seq_len = kwargs.get("input_seq_len")
+            if seq_len is not None:
+                seq_len = seq_len.repeat_interleave(C_in)
+        else:
+            sr = input_sampling_rate
+            seq_len = kwargs.get("input_seq_len")
+
         if self._do_patching:
-            sampling_rate = input_sampling_rate[0].item()
+            sampling_rate = sr[0].item()
             patches = patch_signal(
                 transformed,
                 self.patch_duration,
@@ -178,11 +187,10 @@ class EEGTokenizer(nn.Module):
             if isinstance(self.temporal_embedding, CWTEmbedding):
                 tokens = self.temporal_embedding(
                     transformed,
-                    input_sampling_rate=input_sampling_rate,
-                    input_seq_len=kwargs.get("input_seq_len"),
+                    input_sampling_rate=sr,
+                    input_seq_len=seq_len,
                 )
             else:
-                # PerTimepointEmbedding expects (B, T, input_dim)
                 tokens = self.temporal_embedding(transformed.transpose(1, 2))
 
         if self.uses_per_channel:

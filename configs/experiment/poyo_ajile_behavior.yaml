@@ -4,11 +4,6 @@ defaults:
   - override /model: poyo_eeg
   - override /data: ajile_singlesess
 
-model:
-  tokenizer:
-    channel_strategy:
-      num_channels: 94
-
 data:
   split_type: intrasession
   task_type: behavior
@@ -29,3 +24,4 @@ hyperparameters:
   learning_rate: 1e-4
   weight_decay: 0.01
   sampling_rate: 500
+  num_channels: 94
