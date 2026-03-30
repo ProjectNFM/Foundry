@@ -5,6 +5,10 @@ channel_strategy:
   _target_: foundry.models.embeddings.SpatialProjectionStrategy
   num_channels: ${hyperparameters.num_channels}
   num_sources: ${hyperparameters.num_sources}
+  projector:
+    _target_: foundry.models.embeddings.LinearSpatialProjector
+    num_channels: ${hyperparameters.num_channels}
+    num_sources: ${hyperparameters.num_sources}
 temporal_embedding:
   _target_: foundry.models.embeddings.CNNEmbedding
   embed_dim: ${model.embed_dim}

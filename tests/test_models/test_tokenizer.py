@@ -8,7 +8,11 @@ from foundry.models.embeddings.channel_strategies import (
     PerChannelStrategy,
     SpatialProjectionStrategy,
 )
-from foundry.models.embeddings.spatial import PerceiverSpatialProjector
+from foundry.models.embeddings.spatial import (
+    LinearSpatialProjector,
+    PerceiverSpatialProjector,
+    SessionSpatialProjector,
+)
 from foundry.models.embeddings.cnn import CNNEmbedding
 from foundry.models.embeddings.cwt import CWTEmbedding
 from foundry.models.embeddings.linear import LinearEmbedding
@@ -137,7 +141,11 @@ class TestMode2bSpatialProjectionPatched:
     def _make_tokenizer(self, embed_dim=64):
         return EEGTokenizer(
             channel_strategy=SpatialProjectionStrategy(
-                num_channels=64, num_sources=8
+                num_channels=64,
+                num_sources=8,
+                projector=LinearSpatialProjector(
+                    num_channels=64, num_sources=8
+                ),
             ),
             temporal_embedding=LinearEmbedding(
                 embed_dim=embed_dim, num_input_channels=8, patch_samples=25
@@ -162,7 +170,11 @@ class TestMode3aSpatialProjectionCWT:
     def _make_tokenizer(self, embed_dim=64):
         return EEGTokenizer(
             channel_strategy=SpatialProjectionStrategy(
-                num_channels=64, num_sources=8
+                num_channels=64,
+                num_sources=8,
+                projector=LinearSpatialProjector(
+                    num_channels=64, num_sources=8
+                ),
             ),
             temporal_embedding=CWTEmbedding(
                 embed_dim=embed_dim,
@@ -198,7 +210,11 @@ class TestMode3bSpatialProjectionPerTimepoint:
     def _make_tokenizer(self, embed_dim=64):
         return EEGTokenizer(
             channel_strategy=SpatialProjectionStrategy(
-                num_channels=64, num_sources=8
+                num_channels=64,
+                num_sources=8,
+                projector=LinearSpatialProjector(
+                    num_channels=64, num_sources=8
+                ),
             ),
             temporal_embedding=PerTimepointEmbedding(
                 embed_dim=embed_dim, input_dim=8
@@ -299,7 +315,10 @@ class TestSpatialProjectionWithSessionConfig:
             channel_strategy=SpatialProjectionStrategy(
                 num_channels=self.NUM_CHANNELS,
                 num_sources=self.NUM_SOURCES,
-                session_configs=self.SESSION_CONFIGS,
+                projector=SessionSpatialProjector(
+                    session_configs=self.SESSION_CONFIGS,
+                    num_sources=self.NUM_SOURCES,
+                ),
             ),
             temporal_embedding=LinearEmbedding(
                 embed_dim=embed_dim,
@@ -315,7 +334,10 @@ class TestSpatialProjectionWithSessionConfig:
             channel_strategy=SpatialProjectionStrategy(
                 num_channels=self.NUM_CHANNELS,
                 num_sources=self.NUM_SOURCES,
-                session_configs=self.SESSION_CONFIGS,
+                projector=SessionSpatialProjector(
+                    session_configs=self.SESSION_CONFIGS,
+                    num_sources=self.NUM_SOURCES,
+                ),
             ),
             temporal_embedding=CWTEmbedding(
                 embed_dim=embed_dim,

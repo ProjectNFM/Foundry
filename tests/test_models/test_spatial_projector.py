@@ -46,9 +46,9 @@ class TestSessionSpatialProjector:
         x = torch.randn(batch_size, Max_C, Max_T)
         out = proj(
             x,
-            session_ids=["S"] * batch_size,
-            channel_counts=[10] * batch_size,
-            seq_lens=[200] * batch_size,
+            input_session_ids=["S"] * batch_size,
+            input_channel_counts=[10] * batch_size,
+            input_seq_len=[200] * batch_size,
         )
         assert out.shape == (batch_size, num_sources, Max_T)
 
@@ -61,9 +61,9 @@ class TestSessionSpatialProjector:
 
         out = proj(
             x,
-            session_ids=["A", "B"],
-            channel_counts=[8, 16],
-            seq_lens=[100, 100],
+            input_session_ids=["A", "B"],
+            input_channel_counts=[8, 16],
+            input_seq_len=[100, 100],
         )
         assert out.shape == (2, 4, Max_T)
 
@@ -75,9 +75,9 @@ class TestSessionSpatialProjector:
 
         out = proj(
             x,
-            session_ids=["S"],
-            channel_counts=[4],
-            seq_lens=[valid_len],
+            input_session_ids=["S"],
+            input_channel_counts=[4],
+            input_seq_len=[valid_len],
         )
         assert (out[0, :, valid_len:] == 0.0).all()
 
@@ -88,9 +88,9 @@ class TestSessionSpatialProjector:
         x = torch.randn(2, 8, 50)
         out = proj(
             x,
-            session_ids=["S", "S"],
-            channel_counts=[8, 8],
-            seq_lens=[50, 50],
+            input_session_ids=["S", "S"],
+            input_channel_counts=[8, 8],
+            input_seq_len=[50, 50],
         )
         assert out.shape == (2, 4, 50)
 
@@ -105,16 +105,21 @@ class TestSessionSpatialProjector:
 
         out = proj(
             x,
-            session_ids=["A", "B"],
-            channel_counts=[4, 8],
-            seq_lens=[80, 80],
+            input_session_ids=["A", "B"],
+            input_channel_counts=[4, 8],
+            input_seq_len=[80, 80],
         )
         assert out.shape == (2, 3, Max_T)
 
     def test_gradients_flow(self):
         proj = self._make_projector(session_configs={"S": 4}, num_sources=2)
         x = torch.randn(1, 4, 50, requires_grad=True)
-        out = proj(x, session_ids=["S"], channel_counts=[4], seq_lens=[50])
+        out = proj(
+            x,
+            input_session_ids=["S"],
+            input_channel_counts=[4],
+            input_seq_len=[50],
+        )
         out.sum().backward()
         assert x.grad is not None
         assert x.grad.shape == x.shape
@@ -123,7 +128,12 @@ class TestSessionSpatialProjector:
         proj = self._make_projector(session_configs={"S": 4}, num_sources=2)
         proj = proj.to("cpu")
         x = torch.randn(1, 4, 50)
-        out = proj(x, session_ids=["S"], channel_counts=[4], seq_lens=[50])
+        out = proj(
+            x,
+            input_session_ids=["S"],
+            input_channel_counts=[4],
+            input_seq_len=[50],
+        )
         assert out.device.type == "cpu"
 
     def test_device_placement_cuda(self):
@@ -132,5 +142,10 @@ class TestSessionSpatialProjector:
         proj = self._make_projector(session_configs={"S": 4}, num_sources=2)
         proj = proj.to("cuda")
         x = torch.randn(1, 4, 50, device="cuda")
-        out = proj(x, session_ids=["S"], channel_counts=[4], seq_lens=[50])
+        out = proj(
+            x,
+            input_session_ids=["S"],
+            input_channel_counts=[4],
+            input_seq_len=[50],
+        )
         assert out.device.type == "cuda"

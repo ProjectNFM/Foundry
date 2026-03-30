@@ -7,6 +7,10 @@ from foundry.models.embeddings.channel_strategies import (
     PerChannelStrategy,
     SpatialProjectionStrategy,
 )
+from foundry.models.embeddings.spatial import (
+    LinearSpatialProjector,
+    SessionSpatialProjector,
+)
 
 
 class TestFixedChannelStrategy:
@@ -127,7 +131,11 @@ class TestPerChannelStrategy:
 
 class TestSpatialProjectionStrategy:
     def test_prepare_pretokenize(self):
-        strategy = SpatialProjectionStrategy(num_channels=64, num_sources=8)
+        strategy = SpatialProjectionStrategy(
+            num_channels=64,
+            num_sources=8,
+            projector=LinearSpatialProjector(num_channels=64, num_sources=8),
+        )
         signal = np.random.randn(100, 30).astype(np.float32)
         tokens = np.arange(30)
 
@@ -141,13 +149,21 @@ class TestSpatialProjectionStrategy:
         assert result["input_seq_len"].item() == 100
 
     def test_forward_linear_projection(self, batch_size):
-        strategy = SpatialProjectionStrategy(num_channels=64, num_sources=8)
+        strategy = SpatialProjectionStrategy(
+            num_channels=64,
+            num_sources=8,
+            projector=LinearSpatialProjector(num_channels=64, num_sources=8),
+        )
         x = torch.randn(batch_size, 64, 200)
         out = strategy(x)
         assert out.shape == (batch_size, 8, 200)
 
     def test_forward_gradient_flow(self):
-        strategy = SpatialProjectionStrategy(num_channels=16, num_sources=4)
+        strategy = SpatialProjectionStrategy(
+            num_channels=16,
+            num_sources=4,
+            projector=LinearSpatialProjector(num_channels=16, num_sources=4),
+        )
         x = torch.randn(1, 16, 50, requires_grad=True)
         out = strategy(x)
         out.sum().backward()
@@ -157,7 +173,10 @@ class TestSpatialProjectionStrategy:
         strategy = SpatialProjectionStrategy(
             num_channels=16,
             num_sources=4,
-            session_configs={"sessA": 8, "sessB": 16},
+            projector=SessionSpatialProjector(
+                session_configs={"sessA": 8, "sessB": 16},
+                num_sources=4,
+            ),
         )
         B = 2
         x = torch.randn(B, 16, 50)

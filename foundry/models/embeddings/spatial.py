@@ -3,6 +3,30 @@ import torch.nn as nn
 from torch_brain.nn import RotaryCrossAttention, RotaryTimeEmbedding
 
 
+class LinearSpatialProjector(nn.Module):
+    """Project channels to latent sources via a single shared linear layer.
+
+    Args:
+        num_channels: Number of input channels (after padding).
+        num_sources: Number of latent sources to produce.
+    """
+
+    def __init__(self, num_channels: int, num_sources: int):
+        super().__init__()
+        self.num_sources = num_sources
+        self.linear = nn.Linear(num_channels, num_sources)
+
+    def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+        """
+        Args:
+            x: ``(B, C, T)`` padded channel signals.
+
+        Returns:
+            ``(B, num_sources, T)``
+        """
+        return self.linear(x.transpose(1, 2)).transpose(1, 2)
+
+
 class SessionSpatialProjector(nn.Module):
     """Project variable-channel recordings to a fixed number of latent sources.
 
@@ -46,23 +70,20 @@ class SessionSpatialProjector(nn.Module):
         else:
             self.shared_mlp = None
 
-    def forward(
-        self,
-        x: torch.Tensor,
-        session_ids: list,
-        channel_counts: list | torch.Tensor,
-        seq_lens: list | torch.Tensor,
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Args:
             x: ``(Batch, Max_Channels, Max_Time)`` padded with zeros.
-            session_ids: Session identifier for each batch item.
-            channel_counts: True channel count per batch item.
-            seq_lens: True time-sample count per batch item.
+            **kwargs: Must contain ``input_session_ids``,
+                ``input_channel_counts``, and ``input_seq_len``.
 
         Returns:
             ``(Batch, num_sources, Max_Time)``
         """
+        session_ids = kwargs["input_session_ids"]
+        channel_counts = kwargs["input_channel_counts"]
+        seq_lens = kwargs["input_seq_len"]
+
         B, Max_C, Max_T = x.shape
         device = x.device
 
@@ -195,4 +216,8 @@ class PerceiverSpatialProjector(nn.Module):
         return out
 
 
-__all__ = ["SessionSpatialProjector", "PerceiverSpatialProjector"]
+__all__ = [
+    "LinearSpatialProjector",
+    "SessionSpatialProjector",
+    "PerceiverSpatialProjector",
+]

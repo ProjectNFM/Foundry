@@ -19,6 +19,7 @@ from foundry.models.embeddings.patching import (
 )
 from foundry.models.embeddings.per_timepoint import PerTimepointEmbedding
 from foundry.models.embeddings.spatial import (
+    LinearSpatialProjector,
     PerceiverSpatialProjector,
     SessionSpatialProjector,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "get_activation",
     "ChannelStrategy",
     "FixedChannelStrategy",
+    "LinearSpatialProjector",
     "PerceiverSpatialProjector",
     "PerChannelStrategy",
     "SpatialProjectionStrategy",
