@@ -156,12 +156,23 @@ class SpatialProjectionStrategy(ChannelStrategy):
     Can be followed by patching (``patch_duration`` set on the tokenizer)
     or used directly with CWT / PerTimepoint temporal embeddings.
 
+    The spatial projection can be one of:
+
+    * A simple ``nn.Linear`` (default when no optional arguments are given).
+    * Per-session linear layers via :class:`SessionSpatialProjector`
+      (when ``session_configs`` is provided).
+    * An arbitrary projector module (when ``projector`` is provided),
+      e.g. :class:`PerceiverSpatialProjector` for cross-attention.
+
     Args:
         num_channels: Fixed channel count to pad/truncate to before projection.
         num_sources: Number of latent sources after projection.
         session_configs: If provided, mapping of session_id to channel count;
             enables per-session spatial projection via
             :class:`SessionSpatialProjector`.
+        projector: If provided, an ``nn.Module`` whose ``forward(x, **kwargs)``
+            maps ``(B, num_channels, T)`` → ``(B, num_sources, T)``.  Overrides
+            the default linear projection.
     """
 
     def __init__(
@@ -169,19 +180,24 @@ class SpatialProjectionStrategy(ChannelStrategy):
         num_channels: int,
         num_sources: int,
         session_configs: dict[str, int] | None = None,
+        projector: nn.Module | None = None,
     ):
         super().__init__()
         self.num_channels = num_channels
         self.num_sources = num_sources
-        if session_configs is not None:
+
+        if projector is not None:
+            self.spatial = projector
+        elif session_configs is not None:
             self.spatial = SessionSpatialProjector(
                 session_configs=session_configs,
                 num_sources=num_sources,
             )
-            self._per_session = True
         else:
             self.spatial = nn.Linear(num_channels, num_sources)
-            self._per_session = False
+
+        self._per_session = session_configs is not None and projector is None
+        self._custom_projector = projector is not None
 
     def prepare_pretokenize(self, signal, channel_tokens, sampling_rate):
         T, C_actual = signal.shape
@@ -219,6 +235,8 @@ class SpatialProjectionStrategy(ChannelStrategy):
                 kwargs["input_channel_counts"],
                 kwargs["input_seq_len"],
             )
+        if self._custom_projector:
+            return self.spatial(input_values, **kwargs)
         # (B, C, T) -> (B, T, C) -> Linear -> (B, T, S) -> (B, S, T)
         return self.spatial(input_values.transpose(1, 2)).transpose(1, 2)
 

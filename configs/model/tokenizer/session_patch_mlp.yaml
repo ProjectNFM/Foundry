@@ -1,0 +1,15 @@
+_target_: foundry.models.tokenizer.EEGTokenizer
+patch_duration: ${hyperparameters.patch_duration}
+embed_dim: ${model.embed_dim}
+channel_strategy:
+  _target_: foundry.models.embeddings.SpatialProjectionStrategy
+  num_channels: ${hyperparameters.num_channels}
+  num_sources: ${hyperparameters.num_sources}
+  session_configs: ${hyperparameters.session_configs}
+temporal_embedding:
+  _target_: foundry.models.embeddings.MLPEmbedding
+  embed_dim: ${model.embed_dim}
+  num_input_channels: ${hyperparameters.num_sources}
+  patch_samples: ${patch_samples:${hyperparameters.patch_duration},${hyperparameters.sampling_rate}}
+  hidden_dims: [128, 64]
+  activation: "gelu"

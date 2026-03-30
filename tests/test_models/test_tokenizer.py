@@ -8,6 +8,7 @@ from foundry.models.embeddings.channel_strategies import (
     PerChannelStrategy,
     SpatialProjectionStrategy,
 )
+from foundry.models.embeddings.spatial import PerceiverSpatialProjector
 from foundry.models.embeddings.cnn import CNNEmbedding
 from foundry.models.embeddings.cwt import CWTEmbedding
 from foundry.models.embeddings.linear import LinearEmbedding
@@ -421,6 +422,69 @@ class TestSpatialProjectionWithSessionConfig:
             input_channel_counts=[20, 32],
         )
         assert out.shape == (B, 16, embed_dim)
+
+
+class TestPerceiverSpatialPatched:
+    """Perceiver cross-attention spatial projection + patched temporal embedding."""
+
+    def _make_tokenizer(self, embed_dim=64):
+        return EEGTokenizer(
+            channel_strategy=SpatialProjectionStrategy(
+                num_channels=64,
+                num_sources=8,
+                projector=PerceiverSpatialProjector(
+                    num_sources=8, d_attn=32, num_heads=4
+                ),
+            ),
+            temporal_embedding=LinearEmbedding(
+                embed_dim=embed_dim, num_input_channels=8, patch_samples=25
+            ),
+            embed_dim=embed_dim,
+            patch_duration=0.1,
+        )
+
+    def test_pretokenize_shapes(self):
+        tokenizer = self._make_tokenizer()
+        signal = np.random.randn(250, 30).astype(np.float32)
+        tokens = np.arange(30)
+
+        result = tokenizer.pretokenize(signal, tokens, 250.0, 1.0)
+
+        assert result["input_values"].shape == (64, 250)
+        assert result["input_mask"][:30].all()
+        assert not result["input_mask"][30:].any()
+        assert result["input_timestamps"].shape == (10,)
+
+    def test_forward_shape(self):
+        embed_dim = 64
+        tokenizer = self._make_tokenizer(embed_dim=embed_dim)
+        B = 2
+        x = torch.randn(B, 64, 250)
+        mask = torch.ones(B, 64, dtype=torch.bool)
+        mask[:, 30:] = False
+        fs = torch.full((B,), 250.0)
+
+        out = tokenizer(x, input_mask=mask, input_sampling_rate=fs)
+        assert out.shape == (B, 10, embed_dim)
+
+    def test_forward_gradient_flow(self):
+        tokenizer = self._make_tokenizer()
+        x = torch.randn(1, 64, 250, requires_grad=True)
+        mask = torch.ones(1, 64, dtype=torch.bool)
+        fs = torch.full((1,), 250.0)
+
+        out = tokenizer(x, input_mask=mask, input_sampling_rate=fs)
+        out.sum().backward()
+        assert x.grad is not None
+
+    def test_forward_without_mask(self):
+        embed_dim = 64
+        tokenizer = self._make_tokenizer(embed_dim=embed_dim)
+        x = torch.randn(2, 64, 250)
+        fs = torch.full((2,), 250.0)
+
+        out = tokenizer(x, input_sampling_rate=fs)
+        assert out.shape == (2, 10, embed_dim)
 
 
 class TestTokenizerProperties:
