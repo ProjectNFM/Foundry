@@ -25,6 +25,8 @@ run:
   # Keep fresh runs deterministic unless resume is explicitly requested.
   # SLURM restarts still auto-resume from last.ckpt in main.py.
   resume_if_checkpoint_exists: false
+  # A100 benefits from Tensor Core-enabled FP32 matmul kernels.
+  float32_matmul_precision: high
 
 hydra:
   run:

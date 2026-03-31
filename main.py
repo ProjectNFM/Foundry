@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import hydra
+import torch
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import get_class, instantiate
 from lightning import seed_everything
@@ -115,6 +116,13 @@ def _get_resume_checkpoint_path(
 @hydra_main_wrapper
 def main(cfg: DictConfig):
     setup_logging(cfg.run.log_level)
+    matmul_precision = OmegaConf.select(
+        cfg, "run.float32_matmul_precision", default="high"
+    )
+    torch.set_float32_matmul_precision(str(matmul_precision))
+    logger.info(
+        "Set torch float32 matmul precision to '%s'.", matmul_precision
+    )
     seed_everything(cfg.run.seed, workers=True)
     logger.info(f"Starting training: {cfg.run.name}")
 

@@ -11,7 +11,13 @@ class AjileDataModule(NeuralDataModule):
 
     READOUT_CLASS_NAMES: dict[str, list[str]] = {
         "ajile_inactive_active": ["Active", "Inactive"],
-        "ajile_active_behavior": ["Eat", "Talk", "TV", "Computer/Phone"],
+        "ajile_active_behavior": [
+            "Eat",
+            "Talk",
+            "TV",
+            "Computer/Phone",
+            "Other Activity",
+        ],
     }
 
     def __init__(
