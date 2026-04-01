@@ -1,9 +1,9 @@
 # Foundry
 
-Foundry is a modular EEG experimentation framework designed for flexible brain signal research. It provides composable building blocks (tokenizers, embeddings, backbones, readouts) and keeps the core minimal so you can focus on your experiments instead of glue code.
+Foundry is a modular brain data experimentation framework designed for flexible neuroscience research. It provides composable building blocks (tokenizers, embeddings, backbones, readouts) and keeps the core minimal so you can focus on your experiments instead of glue code.
 
 **Use Foundry when you want to:**
-- Train neural network models on EEG data
+- Train neural network models on neural data (e.g., EEG, iEEG)
 - Experiment with different architectures and tokenization strategies
 - Run sweeps across hyperparameters on local or cluster (SLURM) environments
 - Log experiments and track results with Weights & Biases or CSV
@@ -27,7 +27,7 @@ This installs Foundry and all required dependencies. Several are downloaded from
 
 ### 2. Prepare your data
 
-Place processed EEG data in `./data/processed/` (or override the path in configs). See **Data** section below for details.
+Place processed neural data in `./data/processed/` (or override the path in configs).
 
 ### 3. Run a training experiment
 
@@ -50,9 +50,9 @@ foundry/
 ├── models/
 │   ├── embeddings/          # Token/patch embedding layers
 │   ├── backbones/           # Core model architectures (Perceiver, etc.)
-│   └── poyo_eeg.py          # Reference EEG model implementation
+│   └── poyo_eeg.py          # Reference neural/brain signal model implementation
 ├── training/                # Lightning modules and training logic
-│   └── module.py            # Main EEGModule for training
+│   └── module.py            # Main training module for neural networks
 ├── tools/                   # Utility scripts
 │   └── stage_data.py        # Copy/compress data for SLURM cluster
 ├── callbacks.py             # PyTorch Lightning callbacks
@@ -219,7 +219,7 @@ uv run python main.py experiment=poyo_ajile_sweep
 
 ### Error: No data found at `./data/processed/`
 
-**Problem:** Foundry can't find your processed EEG dataset.
+**Problem:** Foundry can't find your processed dataset.
 
 **Fix:** 
 - Check that the path exists and contains data
