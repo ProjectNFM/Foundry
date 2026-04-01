@@ -10,6 +10,8 @@ from foundry.models import (
     LinearEmbedding,
     CNNEmbedding,
     MLPEmbedding,
+    EEGTokenizer,
+    FixedChannelStrategy,
 )
 
 
@@ -19,7 +21,8 @@ STRIDE = 0.5
 SEQUENCE_LENGTH = 2.0
 NUM_CHANNELS = 8
 PATCH_SAMPLES = int(PATCH_DURATION * SAMPLING_RATE)
-NUM_PATCHES = int(SEQUENCE_LENGTH / STRIDE)
+NUM_SAMPLES = int(SEQUENCE_LENGTH * SAMPLING_RATE)
+NUM_PATCHES = (NUM_SAMPLES - PATCH_SAMPLES) // PATCH_SAMPLES + 1
 
 
 class MockChannels:
@@ -51,68 +54,65 @@ def readout_specs():
     return {"test_task1": MODALITY_REGISTRY["test_task1"]}
 
 
-@pytest.fixture
-def model_with_linear(readout_specs, embed_dim):
-    input_embedding = LinearEmbedding(
+def _make_model(embed_dim, readout_specs, temporal_embedding):
+    tokenizer = EEGTokenizer(
+        channel_strategy=FixedChannelStrategy(num_channels=NUM_CHANNELS),
+        temporal_embedding=temporal_embedding,
         embed_dim=embed_dim,
-        num_channels=NUM_CHANNELS,
-        patch_samples=PATCH_SAMPLES,
+        patch_duration=PATCH_DURATION,
+        stride=STRIDE,
     )
-    model = POYOEEGModel(
-        input_embedding=input_embedding,
+    return POYOEEGModel(
+        tokenizer=tokenizer,
         readout_specs=readout_specs,
         embed_dim=embed_dim,
         sequence_length=SEQUENCE_LENGTH,
-        patch_duration=PATCH_DURATION,
-        stride=STRIDE,
         latent_step=0.5,
         num_latents_per_step=1,
     )
-    return model
+
+
+@pytest.fixture
+def model_with_linear(readout_specs, embed_dim):
+    return _make_model(
+        embed_dim,
+        readout_specs,
+        LinearEmbedding(
+            embed_dim=embed_dim,
+            num_input_channels=NUM_CHANNELS,
+            patch_samples=PATCH_SAMPLES,
+        ),
+    )
 
 
 @pytest.fixture
 def model_with_cnn(readout_specs, embed_dim):
-    input_embedding = CNNEmbedding(
-        embed_dim=embed_dim,
-        num_channels=NUM_CHANNELS,
-        patch_samples=PATCH_SAMPLES,
-        num_filters=32,
-        kernel_size=3,
+    return _make_model(
+        embed_dim,
+        readout_specs,
+        CNNEmbedding(
+            embed_dim=embed_dim,
+            num_input_channels=NUM_CHANNELS,
+            patch_samples=PATCH_SAMPLES,
+            num_filters=32,
+            kernel_size=3,
+        ),
     )
-    model = POYOEEGModel(
-        input_embedding=input_embedding,
-        readout_specs=readout_specs,
-        embed_dim=embed_dim,
-        sequence_length=SEQUENCE_LENGTH,
-        patch_duration=PATCH_DURATION,
-        stride=STRIDE,
-        latent_step=0.5,
-        num_latents_per_step=1,
-    )
-    return model
 
 
 @pytest.fixture
 def model_with_mlp(readout_specs, embed_dim):
-    input_embedding = MLPEmbedding(
-        embed_dim=embed_dim,
-        num_channels=NUM_CHANNELS,
-        patch_samples=PATCH_SAMPLES,
-        hidden_dims=[128, 64],
-        activation="gelu",
+    return _make_model(
+        embed_dim,
+        readout_specs,
+        MLPEmbedding(
+            embed_dim=embed_dim,
+            num_input_channels=NUM_CHANNELS,
+            patch_samples=PATCH_SAMPLES,
+            hidden_dims=[128, 64],
+            activation="gelu",
+        ),
     )
-    model = POYOEEGModel(
-        input_embedding=input_embedding,
-        readout_specs=readout_specs,
-        embed_dim=embed_dim,
-        sequence_length=SEQUENCE_LENGTH,
-        patch_duration=PATCH_DURATION,
-        stride=STRIDE,
-        latent_step=0.5,
-        num_latents_per_step=1,
-    )
-    return model
 
 
 def extract_model_inputs(batch):
@@ -127,6 +127,7 @@ def extract_model_inputs(batch):
             "input_channel_index",
             "input_session_index",
             "input_mask",
+            "input_sampling_rate",
             "latent_index",
             "latent_timestamps",
             "output_session_index",
@@ -138,8 +139,7 @@ def extract_model_inputs(batch):
 
 def create_data_sample(num_channels, session_id="session1"):
     """Create a mock data sample with specified channel count."""
-    num_samples = int(SEQUENCE_LENGTH * SAMPLING_RATE)
-    signal = np.random.randn(num_samples, num_channels).astype(np.float32)
+    signal = np.random.randn(NUM_SAMPLES, num_channels).astype(np.float32)
 
     eeg = RegularTimeSeries(
         signal=signal,
@@ -169,7 +169,7 @@ def create_data_sample(num_channels, session_id="session1"):
 
 class TestTokenizerOutput:
     def test_tokenize_shape(self, model_with_linear):
-        """Tokenizer outputs signal in (P, C_padded, S) shape."""
+        """Tokenizer outputs raw signal in (C_padded, T) shape."""
         model_with_linear.session_emb.initialize_vocab(["session1"])
         model_with_linear.channel_emb.initialize_vocab(
             [f"ch{i}" for i in range(NUM_CHANNELS)]
@@ -178,11 +178,7 @@ class TestTokenizerOutput:
         data = create_data_sample(num_channels=4)
         tokens = model_with_linear.tokenize(data)
 
-        assert tokens["input_values"].shape == (
-            NUM_PATCHES,
-            NUM_CHANNELS,
-            PATCH_SAMPLES,
-        )
+        assert tokens["input_values"].shape == (NUM_CHANNELS, NUM_SAMPLES)
         assert tokens["input_timestamps"].shape == (NUM_PATCHES,)
         assert tokens["input_channel_index"].shape == (NUM_CHANNELS,)
         assert tokens["input_mask"].shape == (NUM_CHANNELS,)
@@ -200,7 +196,7 @@ class TestTokenizerOutput:
         assert tokens["input_mask"][:4].all()
         assert not tokens["input_mask"][4:].any()
 
-        assert (tokens["input_values"][:, 4:, :] == 0).all()
+        assert (tokens["input_values"][4:, :] == 0).all()
 
     def test_full_channels_no_padding(self, model_with_linear):
         """When data has max channels, no padding is needed."""
@@ -250,12 +246,7 @@ class TestHeterogeneousBatching:
 
         batch = collate([tokens1, tokens2])
 
-        assert batch["input_values"].shape == (
-            2,
-            NUM_PATCHES,
-            NUM_CHANNELS,
-            PATCH_SAMPLES,
-        )
+        assert batch["input_values"].shape == (2, NUM_CHANNELS, NUM_SAMPLES)
         assert batch["input_timestamps"].shape == (2, NUM_PATCHES)
         assert batch["input_channel_index"].shape == (2, NUM_CHANNELS)
         assert batch["input_mask"].shape == (2, NUM_CHANNELS)

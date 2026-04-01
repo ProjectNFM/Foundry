@@ -1,15 +1,10 @@
-_target_: foundry.models.POYOEEGModel
+defaults:
+  - tokenizer: patch_linear
 
-input_embedding:
-  _target_: foundry.models.embeddings.LinearEmbedding
-  embed_dim: ${model.embed_dim}
-  num_channels: 64
-  patch_samples: 25
+_target_: foundry.models.POYOEEGModel
 
 embed_dim: 128
 sequence_length: 1.0
-patch_duration: 0.1
-stride: 0.1
 latent_step: 0.1
 num_latents_per_step: 1
 depth: 2

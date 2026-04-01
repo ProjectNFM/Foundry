@@ -14,10 +14,7 @@ constraints.
 
 ```
 foundry/models/
-├── embeddings/          # Input embedding components
-│   ├── linear.py        # LinearEmbedding
-│   ├── mlp.py           # MLPEmbedding
-│   └── cnn.py           # CNNEmbedding
+├── embeddings.py         # Input embedding components
 ├── backbones/           # Model architectures
 │   └── perceiver.py     # Perceiver IO components (encoder, processor, decoder)
 ├── poyo_eeg.py          # Reference POYO-style EEG model implementation
@@ -26,7 +23,7 @@ foundry/models/
 
 ## Components
 
-### Embeddings (`embeddings/`)
+### Embeddings (`embedding.py`)
 
 - **LinearEmbedding**: simple projection to `embed_dim`
 - **MLPEmbedding**: MLP stack for richer projections

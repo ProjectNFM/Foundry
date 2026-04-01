@@ -4,12 +4,18 @@ from foundry.models import LinearEmbedding
 
 
 class TestLinearEmbedding:
+    def test_is_nn_module(self):
+        embedding = LinearEmbedding(
+            embed_dim=64, num_input_channels=8, patch_samples=50
+        )
+        assert isinstance(embedding, torch.nn.Module)
+
     def test_initialization(self, embed_dim):
         embedding = LinearEmbedding(
-            embed_dim=embed_dim, num_channels=8, patch_samples=50
+            embed_dim=embed_dim, num_input_channels=8, patch_samples=50
         )
         assert embedding.embed_dim == embed_dim
-        assert embedding.num_channels == 8
+        assert embedding.num_input_channels == 8
         assert embedding.patch_samples == 50
 
     def test_forward_pass_basic(self, embed_dim, batch_size):
@@ -19,7 +25,7 @@ class TestLinearEmbedding:
 
         embedding = LinearEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
         )
 
@@ -36,7 +42,7 @@ class TestLinearEmbedding:
 
         embedding = LinearEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
         )
 
@@ -54,7 +60,7 @@ class TestLinearEmbedding:
 
         embedding = LinearEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
         )
 
@@ -70,7 +76,7 @@ class TestLinearEmbedding:
 
         embedding = LinearEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
         )
 
@@ -85,7 +91,7 @@ class TestLinearEmbedding:
 
         embedding = LinearEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
         )
         embedding = embedding.to("cpu")
@@ -105,7 +111,7 @@ class TestLinearEmbedding:
 
         embedding = LinearEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
         )
         embedding = embedding.to("cuda")
@@ -124,7 +130,7 @@ class TestLinearEmbedding:
 
         embedding = LinearEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
         )
 

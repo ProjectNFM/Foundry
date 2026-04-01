@@ -23,5 +23,6 @@ hyperparameters:
   batch_size: 64 
   window_length: 1.0
   patch_duration: 0.1
+  sampling_rate: 500
   fold_number: 0
   num_workers: 5
