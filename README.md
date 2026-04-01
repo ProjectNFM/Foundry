@@ -29,13 +29,17 @@ This installs Foundry and all required dependencies. Several are downloaded from
 
 Place processed neural data in `./data/processed/` (or override the path in configs).
 
-### 3. Run a training experiment
+### 3. Set up environment variables (optional but recommended for logging)
+
+Create a `.env` file in the project root with your credentials. See **Environment setup** section below for details.
+
+### 4. Run a training experiment
 
 ```bash
 uv run python main.py experiment=poyo_ajile_sweep
 ```
 
-That's it! Your model will train and log results to Weights & Biases by default. Outputs and checkpoints go to `./outputs` (or to the `SCRATCH` directory if set).
+That's it! Your model will train and log results to Weights & Biases by default (if credentials are set up). Outputs and checkpoints go to `./outputs` (or to the `SCRATCH` directory if set).
 
 ---
 
@@ -80,8 +84,6 @@ uv.lock                      # Locked dependency versions (for reproducibility)
 tests/                        # Unit tests (pytest)
 ```
 
-For advanced model composition details, see [`foundry/models/README.md`](foundry/models/README.md).
-
 ---
 
 ## Prerequisites
@@ -120,6 +122,41 @@ uv run python -c "import foundry; print(foundry.__version__)"
 ```
 
 If this succeeds, you're ready to go.
+
+### Setting up Weights & Biases (WandB) for logging
+
+By default, Foundry logs experiments to [Weights & Biases](https://wandb.ai/), a platform for tracking and visualizing machine learning experiments.
+
+**Step 1: Create a WandB account**
+
+1. Go to [https://wandb.ai/](https://wandb.ai/) and sign up for a free account
+2. Once logged in, navigate to [https://wandb.ai/authorize](https://wandb.ai/authorize) to generate an API key
+
+**Step 2: Create a `.env` file with your credentials**
+
+Create a file named `.env` in the project root directory (same level as `main.py`) with the following content:
+
+```bash
+# .env file - NEVER share this publicly as it contains your API key!
+WANDB_API_KEY=<your_api_key_from_wandb>
+WANDB_ENTITY=<your_username_or_team_name>
+```
+
+Replace:
+- `<your_api_key_from_wandb>` with your actual WandB API key
+- `<your_username_or_team_name>` with your WandB username or team name
+
+**⚠️ Important security note:** The `.env` file contains sensitive credentials and should **NEVER** be committed to git or publicly shared. It's already listed in `.gitignore`, but double-check if you use other version control systems.
+
+**Step 3: Verify setup**
+
+The first time you run Foundry, it will automatically read the `WANDB_API_KEY` from your `.env` file and authenticate. You should see your experiment appear on the [WandB dashboard](https://wandb.ai/).
+
+**If you prefer not to use WandB**, you can disable it and use CSV logging instead:
+
+```bash
+uv run python main.py experiment=poyo_ajile_sweep logger=csv
+```
 
 ---
 
@@ -196,13 +233,13 @@ The `-m` flag enables **multirun mode**. Hydra will:
 
 Each run gets its own output folder under the experiment group.
 
+**View results on the WandB dashboard:**
 
-**First time:** Run `wandb login` and follow the prompts to create/link your account.
-
-**In the W&B dashboard:**
-- View real-time training curves
-- Compare runs across experiments
+Once your experiment starts running and you have set up your `.env` file with WandB credentials, you can view:
+- Real-time training curves and metrics
+- Compare runs across different experiments
 - Download final artifacts and model weights
+- Access logs and system information
 
 ---
 
@@ -221,19 +258,25 @@ uv run python main.py experiment=poyo_ajile_sweep
 
 **Problem:** Foundry can't find your processed dataset.
 
-**Fix:** 
-- Check that the path exists and contains data
-- Override the path:
-  ```bash
-  uv run python main.py experiment=poyo_ajile_sweep data.root=/path/to/my/data
-  ```
+**Fix:** You have two options:
+
+1. **Override the data path** in your command:
+   ```bash
+   uv run python main.py experiment=poyo_ajile_sweep data.root=/path/to/my/data
+   ```
+
+2. **Create a symbolic link** to your processed data location:
+   ```bash
+   ln -s /path/to/your/processed/data ./data/processed
+   ```
+   This is convenient if your data lives elsewhere—just point the symlink to the actual location, and Foundry will find it at `./data/processed/`.
 
 ### Error: W&B offline / API key not found
 
-**Problem:** You're using the default `logger=wandb` but haven't authenticated.
+**Problem:** You're using the default `logger=wandb` but your WandB credentials aren't set up properly.
 
 **Fix:**
-- Run `wandb login` and follow the prompts, or
+- Set up your `.env` file with `WANDB_API_KEY` as described in the **Environment setup** section above, or
 - Switch to CSV logging:
   ```bash
   uv run python main.py experiment=poyo_ajile_sweep logger=csv
