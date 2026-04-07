@@ -120,9 +120,7 @@ def main(cfg: DictConfig):
         cfg, "run.float32_matmul_precision", default="high"
     )
     torch.set_float32_matmul_precision(str(matmul_precision))
-    logger.info(
-        "Set torch float32 matmul precision to '%s'.", matmul_precision
-    )
+    logger.info("Set torch float32 matmul precision to '%s'.", matmul_precision)
     seed_everything(cfg.run.seed, workers=True)
     logger.info(f"Starting training: {cfg.run.name}")
 
