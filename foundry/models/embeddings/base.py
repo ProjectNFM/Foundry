@@ -1,111 +1,26 @@
+"""Backward-compatible shim for base.py module.
+
+.. deprecated::
+    Import from ``foundry.models.embeddings.legacy`` and
+    ``foundry.models.embeddings.activations`` instead.
+"""
+
 import warnings
-from abc import ABC, abstractmethod
 
-import numpy as np
-import torch
-import torch.nn as nn
+warnings.warn(
+    "foundry.models.embeddings.base is deprecated. "
+    "Import EmbeddingBase and FixedChannelWindowEmbedding from "
+    "foundry.models.embeddings.legacy, and get_activation from "
+    "foundry.models.embeddings.activations instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
-
-def get_activation(activation: str) -> nn.Module:
-    activations = {
-        "relu": nn.ReLU(),
-        "gelu": nn.GELU(),
-        "silu": nn.SiLU(),
-        "tanh": nn.Tanh(),
-        "sigmoid": nn.Sigmoid(),
-        "leaky_relu": nn.LeakyReLU(),
-        "elu": nn.ELU(),
-    }
-    if activation.lower() not in activations:
-        raise ValueError(
-            f"Unknown activation: {activation}. "
-            f"Available: {list(activations.keys())}"
-        )
-    return activations[activation.lower()]
-
-
-class EmbeddingBase(nn.Module, ABC):
-    """Abstract base class for input embedding layers.
-
-    .. deprecated::
-        Use ``EEGTokenizer`` with a channel strategy and temporal embedding
-        instead.  Temporal embeddings now inherit directly from
-        ``nn.Module``.
-    """
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        warnings.warn(
-            f"{cls.__name__} inherits from EmbeddingBase which is deprecated. "
-            "Temporal embeddings should inherit from nn.Module directly.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
-    @property
-    def requires_patching(self) -> bool:
-        return True
-
-    @abstractmethod
-    def pretokenize(
-        self,
-        patches_array: np.ndarray,
-        channel_tokens: np.ndarray,
-    ) -> dict: ...
-
-    @abstractmethod
-    def forward(self, input_values: torch.Tensor, **kwargs) -> torch.Tensor: ...
-
-
-class FixedChannelWindowEmbedding(EmbeddingBase):
-    """Base for embeddings on a fixed channel count and patch size.
-
-    .. deprecated::
-        Use ``FixedChannelStrategy`` for channel handling and inherit
-        temporal embeddings from ``nn.Module`` directly.
-    """
-
-    def __init__(self, embed_dim: int, num_channels: int, patch_samples: int):
-        super().__init__()
-        self.embed_dim = embed_dim
-        self.num_channels = num_channels
-        self.patch_samples = patch_samples
-
-    def pretokenize(
-        self,
-        patches_array: np.ndarray,
-        channel_tokens: np.ndarray,
-    ) -> dict:
-        num_patches, num_channels_actual, patch_samples = patches_array.shape
-        num_channels = self.num_channels
-
-        if num_channels_actual > num_channels:
-            patches_array = patches_array[:, :num_channels, :]
-            channel_tokens = channel_tokens[:num_channels]
-            num_channels_actual = num_channels
-
-        padded_signal = np.zeros(
-            (num_patches, num_channels, patch_samples),
-            dtype=patches_array.dtype,
-        )
-        padded_signal[:, :num_channels_actual, :] = patches_array
-
-        padded_channel_tokens = np.zeros(
-            num_channels, dtype=channel_tokens.dtype
-        )
-        padded_channel_tokens[:num_channels_actual] = channel_tokens
-
-        channel_mask = np.zeros(num_channels, dtype=bool)
-        channel_mask[:num_channels_actual] = True
-
-        return {
-            "input_values": torch.from_numpy(padded_signal).float(),
-            "input_channel_index": torch.from_numpy(
-                padded_channel_tokens
-            ).long(),
-            "input_mask": torch.from_numpy(channel_mask),
-        }
-
+from foundry.models.embeddings.activations import get_activation  # noqa: E402
+from foundry.models.embeddings.legacy import (  # noqa: E402
+    EmbeddingBase,
+    FixedChannelWindowEmbedding,
+)
 
 __all__ = [
     "EmbeddingBase",
