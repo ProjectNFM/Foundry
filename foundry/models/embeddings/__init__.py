@@ -8,10 +8,6 @@ from foundry.models.embeddings.channel import (
     SessionSpatialProjector,
     SpatialProjectionStrategy,
 )
-from foundry.models.embeddings.legacy import (
-    EmbeddingBase,
-    FixedChannelWindowEmbedding,
-)
 from foundry.models.embeddings.patching import (
     compute_patch_timestamps,
     patch_signal,
@@ -25,15 +21,7 @@ from foundry.models.embeddings.temporal import (
     PerTimepointEmbedding,
 )
 
-# Backward-compatible aliases for old class names
-LinearEmbedding = PatchLinearEmbedding
-MLPEmbedding = PatchMLPEmbedding
-CNNEmbedding = PatchCNNEmbedding
-
 __all__ = [
-    # Legacy (deprecated)
-    "EmbeddingBase",
-    "FixedChannelWindowEmbedding",
     # Activations
     "get_activation",
     # Channel strategies
@@ -55,8 +43,4 @@ __all__ = [
     "PerTimepointEmbedding",
     "CWTEmbedding",
     "ContinuousCWTLayer",
-    # Temporal embeddings - backward-compatible aliases
-    "LinearEmbedding",
-    "MLPEmbedding",
-    "CNNEmbedding",
 ]

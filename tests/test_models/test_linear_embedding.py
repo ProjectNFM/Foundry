@@ -1,6 +1,8 @@
 import torch
 
-from foundry.models import LinearEmbedding
+from foundry.models.embeddings.temporal import (
+    PatchLinearEmbedding as LinearEmbedding,
+)
 
 
 class TestLinearEmbedding:

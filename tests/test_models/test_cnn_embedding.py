@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from foundry.models import CNNEmbedding
+from foundry.models.embeddings.temporal import PatchCNNEmbedding as CNNEmbedding
 
 
 class TestCNNEmbedding:

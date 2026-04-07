@@ -10,7 +10,7 @@ channel_strategy:
     session_configs: ${hyperparameters.session_configs}
     num_sources: ${model.tokenizer.channel_strategy.num_sources}
 temporal_embedding:
-  _target_: foundry.models.embeddings.MLPEmbedding
+  _target_: foundry.models.embeddings.PatchMLPEmbedding
   embed_dim: ${model.embed_dim}
   num_input_channels: ${model.tokenizer.channel_strategy.num_sources}
   patch_samples: ${patch_samples:${hyperparameters.patch_duration},${hyperparameters.sampling_rate}}

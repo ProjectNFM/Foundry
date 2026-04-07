@@ -25,14 +25,14 @@ foundry/models/
 
 ### Embeddings (`embedding.py`)
 
-- **LinearEmbedding**: simple projection to `embed_dim`
-- **MLPEmbedding**: MLP stack for richer projections
-- **CNNEmbedding**: conv-based temporal embedding
+- **PatchLinearEmbedding**: simple projection to `embed_dim`
+- **PatchMLPEmbedding**: MLP stack for richer projections
+- **PatchCNNEmbedding**: conv-based temporal embedding
 
 ```python
-from foundry.models import LinearEmbedding
+from foundry.models import PatchLinearEmbedding
 
-embedding = LinearEmbedding(embed_dim=256)
+embedding = PatchLinearEmbedding(embed_dim=256)
 embeddings = embedding(input_values)  # (batch, seq, embed_dim)
 ```
 
@@ -78,9 +78,9 @@ outputs = backbone(
 **POYOEEGModel** is a reference POYO-style implementation showing how to compose the pieces with a Perceiver backbone.
 
 ```python
-from foundry.models import POYOEEGModel, LinearEmbedding
+from foundry.models import POYOEEGModel, PatchLinearEmbedding
 
-embedding = LinearEmbedding(embed_dim=256)
+embedding = PatchLinearEmbedding(embed_dim=256)
 
 model = POYOEEGModel(
     input_embedding=embedding,
@@ -95,10 +95,10 @@ model = POYOEEGModel(
 ### Example 1: Use Standard Components
 
 ```python
-from foundry.models import POYOEEGModel, LinearEmbedding
+from foundry.models import POYOEEGModel, PatchLinearEmbedding
 
 model = POYOEEGModel(
-    input_embedding=LinearEmbedding(embed_dim=256),
+    input_embedding=PatchLinearEmbedding(embed_dim=256),
     readout_specs=readout_specs,
     embed_dim=256,
     sequence_length=30.0,
@@ -127,12 +127,16 @@ model = POYOEEGModel(
 ### Example 3: Use Components Directly
 
 ```python
-from foundry.models import LinearEmbedding, PerceiverEncoder, PerceiverProcessor
+from foundry.models import (
+    PatchLinearEmbedding,
+    PerceiverEncoder,
+    PerceiverProcessor,
+)
 
 class MyCustomModel(nn.Module):
     def __init__(self, embed_dim):
         super().__init__()
-        self.embedding = LinearEmbedding(embed_dim)
+        self.embedding = PatchLinearEmbedding(embed_dim)
         self.encoder = PerceiverEncoder(embed_dim)
         self.processor = PerceiverProcessor(embed_dim, depth=6)
         self.my_custom_layer = MyLayer()

@@ -51,22 +51,13 @@ All original module files have been converted to shims that:
 
 Note: `patching.py` is the new canonical location (not a shim).
 
-### 2. Backward-Compatible Aliases
+### 2. Re-exports
 
-The main `__init__.py` provides aliases for old class names:
-- `LinearEmbedding` → `PatchLinearEmbedding`
-- `MLPEmbedding` → `PatchMLPEmbedding`
-- `CNNEmbedding` → `PatchCNNEmbedding`
-
-Both names work identically and refer to the same class.
-
-### 3. Re-exports
-
-All symbols are re-exported from `foundry/models/embeddings/__init__.py`, so existing code continues to work:
+Core symbols are re-exported from `foundry/models/embeddings/__init__.py`:
 
 ```python
-# These all still work:
-from foundry.models.embeddings import LinearEmbedding
+# These are available at package level:
+from foundry.models.embeddings import PatchLinearEmbedding
 from foundry.models.embeddings import ChannelStrategy
 from foundry.models.embeddings import patch_signal
 ```
@@ -87,9 +78,7 @@ from foundry.models.embeddings.channel import (
     PerceiverSpatialProjector,
 )
 
-# Old way (still works, but deprecated)
-from foundry.models.embeddings.channel_strategies import ChannelStrategy
-from foundry.models.embeddings.spatial import LinearSpatialProjector
+# Legacy shim modules have been removed.
 ```
 
 ### Temporal Embeddings
@@ -105,10 +94,7 @@ from foundry.models.embeddings.temporal import (
     ContinuousCWTLayer,
 )
 
-# Old way (still works, but deprecated)
-from foundry.models.embeddings.linear import LinearEmbedding
-from foundry.models.embeddings.mlp import MLPEmbedding
-from foundry.models.embeddings.cnn import CNNEmbedding
+# Legacy shim modules have been removed.
 ```
 
 ### Patch Operations
@@ -130,8 +116,7 @@ from foundry.models.embeddings import patch_signal, compute_patch_timestamps
 # New way (recommended)
 from foundry.models.embeddings.activations import get_activation
 
-# Old way (still works, but deprecated)
-from foundry.models.embeddings.base import get_activation
+# Legacy shim modules have been removed.
 ```
 
 ## Updated Internal Code
@@ -148,13 +133,13 @@ The following files have been updated to use the new import paths:
 
 ## Class Name Changes
 
-Some classes have been renamed to be more descriptive. Backward-compatible aliases are provided:
+Some classes were renamed to be more descriptive:
 
 | Old Name | New Name | Status |
 |----------|----------|--------|
-| `LinearEmbedding` | `PatchLinearEmbedding` | Old name is an alias |
-| `MLPEmbedding` | `PatchMLPEmbedding` | Old name is an alias |
-| `CNNEmbedding` | `PatchCNNEmbedding` | Old name is an alias |
+| `LinearEmbedding` | `PatchLinearEmbedding` | Use new name |
+| `MLPEmbedding` | `PatchMLPEmbedding` | Use new name |
+| `CNNEmbedding` | `PatchCNNEmbedding` | Use new name |
 | `PerTimepointEmbedding` | (unchanged) | No change |
 | `CWTEmbedding` | (unchanged) | No change |
 
@@ -162,23 +147,18 @@ Some classes have been renamed to be more descriptive. Backward-compatible alias
 
 ### For Library Users
 
-No immediate action required. Your code will continue to work with deprecation warnings.
-
-To migrate gradually:
+Migrate imports to the new package structure:
 
 1. **Update imports to use new subpackages:**
    ```python
    # Before
    from foundry.models.embeddings.linear import LinearEmbedding
-   
-   # After (option 1: use new name)
+
+   # After
    from foundry.models.embeddings.temporal import PatchLinearEmbedding
-   
-   # After (option 2: use alias)
-   from foundry.models.embeddings import LinearEmbedding
    ```
 
-2. **Consider adopting new class names** (optional but recommended):
+2. **Use new class names**:
    ```python
    # Before
    LinearEmbedding(embed_dim=64, num_input_channels=8, patch_samples=25)

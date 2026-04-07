@@ -11,7 +11,7 @@ channel_strategy:
     d_attn: 64
     num_heads: 4
 temporal_embedding:
-  _target_: foundry.models.embeddings.MLPEmbedding
+  _target_: foundry.models.embeddings.PatchMLPEmbedding
   embed_dim: ${model.embed_dim}
   num_input_channels: ${model.tokenizer.channel_strategy.num_sources}
   patch_samples: ${patch_samples:${hyperparameters.patch_duration},${hyperparameters.sampling_rate}}

@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from foundry.models import MLPEmbedding
+from foundry.models.embeddings.temporal import PatchMLPEmbedding as MLPEmbedding
 
 
 class TestMLPEmbedding:
