@@ -36,7 +36,7 @@ Create a `.env` file in the project root with your credentials. See **Environmen
 ### 4. Run a training experiment
 
 ```bash
-uv run python main.py experiment=poyo_ajile_sweep
+uv run python main.py experiment=poyo_neurosoft
 ```
 
 That's it! Your model will train and log results to Weights & Biases by default (if credentials are set up). Outputs and checkpoints go to `./outputs` (or to the `SCRATCH` directory if set).
