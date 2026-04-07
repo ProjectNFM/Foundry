@@ -1,5 +1,9 @@
 from .base import NeuralDataModule
-from .physionet import PhysionetDataModule
-from .ajile import AjileDataModule
 
-__all__ = ["NeuralDataModule", "PhysionetDataModule", "AjileDataModule"]
+from .neurosoft import NeurosoftMinipigs2026DataModule, NeurosoftMonkeys2026DataModule
+
+__all__ = [
+    "NeuralDataModule",
+    "NeurosoftMinipigs2026DataModule",
+    "NeurosoftMonkeys2026DataModule",
+]

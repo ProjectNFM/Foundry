@@ -1,6 +1,6 @@
-_target_: foundry.data.datamodules.AjileDataModule
+_target_: foundry.data.datamodules.NeurosoftMinipigs2026DataModule
 
-root: ./data/processed/
+root: ${oc.env:HOME}/data/processed/ #./data/processed/
 batch_size: ${hyperparameters.batch_size}
 num_workers: ${hyperparameters.num_workers}
 pin_memory: false 
@@ -11,5 +11,5 @@ split_type: ???
 task_type: ???
 fold_number: ${hyperparameters.fold_number}
 recording_ids: 
- - "AJILE12_P01_20000102_ses3_pose_trajectories"
+ - "sub-01_ses-01_task-AcousStim_acq-LH_desc-raw"
 
