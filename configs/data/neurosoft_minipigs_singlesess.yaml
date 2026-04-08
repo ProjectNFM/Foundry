@@ -1,0 +1,14 @@
+_target_: foundry.data.datamodules.NeurosoftMinipigs2026DataModule
+
+root: ./data/processed/
+batch_size: ${hyperparameters.batch_size}
+num_workers: ${hyperparameters.num_workers}
+pin_memory: false 
+window_length: ${hyperparameters.window_length}
+seed: 42
+
+split_type: ???
+task_type: ???
+fold_number: ${hyperparameters.fold_number}
+recording_ids: 
+ - "sub-01_ses-01_task-AcousStim_acq-LH_desc-raw"
