@@ -1,0 +1,29 @@
+# @package _global_
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: neurosoft_minipigs_singlesess
+
+model:
+  patch_duration: ${hyperparameters.patch_duration}
+  input_embedding:
+    num_channels: 32
+    patch_samples: 200
+
+data:
+  split_type: intrasession-causal
+  task_type: on_vs_off
+
+run:
+  name: neurosoft_minipigs_2026_poyo_eeg_classifier
+  group: DEBUG
+  tags: [debug, baselines, training, poyo_eeg, neurosoft_minipigs_2026]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 64 
+  window_length: 0.5
+  patch_duration: 0.1
+  fold_number: 0
+  num_workers: 0
