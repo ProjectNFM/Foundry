@@ -36,7 +36,7 @@ __all__ = [
     # Patch operations
     "patch_signal",
     "compute_patch_timestamps",
-    # Temporal embeddings - new names
+    # Temporal embeddings
     "PatchLinearEmbedding",
     "PatchMLPEmbedding",
     "PatchCNNEmbedding",
