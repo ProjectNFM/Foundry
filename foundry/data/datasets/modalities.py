@@ -100,3 +100,21 @@ AJILE = register_modality(
     value_key="active_behavior_trials.behavior_id",
     loss_fn=CrossEntropyLoss(),
 )
+
+NEUROSOT_ON_VS_OFF = register_modality(
+    "neurosoft_on_vs_off",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="on_vs_off_trials.timestamps",
+    value_key="on_vs_off_trials.behavior_ids",
+    loss_fn=CrossEntropyLoss(),
+)
+
+NEUROSOT_ACOUSTIC_STIM = register_modality(
+    "neurosoft_acoustic_stim",
+    dim=17,
+    type=DataType.MULTINOMIAL,
+    timestamp_key="acoustic_stim_trials.timestamps",
+    value_key="acoustic_stim_trials.behavior_ids",
+    loss_fn=CrossEntropyLoss(),
+)
