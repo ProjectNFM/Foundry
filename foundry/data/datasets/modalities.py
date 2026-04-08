@@ -101,7 +101,7 @@ AJILE = register_modality(
     loss_fn=CrossEntropyLoss(),
 )
 
-NEUROSOT_ON_VS_OFF = register_modality(
+NEUROSOFT_ON_VS_OFF = register_modality(
     "neurosoft_on_vs_off",
     dim=2,
     type=DataType.BINARY,
@@ -110,7 +110,7 @@ NEUROSOT_ON_VS_OFF = register_modality(
     loss_fn=CrossEntropyLoss(),
 )
 
-NEUROSOT_ACOUSTIC_STIM = register_modality(
+NEUROSOFT_ACOUSTIC_STIM = register_modality(
     "neurosoft_acoustic_stim",
     dim=17,
     type=DataType.MULTINOMIAL,
