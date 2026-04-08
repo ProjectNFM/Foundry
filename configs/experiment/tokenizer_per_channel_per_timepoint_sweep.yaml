@@ -1,0 +1,42 @@
+# @package _global_
+#
+# W&B sweep over learning rate and weight decay for the per-channel-per-timepoint
+# tokenizer. Intended to be launched via `scripts/launch_tokenizer_wandb_sweep.sh`
+# which pins each wandb agent to a single GPU.
+#
+# Single-run dry test (no sweep):
+#   uv run python main.py experiment=tokenizer_per_channel_per_timepoint_sweep
+
+defaults:
+  - override /model: poyo_eeg
+  - override /model/tokenizer: per_channel_per_timepoint
+  - override /data: ajile_singlesess
+
+model:
+  tokenizer:
+    channel_strategy:
+      max_channels: ${hyperparameters.num_channels}
+
+data:
+  split_type: intrasession
+  task_type: active_vs_inactive
+
+run:
+  name: tok_pctpt_lr${hyperparameters.learning_rate}_wd${hyperparameters.weight_decay}
+  group: TOKENIZER_PCPT_SWEEP_2
+  tags: [sweep, per_channel_per_timepoint, lr_wd]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 100
+  sequence_length: 1.0
+  patch_duration: 0.1
+  sampling_rate: 500
+  fold_number: 0
+  num_workers: 16
+  num_channels: 94
+
+trainer:
+  devices: 1
+  precision: bf16-mixed

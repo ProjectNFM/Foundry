@@ -1,0 +1,25 @@
+program: main.py
+method: bayes
+metric:
+  name: val/loss
+  goal: minimize
+
+parameters:
+  hyperparameters.learning_rate:
+    distribution: log_uniform_values
+    min: 1e-5
+    max: 1e-2
+  hyperparameters.weight_decay:
+    distribution: log_uniform_values
+    min: 1e-4
+    max: 1.0
+
+command:
+  - uv
+  - run
+  - python
+  - ${program}
+  - experiment=tokenizer_per_channel_per_timepoint_sweep
+  - ${args_no_hyphens}
+
+run_cap: 64

@@ -145,11 +145,16 @@ def main(cfg: DictConfig):
         )
     OmegaConf.update(cfg, "trainer.default_root_dir", output_dir)
 
-    # Deterministic WandB run ID so preempted jobs resume the same run
+    # Deterministic WandB run ID so preempted jobs resume the same run.
+    # When launched by `wandb agent`, WANDB_RUN_ID is set per-trial and takes
+    # priority so each sweep trial gets its own W&B run.
     if "WandbLogger" in OmegaConf.select(cfg, "logger._target_", default=""):
         OmegaConf.update(cfg, "logger.save_dir", output_dir)
         if OmegaConf.select(cfg, "logger.id") is None:
-            wandb_run_id = hashlib.md5(cfg.run.name.encode()).hexdigest()[:8]
+            wandb_run_id = os.environ.get(
+                "WANDB_RUN_ID",
+                hashlib.md5(cfg.run.name.encode()).hexdigest()[:8],
+            )
             OmegaConf.update(cfg, "logger.id", wandb_run_id)
 
     slurm_tmpdir = os.environ.get("SLURM_TMPDIR")
