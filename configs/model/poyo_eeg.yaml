@@ -4,12 +4,12 @@ defaults:
 _target_: foundry.models.POYOEEGModel
 
 embed_dim: 128
-sequence_length: 1.0
+sequence_length: ${hyperparameters.sequence_length}
 latent_step: 0.1
-num_latents_per_step: 1
+num_latents_per_step: 8
 depth: 2
 dim_head: 64
-cross_heads: 1
+cross_heads: 8
 self_heads: 8
 ffn_dropout: 0.2
 lin_dropout: 0.4

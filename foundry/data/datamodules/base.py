@@ -36,7 +36,7 @@ class NeuralDataModule(LightningDataModule):
             dataset_class=MyDataset,
             root="./data/",
             batch_size=32,
-            window_length=10.0,
+            sequence_length=10.0,
             tokenizer=model.tokenize,  # optional
             dataset_kwargs={"dirname": "my_dataset"},
         )
@@ -75,7 +75,7 @@ class NeuralDataModule(LightningDataModule):
         batch_size: int = 32,
         num_workers: int = 0,
         pin_memory: bool = False,
-        window_length: Optional[float] = None,
+        sequence_length: Optional[float] = None,
         transforms: Optional[list[Callable]] = None,
         tokenizer: Optional[Callable] = None,
         seed: int = 42,
@@ -88,7 +88,7 @@ class NeuralDataModule(LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
-        self.window_length = window_length
+        self.sequence_length = sequence_length
         self.seed = seed
         self.dataset_kwargs = dataset_kwargs or {}
         self.task_type = task_type
@@ -219,7 +219,7 @@ class NeuralDataModule(LightningDataModule):
 
         sampler = RandomFixedWindowSampler(
             sampling_intervals=sampling_intervals,
-            window_length=self.window_length,
+            window_length=self.sequence_length,
             drop_short=True,
             generator=torch.Generator().manual_seed(self.seed),
         )

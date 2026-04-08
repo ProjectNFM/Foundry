@@ -56,6 +56,7 @@ class EEGTokenizer(nn.Module):
         self.patch_duration = patch_duration
         self.stride = stride if stride is not None else patch_duration
         self._do_patching = patch_duration is not None
+        self.post_proj_norm = nn.LayerNorm(embed_dim)
 
     @property
     def uses_per_channel(self) -> bool:
@@ -192,6 +193,8 @@ class EEGTokenizer(nn.Module):
                 )
             else:
                 tokens = self.temporal_embedding(transformed.transpose(1, 2))
+
+        tokens = self.post_proj_norm(tokens)
 
         if self.uses_per_channel:
             tokens = self._reassemble_per_channel(
