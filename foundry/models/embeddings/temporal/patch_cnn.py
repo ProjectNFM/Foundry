@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
 
-from foundry.models.embeddings.base import get_activation
+from foundry.models.embeddings.activations import get_activation
 
 
-class CNNEmbedding(nn.Module):
+class PatchCNNEmbedding(nn.Module):
     """Convert patched EEG signal to embeddings via 1D CNN.
 
     Treats channels as Conv1d input channels and convolves over the time
@@ -64,4 +64,4 @@ class CNNEmbedding(nn.Module):
         return self.cnn(x).reshape(B, P, self.embed_dim)
 
 
-__all__ = ["CNNEmbedding"]
+__all__ = ["PatchCNNEmbedding"]

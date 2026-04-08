@@ -3,20 +3,20 @@ import math
 import numpy as np
 import torch
 
-from foundry.models.embeddings.channel_strategies import (
+from foundry.models.embeddings.channel import (
     FixedChannelStrategy,
     PerChannelStrategy,
     SpatialProjectionStrategy,
-)
-from foundry.models.embeddings.spatial import (
     LinearSpatialProjector,
     PerceiverSpatialProjector,
     SessionSpatialProjector,
 )
-from foundry.models.embeddings.cnn import CNNEmbedding
-from foundry.models.embeddings.cwt import CWTEmbedding
-from foundry.models.embeddings.linear import LinearEmbedding
-from foundry.models.embeddings.per_timepoint import PerTimepointEmbedding
+from foundry.models.embeddings.temporal import (
+    PatchCNNEmbedding as CNNEmbedding,
+    CWTEmbedding,
+    PatchLinearEmbedding as LinearEmbedding,
+    PerTimepointEmbedding,
+)
 from foundry.models.tokenizer import EEGTokenizer
 
 INIT_FREQS = torch.logspace(math.log10(2), math.log10(50), 8).tolist()

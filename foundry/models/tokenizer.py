@@ -6,15 +6,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from foundry.models.embeddings.channel_strategies import (
+from foundry.models.embeddings.channel import (
     ChannelStrategy,
     PerChannelStrategy,
 )
-from foundry.models.embeddings.cwt import CWTEmbedding
 from foundry.models.embeddings.patching import (
     compute_patch_timestamps,
     patch_signal,
 )
+from foundry.models.embeddings.temporal import CWTEmbedding
 
 
 class EEGTokenizer(nn.Module):

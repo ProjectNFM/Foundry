@@ -2,12 +2,10 @@ import numpy as np
 import pytest
 import torch
 
-from foundry.models.embeddings.channel_strategies import (
+from foundry.models.embeddings.channel import (
     FixedChannelStrategy,
     PerChannelStrategy,
     SpatialProjectionStrategy,
-)
-from foundry.models.embeddings.spatial import (
     LinearSpatialProjector,
     SessionSpatialProjector,
 )

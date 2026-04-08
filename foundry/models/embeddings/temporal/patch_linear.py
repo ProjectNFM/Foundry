@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 
-class LinearEmbedding(nn.Module):
+class PatchLinearEmbedding(nn.Module):
     """Convert patched EEG signal to embeddings via linear projection.
 
     Flattens the (channels, time) dimensions and projects to ``embed_dim``.
@@ -38,4 +38,4 @@ class LinearEmbedding(nn.Module):
         return self.projection(patches.reshape(B, P, C * S))
 
 
-__all__ = ["LinearEmbedding"]
+__all__ = ["PatchLinearEmbedding"]

@@ -7,11 +7,13 @@ from torch_brain.nn.loss import CrossEntropyLoss
 
 from foundry.models import (
     POYOEEGModel,
-    LinearEmbedding,
-    CNNEmbedding,
-    MLPEmbedding,
     EEGTokenizer,
     FixedChannelStrategy,
+)
+from foundry.models.embeddings.temporal import (
+    PatchCNNEmbedding as CNNEmbedding,
+    PatchLinearEmbedding as LinearEmbedding,
+    PatchMLPEmbedding as MLPEmbedding,
 )
 
 

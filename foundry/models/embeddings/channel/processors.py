@@ -155,7 +155,7 @@ class SpatialProjectionStrategy(ChannelStrategy):
     or used directly with CWT / PerTimepoint temporal embeddings.
 
     The ``projector`` argument controls how channels are mixed.  Built-in
-    options (all in :mod:`foundry.models.embeddings.spatial`):
+    options (all in :mod:`foundry.models.embeddings.channel.spatial_projectors`):
 
     * :class:`LinearSpatialProjector` — single shared linear layer.
     * :class:`SessionSpatialProjector` — per-session linear layers.

@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
 
-from foundry.models.embeddings.base import get_activation
+from foundry.models.embeddings.activations import get_activation
 
 
-class MLPEmbedding(nn.Module):
+class PatchMLPEmbedding(nn.Module):
     """Convert patched EEG signal to embeddings via MLP.
 
     Flattens the (channels, time) dimensions and passes through hidden layers.
@@ -57,4 +57,4 @@ class MLPEmbedding(nn.Module):
         return self.mlp(patches.reshape(B, P, C * S))
 
 
-__all__ = ["MLPEmbedding"]
+__all__ = ["PatchMLPEmbedding"]
