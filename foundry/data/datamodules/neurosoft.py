@@ -1,4 +1,3 @@
-from torch_brain.dataset import Dataset
 from auditorydecoding import (
     NeurosoftDataset,
     NeurosoftMinipigs2026,
