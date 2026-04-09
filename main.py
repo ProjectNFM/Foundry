@@ -5,6 +5,7 @@ from pathlib import Path
 
 import hydra
 import torch
+
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import get_class, instantiate
 from lightning import seed_everything

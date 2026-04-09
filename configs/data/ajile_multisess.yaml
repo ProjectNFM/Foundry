@@ -7,7 +7,7 @@ pin_memory: false
 sequence_length: ${hyperparameters.sequence_length}
 seed: 42
 
-split_type: ???
+split_type: intrasession
 task_type: ???
 fold_number: ${hyperparameters.fold_number}
 recording_ids: 

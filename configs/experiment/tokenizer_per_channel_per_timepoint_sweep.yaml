@@ -10,7 +10,7 @@
 defaults:
   - override /model: poyo_eeg
   - override /model/tokenizer: per_channel_per_timepoint
-  - override /data: ajile_allsess
+  - override /data: ajile_multisess
 
 model:
   tokenizer:
@@ -28,7 +28,7 @@ run:
   log_level: INFO
 
 hyperparameters:
-  batch_size: 100
+  batch_size: 200
   sequence_length: 1.0
   patch_duration: 0.1
   sampling_rate: 500

@@ -65,6 +65,8 @@ if ! is_valid_sweep_id "$SWEEP_ID"; then
     exit 1
 fi
 
+ulimit -n 65536 2>/dev/null || true
+
 PIDS=()
 
 cleanup() {
@@ -83,6 +85,8 @@ for gpu_id in $(seq 0 $((NUM_GPUS - 1))); do
     CUDA_VISIBLE_DEVICES="$gpu_id" \
         wandb agent --count "$COUNT_PER_AGENT" "$SWEEP_ID" &
     PIDS+=($!)
+    # Stagger launches to avoid CUDA driver init race conditions
+    sleep 2
 done
 
 echo ""
