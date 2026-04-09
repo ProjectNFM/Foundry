@@ -28,7 +28,7 @@ run:
   log_level: INFO
 
 hyperparameters:
-  batch_size: 200
+  batch_size: 100
   sequence_length: 1.0
   patch_duration: 0.1
   sampling_rate: 500

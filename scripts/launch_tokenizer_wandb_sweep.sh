@@ -14,7 +14,7 @@ set -euo pipefail
 
 SWEEP_CONFIG="configs/sweeps/tokenizer_lr_wd_bayes.yaml"
 NUM_GPUS="${NUM_GPUS:-8}"
-COUNT_PER_AGENT="${COUNT_PER_AGENT:-16}"
+COUNT_PER_AGENT="${COUNT_PER_AGENT:-5}"
 PROJECT="${WANDB_PROJECT:-foundry}"
 
 cd "$(dirname "$0")/.."

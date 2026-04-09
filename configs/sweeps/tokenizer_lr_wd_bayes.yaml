@@ -22,4 +22,4 @@ command:
   - experiment=tokenizer_per_channel_per_timepoint_sweep
   - ${args_no_hyphens}
 
-run_cap: 128
+run_cap: 64
