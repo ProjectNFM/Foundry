@@ -10,7 +10,7 @@
 defaults:
   - override /model: poyo_eeg
   - override /model/tokenizer: per_channel_per_timepoint
-  - override /data: ajile_singlesess
+  - override /data: ajile_allsess
 
 model:
   tokenizer:
@@ -18,12 +18,11 @@ model:
       max_channels: ${hyperparameters.num_channels}
 
 data:
-  split_type: intrasession
-  task_type: active_vs_inactive
+  task_type: behavior
 
 run:
   name: tok_pctpt_lr${hyperparameters.learning_rate}_wd${hyperparameters.weight_decay}
-  group: TOKENIZER_PCPT_SWEEP_2
+  group: TOKENIZER_PCPT_SWEEP_ALL
   tags: [sweep, per_channel_per_timepoint, lr_wd]
   seed: 42
   log_level: INFO
@@ -34,9 +33,14 @@ hyperparameters:
   patch_duration: 0.1
   sampling_rate: 500
   fold_number: 0
-  num_workers: 16
+  num_workers: 24
   num_channels: 94
 
 trainer:
   devices: 1
   precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/ajile_active_behavior_f1
+      mode: max
+      patience: 10

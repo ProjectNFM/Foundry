@@ -1,13 +1,13 @@
 program: main.py
 method: bayes
 metric:
-  name: val/loss
-  goal: minimize
+  name: val/ajile_active_behavior_f1
+  goal: maximize
 
 parameters:
   hyperparameters.learning_rate:
     distribution: log_uniform_values
-    min: 1e-5
+    min: 1e-6
     max: 1e-2
   hyperparameters.weight_decay:
     distribution: log_uniform_values
@@ -22,4 +22,4 @@ command:
   - experiment=tokenizer_per_channel_per_timepoint_sweep
   - ${args_no_hyphens}
 
-run_cap: 64
+run_cap: 128
