@@ -20,7 +20,8 @@ dependencies = [
     "matplotlib>=3.10.8",
     "torchmetrics>=1.8.2",
     "wandb>=0.24.0",
-    "auditorydecoding"
+    "auditorydecoding",
+    "scikit-learn>=1.8.0",
 ]
 
 [dependency-groups]
