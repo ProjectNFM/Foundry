@@ -273,16 +273,17 @@ class EEGModule(L.LightningModule):
             return
 
         experiment = self.logger.experiment
+
         for prefix in ("train", "val"):
             experiment.define_metric(f"{prefix}/loss", summary="min")
             for task_name in self.model.readout_specs:
                 experiment.define_metric(
                     f"{prefix}/{task_name}_loss", summary="min"
                 )
-                for metric_key in self.train_metrics[task_name]:
-                    experiment.define_metric(
-                        f"{prefix}/{task_name}_{metric_key}", summary="max"
-                    )
+
+        for metrics in (*self.train_metrics.values(), *self.val_metrics.values()):
+            for metric_name in metrics:
+                experiment.define_metric(metric_name, summary="max")
 
     def on_validation_epoch_end(self):
         """Log confusion matrices at the end of validation epoch."""

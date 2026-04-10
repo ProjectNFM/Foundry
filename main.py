@@ -221,5 +221,8 @@ def main(cfg: DictConfig):
 
 
 if __name__ == "__main__":
+    # Prevent DataLoader workers from inheriting CUDA contexts via fork().
+    # Without this, orphaned workers hold /dev/nvidia* handles and leak GPU memory.
+    torch.multiprocessing.set_start_method("spawn", force=True)
     register_resolvers()
     main()

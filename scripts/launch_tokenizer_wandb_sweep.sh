@@ -71,9 +71,18 @@ PIDS=()
 
 cleanup() {
     echo ""
-    echo "Shutting down agents..."
+    echo "Shutting down agents and all child processes..."
     for pid in "${PIDS[@]}"; do
-        kill "$pid" 2>/dev/null || true
+        # Kill the entire process tree rooted at each agent PID.
+        # SIGTERM first for graceful DataLoader worker shutdown.
+        pkill -TERM -P "$pid" 2>/dev/null || true
+        kill -TERM "$pid" 2>/dev/null || true
+    done
+    sleep 2
+    for pid in "${PIDS[@]}"; do
+        # SIGKILL stragglers (orphaned DataLoader workers, etc.)
+        pkill -KILL -P "$pid" 2>/dev/null || true
+        kill -KILL "$pid" 2>/dev/null || true
     done
     wait
     echo "All agents stopped."
