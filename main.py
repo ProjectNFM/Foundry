@@ -198,7 +198,7 @@ def main(cfg: DictConfig):
     # priority so each sweep trial gets its own W&B run.
     if "WandbLogger" in OmegaConf.select(cfg, "logger._target_", default=""):
         OmegaConf.update(cfg, "logger.save_dir", output_dir)
-        if OmegaConf.select(cfg, "logger.id") is None:
+        if OmegaConf.select(cfg, "logger.id") is None and False:
             wandb_run_id = os.environ.get(
                 "WANDB_RUN_ID",
                 hashlib.md5(cfg.run.name.encode()).hexdigest()[:8],
