@@ -19,7 +19,10 @@ class NeurosoftDataModule(NeuralDataModule):
 
     READOUT_CLASS_NAMES: dict[str, list[str]] = {
         "on_vs_off": list(ON_VS_OFF_TO_ID.keys()),
-        "acoustic_stim": list(STIM_FREQUENCY_TO_ID.keys()),
+        "acoustic_stim": [
+            k
+            for k, _ in sorted(STIM_FREQUENCY_TO_ID.items(), key=lambda x: x[1])
+        ],
     }
 
     def __init__(

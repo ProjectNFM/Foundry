@@ -9,6 +9,7 @@ SLURM jobs where buffered output is lost on crash.
 """
 
 import glob as _glob
+import os
 import sys
 import traceback
 from functools import wraps
@@ -97,6 +98,20 @@ def _range_resolver(start: int, end: int, step: int) -> List[int]:
     return list(range(int(start), int(end), int(step)))
 
 
+def _list_recordings(data_dir: str, pattern: str = "*") -> List[str]:
+    """Sorted recording-ID stems from *data_dir* matching *pattern*.h5."""
+    matches = _glob.glob(os.path.join(data_dir, f"{pattern}.h5"))
+    return sorted(os.path.splitext(os.path.basename(p))[0] for p in matches)
+
+
+def _get_nth_recording(
+    data_dir: str, index: int, pattern: str = "*"
+) -> List[str]:
+    """Single-element list with the recording ID at *index* in the sorted listing."""
+    recordings = _list_recordings(data_dir, pattern)
+    return [recordings[int(index)]]
+
+
 def _get_suffix(s: str) -> str:
     """Last segment of an underscore-separated string, upper-cased."""
     return s.split("_")[-1].upper()
@@ -134,6 +149,8 @@ def register_resolvers() -> None:
         "get_overrides_from_ckpt": _get_overrides_from_ckpt,
         "range_resolver": _range_resolver,
         "get_suffix": _get_suffix,
+        "list_recordings": _list_recordings,
+        "get_nth_recording": _get_nth_recording,
     }
     for name, fn in _resolvers.items():
         if not OmegaConf.has_resolver(name):

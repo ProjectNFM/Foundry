@@ -1,0 +1,76 @@
+# @package _global_
+#
+# Per-session EEGNet sweep over all NeuroSoft minipig recordings.
+#
+# Local dry-run (session 0 only):
+#   uv run python main.py experiment=eegnet_neurosoft_sweep
+#
+# SLURM sweep (one job per session):
+#   uv run python main.py experiment=eegnet_neurosoft_sweep -m
+
+defaults:
+  - override /model: eeg_net_encoder
+  - override /data: neurosoft_minipigs_singlesess
+  - override /hydra/launcher: slurm_default
+
+model:
+  num_channels: 32
+  num_samples: 1000
+
+data:
+  root: ${oc.env:SLURM_TMPDIR}/brainsets/processed
+  split_type: intrasession-causal
+  task_type: acoustic_stim
+  recording_ids: ${get_nth_recording:${data.root}/neurosoft_minipigs_2026,${hyperparameters.session_index},*desc-raw*}
+
+run:
+  name: eegnet_neurosoft_sess${hyperparameters.session_index}
+  group: EEGNET_NEUROSOFT_SWEEP
+  tags: [sweep, eeg_net_encoder, neurosoft]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 64
+  window_length: 0.5
+  patch_duration: 0.1
+  fold_number: 0
+  num_workers: 5
+  session_index: 0
+
+trainer:
+  max_epochs: 1000
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/neurosoft_acoustic_stim_f1
+      mode: max
+      patience: 20
+    model_checkpoint:
+      monitor: val/neurosoft_acoustic_stim_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/neurosoft_acoustic_stim_f1:.4f}"
+    results_exporter:
+      _target_: foundry.training.callbacks.ResultsExporterCallback
+      n_permutations: 10000
+      permutation_seed: 0
+
+stage:
+  skip: true
+
+hydra:
+  sweeper:
+    params:
+      hyperparameters.session_index: range(0, 35)
+  launcher:
+    tasks_per_node: 4
+    cpus_per_task: 5
+    mem_gb: 128
+    gres: gpu:l40s:1
+    setup:
+      - "set -a"
+      - "source .env"
+      - "set +a"
+      - "export RANK=0"
+      - "uv run python -m foundry.tools.stage_data --experiment eegnet_neurosoft_sweep"

@@ -1,0 +1,27 @@
+# @package _global_
+
+defaults:
+  - override /model: eeg_net_encoder
+  - override /data: neurosoft_minipigs_singlesess
+
+model:
+  num_channels: 32
+  num_samples: 1000
+
+data:
+  split_type: intrasession-causal
+  task_type: acoustic_stim
+
+run:
+  name: eegnet_neurosoft
+  group: EEGNET_NEUROSOFT
+  tags: [baselines, training, eeg_net_encoder, neurosoft]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 64
+  window_length: 0.5
+  patch_duration: 0.1
+  fold_number: 0
+  num_workers: 5
