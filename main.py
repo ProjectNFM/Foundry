@@ -113,6 +113,53 @@ def _get_resume_checkpoint_path(
     return None
 
 
+def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
+    """Auto-derive session_configs and num_channels from the dataset when missing."""
+    session_configs = OmegaConf.select(
+        cfg, "hyperparameters.session_configs", default=None
+    )
+    num_channels = OmegaConf.select(
+        cfg, "hyperparameters.num_channels", default=None
+    )
+
+    if session_configs is not None and num_channels is not None:
+        return
+
+    dm = instantiate(cfg.data, tokenizer=None)
+    dm.setup("fit")
+
+    if session_configs is None:
+        from foundry.data.utils import get_session_configs
+
+        session_configs = get_session_configs(dm.dataset)
+        OmegaConf.update(
+            cfg,
+            "hyperparameters.session_configs",
+            session_configs,
+            force_add=True,
+        )
+        logger.info(
+            "Auto-populated hyperparameters.session_configs from dataset"
+            " (%d sessions).",
+            len(session_configs),
+        )
+
+    if num_channels is None:
+        from foundry.data.utils import get_max_channels
+
+        num_channels = get_max_channels(dm.dataset)
+        OmegaConf.update(
+            cfg,
+            "hyperparameters.num_channels",
+            num_channels,
+            force_add=True,
+        )
+        logger.info(
+            "Auto-populated hyperparameters.num_channels=%d from dataset.",
+            num_channels,
+        )
+
+
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 @hydra_main_wrapper
 def main(cfg: DictConfig):
@@ -180,6 +227,8 @@ def main(cfg: DictConfig):
         cfg.data.task_type
     )
 
+    _populate_data_driven_hyperparams(cfg)
+
     model = instantiate(cfg.model, readout_specs=readout_specs)
 
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
@@ -221,8 +270,5 @@ def main(cfg: DictConfig):
 
 
 if __name__ == "__main__":
-    # Prevent DataLoader workers from inheriting CUDA contexts via fork().
-    # Without this, orphaned workers hold /dev/nvidia* handles and leak GPU memory.
-    torch.multiprocessing.set_start_method("spawn", force=True)
     register_resolvers()
     main()
