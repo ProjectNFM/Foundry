@@ -142,7 +142,7 @@ def main(cfg: DictConfig):
     # Deterministic WandB run ID so preempted jobs resume the same run
     if "WandbLogger" in OmegaConf.select(cfg, "logger._target_", default=""):
         OmegaConf.update(cfg, "logger.save_dir", output_dir)
-        if OmegaConf.select(cfg, "logger.id") is None:
+        if OmegaConf.select(cfg, "logger.id") is None and False:
             wandb_run_id = hashlib.md5(cfg.run.name.encode()).hexdigest()[:8]
             OmegaConf.update(cfg, "logger.id", wandb_run_id)
 
