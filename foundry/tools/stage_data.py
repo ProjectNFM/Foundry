@@ -360,6 +360,10 @@ def main():
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
+    from foundry.config_resolvers import register_resolvers
+
+    register_resolvers()
+
     args = _build_parser().parse_args()
 
     dest_root = args.dest_root or os.environ.get("SLURM_TMPDIR")

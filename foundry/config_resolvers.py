@@ -112,6 +112,33 @@ def _get_nth_recording(
     return [recordings[int(index)]]
 
 
+def _get_num_ecog_channels(
+    data_dir: str, index: int, pattern: str = "*"
+) -> int:
+    """Number of ECoG channels for the recording at *index* in the sorted listing.
+
+    Opens the HDF5 file and counts channels whose type (lowercased) falls
+    within the standard supported modalities (eeg, ecog, seeg, ieeg).
+    """
+    import h5py
+    import numpy as np
+
+    SUPPORTED_MODALITIES = {"eeg", "ecog", "seeg", "ieeg"}
+
+    recording_id = _list_recordings(data_dir, pattern)[int(index)]
+    h5_path = os.path.join(data_dir, f"{recording_id}.h5")
+
+    with h5py.File(h5_path, "r") as f:
+        raw_types = f["channels/type"][()]
+        types = np.array(
+            [t.decode() if isinstance(t, bytes) else t for t in raw_types],
+            dtype="U",
+        )
+        return int(
+            np.isin(np.char.lower(types), list(SUPPORTED_MODALITIES)).sum()
+        )
+
+
 def _get_suffix(s: str) -> str:
     """Last segment of an underscore-separated string, upper-cased."""
     return s.split("_")[-1].upper()
@@ -151,6 +178,7 @@ def register_resolvers() -> None:
         "get_suffix": _get_suffix,
         "list_recordings": _list_recordings,
         "get_nth_recording": _get_nth_recording,
+        "get_num_ecog_channels": _get_num_ecog_channels,
     }
     for name, fn in _resolvers.items():
         if not OmegaConf.has_resolver(name):

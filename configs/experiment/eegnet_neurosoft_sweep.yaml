@@ -14,18 +14,17 @@ defaults:
   - override /hydra/launcher: slurm_default
 
 model:
-  num_channels: 32
+  num_channels: ${get_num_ecog_channels:${data.root}/neurosoft_minipigs_2026,${hyperparameters.session_index},*desc-raw*}
   num_samples: 1000
 
 data:
-  root: ${oc.env:SLURM_TMPDIR}/brainsets/processed
   split_type: intrasession-causal
   task_type: acoustic_stim
   recording_ids: ${get_nth_recording:${data.root}/neurosoft_minipigs_2026,${hyperparameters.session_index},*desc-raw*}
 
 run:
   name: eegnet_neurosoft_sess${hyperparameters.session_index}
-  group: EEGNET_NEUROSOFT_SWEEP
+  group: EEGNET_NEUROSOFT_ALL_SESSIONS
   tags: [sweep, eeg_net_encoder, neurosoft]
   seed: 42
   log_level: INFO
@@ -35,8 +34,9 @@ hyperparameters:
   window_length: 0.5
   patch_duration: 0.1
   fold_number: 0
-  num_workers: 5
+  num_workers: 4
   session_index: 0
+  learning_rate: 0.0015
 
 trainer:
   max_epochs: 1000
@@ -59,18 +59,18 @@ trainer:
 stage:
   skip: true
 
-hydra:
-  sweeper:
-    params:
-      hyperparameters.session_index: range(0, 35)
-  launcher:
-    tasks_per_node: 4
-    cpus_per_task: 5
-    mem_gb: 128
-    gres: gpu:l40s:1
-    setup:
-      - "set -a"
-      - "source .env"
-      - "set +a"
-      - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment eegnet_neurosoft_sweep"
+# hydra:
+#   sweeper:
+#     params:
+#       hyperparameters.session_index: range(0, 39)
+#   launcher:
+#     tasks_per_node: 4
+#     cpus_per_task: 1
+#     mem_gb: 32
+#     gres: gpu:l40s:1
+#     setup:
+#       - "set -a"
+#       - "source .env"
+#       - "set +a"
+#       - "export RANK=0"
+#       - "uv run python -m foundry.tools.stage_data --experiment eegnet_neurosoft_sweep --overrides data.recording_ids=null"

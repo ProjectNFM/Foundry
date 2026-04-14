@@ -152,10 +152,14 @@ class ResultsExporterCallback(L.Callback):
             return
 
         _LOG.info("Loading best checkpoint: %s", ckpt_cb.best_model_path)
+        device = trainer.strategy.root_device
         state = torch.load(
-            ckpt_cb.best_model_path, map_location=pl_module.device
+            ckpt_cb.best_model_path,
+            map_location=device,
+            weights_only=False,
         )
         pl_module.load_state_dict(state["state_dict"])
+        pl_module.to(device)
         pl_module.eval()
 
         all_y_true: dict[str, list[np.ndarray]] = {}
