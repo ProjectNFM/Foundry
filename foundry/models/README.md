@@ -67,21 +67,6 @@ The tokenizer has two phases:
 - `pretokenize(...)`: CPU-side per-sample prep in dataloading
 - `forward(...)`: GPU-side token embedding in training/inference
 
-```mermaid
-flowchart TD
-    A[input_values: B x C x T] --> B[channel_strategy.forward]
-    B --> C{patch_duration?}
-    C -->|yes| D[patch_signal -> B x P x C' x S]
-    C -->|no| E[raw temporal path]
-    D --> F[temporal_embedding]
-    E --> F
-    F --> G[LayerNorm]
-    G --> H{PerChannelStrategy?}
-    H -->|yes| I[reassemble C x N tokens<br/>+ optional channel embedding]
-    H -->|no| J[return tokens]
-    I --> J
-```
-
 ### Channel Strategies (`embeddings/channel/processors.py`)
 
 | Strategy | Output before temporal embedding | Typical use |
@@ -114,53 +99,6 @@ Tokenizer configs live in `configs/model/tokenizer/` and combine:
 
 - one channel strategy family (`fixed`, `per_channel`, `spatial_linear`, `spatial_session`, `spatial_perceiver`)
 - one temporal embedding family (`patch_linear`, `patch_mlp`, `patch_cnn`, `per_timepoint`, `cwt`)
-
-```mermaid
-flowchart LR
-    subgraph Channel Strategy
-      A[fixed]
-      B[per_channel]
-      C[spatial_linear]
-      D[spatial_session]
-      E[spatial_perceiver]
-    end
-    subgraph Temporal Embedding
-      F[patch_linear]
-      G[patch_mlp]
-      H[patch_cnn]
-      I[per_timepoint]
-      J[cwt]
-    end
-    A --> F
-    A --> G
-    A --> H
-    A --> I
-    A --> J
-    B --> F
-    B --> G
-    B --> H
-    B --> I
-    B --> J
-    C --> F
-    C --> G
-    C --> H
-    D --> F
-    D --> G
-    D --> H
-    E --> F
-    E --> G
-    E --> H
-```
-
-### Config Coverage Matrix
-
-| Channel strategy family | `patch_linear` | `patch_mlp` | `patch_cnn` | `per_timepoint` | `cwt` |
-|---|---:|---:|---:|---:|---:|
-| `fixed_*` | `fixed_patch_linear.yaml` | `fixed_patch_mlp.yaml` | `fixed_patch_cnn.yaml` | `fixed_per_timepoint.yaml` | `fixed_cwt.yaml` |
-| `per_channel_*` | `per_channel_patch_linear.yaml` | `per_channel_patch_mlp.yaml` | `per_channel_patch_cnn.yaml` | `per_channel_per_timepoint.yaml` | `per_channel_cwt.yaml` |
-| `spatial_linear_*` | `spatial_linear_patch_linear.yaml` | `spatial_linear_patch_mlp.yaml` | `spatial_linear_patch_cnn.yaml` | - | - |
-| `spatial_session_*` | `spatial_session_patch_linear.yaml` | `spatial_session_patch_mlp.yaml` | `spatial_session_patch_cnn.yaml` | - | - |
-| `spatial_perceiver_*` | `spatial_perceiver_patch_linear.yaml` | `spatial_perceiver_patch_mlp.yaml` | `spatial_perceiver_patch_cnn.yaml` | - | - |
 
 ## API Reference (Practical)
 
