@@ -1,21 +1,31 @@
 import pytest
 import torch
 
-from foundry.models import CNNEmbedding
+from foundry.models.embeddings.temporal import PatchCNNEmbedding as CNNEmbedding
 
 
 class TestCNNEmbedding:
+    def test_is_nn_module(self):
+        embedding = CNNEmbedding(
+            embed_dim=64,
+            num_input_channels=8,
+            patch_samples=50,
+            num_filters=32,
+            kernel_size=3,
+        )
+        assert isinstance(embedding, torch.nn.Module)
+
     def test_initialization(self, embed_dim):
         embedding = CNNEmbedding(
             embed_dim=embed_dim,
-            num_channels=8,
+            num_input_channels=8,
             patch_samples=50,
             num_filters=64,
             kernel_size=3,
             activation="gelu",
         )
         assert embedding.embed_dim == embed_dim
-        assert embedding.num_channels == 8
+        assert embedding.num_input_channels == 8
         assert embedding.patch_samples == 50
 
     def test_forward_pass_basic(self, embed_dim, batch_size):
@@ -25,7 +35,7 @@ class TestCNNEmbedding:
 
         embedding = CNNEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
             num_filters=32,
             kernel_size=3,
@@ -46,7 +56,7 @@ class TestCNNEmbedding:
         for activation in ["relu", "gelu", "silu", "tanh"]:
             embedding = CNNEmbedding(
                 embed_dim=embed_dim,
-                num_channels=num_channels,
+                num_input_channels=num_channels,
                 patch_samples=patch_samples,
                 num_filters=32,
                 kernel_size=3,
@@ -62,7 +72,7 @@ class TestCNNEmbedding:
         with pytest.raises(ValueError, match="Unknown activation"):
             CNNEmbedding(
                 embed_dim=embed_dim,
-                num_channels=8,
+                num_input_channels=8,
                 patch_samples=50,
                 num_filters=32,
                 kernel_size=3,
@@ -76,7 +86,7 @@ class TestCNNEmbedding:
         for kernel_size in [3, 5, 7]:
             embedding = CNNEmbedding(
                 embed_dim=embed_dim,
-                num_channels=num_channels,
+                num_input_channels=num_channels,
                 patch_samples=patch_samples,
                 num_filters=32,
                 kernel_size=kernel_size,
@@ -95,7 +105,7 @@ class TestCNNEmbedding:
         for num_filters in [16, 32, 64, 128]:
             embedding = CNNEmbedding(
                 embed_dim=embed_dim,
-                num_channels=num_channels,
+                num_input_channels=num_channels,
                 patch_samples=patch_samples,
                 num_filters=num_filters,
                 kernel_size=3,
@@ -110,7 +120,7 @@ class TestCNNEmbedding:
     def test_cnn_structure(self, embed_dim):
         embedding = CNNEmbedding(
             embed_dim=embed_dim,
-            num_channels=8,
+            num_input_channels=8,
             patch_samples=50,
             num_filters=32,
             kernel_size=3,
@@ -123,7 +133,7 @@ class TestCNNEmbedding:
         num_channels = 8
         embedding = CNNEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=50,
             num_filters=32,
             kernel_size=3,
@@ -141,7 +151,7 @@ class TestCNNEmbedding:
 
         embedding = CNNEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
             num_filters=32,
             kernel_size=3,
@@ -158,7 +168,7 @@ class TestCNNEmbedding:
 
         embedding = CNNEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
             num_filters=64,
             kernel_size=5,
@@ -174,7 +184,7 @@ class TestCNNEmbedding:
 
         embedding = CNNEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
             num_filters=32,
             kernel_size=3,
@@ -197,7 +207,7 @@ class TestCNNEmbedding:
 
         embedding = CNNEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
             num_filters=32,
             kernel_size=3,
@@ -219,7 +229,7 @@ class TestCNNEmbedding:
 
         embedding = CNNEmbedding(
             embed_dim=embed_dim,
-            num_channels=num_channels,
+            num_input_channels=num_channels,
             patch_samples=patch_samples,
             num_filters=32,
             kernel_size=3,

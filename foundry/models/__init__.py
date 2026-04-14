@@ -5,10 +5,23 @@ from foundry.models.backbones import (
     PerceiverProcessor,
 )
 from foundry.models.embeddings import (
-    CNNEmbedding,
-    MLPEmbedding,
-    LinearEmbedding,
+    ChannelStrategy,
+    FixedChannelStrategy,
+    PerChannelStrategy,
+    SpatialProjectionStrategy,
+    PatchCNNEmbedding,
+    ContinuousCWTLayer,
+    CWTEmbedding,
+    PatchMLPEmbedding,
+    PatchLinearEmbedding,
+    PerTimepointEmbedding,
+    LinearSpatialProjector,
+    PerceiverSpatialProjector,
+    SessionSpatialProjector,
+    patch_signal,
+    compute_patch_timestamps,
 )
+from foundry.models.tokenizer import EEGTokenizer
 
 from foundry.models.poyo_eeg import POYOEEGModel
 from foundry.models.baselines import (
@@ -19,14 +32,27 @@ from foundry.models.baselines import (
 
 __all__ = [
     "POYOEEGModel",
+    "EEGTokenizer",
     "TemporalConvAvgPoolClassifier",
     "ShallowConvNet",
     "EEGNetEncoder",
-    "LinearEmbedding",
-    "MLPEmbedding",
-    "CNNEmbedding",
+    "ChannelStrategy",
+    "FixedChannelStrategy",
+    "PerChannelStrategy",
+    "SpatialProjectionStrategy",
+    "PatchLinearEmbedding",
+    "PatchMLPEmbedding",
+    "PatchCNNEmbedding",
+    "CWTEmbedding",
+    "ContinuousCWTLayer",
+    "PerTimepointEmbedding",
+    "LinearSpatialProjector",
+    "PerceiverSpatialProjector",
+    "SessionSpatialProjector",
     "PerceiverDecoder",
     "PerceiverEncoder",
     "PerceiverIOBackbone",
     "PerceiverProcessor",
+    "patch_signal",
+    "compute_patch_timestamps",
 ]

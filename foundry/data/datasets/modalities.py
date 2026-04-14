@@ -94,7 +94,7 @@ AJILE_INACTIVE_ACTIVE = register_modality(
 
 AJILE = register_modality(
     "ajile_active_behavior",
-    dim=4,
+    dim=5,
     type=DataType.MULTINOMIAL,
     timestamp_key="active_behavior_trials.timestamps",
     value_key="active_behavior_trials.behavior_id",

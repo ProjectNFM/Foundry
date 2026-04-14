@@ -11,7 +11,13 @@ class AjileDataModule(NeuralDataModule):
 
     READOUT_CLASS_NAMES: dict[str, list[str]] = {
         "ajile_inactive_active": ["Active", "Inactive"],
-        "ajile_active_behavior": ["Eat", "Talk", "TV", "Computer/Phone"],
+        "ajile_active_behavior": [
+            "Eat",
+            "Talk",
+            "TV",
+            "Computer/Phone",
+            "Other Activity",
+        ],
     }
 
     def __init__(
@@ -20,7 +26,7 @@ class AjileDataModule(NeuralDataModule):
         batch_size: int = 32,
         num_workers: int = 0,
         pin_memory: bool = False,
-        window_length: Optional[float] = None,
+        sequence_length: Optional[float] = None,
         transforms: Optional[list[Callable]] = None,
         tokenizer: Optional[Callable] = None,
         seed: int = 42,
@@ -45,7 +51,7 @@ class AjileDataModule(NeuralDataModule):
             batch_size=batch_size,
             num_workers=num_workers,
             pin_memory=pin_memory,
-            window_length=window_length,
+            sequence_length=sequence_length,
             transforms=transforms,
             tokenizer=tokenizer,
             seed=seed,

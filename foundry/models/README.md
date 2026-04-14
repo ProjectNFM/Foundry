@@ -1,148 +1,165 @@
-# Modular EEG Model Architecture
+# Foundry Models
 
-This directory contains composable EEG modeling components. Each piece is a
-plain `nn.Module` so you can wire things together without extra framework
-constraints.
+`foundry/models` contains the EEG/iEEG model stack used in Foundry:
 
-## Philosophy
+- a composable `EEGTokenizer` (`tokenizer.py`) for channel handling + temporal embedding,
+- a Perceiver IO backbone (`backbones/perceiver.py`),
+- the integrated POYO-style model (`poyo_eeg.py`),
+- and baseline CNN models (`baselines.py`).
 
-- **No enforced protocols**: components are standard `nn.Module`s
-- **Plug and play**: swap embeddings, backbones, or entire assemblies
-- **Clear separation**: Embedding → Backbone → Readout
+## Current Layout
 
-## Directory Structure
-
-```
+```text
 foundry/models/
-├── embeddings/          # Input embedding components
-│   ├── linear.py        # LinearEmbedding
-│   ├── mlp.py           # MLPEmbedding
-│   └── cnn.py           # CNNEmbedding
-├── backbones/           # Model architectures
-│   └── perceiver.py     # Perceiver IO components (encoder, processor, decoder)
-├── poyo_eeg.py          # Reference POYO-style EEG model implementation
-└── README.md            # This file
+├── __init__.py
+├── tokenizer.py
+├── poyo_eeg.py
+├── baselines.py
+├── utils.py
+├── backbones/
+│   ├── __init__.py
+│   └── perceiver.py
+└── embeddings/
+    ├── __init__.py
+    ├── activations.py
+    ├── patching.py
+    ├── channel/
+    │   ├── __init__.py
+    │   ├── processors.py
+    │   └── spatial_projectors.py
+    └── temporal/
+        ├── __init__.py
+        ├── per_timepoint.py
+        ├── patch_linear.py
+        ├── patch_mlp.py
+        ├── patch_cnn.py
+        └── cwt.py
 ```
 
-## Components
+## End-to-End Integration
 
-### Embeddings (`embeddings/`)
-
-- **LinearEmbedding**: simple projection to `embed_dim`
-- **MLPEmbedding**: MLP stack for richer projections
-- **CNNEmbedding**: conv-based temporal embedding
-
-```python
-from foundry.models import LinearEmbedding
-
-embedding = LinearEmbedding(embed_dim=256)
-embeddings = embedding(input_values)  # (batch, seq, embed_dim)
+```mermaid
+flowchart LR
+    A[TemporalData sample] --> B[POYOEEGModel.tokenize]
+    B --> C[EEGTokenizer.pretokenize<br/>CPU dataloader stage]
+    C --> D[Batch tensors]
+    D --> E[EEGTokenizer.forward<br/>GPU stage]
+    E --> F[Session embedding add]
+    F --> G[PerceiverIOBackbone]
+    G --> H[MultitaskReadout]
+    H --> I[Task outputs]
 ```
 
-### Backbones (`backbones/`)
+### POYOEEGModel Composition
 
-**Perceiver Components** - three standalone modules:
+`POYOEEGModel` composes these modules in order:
 
-1. **PerceiverEncoder** - compress inputs into latents via cross-attention
-2. **PerceiverProcessor** - refine latents with self-attention layers
-3. **PerceiverDecoder** - generate outputs from latents via cross-attention
+1. `EEGTokenizer` -> produces `inputs` with shape `(B, num_tokens, embed_dim)`
+2. session conditioning -> adds `session_emb(input_session_index)` to every input token
+3. latent/query setup -> latent embeddings + rotary time embeddings
+4. `PerceiverIOBackbone` -> encoder cross-attn, processor self-attn, decoder cross-attn
+5. `MultitaskReadout` -> task-specific heads chosen by `output_decoder_index`
+
+## EEGTokenizer Architecture
+
+The tokenizer has two phases:
+
+- `pretokenize(...)`: CPU-side per-sample prep in dataloading
+- `forward(...)`: GPU-side token embedding in training/inference
+
+### Channel Strategies (`embeddings/channel/processors.py`)
+
+| Strategy | Output before temporal embedding | Typical use |
+|---|---|---|
+| `FixedChannelStrategy` | `(B, num_channels, T)` | Fixed-size channel layout |
+| `PerChannelStrategy` | `(B * C_pad, 1, T)` | Independent per-channel tokenization |
+| `SpatialProjectionStrategy` | `(B, num_sources, T)` | Learn a common source space from variable channels |
+
+### Spatial Projectors (`embeddings/channel/spatial_projectors.py`)
+
+Used only by `SpatialProjectionStrategy`:
+
+- `LinearSpatialProjector`: shared linear projection from channels to sources
+- `SessionSpatialProjector`: session-specific linear projection (optional shared MLP)
+- `PerceiverSpatialProjector`: cross-attention projection into latent sources
+
+### Temporal Embeddings (`embeddings/temporal/`)
+
+| Embedding | Expected input | Output |
+|---|---|---|
+| `PatchLinearEmbedding` | `(B, P, C, S)` | `(B, P, D)` |
+| `PatchMLPEmbedding` | `(B, P, C, S)` | `(B, P, D)` |
+| `PatchCNNEmbedding` | `(B, P, C, S)` | `(B, P, D)` |
+| `PerTimepointEmbedding` | `(B, T, input_dim)` | `(B, T, D)` |
+| `CWTEmbedding` | `(B, num_sources, T)` + `input_sampling_rate`, `input_seq_len` | `(B, target_time_tokens, D)` |
+
+## How Tokenizer Variants Relate
+
+Tokenizer configs live in `configs/model/tokenizer/` and combine:
+
+- one channel strategy family (`fixed`, `per_channel`, `spatial_linear`, `spatial_session`, `spatial_perceiver`)
+- one temporal embedding family (`patch_linear`, `patch_mlp`, `patch_cnn`, `per_timepoint`, `cwt`)
+
+## API Reference (Practical)
+
+### Build a tokenizer + POYO model
 
 ```python
-from foundry.models import PerceiverEncoder, PerceiverProcessor, PerceiverDecoder
-
-encoder = PerceiverEncoder(embed_dim=256)
-processor = PerceiverProcessor(embed_dim=256, depth=4)
-decoder = PerceiverDecoder(embed_dim=256)
-
-latents = encoder(latents, inputs, latent_ts_emb, input_ts_emb, mask)
-latents = processor(latents, latent_ts_emb)
-outputs = decoder(queries, latents, query_ts_emb, latent_ts_emb)
-```
-
-Or use the convenience wrapper:
-
-```python
-from foundry.models import PerceiverIOBackbone
-
-backbone = PerceiverIOBackbone(embed_dim=256, depth=4)
-outputs = backbone(
-    inputs,
-    input_ts_emb,
-    latents,
-    latent_ts_emb,
-    queries,
-    query_ts_emb,
-    mask,
+from foundry.models import (
+    EEGTokenizer,
+    POYOEEGModel,
+    SpatialProjectionStrategy,
+    PerceiverSpatialProjector,
+    PatchLinearEmbedding,
 )
-```
 
-### Complete Model (`poyo_eeg.py`)
+embed_dim = 128
+num_channels = 64
+num_sources = 10
+patch_samples = 25
 
-**POYOEEGModel** is a reference POYO-style implementation showing how to compose the pieces with a Perceiver backbone.
-
-```python
-from foundry.models import POYOEEGModel, LinearEmbedding
-
-embedding = LinearEmbedding(embed_dim=256)
+tokenizer = EEGTokenizer(
+    channel_strategy=SpatialProjectionStrategy(
+        num_channels=num_channels,
+        num_sources=num_sources,
+        projector=PerceiverSpatialProjector(
+            num_sources=num_sources,
+            d_attn=64,
+            num_heads=4,
+        ),
+    ),
+    temporal_embedding=PatchLinearEmbedding(
+        embed_dim=embed_dim,
+        num_input_channels=num_sources,
+        patch_samples=patch_samples,
+    ),
+    embed_dim=embed_dim,
+    patch_duration=0.1,
+)
 
 model = POYOEEGModel(
-    input_embedding=embedding,
-    readout_specs=readout_specs,
-    embed_dim=256,
+    tokenizer=tokenizer,
+    readout_specs=readout_specs,  # list[str], list[ModalitySpec], or dict
+    embed_dim=embed_dim,
     sequence_length=30.0,
 )
 ```
 
-## Usage Examples
+### Perceiver IO components directly
 
-### Example 1: Use Standard Components
+`backbones/perceiver.py` exposes:
 
-```python
-from foundry.models import POYOEEGModel, LinearEmbedding
+- `PerceiverEncoder`
+- `PerceiverProcessor`
+- `PerceiverDecoder`
+- `PerceiverIOBackbone` (wrapper around the three components)
 
-model = POYOEEGModel(
-    input_embedding=LinearEmbedding(embed_dim=256),
-    readout_specs=readout_specs,
-    embed_dim=256,
-    sequence_length=30.0,
-)
-```
+### Baselines
 
-### Example 2: Swap Just the Embedding
+`baselines.py` provides non-Perceiver references:
 
-```python
-class ConvEmbedding(nn.Module):
-    def __init__(self, embed_dim):
-        super().__init__()
-        self.conv = nn.Conv1d(...)
+- `TemporalConvAvgPoolClassifier`
+- `ShallowConvNet`
+- `EEGNetEncoder`
 
-    def forward(self, input_values):
-        return self.conv(input_values)
-
-model = POYOEEGModel(
-    input_embedding=ConvEmbedding(embed_dim=256),
-    readout_specs=readout_specs,
-    embed_dim=256,
-    sequence_length=30.0,
-)
-```
-
-### Example 3: Use Components Directly
-
-```python
-from foundry.models import LinearEmbedding, PerceiverEncoder, PerceiverProcessor
-
-class MyCustomModel(nn.Module):
-    def __init__(self, embed_dim):
-        super().__init__()
-        self.embedding = LinearEmbedding(embed_dim)
-        self.encoder = PerceiverEncoder(embed_dim)
-        self.processor = PerceiverProcessor(embed_dim, depth=6)
-        self.my_custom_layer = MyLayer()
-
-    def forward(self, inputs, ...):
-        x = self.embedding(inputs)
-        x = self.encoder(...)
-        x = self.processor(x, ...)
-        return self.my_custom_layer(x)
-```
+These use the same multitask readout interface, but do not use `EEGTokenizer`.

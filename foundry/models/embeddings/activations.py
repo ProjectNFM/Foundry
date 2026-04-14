@@ -2,15 +2,6 @@ import torch.nn as nn
 
 
 def get_activation(activation: str) -> nn.Module:
-    """
-    Get activation function by name.
-
-    Args:
-        activation: Name of activation function (relu, gelu, silu, tanh, etc.)
-
-    Returns:
-        Activation module instance
-    """
     activations = {
         "relu": nn.ReLU(),
         "gelu": nn.GELU(),
@@ -26,3 +17,6 @@ def get_activation(activation: str) -> nn.Module:
             f"Available: {list(activations.keys())}"
         )
     return activations[activation.lower()]
+
+
+__all__ = ["get_activation"]
