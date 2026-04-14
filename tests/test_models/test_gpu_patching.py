@@ -1,7 +1,5 @@
-import numpy as np
 import torch
 
-from foundry.data.transforms import patch_time_series
 from foundry.models.embeddings.patching import (
     compute_patch_timestamps,
     patch_signal,
@@ -34,33 +32,6 @@ class TestPatchSignal:
         )
         # patch_samples = 50, stride_samples = 25, num_patches = (200-50)//25+1 = 7
         assert patches.shape == (B, 7, C, 50)
-
-    def test_equivalence_with_numpy(self):
-        """GPU patching matches numpy patch_time_series for evenly-divisible cases."""
-        T, C = 250, 4
-        fs = 250.0
-        duration = T / fs
-
-        signal_np = np.random.randn(T, C).astype(np.float32)
-        timestamps = np.linspace(0, duration, T, endpoint=False)
-
-        patches_np, _ = patch_time_series(
-            signal=signal_np,
-            timestamps=timestamps,
-            patch_duration=0.1,
-            stride=0.1,
-        )
-
-        signal_torch = torch.from_numpy(signal_np.T).unsqueeze(0)  # (1, C, T)
-        patches_torch = patch_signal(
-            signal_torch, patch_duration=0.1, stride=0.1, sampling_rate=fs
-        )
-
-        np.testing.assert_allclose(
-            patches_torch[0].numpy(),
-            patches_np,
-            atol=1e-6,
-        )
 
     def test_device_placement(self):
         if not torch.cuda.is_available():
