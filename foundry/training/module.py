@@ -281,7 +281,10 @@ class EEGModule(L.LightningModule):
                     f"{prefix}/{task_name}_loss", summary="min"
                 )
 
-        for metrics in (*self.train_metrics.values(), *self.val_metrics.values()):
+        for metrics in (
+            *self.train_metrics.values(),
+            *self.val_metrics.values(),
+        ):
             for metric_name in metrics:
                 experiment.define_metric(metric_name, summary="max")
 
