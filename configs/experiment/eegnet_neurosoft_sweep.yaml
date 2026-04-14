@@ -51,26 +51,6 @@ trainer:
       mode: max
       auto_insert_metric_name: false
       filename: "best-epoch{epoch:03d}-val_f1_{val/neurosoft_acoustic_stim_f1:.4f}"
-    results_exporter:
-      _target_: foundry.training.callbacks.ResultsExporterCallback
-      n_permutations: 10000
-      permutation_seed: 0
 
 stage:
   skip: true
-
-# hydra:
-#   sweeper:
-#     params:
-#       hyperparameters.session_index: range(0, 39)
-#   launcher:
-#     tasks_per_node: 4
-#     cpus_per_task: 1
-#     mem_gb: 32
-#     gres: gpu:l40s:1
-#     setup:
-#       - "set -a"
-#       - "source .env"
-#       - "set +a"
-#       - "export RANK=0"
-#       - "uv run python -m foundry.tools.stage_data --experiment eegnet_neurosoft_sweep --overrides data.recording_ids=null"

@@ -12,7 +12,7 @@ import glob as _glob
 import os
 import sys
 import traceback
-from functools import wraps
+from functools import lru_cache, wraps
 from typing import List, Optional
 
 from omegaconf import OmegaConf
@@ -109,10 +109,13 @@ def _range_resolver(start: int, end: int, step: int) -> List[int]:
     return list(range(int(start), int(end), int(step)))
 
 
-def _list_recordings(data_dir: str, pattern: str = "*") -> List[str]:
+@lru_cache(maxsize=32)
+def _list_recordings(data_dir: str, pattern: str = "*") -> tuple[str, ...]:
     """Sorted recording-ID stems from *data_dir* matching *pattern*.h5."""
     matches = _glob.glob(os.path.join(data_dir, f"{pattern}.h5"))
-    return sorted(os.path.splitext(os.path.basename(p))[0] for p in matches)
+    return tuple(
+        sorted(os.path.splitext(os.path.basename(p))[0] for p in matches)
+    )
 
 
 def _get_nth_recording(
@@ -136,8 +139,26 @@ def _get_num_ecog_channels(
 
     SUPPORTED_MODALITIES = {"eeg", "ecog", "seeg", "ieeg"}
 
-    recording_id = _list_recordings(data_dir, pattern)[int(index)]
+    recordings = _list_recordings(data_dir, pattern)
+    idx = int(index)
+    if not recordings:
+        raise FileNotFoundError(
+            f"No recordings matching '{pattern}.h5' found in {data_dir}"
+        )
+    if idx >= len(recordings):
+        raise IndexError(
+            f"Session index {idx} out of range — only {len(recordings)} "
+            f"recordings found in {data_dir}"
+        )
+
+    recording_id = recordings[idx]
     h5_path = os.path.join(data_dir, f"{recording_id}.h5")
+
+    if not os.path.isfile(h5_path):
+        raise FileNotFoundError(
+            f"HDF5 file not found: {h5_path}  "
+            f"(is the data staged / accessible from this node?)"
+        )
 
     with h5py.File(h5_path, "r") as f:
         raw_types = f["channels/type"][()]

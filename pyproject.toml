@@ -21,7 +21,6 @@ dependencies = [
     "torchmetrics>=1.8.2",
     "wandb>=0.24.0",
     "auditorydecoding",
-    "scikit-learn>=1.8.0",
 ]
 
 [dependency-groups]
