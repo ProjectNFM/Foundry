@@ -4,13 +4,11 @@ embed_dim: ${model.embed_dim}
 channel_strategy:
   _target_: foundry.models.embeddings.SpatialProjectionStrategy
   num_channels: ${hyperparameters.num_channels}
-  num_sources: 10
+  num_sources: ${model.embed_dim}
   projector:
     _target_: foundry.models.embeddings.SessionSpatialProjector
     session_configs: ${hyperparameters.session_configs}
     num_sources: ${model.tokenizer.channel_strategy.num_sources}
-    hidden_dim: 32
 temporal_embedding:
-  _target_: foundry.models.embeddings.PerTimepointEmbedding
+  _target_: foundry.models.embeddings.IdentityTemporalEmbedding
   embed_dim: ${model.embed_dim}
-  input_dim: ${model.tokenizer.channel_strategy.num_sources}

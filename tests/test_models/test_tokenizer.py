@@ -1,6 +1,7 @@
 import math
 
 import numpy as np
+import pytest
 import torch
 
 from foundry.models.embeddings.channel import (
@@ -14,6 +15,7 @@ from foundry.models.embeddings.channel import (
 from foundry.models.embeddings.temporal import (
     PatchCNNEmbedding as CNNEmbedding,
     CWTEmbedding,
+    IdentityTemporalEmbedding,
     PatchLinearEmbedding as LinearEmbedding,
     PerTimepointEmbedding,
 )
@@ -238,6 +240,39 @@ class TestMode3bSpatialProjectionPerTimepoint:
 
         out = tokenizer(x, input_sampling_rate=fs)
         assert out.shape == (batch_size, 200, embed_dim)
+
+
+class TestMode3cSpatialProjectionIdentityTemporal:
+    """Mode 3c: Variable channels, variable fs, identity temporal embedding."""
+
+    def _make_tokenizer(self, embed_dim=8, num_sources=8):
+        return EEGTokenizer(
+            channel_strategy=SpatialProjectionStrategy(
+                num_channels=64,
+                num_sources=num_sources,
+                projector=LinearSpatialProjector(
+                    num_channels=64, num_sources=num_sources
+                ),
+            ),
+            temporal_embedding=IdentityTemporalEmbedding(embed_dim=embed_dim),
+            embed_dim=embed_dim,
+        )
+
+    def test_forward_shape(self, batch_size):
+        tokenizer = self._make_tokenizer(embed_dim=8, num_sources=8)
+        x = torch.randn(batch_size, 64, 200)
+        fs = torch.full((batch_size,), 250.0)
+
+        out = tokenizer(x, input_sampling_rate=fs)
+        assert out.shape == (batch_size, 200, 8)
+
+    def test_forward_raises_on_dim_mismatch(self):
+        tokenizer = self._make_tokenizer(embed_dim=16, num_sources=8)
+        x = torch.randn(2, 64, 200)
+        fs = torch.full((2,), 250.0)
+
+        with pytest.raises(ValueError, match="match embed_dim"):
+            tokenizer(x, input_sampling_rate=fs)
 
 
 class TestMode4PerChannelPerTimepoint:

@@ -15,6 +15,7 @@ from foundry.models.embeddings.patching import (
 from foundry.models.embeddings.temporal import (
     CWTEmbedding,
     ContinuousCWTLayer,
+    IdentityTemporalEmbedding,
     PatchCNNEmbedding,
     PatchLinearEmbedding,
     PatchMLPEmbedding,
@@ -41,6 +42,7 @@ __all__ = [
     "PatchMLPEmbedding",
     "PatchCNNEmbedding",
     "PerTimepointEmbedding",
+    "IdentityTemporalEmbedding",
     "CWTEmbedding",
     "ContinuousCWTLayer",
 ]
