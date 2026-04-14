@@ -207,7 +207,6 @@ class SpatialProjectionStrategy(ChannelStrategy):
                 sampling_rate, dtype=torch.float32
             ),
             "input_seq_len": torch.tensor(T, dtype=torch.long),
-            "input_channel_counts": torch.tensor(C_actual, dtype=torch.long),
         }
 
     def forward(self, input_values, **kwargs):

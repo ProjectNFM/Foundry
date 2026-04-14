@@ -18,16 +18,16 @@ class TestSessionSpatialProjector:
         assert proj.num_sources == 4
         assert "A" in proj.session_layers
         assert "B" in proj.session_layers
+        assert proj.shared_mlp is None
 
-    def test_initialization_with_hidden_dim(self):
-        proj = self._make_projector(hidden_dim=32)
-        assert proj.hidden_dim == 32
+    def test_initialization_with_shared_hidden(self):
+        proj = self._make_projector(shared_hidden_dim=32)
+        assert proj.shared_hidden_dim == 32
+        assert proj.shared_mlp is not None
 
-        mlp_a = proj.session_layers["A"]
-        assert mlp_a[0].in_features == 8
-        assert mlp_a[0].out_features == 32
-        assert mlp_a[2].in_features == 32
-        assert mlp_a[2].out_features == 4
+        layer_a = proj.session_layers["A"]
+        assert layer_a.in_features == 8
+        assert layer_a.out_features == 32
 
     def test_session_layer_dimensions(self):
         proj = self._make_projector()
@@ -81,9 +81,9 @@ class TestSessionSpatialProjector:
         )
         assert (out[0, :, valid_len:] == 0.0).all()
 
-    def test_forward_with_hidden_dim(self):
+    def test_forward_with_shared_mlp(self):
         proj = self._make_projector(
-            session_configs={"S": 8}, num_sources=4, hidden_dim=16
+            session_configs={"S": 8}, num_sources=4, shared_hidden_dim=16
         )
         x = torch.randn(2, 8, 50)
         out = proj(

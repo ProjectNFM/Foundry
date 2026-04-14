@@ -136,8 +136,6 @@ class POYOEEGModel(nn.Module):
         input_mask: Optional[torch.Tensor] = None,
         input_sampling_rate: Optional[torch.Tensor] = None,
         input_seq_len: Optional[torch.Tensor] = None,
-        input_session_ids=None,
-        input_channel_counts: Optional[torch.Tensor] = None,
         latent_index: torch.Tensor,
         latent_timestamps: torch.Tensor,
         output_session_index: torch.Tensor,
@@ -173,8 +171,6 @@ class POYOEEGModel(nn.Module):
             input_mask=input_mask,
             input_sampling_rate=input_sampling_rate,
             input_seq_len=input_seq_len,
-            input_session_ids=input_session_ids,
-            input_channel_counts=input_channel_counts,
             channel_emb_fn=self.channel_emb,
         )
 
@@ -288,7 +284,6 @@ class POYOEEGModel(nn.Module):
             sampling_rate=sampling_rate,
             sequence_length=self.sequence_length,
         )
-        pretokenized["input_session_ids"] = str(data.session.id)
         input_timestamps = pretokenized.pop("input_timestamps")
 
         latent_index = self._latent_index
