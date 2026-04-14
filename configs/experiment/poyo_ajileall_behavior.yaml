@@ -1,0 +1,26 @@
+# @package _global_
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: ajile_allsess
+
+data:
+  task_type: behavior
+
+run:
+  name: ajile_poyo_eeg_behavior_classifier
+  group: DEBUG
+  tags: [debug, baselines, training, poyo_eeg, ajile]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 2048
+  sequence_length: 1.0
+  patch_duration: 0.1
+  fold_number: 0
+  num_workers: 32
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  sampling_rate: 500
+  num_channels: 94

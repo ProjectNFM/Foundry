@@ -23,10 +23,10 @@ defaults:
   - override /hydra/launcher: slurm_default
 
 model:
-  patch_duration: ${hyperparameters.patch_duration}
-  input_embedding:
-    num_channels: 94
-    patch_samples: 50 
+  tokenizer:
+    patch_duration: ${hyperparameters.patch_duration}
+    channel_strategy:
+      num_channels: 94
 
 data:
   root: ${oc.env:SLURM_TMPDIR}/brainsets/processed
@@ -42,8 +42,9 @@ run:
 
 hyperparameters:
   batch_size: 512
-  window_length: 1.0
+  sequence_length: 1.0
   patch_duration: 0.1
+  sampling_rate: 500
   fold_number: 0
   num_workers: 6
   learning_rate: 1e-4

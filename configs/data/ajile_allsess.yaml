@@ -1,0 +1,13 @@
+_target_: foundry.data.datamodules.AjileDataModule
+
+root: ./data/processed/
+batch_size: ${hyperparameters.batch_size}
+num_workers: ${hyperparameters.num_workers}
+pin_memory: false 
+sequence_length: ${hyperparameters.sequence_length}
+seed: 42
+
+split_type: intersession
+task_type: ???
+fold_number: ${hyperparameters.fold_number}
+

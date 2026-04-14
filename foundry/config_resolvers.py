@@ -94,6 +94,17 @@ def _get_overrides_from_ckpt(
     return "-".join(f"{k.split('.')[-1]}={v}" for k, v in filtered.items())
 
 
+def _patch_samples_resolver(patch_duration: float, sampling_rate: float) -> int:
+    """Compute ``patch_samples`` from patch duration and sampling rate.
+
+    Equivalent to ``foundry.data.utils.compute_patch_samples``, exposed
+    as an OmegaConf resolver so it can be used in YAML configs::
+
+        patch_samples: ${patch_samples:${hyperparameters.patch_duration},${hyperparameters.sampling_rate}}
+    """
+    return max(1, round(float(patch_duration) * float(sampling_rate)))
+
+
 def _range_resolver(start: int, end: int, step: int) -> List[int]:
     return list(range(int(start), int(end), int(step)))
 
@@ -174,6 +185,7 @@ def register_resolvers() -> None:
         "find_checkpoints": _find_checkpoints,
         "get_checkpoints_from_folder": _get_checkpoints_from_folder,
         "get_overrides_from_ckpt": _get_overrides_from_ckpt,
+        "patch_samples": _patch_samples_resolver,
         "range_resolver": _range_resolver,
         "get_suffix": _get_suffix,
         "list_recordings": _list_recordings,
