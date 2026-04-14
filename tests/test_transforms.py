@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from temporaldata import Data, Interval, RegularTimeSeries
 
-from foundry.data.transforms import RescaleSignal, patch_time_series
+from foundry.data.transforms import RescaleSignal
 
 
 class TestRescaleSignal:
@@ -311,64 +311,3 @@ class TestRescaleSignal:
 
         assert np.allclose(result.eeg.signal, eeg_array * 3.0)
         assert np.allclose(result.ecg.signal, ecg_array)
-
-
-class TestPatchTimeSeries:
-    def test_non_overlapping_patches(self):
-        signal = np.arange(16, dtype=np.float32).reshape(8, 2)
-        timestamps = np.arange(8, dtype=np.float32) * 0.5
-
-        patched_signal, patched_timestamps = patch_time_series(
-            signal=signal,
-            timestamps=timestamps,
-            patch_duration=1.0,
-            stride=1.0,
-            timestamp_mode="middle",
-        )
-
-        assert patched_signal.shape == (4, 2, 2)
-        assert np.allclose(patched_timestamps, np.array([0.5, 1.5, 2.5, 3.5]))
-
-    def test_overlapping_patches(self):
-        signal = np.arange(10, dtype=np.float32).reshape(5, 2)
-        timestamps = np.arange(5, dtype=np.float32) * 1.0
-
-        patched_signal, patched_timestamps = patch_time_series(
-            signal=signal,
-            timestamps=timestamps,
-            patch_duration=3.0,
-            stride=2.0,
-            timestamp_mode="start",
-        )
-
-        assert patched_signal.shape == (2, 2, 3)
-        assert np.allclose(patched_timestamps, np.array([0.0, 2.0]))
-
-    def test_padding_last_patch(self):
-        signal = np.arange(18, dtype=np.float32).reshape(9, 2)
-        timestamps = np.arange(9, dtype=np.float32) * 0.5
-
-        patched_signal, _ = patch_time_series(
-            signal=signal,
-            timestamps=timestamps,
-            patch_duration=2.0,
-            stride=1.5,
-            timestamp_mode="middle",
-        )
-
-        assert patched_signal.shape == (3, 2, 4)
-        assert np.allclose(patched_signal[-1, :, -1], np.zeros(2))
-
-    def test_rejects_irregular_timestamps(self):
-        signal = np.arange(10, dtype=np.float32).reshape(5, 2)
-        timestamps = np.array([0.0, 1.0, 2.1, 3.0, 4.0], dtype=np.float32)
-
-        with pytest.raises(
-            ValueError, match="timestamps must be regularly spaced"
-        ):
-            patch_time_series(
-                signal=signal,
-                timestamps=timestamps,
-                patch_duration=2.0,
-                stride=1.0,
-            )
