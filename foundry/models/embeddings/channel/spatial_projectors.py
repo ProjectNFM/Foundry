@@ -30,45 +30,47 @@ class LinearSpatialProjector(nn.Module):
 class SessionSpatialProjector(nn.Module):
     """Project variable-channel recordings to a fixed number of latent sources.
 
-    Each session (recording setup) has its own linear layer mapping its channel
-    count to a shared hidden dimension (or directly to ``num_sources``).  An
-    optional shared MLP is applied afterwards so that all sessions are mapped
-    into the same representational space.
+    Each session (recording setup) has its own layer(s) mapping its channel
+    count to ``num_sources``.
+
+    Two modes of operation:
+
+    1. **Direct** (default) — each session has a single linear layer mapping
+       ``num_channels → num_sources``.
+    2. **Per-session MLP** (``hidden_dim``) — each session gets its own
+       two-layer MLP: ``num_channels → hidden_dim → num_sources``.
 
     Args:
         session_configs: Mapping of ``session_id`` (str) to the number of
             channels for that session.
         num_sources: Number of latent sources to produce.
-        shared_hidden_dim: If given, session-specific layers first project to
-            this size, then a shared MLP maps to ``num_sources``.
+        hidden_dim: If given, each session gets its own two-layer MLP with
+            this hidden size.
     """
 
     def __init__(
         self,
         session_configs: dict[str, int],
         num_sources: int,
-        shared_hidden_dim: int | None = None,
+        hidden_dim: int | None = None,
     ):
         super().__init__()
         self.num_sources = num_sources
-        self.shared_hidden_dim = shared_hidden_dim
-
-        out_dim = (
-            shared_hidden_dim if shared_hidden_dim is not None else num_sources
-        )
+        self.hidden_dim = hidden_dim
 
         self.session_layers = nn.ModuleDict()
-        for session_id, num_channels in session_configs.items():
-            self.session_layers[str(session_id)] = nn.Linear(
-                num_channels, out_dim
-            )
-
-        if shared_hidden_dim is not None:
-            self.shared_mlp = nn.Sequential(
-                nn.GELU(), nn.Linear(shared_hidden_dim, num_sources)
-            )
+        if hidden_dim is not None:
+            for session_id, num_channels in session_configs.items():
+                self.session_layers[str(session_id)] = nn.Sequential(
+                    nn.Linear(num_channels, hidden_dim),
+                    nn.GELU(),
+                    nn.Linear(hidden_dim, num_sources),
+                )
         else:
-            self.shared_mlp = None
+            for session_id, num_channels in session_configs.items():
+                self.session_layers[str(session_id)] = nn.Linear(
+                    num_channels, num_sources
+                )
 
     def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
         """
@@ -104,10 +106,6 @@ class SessionSpatialProjector(nn.Module):
             x_i_t = x_i.transpose(0, 1)  # (Max_T, c)
 
             projected = self.session_layers[sess_id](x_i_t)
-
-            if self.shared_mlp is not None:
-                projected = self.shared_mlp(projected)
-
             projected = projected.transpose(0, 1)  # (num_sources, Max_T)
 
             # Re-zero time-padding corrupted by linear bias
