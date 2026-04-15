@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 
-class PerTimepointEmbedding(nn.Module):
+class PerTimepointLinearEmbedding(nn.Module):
     """Project each timepoint independently via a linear layer.
 
     No patching or resampling is applied.  Variable sequence lengths are
@@ -31,7 +31,7 @@ class PerTimepointEmbedding(nn.Module):
         return self.projection(x)
 
 
-class IdentityTemporalEmbedding(nn.Module):
+class PerTimepointIdentityEmbedding(nn.Module):
     """Use timepoint features as tokens without a learned projection.
 
     This is useful when channel strategy output already matches the tokenizer
@@ -70,4 +70,4 @@ class IdentityTemporalEmbedding(nn.Module):
         return x
 
 
-__all__ = ["PerTimepointEmbedding", "IdentityTemporalEmbedding"]
+__all__ = ["PerTimepointLinearEmbedding", "PerTimepointIdentityEmbedding"]

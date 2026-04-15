@@ -15,9 +15,9 @@ from foundry.models.embeddings.channel import (
 from foundry.models.embeddings.temporal import (
     PatchCNNEmbedding as CNNEmbedding,
     CWTEmbedding,
-    IdentityTemporalEmbedding,
+    PerTimepointIdentityEmbedding,
     PatchLinearEmbedding as LinearEmbedding,
-    PerTimepointEmbedding,
+    PerTimepointLinearEmbedding,
 )
 from foundry.models.tokenizer import EEGTokenizer
 
@@ -218,7 +218,7 @@ class TestMode3bSpatialProjectionPerTimepoint:
                     num_channels=64, num_sources=8
                 ),
             ),
-            temporal_embedding=PerTimepointEmbedding(
+            temporal_embedding=PerTimepointLinearEmbedding(
                 embed_dim=embed_dim, input_dim=8
             ),
             embed_dim=embed_dim,
@@ -254,7 +254,9 @@ class TestMode3cSpatialProjectionIdentityTemporal:
                     num_channels=64, num_sources=num_sources
                 ),
             ),
-            temporal_embedding=IdentityTemporalEmbedding(embed_dim=embed_dim),
+            temporal_embedding=PerTimepointIdentityEmbedding(
+                embed_dim=embed_dim
+            ),
             embed_dim=embed_dim,
         )
 
@@ -281,7 +283,7 @@ class TestMode4PerChannelPerTimepoint:
     def _make_tokenizer(self, embed_dim=64):
         return EEGTokenizer(
             channel_strategy=PerChannelStrategy(max_channels=16),
-            temporal_embedding=PerTimepointEmbedding(
+            temporal_embedding=PerTimepointLinearEmbedding(
                 embed_dim=embed_dim, input_dim=1
             ),
             embed_dim=embed_dim,
@@ -548,7 +550,9 @@ class TestTokenizerProperties:
     def test_uses_per_channel_true(self):
         tokenizer = EEGTokenizer(
             channel_strategy=PerChannelStrategy(max_channels=8),
-            temporal_embedding=PerTimepointEmbedding(embed_dim=32, input_dim=1),
+            temporal_embedding=PerTimepointLinearEmbedding(
+                embed_dim=32, input_dim=1
+            ),
             embed_dim=32,
         )
         assert tokenizer.uses_per_channel is True

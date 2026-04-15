@@ -10,5 +10,5 @@ channel_strategy:
     session_configs: ${hyperparameters.session_configs}
     num_sources: ${model.tokenizer.channel_strategy.num_sources}
 temporal_embedding:
-  _target_: foundry.models.embeddings.IdentityTemporalEmbedding
+  _target_: foundry.models.embeddings.PerTimepointIdentityEmbedding
   embed_dim: ${model.embed_dim}
