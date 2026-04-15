@@ -90,7 +90,8 @@ Used only by `SpatialProjectionStrategy`:
 | `PatchLinearEmbedding` | `(B, P, C, S)` | `(B, P, D)` |
 | `PatchMLPEmbedding` | `(B, P, C, S)` | `(B, P, D)` |
 | `PatchCNNEmbedding` | `(B, P, C, S)` | `(B, P, D)` |
-| `PerTimepointEmbedding` | `(B, T, input_dim)` | `(B, T, D)` |
+| `PerTimepointLinearEmbedding` | `(B, T, input_dim)` | `(B, T, D)` |
+| `PerTimepointIdentityEmbedding` | `(B, T, input_dim)` | `(B, T, D)` |
 | `CWTEmbedding` | `(B, num_sources, T)` + `input_sampling_rate`, `input_seq_len` | `(B, target_time_tokens, D)` |
 
 ## How Tokenizer Variants Relate

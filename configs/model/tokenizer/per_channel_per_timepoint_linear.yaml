@@ -5,6 +5,6 @@ channel_strategy:
   _target_: foundry.models.embeddings.PerChannelStrategy
   max_channels: ${hyperparameters.num_channels}
 temporal_embedding:
-  _target_: foundry.models.embeddings.PerTimepointEmbedding
+  _target_: foundry.models.embeddings.PerTimepointLinearEmbedding
   embed_dim: ${model.embed_dim}
   input_dim: 1
