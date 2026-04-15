@@ -10,8 +10,7 @@
 
 defaults:
   - override /model: eeg_net_encoder
-  - override /data: neurosoft_minipigs_singlesess
-  - override /hydra/launcher: slurm_default
+  - override /data: neurosoft_minipigs/singlesess
 
 model:
   num_channels: ${get_num_ecog_channels_by_name:${data.root}/neurosoft_minipigs_2026,${data.recording_ids.0}}
@@ -23,18 +22,18 @@ data:
 
 run:
   name: eegnet_neurosoft_${data.recording_ids.0}
-  group: EEGNET_NEUROSOFT_ALL_SESSIONS
+  group: EEGNET_NEUROSOFT_ALL_SESSIONS_DEBUG
   tags: [sweep, eeg_net_encoder, neurosoft]
   seed: 42
   log_level: INFO
 
 hyperparameters:
   batch_size: 64
-  window_length: 0.5
-  patch_duration: 0.1
+  sequence_length: 0.5
   fold_number: 0
   num_workers: 4
   learning_rate: 0.0015
+  weight_decay: 0.01
 
 trainer:
   max_epochs: 1000
@@ -55,5 +54,6 @@ stage:
 
 hydra:
   sweeper:
+    max_batch_size: 1
     params:
-      data.recording_ids.0: ${config_list_sweep_choices:configs/data/neurosoft_minipigs_multisess_raw.yaml,recording_ids}
+      data.recording_ids.0: ${config_list_sweep_choices:configs/data/neurosoft_minipigs/multisess_raw.yaml,recording_ids}

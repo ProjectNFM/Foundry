@@ -1,0 +1,7 @@
+defaults:
+  - submitit_local
+
+_target_: hydra_plugins.foundry_launcher.packed_launcher.LocalLauncher
+submitit_folder: ${hydra.sweep.dir}/local_logs
+timeout_min: 180
+tasks_per_node: 1
