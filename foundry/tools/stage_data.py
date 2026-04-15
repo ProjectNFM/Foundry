@@ -6,7 +6,7 @@ unpacks them at the destination so training can read from fast local storage.
 
 Usage as standalone CLI:
     uv run python -m foundry.tools.stage_data \\
-        --experiment poyo_ajile \\
+        --experiment tokenizer_explore/poyo_ajile_sweep \\
         --source-root ../scratch/brainsets/processed \\
         --compressed-root ../scratch/brainsets/compressed \\
         --dest-root $SLURM_TMPDIR
@@ -318,7 +318,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--experiment",
         required=True,
-        help="Hydra experiment name (e.g. poyo_ajile).",
+        help="Hydra experiment name (e.g. tokenizer_explore/poyo_ajile_sweep).",
     )
     parser.add_argument(
         "--source-root",

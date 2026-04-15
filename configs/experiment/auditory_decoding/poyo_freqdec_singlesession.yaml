@@ -2,7 +2,7 @@
 
 defaults:
   - override /model: poyo_eeg
-  - override /data: neurosoft_minipigs_singlesess
+  - override /data: neurosoft_minipigs/singlesess
 
 data:
   split_type: intrasession-causal
@@ -20,5 +20,7 @@ hyperparameters:
   sequence_length: 0.5
   patch_duration: 0.1
   fold_number: 0
-  num_workers: 0
+  num_workers: 4
   sampling_rate: 2000
+  learning_rate: 1e-4
+  weight_decay: 0.01
