@@ -1,5 +1,5 @@
 defaults:
-  - tokenizer: patch_linear
+  - tokenizer: fixed_patch_linear
 
 _target_: foundry.models.POYOEEGModel
 
