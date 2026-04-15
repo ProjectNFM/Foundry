@@ -263,6 +263,36 @@ class EEGModule(L.LightningModule):
             },
         }
 
+    def on_fit_start(self):
+        self._configure_wandb_metric_summaries()
+
+    def _configure_wandb_metric_summaries(self):
+        """Tell W&B to track best (not last) values in run summaries.
+
+        Losses get summary="min", classification metrics get summary="max".
+        This matters for W&B sweep optimization which reads from run.summary.
+        """
+        from lightning.pytorch.loggers import WandbLogger
+
+        if not isinstance(self.logger, WandbLogger):
+            return
+
+        experiment = self.logger.experiment
+
+        for prefix in ("train", "val"):
+            experiment.define_metric(f"{prefix}/loss", summary="min")
+            for task_name in self.model.readout_specs:
+                experiment.define_metric(
+                    f"{prefix}/{task_name}_loss", summary="min"
+                )
+
+        for metrics in (
+            *self.train_metrics.values(),
+            *self.val_metrics.values(),
+        ):
+            for metric_name in metrics:
+                experiment.define_metric(metric_name, summary="max")
+
     def on_validation_epoch_end(self):
         """Log confusion matrices at the end of validation epoch."""
         import matplotlib.pyplot as plt
