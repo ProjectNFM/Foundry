@@ -8,10 +8,8 @@
 # - Override parallelism from CLI with `hydra.sweeper.max_batch_size=<N>`.
 #
 # Launcher usage:
-# - Local submitit (default sequential policy):
-#   uv run python main.py experiment=auditory_decoding/eegnet_freqdec_multisess hydra/launcher=local_sequential -m
-# - Local submitit with bounded parallelism (example N=4):
-#   uv run python main.py experiment=auditory_decoding/eegnet_freqdec_multisess hydra/launcher=local_sequential hydra.sweeper.max_batch_size=4 -m
+# - Local sequential (default launcher, no parallelism):
+#   uv run python main.py experiment=auditory_decoding/eegnet_freqdec_multisess -m
 # - SLURM (one job per sweep point):
 #   uv run python main.py experiment=auditory_decoding/eegnet_freqdec_multisess hydra/launcher=slurm_default -m
 # - SLURM packed (example 4 tasks per node):

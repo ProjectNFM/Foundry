@@ -62,14 +62,20 @@ def _configure_output_paths(cfg: DictConfig) -> tuple[str, str]:
 
 
 def _configure_wandb(cfg: DictConfig, output_dir: str) -> None:
-    """Deterministic WandB run ID so preempted SLURM jobs resume the same run."""
+    """Configure WandB run identity and resume behavior."""
     if "WandbLogger" not in OmegaConf.select(
         cfg, "logger._target_", default=""
     ):
         return
 
     OmegaConf.update(cfg, "logger.save_dir", output_dir)
-    if OmegaConf.select(cfg, "logger.id") is None:
+    if OmegaConf.select(cfg, "logger.id") is not None:
+        return
+
+    resume_wandb_if_name_matches = OmegaConf.select(
+        cfg, "run.resume_wandb_if_name_matches", default=False
+    )
+    if resume_wandb_if_name_matches:
         wandb_run_id = hashlib.md5(cfg.run.name.encode()).hexdigest()[:8]
         OmegaConf.update(cfg, "logger.id", wandb_run_id)
 
