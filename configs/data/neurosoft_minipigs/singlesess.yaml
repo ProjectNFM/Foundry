@@ -3,8 +3,8 @@ _target_: foundry.data.datamodules.NeurosoftMinipigs2026DataModule
 root: ./data/processed/
 batch_size: ${hyperparameters.batch_size}
 num_workers: ${hyperparameters.num_workers}
-pin_memory: false
-window_length: ${hyperparameters.window_length}
+pin_memory: false 
+sequence_length: ${hyperparameters.sequence_length}
 seed: 42
 
 split_type: ???

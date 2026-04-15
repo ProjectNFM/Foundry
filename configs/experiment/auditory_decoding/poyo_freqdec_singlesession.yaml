@@ -4,12 +4,6 @@ defaults:
   - override /model: poyo_eeg
   - override /data: neurosoft_minipigs/singlesess
 
-model:
-  patch_duration: ${hyperparameters.patch_duration}
-  input_embedding:
-    num_channels: 32
-    patch_samples: 200
-
 data:
   split_type: intrasession-causal
   task_type: on_vs_off
@@ -22,8 +16,9 @@ run:
   log_level: INFO
 
 hyperparameters:
-  batch_size: 64
-  window_length: 0.5
+  batch_size: 128
+  sequence_length: 0.5
   patch_duration: 0.1
   fold_number: 0
-  num_workers: 0
+  num_workers: 4
+  sampling_rate: 2000
