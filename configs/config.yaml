@@ -15,8 +15,8 @@ hyperparameters:
   sampling_rate: ???
   fold_number: ???
   num_workers: ???
-  learning_rate: 1e-4
-  weight_decay: 0.01
+  learning_rate: ???  
+  weight_decay: ???
 
 stage:
   skip: false
