@@ -3,13 +3,13 @@ _target_: foundry.data.datamodules.AjileDataModule
 root: ./data/processed/
 batch_size: ${hyperparameters.batch_size}
 num_workers: ${hyperparameters.num_workers}
-pin_memory: false 
+pin_memory: false
 sequence_length: ${hyperparameters.sequence_length}
 seed: 42
 
 split_type: ???
 task_type: ???
 fold_number: ${hyperparameters.fold_number}
-recording_ids: 
+recording_ids:
  - "AJILE12_P01_20000102_ses3_pose_trajectories"
 

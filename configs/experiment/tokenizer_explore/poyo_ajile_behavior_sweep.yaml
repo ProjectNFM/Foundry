@@ -12,14 +12,14 @@
 # (stage.skip: true) and reads directly from the pre-staged path.
 #
 # Local dry-run (single combo, no SLURM):
-#   uv run python main.py experiment=poyo_ajile_behavior_sweep
+#   uv run python main.py experiment=tokenizer_explore/poyo_ajile_behavior_sweep
 #
 # SLURM packed sweep (4 jobs share each GPU node):
-#   uv run python main.py experiment=poyo_ajile_behavior_sweep -m
+#   uv run python main.py experiment=tokenizer_explore/poyo_ajile_behavior_sweep -m
 
 defaults:
   - override /model: poyo_eeg
-  - override /data: ajile_singlesess
+  - override /data: ajile/singlesess
   - override /hydra/launcher: slurm_default
 
 model:
@@ -86,4 +86,4 @@ hydra:
       - "source .env"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment poyo_ajile_behavior_sweep"
+      - "uv run python -m foundry.tools.stage_data --experiment tokenizer_explore/poyo_ajile_behavior_sweep"

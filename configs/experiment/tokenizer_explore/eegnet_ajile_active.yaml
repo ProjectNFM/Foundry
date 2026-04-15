@@ -2,7 +2,7 @@
 
 defaults:
   - override /model: eeg_net_encoder
-  - override /data: ajile_singlesess
+  - override /data: ajile/singlesess
 
 model:
   num_channels: 94
@@ -20,7 +20,7 @@ run:
   log_level: INFO
 
 hyperparameters:
-  batch_size: 64 
+  batch_size: 64
   sequence_length: 1.0
   patch_duration: 0.1
   sampling_rate: 500

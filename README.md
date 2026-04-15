@@ -36,7 +36,7 @@ Create a `.env` file in the project root with your credentials. See **Environmen
 ### 4. Run a training experiment
 
 ```bash
-uv run python main.py experiment=poyo_ajile_sweep
+uv run python main.py experiment=tokenizer_explore/poyo_ajile_sweep
 ```
 
 That's it! Your model will train and log results to Weights & Biases by default (if credentials are set up). Outputs and checkpoints go to `./outputs` (or to the `SCRATCH` directory if set).
@@ -66,9 +66,14 @@ foundry/
 configs/
 ├── config.yaml              # Root config (composes all groups below)
 ├── experiment/              # Pre-configured experiment combinations
-│   ├── poyo_ajile_sweep.yaml         # Example: POYO model on AJILE data
+│   ├── tokenizer_explore/            # Tokenizer-focused experiments
+│   ├── neurosoft/                    # Neurosoft project experiments
 │   └── ...
-├── data/                    # Data configuration
+├── data/                    # Data configuration by dataset group
+│   ├── ajile/
+│   ├── neurosoft_minipigs/
+│   ├── physionet/
+│   └── ...
 ├── model/                   # Model configuration
 ├── module/                  # Training loop configuration
 ├── trainer/                 # PyTorch Lightning trainer settings
@@ -155,7 +160,7 @@ The first time you run Foundry, it will automatically read the `WANDB_API_KEY` f
 **If you prefer not to use WandB**, you can disable it and use CSV logging instead:
 
 ```bash
-uv run python main.py experiment=poyo_ajile_sweep logger=csv
+uv run python main.py experiment=tokenizer_explore/poyo_ajile_sweep logger=csv
 ```
 
 ---
@@ -169,13 +174,13 @@ Foundry uses **Hydra**, a configuration framework that lets you compose settings
    - `data`, `model`, `module`, `trainer`, `logger`, `profiling`, `hydra/launcher`
 
 2. **Experiments** ([`configs/experiment/`](configs/experiment/)) combine multiple groups into a ready-to-run setup.
-   - Example: `experiment=poyo_ajile_sweep` picks `model=poyo_eeg`, `data=ajile_singlesess`, and SLURM launcher settings.
+   - Example: `experiment=tokenizer_explore/poyo_ajile_sweep` picks `model=poyo_eeg`, `data=ajile/singlesess`, and SLURM launcher settings.
 
 3. **Config groups** ([`configs/data/`](configs/data/), [`configs/model/`](configs/model/), etc.) define options within each category.
 
 4. **Command-line overrides** let you tweak settings without editing files:
    ```bash
-   uv run python main.py experiment=poyo_ajile_sweep data.root=./my_data model.hidden_dim=256
+   uv run python main.py experiment=tokenizer_explore/poyo_ajile_sweep data.root=./my_data model.hidden_dim=256
    ```
 
 ### Key config groups
@@ -197,11 +202,11 @@ Foundry uses **Hydra**, a configuration framework that lets you compose settings
 ### Local training (single run)
 
 ```bash
-uv run python main.py experiment=poyo_ajile_sweep
+uv run python main.py experiment=tokenizer_explore/poyo_ajile_sweep
 ```
 
 **What happens:**
-1. Hydra composes the config from `experiment=poyo_ajile_sweep` and all linked config groups
+1. Hydra composes the config from `experiment=tokenizer_explore/poyo_ajile_sweep` and all linked config groups
 2. Foundry loads data from `./data/processed/` (or your configured `data.root`)
 3. The model trains on GPU (if available) and logs metrics to Weights & Biases by default
 4. Checkpoints and logs save to `./outputs/` (or `$SCRATCH/runs/` if the `SCRATCH` environment variable is set)
@@ -223,7 +228,7 @@ uv run python main.py experiment=poyo_ajile_sweep
 To run multiple configurations in parallel (e.g., trying different batch sizes and learning rates):
 
 ```bash
-uv run python main.py experiment=poyo_ajile_sweep -m
+uv run python main.py experiment=tokenizer_explore/poyo_ajile_sweep -m
 ```
 
 The `-m` flag enables **multirun mode**. Hydra will:
@@ -251,7 +256,7 @@ Once your experiment starts running and you have set up your `.env` file with Wa
 
 **Fix:** Always pass an experiment:
 ```bash
-uv run python main.py experiment=poyo_ajile_sweep
+uv run python main.py experiment=tokenizer_explore/poyo_ajile_sweep
 ```
 
 ### Error: No data found at `./data/processed/`
@@ -262,7 +267,7 @@ uv run python main.py experiment=poyo_ajile_sweep
 
 1. **Override the data path** in your command:
    ```bash
-   uv run python main.py experiment=poyo_ajile_sweep data.root=/path/to/my/data
+   uv run python main.py experiment=tokenizer_explore/poyo_ajile_sweep data.root=/path/to/my/data
    ```
 
 2. **Create a symbolic link** to your processed data location:
@@ -279,7 +284,7 @@ uv run python main.py experiment=poyo_ajile_sweep
 - Set up your `.env` file with `WANDB_API_KEY` as described in the **Environment setup** section above, or
 - Switch to CSV logging:
   ```bash
-  uv run python main.py experiment=poyo_ajile_sweep logger=csv
+  uv run python main.py experiment=tokenizer_explore/poyo_ajile_sweep logger=csv
   ```
 
 ### Error: GPU out of memory
@@ -289,11 +294,11 @@ uv run python main.py experiment=poyo_ajile_sweep
 **Fix:**
 - Reduce batch size:
   ```bash
-  uv run python main.py experiment=poyo_ajile_sweep hyperparameters.batch_size=32
+  uv run python main.py experiment=tokenizer_explore/poyo_ajile_sweep hyperparameters.batch_size=32
   ```
 - Or train on CPU (slow but works):
   ```bash
-  uv run python main.py experiment=poyo_ajile_sweep trainer.accelerator=cpu
+  uv run python main.py experiment=tokenizer_explore/poyo_ajile_sweep trainer.accelerator=cpu
   ```
 
 ### Error: Checkpoint not found during SLURM restart
@@ -302,7 +307,7 @@ uv run python main.py experiment=poyo_ajile_sweep
 
 **Fix:** Foundry logs a warning and starts from scratch. This is expected behavior. If you want to manually resume from an old checkpoint:
 ```bash
-uv run python main.py experiment=poyo_ajile_sweep run.resume_if_checkpoint_exists=true
+uv run python main.py experiment=tokenizer_explore/poyo_ajile_sweep run.resume_if_checkpoint_exists=true
 ```
 
 ---

@@ -2,7 +2,7 @@
 
 defaults:
   - override /model: poyo_eeg
-  - override /data: ajile_singlesess
+  - override /data: ajile/singlesess
 
 data:
   split_type: intrasession
@@ -16,7 +16,7 @@ run:
   log_level: INFO
 
 hyperparameters:
-  batch_size: 64 
+  batch_size: 64
   sequence_length: 1.0
   patch_duration: 0.1
   fold_number: 0
