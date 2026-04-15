@@ -80,6 +80,27 @@ def _configure_wandb(cfg: DictConfig, output_dir: str) -> None:
         OmegaConf.update(cfg, "logger.id", wandb_run_id)
 
 
+def _is_wandb_logger_enabled(cfg: DictConfig) -> bool:
+    return "WandbLogger" in OmegaConf.select(cfg, "logger._target_", default="")
+
+
+def _finish_active_wandb_run() -> None:
+    try:
+        import wandb
+    except ImportError:
+        return
+
+    if wandb.run is None:
+        return
+
+    logger.info(
+        "Finishing lingering WandB run id=%s name=%s before continuing.",
+        wandb.run.id,
+        wandb.run.name,
+    )
+    wandb.finish()
+
+
 def _stage_data_if_needed(cfg: DictConfig) -> None:
     slurm_tmpdir = os.environ.get("SLURM_TMPDIR")
     if not slurm_tmpdir:
@@ -300,6 +321,10 @@ def main(cfg: DictConfig):
             slurm_restart_count,
         )
 
+    using_wandb_logger = _is_wandb_logger_enabled(cfg)
+    if using_wandb_logger:
+        _finish_active_wandb_run()
+
     output_dir, checkpoint_dir = _configure_output_paths(cfg)
     _configure_wandb(cfg, output_dir)
     _stage_data_if_needed(cfg)
@@ -313,9 +338,16 @@ def main(cfg: DictConfig):
     ckpt_path = _get_resume_checkpoint_path(
         cfg, checkpoint_dir, slurm_restart_count
     )
-    trainer.fit(
-        lightning_module, datamodule, ckpt_path=ckpt_path, weights_only=False
-    )
+    try:
+        trainer.fit(
+            lightning_module,
+            datamodule,
+            ckpt_path=ckpt_path,
+            weights_only=False,
+        )
+    finally:
+        if using_wandb_logger:
+            _finish_active_wandb_run()
 
 
 if __name__ == "__main__":
