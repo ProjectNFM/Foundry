@@ -1,12 +1,21 @@
 # @package _global_
 #
 # Per-recording EEGNet sweep over all NeuroSoft minipig raw sessions.
+# The sweep choices are generated from `configs/data/neurosoft_minipigs/multisess_raw.yaml`.
 #
-# Local dry-run (single recording from data config):
-#   uv run python main.py experiment=eegnet_neurosoft_sweep
+# Execution policy:
+# - Default is truly sequential because `hydra.sweeper.max_batch_size: 1`.
+# - Override parallelism from CLI with `hydra.sweeper.max_batch_size=<N>`.
 #
-# SLURM sweep (one job per raw recording):
-#   uv run python main.py experiment=eegnet_neurosoft_sweep -m
+# Launcher usage:
+# - Local submitit (default sequential policy):
+#   uv run python main.py experiment=auditory_decoding/eegnet_freqdec_multisess hydra/launcher=local_sequential -m
+# - Local submitit with bounded parallelism (example N=4):
+#   uv run python main.py experiment=auditory_decoding/eegnet_freqdec_multisess hydra/launcher=local_sequential hydra.sweeper.max_batch_size=4 -m
+# - SLURM (one job per sweep point):
+#   uv run python main.py experiment=auditory_decoding/eegnet_freqdec_multisess hydra/launcher=slurm_default -m
+# - SLURM packed (example 4 tasks per node):
+#   uv run python main.py experiment=auditory_decoding/eegnet_freqdec_multisess hydra/launcher=slurm_default hydra.launcher.tasks_per_node=4 -m
 
 defaults:
   - override /model: eeg_net_encoder
