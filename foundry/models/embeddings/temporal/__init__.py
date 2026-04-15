@@ -6,14 +6,16 @@ from foundry.models.embeddings.temporal.patch_cnn import PatchCNNEmbedding
 from foundry.models.embeddings.temporal.patch_linear import PatchLinearEmbedding
 from foundry.models.embeddings.temporal.patch_mlp import PatchMLPEmbedding
 from foundry.models.embeddings.temporal.per_timepoint import (
-    PerTimepointEmbedding,
+    PerTimepointIdentityEmbedding,
+    PerTimepointLinearEmbedding,
 )
 
 __all__ = [
     "PatchLinearEmbedding",
     "PatchMLPEmbedding",
     "PatchCNNEmbedding",
-    "PerTimepointEmbedding",
+    "PerTimepointLinearEmbedding",
+    "PerTimepointIdentityEmbedding",
     "CWTEmbedding",
     "ContinuousCWTLayer",
 ]
