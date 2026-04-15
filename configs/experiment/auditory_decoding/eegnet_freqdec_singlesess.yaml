@@ -2,7 +2,7 @@
 
 defaults:
   - override /model: eeg_net_encoder
-  - override /data: neurosoft_minipigs_singlesess
+  - override /data: neurosoft_minipigs/singlesess
 
 model:
   num_channels: ${get_num_ecog_channels_by_name:${data.root}/neurosoft_minipigs_2026,${data.recording_ids.0}}
@@ -31,3 +31,5 @@ hyperparameters:
   sequence_length: 0.5
   fold_number: 0
   num_workers: 4
+  learning_rate: 1e-4
+  weight_decay: 0.01
