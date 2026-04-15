@@ -5,7 +5,7 @@ defaults:
   - override /data: neurosoft_minipigs_singlesess
 
 model:
-  num_channels: 4
+  num_channels: ${get_num_ecog_channels_by_name:${data.root}/neurosoft_minipigs_2026,${data.recording_ids.0}}
   num_samples: 1000
 
 data:
@@ -21,14 +21,13 @@ trainer:
 
 run:
   name: eegnet_neurosoft_singlesess
-  group: EEGNET_NEUROSOFT
+  group: DEBUG_EEGNET_NEUROSOFT
   tags: [baselines, training, eeg_net_encoder, neurosoft]
   seed: 42
   log_level: INFO
 
 hyperparameters:
   batch_size: 64
-  window_length: 0.5
-  patch_duration: 0.1
+  sequence_length: 0.5
   fold_number: 0
-  num_workers: 5
+  num_workers: 4

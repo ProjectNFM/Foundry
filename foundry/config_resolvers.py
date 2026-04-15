@@ -12,7 +12,7 @@ import glob as _glob
 import os
 import sys
 import traceback
-from functools import lru_cache, wraps
+from functools import wraps
 from typing import List, Optional
 
 from omegaconf import OmegaConf
@@ -105,54 +105,43 @@ def _patch_samples_resolver(patch_duration: float, sampling_rate: float) -> int:
     return max(1, round(float(patch_duration) * float(sampling_rate)))
 
 
-def _range_resolver(start: int, end: int, step: int) -> List[int]:
-    return list(range(int(start), int(end), int(step)))
+def _sweep_choices(values: List[str] | tuple[str, ...]) -> str:
+    """Hydra-compatible choice string from a list/tuple of string values."""
+    if not values:
+        raise ValueError("Cannot build sweep choices from an empty sequence")
 
-
-@lru_cache(maxsize=32)
-def _list_recordings(data_dir: str, pattern: str = "*") -> tuple[str, ...]:
-    """Sorted recording-ID stems from *data_dir* matching *pattern*.h5."""
-    matches = _glob.glob(os.path.join(data_dir, f"{pattern}.h5"))
-    return tuple(
-        sorted(os.path.splitext(os.path.basename(p))[0] for p in matches)
+    return ",".join(
+        "'" + str(value).replace("'", "\\'") + "'" for value in values
     )
 
 
-def _get_nth_recording(
-    data_dir: str, index: int, pattern: str = "*"
-) -> List[str]:
-    """Single-element list with the recording ID at *index* in the sorted listing."""
-    recordings = _list_recordings(data_dir, pattern)
-    return [recordings[int(index)]]
+def _config_list_sweep_choices(config_path: str, key: str) -> str:
+    """Hydra-compatible choice string from a list key inside a YAML config."""
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    cfg = OmegaConf.load(config_path)
+    values = OmegaConf.select(cfg, key)
+    if values is None:
+        raise KeyError(f"Key '{key}' not found in config file: {config_path}")
+
+    if OmegaConf.is_config(values):
+        values = OmegaConf.to_container(values, resolve=True)
+
+    if not isinstance(values, (list, tuple)):
+        raise TypeError(
+            f"Expected '{key}' in {config_path} to be a list/tuple, got {type(values)}"
+        )
+
+    return _sweep_choices(tuple(str(value) for value in values))
 
 
-def _get_num_ecog_channels(
-    data_dir: str, index: int, pattern: str = "*"
-) -> int:
-    """Number of ECoG channels for the recording at *index* in the sorted listing.
-
-    Opens the HDF5 file and counts channels whose type (lowercased) falls
-    within the standard supported modalities (eeg, ecog, seeg, ieeg).
-    """
+def _count_ecog_channels(h5_path: str) -> int:
+    """Count ECoG-like channels in an HDF5 recording file."""
     import h5py
     import numpy as np
 
-    SUPPORTED_MODALITIES = {"eeg", "ecog", "seeg", "ieeg"}
-
-    recordings = _list_recordings(data_dir, pattern)
-    idx = int(index)
-    if not recordings:
-        raise FileNotFoundError(
-            f"No recordings matching '{pattern}.h5' found in {data_dir}"
-        )
-    if idx >= len(recordings):
-        raise IndexError(
-            f"Session index {idx} out of range — only {len(recordings)} "
-            f"recordings found in {data_dir}"
-        )
-
-    recording_id = recordings[idx]
-    h5_path = os.path.join(data_dir, f"{recording_id}.h5")
+    supported_modalities = {"eeg", "ecog", "seeg", "ieeg"}
 
     if not os.path.isfile(h5_path):
         raise FileNotFoundError(
@@ -162,13 +151,21 @@ def _get_num_ecog_channels(
 
     with h5py.File(h5_path, "r") as f:
         raw_types = f["channels/type"][()]
-        types = np.array(
+        channel_types = np.array(
             [t.decode() if isinstance(t, bytes) else t for t in raw_types],
             dtype="U",
         )
         return int(
-            np.isin(np.char.lower(types), list(SUPPORTED_MODALITIES)).sum()
+            np.isin(
+                np.char.lower(channel_types), list(supported_modalities)
+            ).sum()
         )
+
+
+def _get_num_ecog_channels_by_name(data_dir: str, recording_id: str) -> int:
+    """Number of ECoG channels for a recording identified by *recording_id*."""
+    h5_path = os.path.join(data_dir, f"{recording_id}.h5")
+    return _count_ecog_channels(h5_path)
 
 
 def _get_suffix(s: str) -> str:
@@ -207,11 +204,10 @@ def register_resolvers() -> None:
         "get_checkpoints_from_folder": _get_checkpoints_from_folder,
         "get_overrides_from_ckpt": _get_overrides_from_ckpt,
         "patch_samples": _patch_samples_resolver,
-        "range_resolver": _range_resolver,
         "get_suffix": _get_suffix,
-        "list_recordings": _list_recordings,
-        "get_nth_recording": _get_nth_recording,
-        "get_num_ecog_channels": _get_num_ecog_channels,
+        "sweep_choices": _sweep_choices,
+        "config_list_sweep_choices": _config_list_sweep_choices,
+        "get_num_ecog_channels_by_name": _get_num_ecog_channels_by_name,
     }
     for name, fn in _resolvers.items():
         if not OmegaConf.has_resolver(name):

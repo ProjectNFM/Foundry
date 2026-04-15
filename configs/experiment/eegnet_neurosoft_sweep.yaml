@@ -1,11 +1,11 @@
 # @package _global_
 #
-# Per-session EEGNet sweep over all NeuroSoft minipig recordings.
+# Per-recording EEGNet sweep over all NeuroSoft minipig raw sessions.
 #
-# Local dry-run (session 0 only):
+# Local dry-run (single recording from data config):
 #   uv run python main.py experiment=eegnet_neurosoft_sweep
 #
-# SLURM sweep (one job per session):
+# SLURM sweep (one job per raw recording):
 #   uv run python main.py experiment=eegnet_neurosoft_sweep -m
 
 defaults:
@@ -14,16 +14,15 @@ defaults:
   - override /hydra/launcher: slurm_default
 
 model:
-  num_channels: ${get_num_ecog_channels:${data.root}/neurosoft_minipigs_2026,${hyperparameters.session_index},*desc-raw*}
+  num_channels: ${get_num_ecog_channels_by_name:${data.root}/neurosoft_minipigs_2026,${data.recording_ids.0}}
   num_samples: 1000
 
 data:
   split_type: intrasession-causal
   task_type: acoustic_stim
-  recording_ids: ${get_nth_recording:${data.root}/neurosoft_minipigs_2026,${hyperparameters.session_index},*desc-raw*}
 
 run:
-  name: eegnet_neurosoft_sess${hyperparameters.session_index}
+  name: eegnet_neurosoft_${data.recording_ids.0}
   group: EEGNET_NEUROSOFT_ALL_SESSIONS
   tags: [sweep, eeg_net_encoder, neurosoft]
   seed: 42
@@ -35,7 +34,6 @@ hyperparameters:
   patch_duration: 0.1
   fold_number: 0
   num_workers: 4
-  session_index: 0
   learning_rate: 0.0015
 
 trainer:
@@ -54,3 +52,8 @@ trainer:
 
 stage:
   skip: true
+
+hydra:
+  sweeper:
+    params:
+      data.recording_ids.0: ${config_list_sweep_choices:configs/data/neurosoft_minipigs_multisess_raw.yaml,recording_ids}
