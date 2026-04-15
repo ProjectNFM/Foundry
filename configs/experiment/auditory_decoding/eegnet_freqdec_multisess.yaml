@@ -31,7 +31,7 @@ data:
 
 run:
   name: eegnet_neurosoft_${data.recording_ids.0}
-  group: EEGNET_NEUROSOFT_ALL_SESSIONS_DEBUG
+  group: EEGNET_NEUROSOFT_ALL_SESSIONS
   tags: [sweep, eeg_net_encoder, neurosoft]
   seed: 42
   log_level: INFO
