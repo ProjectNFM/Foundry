@@ -5,7 +5,7 @@
 defaults:
   - override /model: poyo_eeg
   - override /model/tokenizer: session_per_timepoint # or session_mlp_per_timepoint
-  - override /data: ajile_multisess
+  - override /data: ajile/multisess
 
 data:
   task_type: behavior
