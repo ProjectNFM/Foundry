@@ -310,6 +310,15 @@ uv run python main.py experiment=tokenizer_explore/poyo_ajile_sweep
 uv run python main.py experiment=tokenizer_explore/poyo_ajile_sweep run.resume_if_checkpoint_exists=true
 ```
 
+### Error: New run with the same name resumes old WandB run
+
+**Problem:** You want multiple independent runs with identical `run.name`.
+
+**Fix:** Leave `run.resume_wandb_if_name_matches=false` (the default). If you do want same-name runs to resume the same WandB history, enable it explicitly:
+```bash
+uv run python main.py experiment=tokenizer_explore/poyo_ajile_sweep run.resume_wandb_if_name_matches=true
+```
+
 ---
 
 ## Contributing to Foundry
