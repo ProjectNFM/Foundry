@@ -118,3 +118,12 @@ NEUROSOFT_ACOUSTIC_STIM = register_modality(
     value_key="acoustic_stim_trials.behavior_ids",
     loss_fn=CrossEntropyLoss(),
 )
+
+NEUROPROBE_SPEECH_BINARY = register_modality(
+    "neuroprobe_speech_binary",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="splits.start",
+    value_key="splits.label",
+    loss_fn=CrossEntropyLoss(),
+)

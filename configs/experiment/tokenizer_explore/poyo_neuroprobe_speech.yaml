@@ -1,0 +1,36 @@
+# @package _global_
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: neuroprobe/default
+
+data:
+  task_type: speech_binary
+  task: speech
+  label_mode: binary
+  subset_tier: full
+  regime: SS-SM
+  fold: 0
+  test_subject: 1
+  test_session: 0
+
+run:
+  name: poyo_neuroprobe_speech_binary
+  group: NEUROPROBE_SPEECH
+  tags: [neuroprobe, poyo_eeg, speech_binary]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 16
+  sequence_length: 0.5
+  patch_duration: 0.1
+  sampling_rate: 2048
+  num_channels: 155
+  fold_number: 0
+  num_workers: 4
+  learning_rate: 1e-4
+  weight_decay: 0.01
+
+stage:
+  skip: true
