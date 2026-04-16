@@ -151,12 +151,16 @@ def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
 def _build_model_and_data(cfg: DictConfig):
     _populate_data_driven_hyperparams(cfg)
 
-    DataModuleClass = get_class(cfg.data._target_)
-    readout_specs = DataModuleClass.get_readout_specs_for_task(
-        cfg.data.task_type
-    )
+    task_type = OmegaConf.select(cfg, "data.task_type", default=None)
+    extra_kwargs = {}
 
-    model = instantiate(cfg.model, readout_specs=readout_specs)
+    if task_type is not None:
+        DataModuleClass = get_class(cfg.data._target_)
+        extra_kwargs["readout_specs"] = (
+            DataModuleClass.get_readout_specs_for_task(task_type)
+        )
+
+    model = instantiate(cfg.model, **extra_kwargs)
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)
 
@@ -175,17 +179,22 @@ def _compute_class_weights(cfg: DictConfig, datamodule):
 
 
 def _build_lightning_module(cfg: DictConfig, model, datamodule):
-    class_weights = _compute_class_weights(cfg, datamodule)
+    task_type = OmegaConf.select(cfg, "data.task_type", default=None)
 
-    if cfg.module.class_weights in (None, "none"):
-        OmegaConf.update(cfg, "module.class_weights", None)
+    if task_type is not None:
+        class_weights = _compute_class_weights(cfg, datamodule)
 
-    return instantiate(
-        cfg.module,
-        model=model,
-        class_names=datamodule.get_class_names_for_task(cfg.data.task_type),
-        class_weights=class_weights,
-    )
+        if cfg.module.class_weights in (None, "none"):
+            OmegaConf.update(cfg, "module.class_weights", None)
+
+        return instantiate(
+            cfg.module,
+            model=model,
+            class_names=datamodule.get_class_names_for_task(task_type),
+            class_weights=class_weights,
+        )
+
+    return instantiate(cfg.module, model=model)
 
 
 def _build_trainer(cfg: DictConfig):

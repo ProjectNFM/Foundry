@@ -104,6 +104,17 @@ def _patch_samples_resolver(patch_duration: float, sampling_rate: float) -> int:
     return max(1, round(float(patch_duration) * float(sampling_rate)))
 
 
+def _recon_output_dim_resolver(
+    num_channels: int, patch_duration: float, sampling_rate: float
+) -> int:
+    """Reconstruction target dimensionality for fixed-channel patch tokenizers.
+
+    ``num_channels * patch_samples`` -- the flattened patch vector length.
+    """
+    patch_samples = max(1, round(float(patch_duration) * float(sampling_rate)))
+    return int(num_channels) * patch_samples
+
+
 def _range_resolver(start: int, end: int, step: int) -> List[int]:
     return list(range(int(start), int(end), int(step)))
 
@@ -144,6 +155,7 @@ def register_resolvers() -> None:
         "get_checkpoints_from_folder": _get_checkpoints_from_folder,
         "get_overrides_from_ckpt": _get_overrides_from_ckpt,
         "patch_samples": _patch_samples_resolver,
+        "recon_output_dim": _recon_output_dim_resolver,
         "range_resolver": _range_resolver,
         "get_suffix": _get_suffix,
     }

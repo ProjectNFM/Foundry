@@ -22,6 +22,12 @@ from foundry.models.embeddings import (
     patch_signal,
     compute_patch_timestamps,
 )
+from foundry.models.masking import (
+    MaskingStrategy,
+    RandomPatchMasking,
+    ContiguousSpanMasking,
+)
+from foundry.models.reconstruction_head import ReconstructionHead
 from foundry.models.tokenizer import EEGTokenizer
 
 from foundry.models.poyo_eeg import POYOEEGModel
@@ -34,6 +40,10 @@ from foundry.models.baselines import (
 __all__ = [
     "POYOEEGModel",
     "EEGTokenizer",
+    "MaskingStrategy",
+    "RandomPatchMasking",
+    "ContiguousSpanMasking",
+    "ReconstructionHead",
     "TemporalConvAvgPoolClassifier",
     "ShallowConvNet",
     "EEGNetEncoder",

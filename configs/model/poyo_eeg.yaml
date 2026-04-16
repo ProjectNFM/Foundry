@@ -3,6 +3,8 @@ defaults:
 
 _target_: foundry.models.POYOEEGModel
 
+reconstruction_head: null
+
 embed_dim: 128
 sequence_length: ${hyperparameters.sequence_length}
 latent_step: 0.1

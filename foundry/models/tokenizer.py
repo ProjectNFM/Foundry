@@ -15,6 +15,7 @@ from foundry.models.embeddings.patching import (
     patch_signal,
 )
 from foundry.models.embeddings.temporal import CWTEmbedding
+from foundry.models.masking import MaskingStrategy
 
 
 class EEGTokenizer(nn.Module):
@@ -30,6 +31,11 @@ class EEGTokenizer(nn.Module):
     An optional fourth step reassembles per-channel tokens and adds
     channel identity embeddings when using :class:`PerChannelStrategy`.
 
+    When ``masking`` is provided the tokenizer also supports masked
+    reconstruction pretraining: ``pretokenize`` extracts reconstruction
+    targets at masked positions and ``forward`` replaces masked token
+    embeddings with a learned ``mask_emb``.
+
     Args:
         channel_strategy: Module handling channel dimension transform.
         temporal_embedding: Module converting (patched or raw) signal to
@@ -39,6 +45,7 @@ class EEGTokenizer(nn.Module):
             seconds on GPU.  If ``None``, no patching is applied.
         stride: Stride between patches in seconds.  Defaults to
             ``patch_duration`` (non-overlapping patches).
+        masking: Optional masking strategy for pretraining.
     """
 
     def __init__(
@@ -48,6 +55,7 @@ class EEGTokenizer(nn.Module):
         embed_dim: int,
         patch_duration: float | None = None,
         stride: float | None = None,
+        masking: MaskingStrategy | None = None,
     ):
         super().__init__()
         self.channel_strategy = channel_strategy
@@ -57,6 +65,11 @@ class EEGTokenizer(nn.Module):
         self.stride = stride if stride is not None else patch_duration
         self._do_patching = patch_duration is not None
         self.post_proj_norm = nn.LayerNorm(embed_dim)
+        self.masking = masking
+
+        if masking is not None:
+            self.mask_emb = nn.Parameter(torch.zeros(embed_dim))
+            nn.init.normal_(self.mask_emb, std=0.02)
 
     @property
     def uses_per_channel(self) -> bool:
@@ -81,12 +94,16 @@ class EEGTokenizer(nn.Module):
 
         Returns:
             dict with model input tensors including ``input_timestamps``.
+            When masking is active also includes ``masking_mask``,
+            ``reconstruction_targets``, and ``masked_timestamps``.
         """
         result = self.channel_strategy.prepare_pretokenize(
             signal,
             channel_tokens,
             sampling_rate,
         )
+
+        padded_signal = result["input_values"]  # (C_pad, T)
 
         if self._do_patching:
             num_samples = signal.shape[0]
@@ -112,7 +129,6 @@ class EEGTokenizer(nn.Module):
             else:
                 result["input_timestamps"] = patch_timestamps
         else:
-            # CWT produces target_time_tokens; PerTimepoint produces T tokens
             if hasattr(self.temporal_embedding, "target_time_tokens"):
                 num_time_tokens = self.temporal_embedding.target_time_tokens
             else:
@@ -131,7 +147,146 @@ class EEGTokenizer(nn.Module):
             else:
                 result["input_timestamps"] = sample_timestamps
 
+        if self.masking is not None:
+            self._add_masking_fields(
+                result,
+                padded_signal,
+                signal,
+                sampling_rate,
+                sequence_length,
+            )
+
         return result
+
+    def _add_masking_fields(
+        self,
+        result: dict,
+        padded_signal: torch.Tensor | np.ndarray,
+        raw_signal: np.ndarray,
+        sampling_rate: float,
+        sequence_length: float,
+    ) -> None:
+        """Generate a mask and extract reconstruction targets for pretraining.
+
+        Adds three keys to *result* **in-place**:
+
+        * ``masking_mask`` -- ``(num_tokens,)`` bool, ``True`` = masked.
+        * ``reconstruction_targets`` -- ``(num_tokens, output_dim)`` float
+          tensor.  Entries at unmasked positions are zero; masked entries
+          contain the raw-signal patch/sample that the model should
+          reconstruct.
+        * ``masked_timestamps`` -- ``(n_masked,)`` timestamps of masked
+          tokens (used as output query timestamps for reconstruction).
+
+        The target extraction logic branches on the channel strategy and
+        temporal embedding to handle every valid combination (see the
+        *Masking Details* section in the plan).
+
+        Args:
+            result: Pretokenize output dict to update in-place.
+            padded_signal: ``(C_pad, T)`` channel-padded signal from the
+                channel strategy's ``prepare_pretokenize``.
+            raw_signal: ``(T, C_actual)`` original unpadded signal.
+            sampling_rate: Sampling rate in Hz.
+            sequence_length: Duration of the context window in seconds.
+        """
+        if isinstance(padded_signal, np.ndarray):
+            padded_signal = torch.from_numpy(padded_signal).float()
+        elif not isinstance(padded_signal, torch.Tensor):
+            padded_signal = torch.tensor(padded_signal, dtype=torch.float32)
+        else:
+            padded_signal = padded_signal.float()
+
+        C_pad = padded_signal.shape[0]
+
+        if self._do_patching:
+            num_samples = raw_signal.shape[0]
+            patch_samples = max(1, round(self.patch_duration * sampling_rate))
+            stride_samples = max(1, round(self.stride * sampling_rate))
+            if num_samples > patch_samples:
+                num_patches = (
+                    num_samples - patch_samples
+                ) // stride_samples + 1
+            else:
+                num_patches = 1
+
+            # CPU-side patching: unfold (C_pad, T) -> (C_pad, num_patches, patch_samples)
+            sig_t = padded_signal  # (C_pad, T)
+            T = sig_t.shape[1]
+            if T >= patch_samples:
+                patches_cpu = sig_t.unfold(1, patch_samples, stride_samples)
+            else:
+                patches_cpu = sig_t.unsqueeze(1)
+
+            if self.uses_per_channel:
+                # Flat token order: all patches of ch0, then ch1, ...
+                # patches_cpu: (C_pad, num_patches, patch_samples)
+                # Each token reconstructs (1 * patch_samples)
+                flat_patches = patches_cpu.reshape(
+                    C_pad * num_patches, patch_samples
+                )
+                num_tokens = C_pad * num_patches
+                mask = self.masking.generate_mask(num_tokens)
+                targets = flat_patches[mask]
+            else:
+                # Fixed / SpatialProjection: token = patch across all channels
+                # patches_cpu: (C_pad, num_patches, patch_samples)
+                # -> (num_patches, C_pad, patch_samples)
+                patches_transposed = patches_cpu.permute(1, 0, 2)
+                num_tokens = num_patches
+                mask = self.masking.generate_mask(num_tokens)
+                targets = patches_transposed[mask].reshape(
+                    -1, C_pad * patch_samples
+                )
+        else:
+            if hasattr(self.temporal_embedding, "target_time_tokens"):
+                num_time_tokens = self.temporal_embedding.target_time_tokens
+                # Resample signal to target_time_tokens
+                # padded_signal: (C_pad, T)
+                sig_resampled = torch.nn.functional.interpolate(
+                    padded_signal.unsqueeze(0),
+                    size=num_time_tokens,
+                    mode="linear",
+                    align_corners=True,
+                ).squeeze(0)  # (C_pad, num_time_tokens)
+
+                if self.uses_per_channel:
+                    # (C_pad * num_time_tokens,) tokens, each target is (1,)
+                    flat = sig_resampled.reshape(C_pad * num_time_tokens)
+                    num_tokens = C_pad * num_time_tokens
+                    mask = self.masking.generate_mask(num_tokens)
+                    targets = flat[mask].unsqueeze(-1)
+                else:
+                    # (num_time_tokens,) tokens, each target is (C_pad,)
+                    num_tokens = num_time_tokens
+                    mask = self.masking.generate_mask(num_tokens)
+                    targets = sig_resampled.T[mask]  # (n_masked, C_pad)
+            else:
+                T = raw_signal.shape[0]
+                if self.uses_per_channel:
+                    # (C_pad * T,) tokens, each target is (1,)
+                    flat = padded_signal.reshape(C_pad * T)
+                    num_tokens = C_pad * T
+                    mask = self.masking.generate_mask(num_tokens)
+                    targets = flat[mask].unsqueeze(-1)
+                else:
+                    # (T,) tokens, each target is (C_pad,)
+                    num_tokens = T
+                    mask = self.masking.generate_mask(num_tokens)
+                    targets = padded_signal.T[mask]  # (n_masked, C_pad)
+
+        timestamps = result["input_timestamps"]
+        if isinstance(timestamps, np.ndarray):
+            timestamps = torch.from_numpy(timestamps).float()
+
+        num_tokens = mask.shape[0]
+        output_dim = targets.shape[1] if targets.ndim == 2 else 1
+        full_targets = torch.zeros(num_tokens, output_dim)
+        full_targets[mask] = targets.reshape(-1, output_dim)
+
+        result["masking_mask"] = mask
+        result["reconstruction_targets"] = full_targets
+        result["masked_timestamps"] = timestamps[mask]
 
     def forward(
         self,
@@ -141,6 +296,7 @@ class EEGTokenizer(nn.Module):
         input_mask: torch.Tensor | None = None,
         input_sampling_rate: torch.Tensor | None = None,
         channel_emb_fn: Callable | None = None,
+        masking_mask: torch.Tensor | None = None,
         **kwargs,
     ) -> torch.Tensor:
         """GPU-side embedding.
@@ -154,6 +310,8 @@ class EEGTokenizer(nn.Module):
             input_sampling_rate: (B,) per-item sampling rate.
             channel_emb_fn: Maps channel token indices to embedding vectors.
                 Used by :class:`PerChannelStrategy` for channel identity.
+            masking_mask: (B, num_tokens) boolean mask from pretokenize.
+                ``True`` positions are replaced with ``mask_emb``.
 
         Returns:
             (B, num_tokens, embed_dim)
@@ -196,6 +354,9 @@ class EEGTokenizer(nn.Module):
 
         tokens = self.post_proj_norm(tokens)
 
+        if masking_mask is not None and self.masking is not None:
+            tokens = self._apply_masking(tokens, masking_mask, B, C_in)
+
         if self.uses_per_channel:
             tokens = self._reassemble_per_channel(
                 tokens,
@@ -205,6 +366,49 @@ class EEGTokenizer(nn.Module):
                 channel_emb_fn,
             )
 
+        return tokens
+
+    def _apply_masking(
+        self,
+        tokens: torch.Tensor,
+        masking_mask: torch.Tensor,
+        B: int,
+        C_in: int,
+    ) -> torch.Tensor:
+        """Replace masked token embeddings with the learned ``mask_emb``.
+
+        Must be called **after** ``post_proj_norm`` and **before**
+        ``_reassemble_per_channel`` (if applicable).
+
+        For :class:`PerChannelStrategy` the tokens are still in
+        ``(B*C, N, D)`` form and the mask is ``(B, C*N)`` flat, so we
+        reshape the mask to ``(B*C, N)`` before applying it.
+
+        Args:
+            tokens: Embedded tokens.  Shape is ``(B, N, D)`` for
+                fixed / spatial-projection strategies, or
+                ``(B*C, N, D)`` for per-channel strategies.
+            masking_mask: ``(B, num_tokens)`` boolean mask where
+                ``True`` means the position should be replaced.
+            B: Original batch size (before per-channel expansion).
+            C_in: Number of (padded) channels in the batch.
+
+        Returns:
+            Token tensor of the same shape with masked positions
+            overwritten by ``mask_emb``.
+        """
+        if self.uses_per_channel:
+            # tokens: (B*C, N, D), mask: (B, C*N)
+            N = tokens.shape[1]
+            C = C_in
+            # Reshape mask to (B*C, N)
+            mask_reshaped = masking_mask.reshape(B, C, N).reshape(B * C, N)
+            tokens = tokens.clone()
+            tokens[mask_reshaped] = self.mask_emb
+        else:
+            # tokens: (B, N, D), mask: (B, N)
+            tokens = tokens.clone()
+            tokens[masking_mask] = self.mask_emb
         return tokens
 
     def _reassemble_per_channel(

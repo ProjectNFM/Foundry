@@ -1,0 +1,33 @@
+_target_: lightning.Trainer
+
+max_epochs: 200
+precision: 32-true
+accelerator: auto
+devices: auto
+default_root_dir: .
+log_every_n_steps: 10
+enable_progress_bar: true
+enable_model_summary: true
+logger: ${logger}
+callbacks:
+  vocab_initializer:
+    _target_: foundry.training.callbacks.VocabInitializerCallback
+  rich_model_summary:
+    _target_: lightning.pytorch.callbacks.RichModelSummary
+  rich_progress_bar:
+    _target_: lightning.pytorch.callbacks.RichProgressBar
+  early_stopping:
+    _target_: lightning.pytorch.callbacks.EarlyStopping
+    monitor: val/loss
+    patience: 20
+    mode: min
+    verbose: true
+  model_checkpoint:
+    _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    dirpath: checkpoints
+    filename: "best-epoch{epoch:03d}-{val/loss:.4f}"
+    save_last: true
+    monitor: val/loss
+    mode: min
+    save_top_k: 1
+    verbose: true
