@@ -1,0 +1,14 @@
+_target_: foundry.data.datamodules.OpenNeuroDataModule
+
+root: ./data/processed/
+batch_size: ${hyperparameters.batch_size}
+num_workers: ${hyperparameters.num_workers}
+pin_memory: false
+sequence_length: ${hyperparameters.sequence_length}
+seed: 42
+
+dataset_dirs:
+  - klinzing_sleep_ds005555
+
+split_type: intrasession
+recording_ids: null

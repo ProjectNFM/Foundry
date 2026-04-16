@@ -5,6 +5,7 @@
 
 defaults:
   - override /model: poyo_eeg
+  - override /data: openneuro/default
   - override /module: pretrain
   - override /trainer: pretrain
 
@@ -13,7 +14,7 @@ model:
     patch_duration: ${hyperparameters.patch_duration}
     masking:
       _target_: foundry.models.masking.RandomPatchMasking
-      mask_ratio: 0.15
+      mask_ratio: 0.50
     channel_strategy:
       num_channels: ${hyperparameters.num_channels}
   reconstruction_head:

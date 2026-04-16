@@ -3,7 +3,9 @@ defaults:
 
 _target_: foundry.models.POYOEEGModel
 
+# Must define either reconstruction_head or readout_specs or both
 reconstruction_head: null
+readout_specs: null
 
 embed_dim: 128
 sequence_length: ${hyperparameters.sequence_length}
