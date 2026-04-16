@@ -1,0 +1,32 @@
+# @package _global_
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: ajile/singlesess
+  - override /module: regression
+
+model:
+  zero_output_timestamps: false
+
+data:
+  split_type: intrasession
+  task_type: pose_estimation
+
+run:
+  name: ajile_poyo_eeg_pose_estimation
+  group: DEBUG
+  tags: [debug, pose, regression, poyo_eeg, ajile]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 1.0
+  patch_duration: 0.1
+  sampling_rate: 500
+  fold_number: 0
+  num_workers: 5
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  num_channels: null
+  session_configs: null
