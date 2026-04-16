@@ -5,6 +5,7 @@ from typing import Any, Dict
 import lightning as L
 import torch
 import torch.nn as nn
+from torchmetrics.regression import R2Score
 
 
 class PretrainModule(L.LightningModule):
@@ -41,6 +42,9 @@ class PretrainModule(L.LightningModule):
 
         self.save_hyperparameters(ignore=["model"])
 
+        self.train_r2 = R2Score()
+        self.val_r2 = R2Score()
+
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
         """Downcast float64 tensors to float32 and move the batch to *device*."""
         from lightning.fabric.utilities.apply_func import move_data_to_device
@@ -72,8 +76,13 @@ class PretrainModule(L.LightningModule):
         recon_targets, model_inputs = self._unpack_batch(batch)
         outputs = self.model(**model_inputs, unpack_output=False)
         flat_targets = self._flatten_targets(recon_targets, model_inputs)
-        loss = self.loss_fn(outputs["reconstruction"], flat_targets)
+        preds = outputs["reconstruction"]
+        loss = self.loss_fn(preds, flat_targets)
         self.log("train/loss", loss, prog_bar=True)
+
+        self.train_r2.update(preds.flatten(), flat_targets.flatten())
+        self.log("train/r2", self.train_r2, on_step=False, on_epoch=True)
+
         return loss
 
     def validation_step(
@@ -91,8 +100,13 @@ class PretrainModule(L.LightningModule):
         recon_targets, model_inputs = self._unpack_batch(batch)
         outputs = self.model(**model_inputs, unpack_output=False)
         flat_targets = self._flatten_targets(recon_targets, model_inputs)
-        loss = self.loss_fn(outputs["reconstruction"], flat_targets)
+        preds = outputs["reconstruction"]
+        loss = self.loss_fn(preds, flat_targets)
         self.log("val/loss", loss, prog_bar=True)
+
+        self.val_r2.update(preds.flatten(), flat_targets.flatten())
+        self.log("val/r2", self.val_r2, on_step=False, on_epoch=True)
+
         return loss
 
     def configure_optimizers(self):
