@@ -5,6 +5,7 @@ defaults:
   - override /data: ajile/singlesess
 
 model:
+  zero_output_timestamps: true
   tokenizer:
     patch_duration: ${hyperparameters.patch_duration}
     channel_strategy:
@@ -28,3 +29,5 @@ hyperparameters:
   sampling_rate: 500
   fold_number: 0
   num_workers: 5
+  learning_rate: 1e-4
+  weight_decay: 0.01
