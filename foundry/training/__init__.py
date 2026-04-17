@@ -1,4 +1,6 @@
-from foundry.training.classification_module import ClassificationModule
-from foundry.training.regression_module import RegressionModule
+from foundry.training.task_modules import (
+    ClassificationModule,
+    RegressionModule,
+)
 
 __all__ = ["ClassificationModule", "RegressionModule"]
