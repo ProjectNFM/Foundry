@@ -1,4 +1,4 @@
-from foundry.training.module import EEGModule
+from foundry.training.classification_module import ClassificationModule
 from foundry.training.regression_module import RegressionModule
 
-__all__ = ["EEGModule", "RegressionModule"]
+__all__ = ["ClassificationModule", "RegressionModule"]

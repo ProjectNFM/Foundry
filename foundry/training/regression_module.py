@@ -56,9 +56,9 @@ class RegressionModule(L.LightningModule):
         batch = apply_to_collection(
             batch,
             dtype=torch.Tensor,
-            function=lambda tensor: tensor.float()
-            if tensor.dtype == torch.float64
-            else tensor,
+            function=lambda tensor: (
+                tensor.float() if tensor.dtype == torch.float64 else tensor
+            ),
         )
         return move_data_to_device(batch, device)
 

@@ -2,3 +2,4 @@ _target_: foundry.training.RegressionModule
 
 learning_rate: ${hyperparameters.learning_rate}
 weight_decay: ${hyperparameters.weight_decay}
+class_weights: null
