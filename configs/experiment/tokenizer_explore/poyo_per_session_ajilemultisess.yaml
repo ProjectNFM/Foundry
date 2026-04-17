@@ -7,6 +7,9 @@ defaults:
   - override /model/tokenizer: session_per_timepoint # or session_mlp_per_timepoint
   - override /data: ajile/multisess
 
+model:
+  zero_output_timestamps: true
+
 data:
   task_type: behavior
 
