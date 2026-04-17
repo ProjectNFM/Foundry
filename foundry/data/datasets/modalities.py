@@ -112,7 +112,7 @@ NEUROSOFT_ON_VS_OFF = register_modality(
 
 NEUROSOFT_ACOUSTIC_STIM = register_modality(
     "neurosoft_acoustic_stim",
-    dim=17,
+    dim=26,
     type=DataType.MULTINOMIAL,
     timestamp_key="acoustic_stim_trials.timestamps",
     value_key="acoustic_stim_trials.behavior_ids",

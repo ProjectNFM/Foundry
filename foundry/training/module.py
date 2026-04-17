@@ -7,6 +7,7 @@ from torchmetrics import MetricCollection
 from torchmetrics.classification import (
     AUROC,
     Accuracy,
+    CohenKappa,
     ConfusionMatrix,
     F1Score,
     Precision,
@@ -39,6 +40,10 @@ def _create_task_metrics(num_classes: int, prefix: str) -> MetricCollection:
             "recall": Recall(
                 task=task_type, num_classes=num_classes, average="macro"
             ),
+            "balanced_acc": Accuracy(
+                task=task_type, num_classes=num_classes, average="macro"
+            ),
+            "cohen_kappa": CohenKappa(task=task_type, num_classes=num_classes),
         },
         prefix=prefix,
     )
