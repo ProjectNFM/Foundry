@@ -4,6 +4,9 @@ defaults:
   - override /model: poyo_eeg
   - override /data: ajile/singlesess
 
+model:
+  zero_output_timestamps: true
+
 data:
   split_type: intrasession
   task_type: behavior

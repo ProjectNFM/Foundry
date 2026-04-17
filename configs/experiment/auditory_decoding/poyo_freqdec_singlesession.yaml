@@ -4,6 +4,9 @@ defaults:
   - override /model: poyo_eeg
   - override /data: neurosoft_minipigs/singlesess
 
+model:
+  zero_output_timestamps: true
+
 data:
   split_type: intrasession-causal
   task_type: on_vs_off
