@@ -214,3 +214,5 @@ logs/
 .vscode/
 profiling_output/
 runs/
+data/
+wandb_exports/
