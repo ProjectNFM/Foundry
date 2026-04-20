@@ -14,6 +14,24 @@ from foundry.data.datamodules.base import NeuralDataModule
 
 logger = logging.getLogger(__name__)
 
+NeuroprobeTaskType = Literal[
+    "onset_binary",
+    "speech_binary",
+    "volume_binary",
+    "delta_volume_binary",
+    "pitch_binary",
+    "word_index_binary",
+    "word_gap_binary",
+    "gpt2_surprisal_binary",
+    "word_head_pos_binary",
+    "word_part_speech_binary",
+    "word_length_binary",
+    "global_flow_binary",
+    "local_flow_binary",
+    "frame_brightness_binary",
+    "face_num_binary",
+]
+
 
 def normalize_neuroprobe_recording(data):
     """Normalize Neuroprobe sample fields for existing tokenizers."""
@@ -56,11 +74,39 @@ class NeuroprobeDataModule(NeuralDataModule):
     """
 
     TASK_TO_READOUT = {
+        "onset_binary": ["neuroprobe_onset_binary"],
         "speech_binary": ["neuroprobe_speech_binary"],
+        "volume_binary": ["neuroprobe_volume_binary"],
+        "delta_volume_binary": ["neuroprobe_delta_volume_binary"],
+        "pitch_binary": ["neuroprobe_pitch_binary"],
+        "word_index_binary": ["neuroprobe_word_index_binary"],
+        "word_gap_binary": ["neuroprobe_word_gap_binary"],
+        "gpt2_surprisal_binary": ["neuroprobe_gpt2_surprisal_binary"],
+        "word_head_pos_binary": ["neuroprobe_word_head_pos_binary"],
+        "word_part_speech_binary": ["neuroprobe_word_part_speech_binary"],
+        "word_length_binary": ["neuroprobe_word_length_binary"],
+        "global_flow_binary": ["neuroprobe_global_flow_binary"],
+        "local_flow_binary": ["neuroprobe_local_flow_binary"],
+        "frame_brightness_binary": ["neuroprobe_frame_brightness_binary"],
+        "face_num_binary": ["neuroprobe_face_num_binary"],
     }
 
     READOUT_CLASS_NAMES: dict[str, list[str]] = {
+        "neuroprobe_onset_binary": ["Negative", "Positive"],
         "neuroprobe_speech_binary": ["NoSpeech", "Speech"],
+        "neuroprobe_volume_binary": ["Negative", "Positive"],
+        "neuroprobe_delta_volume_binary": ["Negative", "Positive"],
+        "neuroprobe_pitch_binary": ["Negative", "Positive"],
+        "neuroprobe_word_index_binary": ["Negative", "Positive"],
+        "neuroprobe_word_gap_binary": ["Negative", "Positive"],
+        "neuroprobe_gpt2_surprisal_binary": ["Negative", "Positive"],
+        "neuroprobe_word_head_pos_binary": ["Negative", "Positive"],
+        "neuroprobe_word_part_speech_binary": ["Negative", "Positive"],
+        "neuroprobe_word_length_binary": ["Negative", "Positive"],
+        "neuroprobe_global_flow_binary": ["Negative", "Positive"],
+        "neuroprobe_local_flow_binary": ["Negative", "Positive"],
+        "neuroprobe_frame_brightness_binary": ["Negative", "Positive"],
+        "neuroprobe_face_num_binary": ["Negative", "Positive"],
     }
 
     _SPLIT_TO_DATASET_SPLIT: dict[str, Literal["train", "val", "test"]] = {
@@ -79,7 +125,7 @@ class NeuroprobeDataModule(NeuralDataModule):
         transforms: Optional[list[Callable]] = None,
         tokenizer: Optional[Callable] = None,
         seed: int = 42,
-        task_type: Literal["speech_binary"] = "speech_binary",
+        task_type: NeuroprobeTaskType = "speech_binary",
         subset_tier: Literal["full", "lite", "nano"] = "full",
         test_subject: int = 1,
         test_session: int = 0,
@@ -91,6 +137,7 @@ class NeuroprobeDataModule(NeuralDataModule):
         dirname: str = "neuroprobe_2025",
         uniquify_channel_ids_with_subject: bool = True,
         uniquify_channel_ids_with_session: bool = False,
+        **kwargs,
     ):
         self._use_explicit_recordings = recording_ids is not None
         if self._use_explicit_recordings:

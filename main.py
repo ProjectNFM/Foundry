@@ -335,16 +335,37 @@ def main(cfg: DictConfig):
 
     _log_config_to_wandb(trainer, cfg)
 
-    ckpt_path = _get_resume_checkpoint_path(
-        cfg, checkpoint_dir, slurm_restart_count
-    )
+    run_mode = str(OmegaConf.select(cfg, "run.mode", default="train"))
     try:
-        trainer.fit(
-            lightning_module,
-            datamodule,
-            ckpt_path=ckpt_path,
-            weights_only=False,
-        )
+        if run_mode == "eval":
+            eval_ckpt = OmegaConf.select(
+                cfg, "run.eval_checkpoint", default=None
+            )
+            if not eval_ckpt:
+                raise ValueError(
+                    "run.mode=eval requires run.eval_checkpoint to be set."
+                )
+            logger.info("Running eval mode with checkpoint: %s", eval_ckpt)
+            trainer.validate(
+                lightning_module,
+                datamodule=datamodule,
+                ckpt_path=str(eval_ckpt),
+            )
+        elif run_mode == "train":
+            ckpt_path = _get_resume_checkpoint_path(
+                cfg, checkpoint_dir, slurm_restart_count
+            )
+            trainer.fit(
+                lightning_module,
+                datamodule,
+                ckpt_path=ckpt_path,
+                weights_only=False,
+            )
+        else:
+            raise ValueError(
+                f"Unsupported run.mode='{run_mode}'. "
+                "Expected one of: train, eval."
+            )
     finally:
         if using_wandb_logger:
             _finish_active_wandb_run()

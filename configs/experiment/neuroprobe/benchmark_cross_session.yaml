@@ -1,0 +1,68 @@
+# @package _global_
+#
+# Neuroprobe cross-session benchmark (SS-DM).
+#
+# Single run:
+#   uv run python main.py experiment=neuroprobe/benchmark_cross_session data.task=speech data.test_pair=1,1
+#
+# Sweep all tasks for one fixed target pair:
+#   uv run python main.py -m experiment=neuroprobe/benchmark_cross_session
+#
+# Sweep all valid SS-DM lite (subject,session) pairs and all tasks:
+#   uv run python main.py -m experiment=neuroprobe/benchmark_cross_session data.test_pair=\${neuroprobe_ss_dm_pair_choices:lite}
+#
+# `data.test_pair` guarantees pairing; `data.test_subject`/`data.test_session` are
+# derived from it via resolvers and never Cartesian-product mismatched.
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: neuroprobe/default
+
+model:
+  zero_output_timestamps: true
+
+data:
+  task_type: ${data.task}_binary
+  task: speech
+  label_mode: binary
+  subset_tier: lite
+  regime: SS-DM
+  fold: 0
+  test_pair: "1x1"
+  test_subject: ${pair_int:${data.test_pair},0}
+  test_session: ${pair_int:${data.test_pair},1}
+
+run:
+  mode: train
+  name: neuroprobe_cross_session_${data.task}_s${data.test_subject}_t${data.test_session}
+  group: NEUROPROBE_CROSS_SESSION
+  tags:
+    - neuroprobe
+    - poyo_eeg
+    - cross_session
+    - ${data.task}
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 128
+  sequence_length: 1.0
+  patch_duration: 0.1
+  sampling_rate: 2048
+  num_channels: 155
+  fold_number: 0
+  num_workers: 4
+  learning_rate: 1e-4
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 10
+
+stage:
+  skip: true
+
+hydra:
+  sweeper:
+    params:
+      data.task: choice(onset,speech,volume,delta_volume,pitch,word_index,word_gap,gpt2_surprisal,word_head_pos,word_part_speech,word_length,global_flow,local_flow,frame_brightness,face_num)
+      data.test_pair: choice(${neuroprobe_ss_dm_pair_choices:${data.subset_tier}})
