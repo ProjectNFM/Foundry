@@ -31,7 +31,7 @@ from foundry.models.embeddings.temporal import (
     PerTimepointLinearEmbedding,
 )
 from foundry.models.poyo_eeg import RECON_DECODER_ID
-from foundry.training.pretrain_module import PretrainModule
+from foundry.training import PretrainModule
 
 
 SAMPLING_RATE = 250.0

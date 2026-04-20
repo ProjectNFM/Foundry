@@ -28,9 +28,9 @@ dev = ["pre-commit>=4.5.1", "pytest>=8.0.0", "ruff>=0.14.14"]
 
 [tool.uv.sources]
 torch-brain = { git = "https://github.com/neuro-galaxy/torch_brain", branch = "main" }
-brainsets = { git = "https://github.com/neuro-galaxy/brainsets", branch = "suarez/openneuro" }
+brainsets = { git = "https://github.com/neuro-galaxy/brainsets", branch = "mila/dev-main" }
 temporaldata = { git = "https://github.com/neuro-galaxy/temporaldata", branch = "main" }
-auditorydecoding = { git = "https://github.com/Neurosoft-Bioelectronics/auditorydecoding", branch = "milo/temp-16-04-26" }
+auditorydecoding = { git = "https://github.com/Neurosoft-Bioelectronics/auditorydecoding", branch = "milo/temp-dep-devmain" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

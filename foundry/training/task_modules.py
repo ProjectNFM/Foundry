@@ -53,7 +53,7 @@ def _create_classification_metrics(
     )
 
 
-class BaseMultitaskModule(L.LightningModule):
+class BaseModule(L.LightningModule):
     def __init__(
         self,
         model: nn.Module,
@@ -64,6 +64,54 @@ class BaseMultitaskModule(L.LightningModule):
         self.model = model
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
+
+    def transfer_batch_to_device(self, batch, device, dataloader_idx):
+        from lightning.fabric.utilities.apply_func import move_data_to_device
+        from lightning_utilities.core.apply_func import apply_to_collection
+
+        batch = apply_to_collection(
+            batch,
+            dtype=torch.Tensor,
+            function=lambda tensor: (
+                tensor.float() if tensor.dtype == torch.float64 else tensor
+            ),
+        )
+        return move_data_to_device(batch, device)
+
+    def forward(self, **kwargs) -> Dict[str, Any]:
+        return self.model(**kwargs)
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(
+            self.parameters(),
+            lr=self.learning_rate,
+            weight_decay=self.weight_decay,
+        )
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=self.trainer.max_epochs if self.trainer else 100
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",
+                "frequency": 1,
+            },
+        }
+
+
+class BaseMultitaskModule(BaseModule):
+    def __init__(
+        self,
+        model: nn.Module,
+        learning_rate: float = 1e-4,
+        weight_decay: float = 0.01,
+    ):
+        super().__init__(
+            model=model,
+            learning_rate=learning_rate,
+            weight_decay=weight_decay,
+        )
         self.train_metrics = nn.ModuleDict()
         self.val_metrics = nn.ModuleDict()
 
@@ -116,22 +164,6 @@ class BaseMultitaskModule(L.LightningModule):
     def _on_validation_epoch_end_task(self, task_name: str) -> None:
         return None
 
-    def transfer_batch_to_device(self, batch, device, dataloader_idx):
-        from lightning.fabric.utilities.apply_func import move_data_to_device
-        from lightning_utilities.core.apply_func import apply_to_collection
-
-        batch = apply_to_collection(
-            batch,
-            dtype=torch.Tensor,
-            function=lambda tensor: (
-                tensor.float() if tensor.dtype == torch.float64 else tensor
-            ),
-        )
-        return move_data_to_device(batch, device)
-
-    def forward(self, **kwargs) -> Dict[str, Any]:
-        return self.model(**kwargs)
-
     def training_step(
         self, batch: Dict[str, Any], batch_idx: int
     ) -> torch.Tensor:
@@ -177,24 +209,6 @@ class BaseMultitaskModule(L.LightningModule):
                 )
 
         return total_loss
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.learning_rate,
-            weight_decay=self.weight_decay,
-        )
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=self.trainer.max_epochs if self.trainer else 100
-        )
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "interval": "epoch",
-                "frequency": 1,
-            },
-        }
 
     def on_fit_start(self):
         self._configure_wandb_metric_summaries()
@@ -304,6 +318,91 @@ class RegressionModule(BaseMultitaskModule):
 
     def _metric_summary_mode(self, metric_name: str) -> str:
         return "max" if metric_name.endswith("_r2") else "min"
+
+
+class MaskedReconstructionModule(BaseModule):
+    def __init__(
+        self,
+        model: nn.Module,
+        learning_rate: float = 1e-4,
+        weight_decay: float = 0.01,
+        loss_type: str = "mse",
+    ):
+        super().__init__(
+            model=model,
+            learning_rate=learning_rate,
+            weight_decay=weight_decay,
+        )
+
+        loss_factories = {
+            "mse": nn.MSELoss,
+            "smooth_l1": nn.SmoothL1Loss,
+        }
+        if loss_type not in loss_factories:
+            raise ValueError(f"Unsupported loss_type: {loss_type!r}")
+        self.loss_fn = loss_factories[loss_type]()
+
+        self.train_r2 = R2Score()
+        self.val_r2 = R2Score()
+        self.save_hyperparameters(ignore=["model"])
+
+    def training_step(
+        self, batch: Dict[str, Any], batch_idx: int
+    ) -> torch.Tensor:
+        return self._shared_reconstruction_step("train", batch)
+
+    def validation_step(
+        self, batch: Dict[str, Any], batch_idx: int
+    ) -> torch.Tensor:
+        return self._shared_reconstruction_step("val", batch)
+
+    def _shared_reconstruction_step(
+        self, stage: str, batch: Dict[str, Any]
+    ) -> torch.Tensor:
+        recon_targets, model_inputs = self._unpack_batch(batch)
+        outputs = self.model(**model_inputs, unpack_output=False)
+        predictions = outputs["reconstruction"]
+        targets = self._flatten_targets(recon_targets, model_inputs)
+
+        loss = self.loss_fn(predictions, targets)
+        self.log(f"{stage}/loss", loss, prog_bar=True)
+
+        r2_metric = self.train_r2 if stage == "train" else self.val_r2
+        r2_metric.update(predictions.flatten(), targets.flatten())
+        self.log(f"{stage}/r2", r2_metric, on_step=False, on_epoch=True)
+
+        return loss
+
+    def _unpack_batch(self, batch: Dict[str, Any]):
+        recon_targets = batch.pop("reconstruction_targets")
+        batch.pop("target_values", None)
+        batch.pop("target_weights", None)
+        batch.pop("session_id", None)
+        batch.pop("absolute_start", None)
+        batch.pop("eval_mask", None)
+        return recon_targets, batch
+
+    def _flatten_targets(
+        self,
+        recon_targets: torch.Tensor,
+        model_inputs: Dict[str, Any],
+    ) -> torch.Tensor:
+        masking_mask = model_inputs.get("masking_mask")
+        if masking_mask is not None:
+            return recon_targets[masking_mask]
+
+        from foundry.models.poyo_eeg import RECON_DECODER_ID
+
+        decoder_idx = model_inputs["output_decoder_index"]
+        per_batch_targets = []
+        for batch_idx in range(decoder_idx.shape[0]):
+            num_reconstruction_queries = (
+                (decoder_idx[batch_idx] == RECON_DECODER_ID).sum().item()
+            )
+            per_batch_targets.append(
+                recon_targets[batch_idx, :num_reconstruction_queries]
+            )
+        return torch.cat(per_batch_targets, dim=0)
 
 
 class ClassificationModule(BaseMultitaskModule):

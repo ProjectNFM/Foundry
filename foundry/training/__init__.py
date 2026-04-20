@@ -1,7 +1,14 @@
 from foundry.training.task_modules import (
     ClassificationModule,
+    MaskedReconstructionModule,
     RegressionModule,
 )
-from foundry.training.pretrain_module import PretrainModule
 
-__all__ = ["ClassificationModule", "RegressionModule", "PretrainModule"]
+PretrainModule = MaskedReconstructionModule
+
+__all__ = [
+    "ClassificationModule",
+    "RegressionModule",
+    "MaskedReconstructionModule",
+    "PretrainModule",
+]
