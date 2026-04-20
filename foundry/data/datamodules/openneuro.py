@@ -2,11 +2,7 @@ from __future__ import annotations
 
 from typing import Callable, Literal, Optional
 
-import torch
 from brainsets.datasets.OpenNeuroBase import OpenNeuroDataset
-from torch.utils.data import DataLoader
-from torch_brain.data import collate
-from torch_brain.data.sampler import RandomFixedWindowSampler
 from torch_brain.dataset import NestedDataset
 from torch_brain.transforms import Compose
 
@@ -107,6 +103,7 @@ class OpenNeuroDataModule(NeuralDataModule):
                 transform=transform,
                 **dataset_kwargs,
             )
+            self.dataset.multichannel_dataset_mixin_uniquify_channel_ids_with_session = True
             return
 
         datasets = {}
@@ -119,33 +116,13 @@ class OpenNeuroDataModule(NeuralDataModule):
                 transform=None,
                 **dataset_kwargs,
             )
-
+            datasets[
+                dataset_dir
+            ].multichannel_dataset_mixin_uniquify_channel_ids_with_session = (
+                True
+            )
         # Apply transforms at the nested level so they run consistently once.
         self.dataset = NestedDataset(datasets=datasets, transform=transform)
-
-    def _create_dataloader(self, split: SplitAssignmentType) -> DataLoader:
-        sampling_intervals = self.dataset.get_sampling_intervals(
-            split_assignment=split
-        )
-
-        sampler = RandomFixedWindowSampler(
-            sampling_intervals=sampling_intervals,
-            window_length=self.sequence_length,
-            drop_short=True,
-            generator=torch.Generator().manual_seed(self.seed),
-        )
-
-        return DataLoader(
-            self.dataset,
-            sampler=sampler,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
-            pin_memory=self.pin_memory,
-            collate_fn=collate,
-            persistent_workers=self.num_workers > 0,
-            prefetch_factor=2 if self.num_workers > 0 else None,
-            drop_last=(split == "train"),
-        )
 
     def get_recording_ids(self) -> list[str]:
         return sorted(self.dataset.recording_ids)

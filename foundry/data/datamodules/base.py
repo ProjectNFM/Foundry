@@ -216,6 +216,15 @@ class NeuralDataModule(LightningDataModule):
             DataLoader for the split.
         """
         sampling_intervals = self.dataset.get_sampling_intervals(split=split)
+        logger.info(
+            "Total time in %s split: %s hours",
+            split,
+            sum(
+                interval.end - interval.start
+                for interval in sampling_intervals.values()
+            )
+            / 3600.0,
+        )
 
         sampler = RandomFixedWindowSampler(
             sampling_intervals=sampling_intervals,
