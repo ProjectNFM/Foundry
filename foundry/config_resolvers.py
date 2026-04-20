@@ -9,6 +9,7 @@ SLURM jobs where buffered output is lost on crash.
 """
 
 import glob as _glob
+import os
 import sys
 import traceback
 from functools import wraps
@@ -115,8 +116,67 @@ def _recon_output_dim_resolver(
     return int(num_channels) * patch_samples
 
 
-def _range_resolver(start: int, end: int, step: int) -> List[int]:
-    return list(range(int(start), int(end), int(step)))
+def _sweep_choices(values: List[str] | tuple[str, ...]) -> str:
+    """Hydra-compatible choice string from a list/tuple of string values."""
+    if not values:
+        raise ValueError("Cannot build sweep choices from an empty sequence")
+
+    return ",".join(
+        "'" + str(value).replace("'", "\\'") + "'" for value in values
+    )
+
+
+def _config_list_sweep_choices(config_path: str, key: str) -> str:
+    """Hydra-compatible choice string from a list key inside a YAML config."""
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    cfg = OmegaConf.load(config_path)
+    values = OmegaConf.select(cfg, key)
+    if values is None:
+        raise KeyError(f"Key '{key}' not found in config file: {config_path}")
+
+    if OmegaConf.is_config(values):
+        values = OmegaConf.to_container(values, resolve=True)
+
+    if not isinstance(values, (list, tuple)):
+        raise TypeError(
+            f"Expected '{key}' in {config_path} to be a list/tuple, got {type(values)}"
+        )
+
+    return _sweep_choices(tuple(str(value) for value in values))
+
+
+def _count_ecog_channels(h5_path: str) -> int:
+    """Count ECoG-like channels in an HDF5 recording file."""
+    import h5py
+    import numpy as np
+
+    supported_modalities = {"eeg", "ecog", "seeg", "ieeg"}
+
+    if not os.path.isfile(h5_path):
+        raise FileNotFoundError(
+            f"HDF5 file not found: {h5_path}  "
+            f"(is the data staged / accessible from this node?)"
+        )
+
+    with h5py.File(h5_path, "r") as f:
+        raw_types = f["channels/type"][()]
+        channel_types = np.array(
+            [t.decode() if isinstance(t, bytes) else t for t in raw_types],
+            dtype="U",
+        )
+        return int(
+            np.isin(
+                np.char.lower(channel_types), list(supported_modalities)
+            ).sum()
+        )
+
+
+def _get_num_ecog_channels_by_name(data_dir: str, recording_id: str) -> int:
+    """Number of ECoG channels for a recording identified by *recording_id*."""
+    h5_path = os.path.join(data_dir, f"{recording_id}.h5")
+    return _count_ecog_channels(h5_path)
 
 
 def _get_suffix(s: str) -> str:
@@ -156,8 +216,10 @@ def register_resolvers() -> None:
         "get_overrides_from_ckpt": _get_overrides_from_ckpt,
         "patch_samples": _patch_samples_resolver,
         "recon_output_dim": _recon_output_dim_resolver,
-        "range_resolver": _range_resolver,
         "get_suffix": _get_suffix,
+        "sweep_choices": _sweep_choices,
+        "config_list_sweep_choices": _config_list_sweep_choices,
+        "get_num_ecog_channels_by_name": _get_num_ecog_channels_by_name,
     }
     for name, fn in _resolvers.items():
         if not OmegaConf.has_resolver(name):

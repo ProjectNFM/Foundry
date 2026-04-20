@@ -52,6 +52,11 @@ class POYOEEGModel(nn.Module):
         emb_init_scale: Initialization scale for embeddings.
         t_min: Minimum time value for rotary encoding.
         t_max: Maximum time value for rotary encoding.
+        zero_output_timestamps: If True, replaces all output query timestamps
+            with zeros before decoder cross-attention. This is useful for
+            window-level classification tasks where labels are not tied to a
+            precise timepoint. Keep this False for timestamp-aware tasks such
+            as trajectory regression.
     """
 
     SUPPORTED_MODALITIES = {"eeg", "ecog", "seeg", "ieeg"}
@@ -77,6 +82,7 @@ class POYOEEGModel(nn.Module):
         emb_init_scale: float = 0.02,
         t_min: float = 1e-4,
         t_max: float = 2.0627,
+        zero_output_timestamps: bool = False,
     ):
         super().__init__()
 
@@ -91,6 +97,7 @@ class POYOEEGModel(nn.Module):
         self.sequence_length = sequence_length
         self.latent_step = latent_step
         self.num_latents_per_step = num_latents_per_step
+        self.zero_output_timestamps = zero_output_timestamps
         self._latent_index, self._latent_timestamps = (
             create_linspace_latent_tokens(
                 0,
@@ -489,7 +496,8 @@ class POYOEEGModel(nn.Module):
                 data,
                 self._readout_specs,
             )
-            output_timestamps = torch.zeros_like(output_timestamps)
+            if self.zero_output_timestamps:
+                output_timestamps = torch.zeros_like(output_timestamps)
             output_session_index = np.full(
                 len(output_timestamps), input_session_index
             )
