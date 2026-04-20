@@ -453,12 +453,18 @@ class EEGTokenizer(nn.Module):
             C = C_in
             # Reshape mask to (B*C, N)
             mask_reshaped = masking_mask.reshape(B, C, N).reshape(B * C, N)
-            tokens = tokens.clone()
-            tokens[mask_reshaped] = self.mask_emb
+            tokens = torch.where(
+                mask_reshaped.unsqueeze(-1),
+                self.mask_emb.view(1, 1, -1),
+                tokens,
+            )
         else:
             # tokens: (B, N, D), mask: (B, N)
-            tokens = tokens.clone()
-            tokens[masking_mask] = self.mask_emb
+            tokens = torch.where(
+                masking_mask.unsqueeze(-1),
+                self.mask_emb.view(1, 1, -1),
+                tokens,
+            )
         return tokens
 
     def _reassemble_per_channel(

@@ -106,6 +106,9 @@ class POYOEEGModel(nn.Module):
                 num_latents_per_step=self.num_latents_per_step,
             )
         )
+        self._latent_timestamps = torch.as_tensor(
+            self._latent_timestamps, dtype=torch.float32
+        )
 
         # --- Supervised readout (optional) ---
         if readout_specs is not None:

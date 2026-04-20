@@ -13,9 +13,10 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from torch_brain.data import collate
-from torch_brain.data.sampler import RandomFixedWindowSampler
 from lightning import LightningDataModule
 from torch_brain.transforms import Compose
+
+from foundry.data.samplers import FastRandomFixedWindowSampler
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,8 @@ class NeuralDataModule(LightningDataModule):
         seed: int = 42,
         dataset_kwargs: Optional[dict] = None,
         task_type: Optional[str] = None,
+        sampler_class=FastRandomFixedWindowSampler,
+        prefetch_factor: int = 2,
     ):
         super().__init__()
         self.dataset_class = dataset_class
@@ -92,12 +95,12 @@ class NeuralDataModule(LightningDataModule):
         self.seed = seed
         self.dataset_kwargs = dataset_kwargs or {}
         self.task_type = task_type
+        self.sampler_class = sampler_class
+        self.prefetch_factor = prefetch_factor
 
-        # Build transform pipeline
         transform_list = transforms or []
         if tokenizer is not None:
             transform_list = list(transform_list) + [tokenizer]
-
         self.transform = transform_list if transform_list else None
         self.dataset = None
 
@@ -226,7 +229,7 @@ class NeuralDataModule(LightningDataModule):
             / 3600.0,
         )
 
-        sampler = RandomFixedWindowSampler(
+        sampler = self.sampler_class(
             sampling_intervals=sampling_intervals,
             window_length=self.sequence_length,
             drop_short=True,
@@ -241,7 +244,9 @@ class NeuralDataModule(LightningDataModule):
             pin_memory=self.pin_memory,
             collate_fn=collate,
             persistent_workers=self.num_workers > 0,
-            prefetch_factor=2 if self.num_workers > 0 else None,
+            prefetch_factor=(
+                self.prefetch_factor if self.num_workers > 0 else None
+            ),
             drop_last=(split == "train"),  # Only drop last for training
         )
 

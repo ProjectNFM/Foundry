@@ -346,6 +346,17 @@ class MaskedReconstructionModule(BaseModule):
         self.val_r2 = R2Score()
         self.save_hyperparameters(ignore=["model"])
 
+    def transfer_batch_to_device(self, batch, device, dataloader_idx):
+        # These keys are not used by reconstruction training and would
+        # otherwise be converted/copied to GPU every step.
+        batch = dict(batch)
+        batch.pop("session_id", None)
+        batch.pop("absolute_start", None)
+        batch.pop("eval_mask", None)
+        batch.pop("target_values", None)
+        batch.pop("target_weights", None)
+        return super().transfer_batch_to_device(batch, device, dataloader_idx)
+
     def training_step(
         self, batch: Dict[str, Any], batch_idx: int
     ) -> torch.Tensor:
