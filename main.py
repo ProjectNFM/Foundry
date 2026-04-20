@@ -129,23 +129,29 @@ def _stage_data_if_needed(cfg: DictConfig) -> None:
 
 
 def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
-    """Auto-derive session_configs and num_channels from the dataset when missing."""
+    """Auto-derive data-dependent hyperparameters from the dataset when missing."""
+    from foundry.data.utils import (
+        get_all_sampling_rates,
+        get_max_channels,
+        get_sampling_rate,
+        get_session_configs,
+    )
+
     session_configs = OmegaConf.select(
         cfg, "hyperparameters.session_configs", default=None
     )
     num_channels = OmegaConf.select(
         cfg, "hyperparameters.num_channels", default=None
     )
-
-    if session_configs is not None and num_channels is not None:
-        return
+    sampling_rate = OmegaConf.select(
+        cfg, "hyperparameters.sampling_rate", default=None
+    )
 
     dm = instantiate(cfg.data, tokenizer=None)
     dm.setup("fit")
+    all_sampling_rates = get_all_sampling_rates(dm.dataset)
 
     if session_configs is None:
-        from foundry.data.utils import get_session_configs
-
         session_configs = get_session_configs(dm.dataset)
         OmegaConf.update(
             cfg,
@@ -160,8 +166,6 @@ def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
         )
 
     if num_channels is None:
-        from foundry.data.utils import get_max_channels
-
         num_channels = get_max_channels(dm.dataset)
         OmegaConf.update(
             cfg,
@@ -172,6 +176,77 @@ def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
         logger.info(
             "Auto-populated hyperparameters.num_channels=%d from dataset.",
             num_channels,
+        )
+
+    if sampling_rate is None:
+        sampling_rate = get_sampling_rate(dm.dataset)
+        OmegaConf.update(
+            cfg,
+            "hyperparameters.sampling_rate",
+            sampling_rate,
+            force_add=True,
+        )
+        logger.info(
+            "Auto-populated hyperparameters.sampling_rate=%.3f from dataset.",
+            sampling_rate,
+        )
+
+    patch_duration = OmegaConf.select(
+        cfg, "model.tokenizer.patch_duration", default=None
+    )
+    has_patching = patch_duration is not None and float(patch_duration) > 0
+    if has_patching and len(all_sampling_rates) > 1:
+        raise ValueError(
+            "Patch-based tokenizers require a single sampling rate, but the "
+            f"dataset contains multiple rates: {all_sampling_rates}. "
+            "Use a CWT/PerTimepoint tokenizer or filter to one sampling rate."
+        )
+
+    if len(all_sampling_rates) > 1:
+        logger.info(
+            "Dataset includes multiple sampling rates: %s.",
+            all_sampling_rates,
+        )
+
+    recon_output_dim = OmegaConf.select(
+        cfg, "model.reconstruction_head.output_dim", default=None
+    )
+    if recon_output_dim is None:
+        return
+
+    strategy_target = str(
+        OmegaConf.select(
+            cfg, "model.tokenizer.channel_strategy._target_", default=""
+        )
+    )
+    is_per_channel = strategy_target.endswith("PerChannelStrategy")
+
+    if has_patching:
+        if sampling_rate is None:
+            raise ValueError(
+                "Cannot validate reconstruction_head.output_dim without "
+                "hyperparameters.sampling_rate."
+            )
+        patch_samples = max(
+            1, round(float(patch_duration) * float(sampling_rate))
+        )
+        expected_recon_output_dim = (
+            patch_samples
+            if is_per_channel
+            else int(num_channels) * patch_samples
+        )
+    else:
+        expected_recon_output_dim = 1 if is_per_channel else int(num_channels)
+
+    if int(recon_output_dim) != int(expected_recon_output_dim):
+        raise ValueError(
+            "model.reconstruction_head.output_dim is incompatible with "
+            "tokenizer configuration. "
+            f"Configured={int(recon_output_dim)}, expected={expected_recon_output_dim}. "
+            "Use ${recon_output_dim_general:${hyperparameters.num_channels},"
+            "${model.tokenizer.patch_duration},${hyperparameters.sampling_rate},"
+            + str(is_per_channel).lower()
+            + "}."
         )
 
 

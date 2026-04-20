@@ -20,7 +20,7 @@ model:
   reconstruction_head:
     _target_: foundry.models.reconstruction_head.ReconstructionHead
     embed_dim: ${model.embed_dim}
-    output_dim: ${recon_output_dim:${hyperparameters.num_channels},${hyperparameters.patch_duration},${hyperparameters.sampling_rate}}
+    output_dim: ${recon_output_dim_general:${hyperparameters.num_channels},${model.tokenizer.patch_duration},${hyperparameters.sampling_rate},false}
 
 run:
   name: pretrain_openneuro_eeg
@@ -33,7 +33,7 @@ hyperparameters:
   batch_size: 128
   sequence_length: 2.0
   patch_duration: 0.1
-  sampling_rate: 256
+  sampling_rate: null
   fold_number: 0
   num_workers: 4
   learning_rate: 1e-4

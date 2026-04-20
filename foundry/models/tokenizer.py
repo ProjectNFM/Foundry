@@ -75,6 +75,43 @@ class EEGTokenizer(nn.Module):
     def uses_per_channel(self) -> bool:
         return isinstance(self.channel_strategy, PerChannelStrategy)
 
+    @property
+    def supports_variable_sampling_rate(self) -> bool:
+        """Whether this tokenizer supports mixed sampling rates in one dataset."""
+        return not self._do_patching
+
+    @property
+    def recon_output_dim(self) -> int:
+        """Expected reconstruction target width for masked reconstruction."""
+        if self._do_patching:
+            patch_samples = getattr(
+                self.temporal_embedding, "patch_samples", None
+            )
+            if patch_samples is None:
+                raise AttributeError(
+                    "Patch temporal embedding must define 'patch_samples'."
+                )
+            if self.uses_per_channel:
+                return int(patch_samples)
+            num_channels = getattr(self.channel_strategy, "num_channels", None)
+            if num_channels is None:
+                raise AttributeError(
+                    "Patch tokenizer with non-per-channel strategy must define "
+                    "'num_channels' on channel_strategy."
+                )
+            return int(num_channels) * int(patch_samples)
+
+        if self.uses_per_channel:
+            return 1
+
+        num_channels = getattr(self.channel_strategy, "num_channels", None)
+        if num_channels is None:
+            raise AttributeError(
+                "Non-per-channel strategy must define 'num_channels' to infer "
+                "reconstruction output dimension."
+            )
+        return int(num_channels)
+
     def pretokenize(
         self,
         signal: np.ndarray,
@@ -334,6 +371,19 @@ class EEGTokenizer(nn.Module):
             seq_len = kwargs.get("input_seq_len")
 
         if self._do_patching:
+            if sr is None:
+                raise ValueError(
+                    "input_sampling_rate is required when patching is enabled."
+                )
+            if sr.numel() == 0:
+                raise ValueError(
+                    "input_sampling_rate must be non-empty when patching is enabled."
+                )
+            if not torch.allclose(sr, sr[0], rtol=1e-5, atol=1e-5):
+                raise ValueError(
+                    "Patching tokenizer requires a uniform sampling rate "
+                    f"within each batch, got rates: {torch.unique(sr).tolist()}"
+                )
             sampling_rate = sr[0].item()
             patches = patch_signal(
                 transformed,
