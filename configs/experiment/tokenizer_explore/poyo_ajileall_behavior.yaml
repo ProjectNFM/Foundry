@@ -4,6 +4,9 @@ defaults:
   - override /model: poyo_eeg
   - override /data: ajile/allsess
 
+model:
+  zero_output_timestamps: true
+
 data:
   task_type: behavior
 

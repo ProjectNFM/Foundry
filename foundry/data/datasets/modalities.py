@@ -1,6 +1,6 @@
 import torch
 from torch_brain.registry import register_modality, DataType
-from torch_brain.nn.loss import CrossEntropyLoss, Loss
+from torch_brain.nn.loss import CrossEntropyLoss, Loss, MSELoss
 
 
 class MappedCrossEntropyLoss(Loss):
@@ -101,6 +101,15 @@ AJILE = register_modality(
     loss_fn=CrossEntropyLoss(),
 )
 
+AJILE_POSE_ESTIMATION = register_modality(
+    "ajile_pose_estimation",
+    dim=18,
+    type=DataType.CONTINUOUS,
+    timestamp_key="pose_trajectories.timestamps",
+    value_key="pose_trajectories.values",
+    loss_fn=MSELoss(),
+)
+
 NEUROSOFT_ON_VS_OFF = register_modality(
     "neurosoft_on_vs_off",
     dim=2,
@@ -112,7 +121,7 @@ NEUROSOFT_ON_VS_OFF = register_modality(
 
 NEUROSOFT_ACOUSTIC_STIM = register_modality(
     "neurosoft_acoustic_stim",
-    dim=17,
+    dim=26,
     type=DataType.MULTINOMIAL,
     timestamp_key="acoustic_stim_trials.timestamps",
     value_key="acoustic_stim_trials.behavior_ids",

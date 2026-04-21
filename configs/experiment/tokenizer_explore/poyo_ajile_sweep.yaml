@@ -14,6 +14,7 @@ defaults:
   - override /hydra/launcher: slurm_default
 
 model:
+  zero_output_timestamps: true
   tokenizer:
     patch_duration: ${hyperparameters.patch_duration}
     channel_strategy:

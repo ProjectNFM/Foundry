@@ -215,3 +215,4 @@ __marimo__/
 /profiling_output/
 /runs/
 runs
+wandb_exports/

@@ -1,0 +1,35 @@
+# @package _global_
+
+defaults:
+  - override /model: eeg_net_encoder
+  - override /data: neurosoft_minipigs/singlesess
+
+model:
+  num_channels: ${get_num_ecog_channels_by_name:${data.root}/neurosoft_minipigs_2026,${data.recording_ids.0}}
+  num_samples: 1000
+
+data:
+  split_type: intrasession-causal
+  task_type: acoustic_stim
+
+trainer:
+  callbacks:
+    early_stopping:
+      monitor: val/neurosoft_acoustic_stim_f1
+      mode: max
+      patience: 20
+
+run:
+  name: eegnet_neurosoft_singlesess
+  group: DEBUG_EEGNET_NEUROSOFT
+  tags: [baselines, training, eeg_net_encoder, neurosoft]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 0.5
+  fold_number: 0
+  num_workers: 4
+  learning_rate: 1e-4
+  weight_decay: 0.01
