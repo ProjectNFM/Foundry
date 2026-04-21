@@ -55,7 +55,7 @@ def time_dataloader(dataloader, num_batches, label):
     return elapsed
 
 
-@hydra.main(version_base=None, config_path="configs", config_name="config")
+@hydra.main(version_base=None, config_path="../configs", config_name="config")
 @hydra_main_wrapper
 def main(cfg: DictConfig):
     from foundry.data.utils import (

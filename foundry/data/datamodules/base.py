@@ -16,7 +16,7 @@ from torch_brain.data import collate
 from lightning import LightningDataModule
 from torch_brain.transforms import Compose
 
-from foundry.data.samplers import FastRandomFixedWindowSampler
+from torch_brain.data.sampler import RandomFixedWindowSampler
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ class NeuralDataModule(LightningDataModule):
         seed: int = 42,
         dataset_kwargs: Optional[dict] = None,
         task_type: Optional[str] = None,
-        sampler_class=FastRandomFixedWindowSampler,
+        sampler_class=RandomFixedWindowSampler,
         prefetch_factor: int = 2,
     ):
         super().__init__()
