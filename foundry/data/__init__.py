@@ -1,6 +1,5 @@
 from . import datasets, datamodules
 from . import transforms
-from . import samplers
 from .utils import (
     compute_patch_samples,
     get_sampling_rate,
@@ -14,7 +13,6 @@ __all__ = [
     "datasets",
     "datamodules",
     "transforms",
-    "samplers",
     "compute_patch_samples",
     "get_sampling_rate",
     "get_channel_counts",
