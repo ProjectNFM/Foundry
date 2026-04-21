@@ -206,13 +206,14 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-./data/
+
 .eegdash_cache
-outputs/
-lightning_logs/
-logs/
 .vscode/
-profiling_output/
-runs/
-data/
+/data/
+/outputs/
+/lightning_logs/
+/logs/
+/profiling_output/
+/runs/
+runs
 wandb_exports/
