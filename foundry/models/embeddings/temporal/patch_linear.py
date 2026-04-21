@@ -21,7 +21,7 @@ class PatchLinearEmbedding(nn.Module):
         self.num_input_channels = num_input_channels
         self.patch_samples = patch_samples
         self.projection = nn.Linear(
-            num_input_channels * patch_samples, embed_dim
+            num_input_channels * patch_samples, embed_dim, bias=True
         )
         nn.init.xavier_uniform_(self.projection.weight, gain=1.0)
         nn.init.zeros_(self.projection.bias)

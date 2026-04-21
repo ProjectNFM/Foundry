@@ -5,6 +5,8 @@
 - a composable `EEGTokenizer` (`tokenizer.py`) for channel handling + temporal embedding,
 - a Perceiver IO backbone (`backbones/perceiver.py`),
 - the integrated POYO-style model (`poyo_eeg.py`),
+- masking strategies for self-supervised pretraining (`masking.py`),
+- a reconstruction head for masked signal reconstruction (`reconstruction_head.py`),
 - and baseline CNN models (`baselines.py`).
 
 ## Current Layout
@@ -14,6 +16,8 @@ foundry/models/
 ├── __init__.py
 ├── tokenizer.py
 ├── poyo_eeg.py
+├── masking.py
+├── reconstruction_head.py
 ├── baselines.py
 ├── utils.py
 ├── backbones/
@@ -46,8 +50,12 @@ flowchart LR
     D --> E[EEGTokenizer.forward<br/>GPU stage]
     E --> F[Session embedding add]
     F --> G[PerceiverIOBackbone]
-    G --> H[MultitaskReadout]
-    H --> I[Task outputs]
+    G --> H{Mode?}
+    H -->|Supervised| I[MultitaskReadout]
+    H -->|Pretrain| J[ReconstructionHead]
+    H -->|Joint| I & J
+    I --> K[Task outputs]
+    J --> L[Reconstructed signal]
 ```
 
 ### POYOEEGModel Composition
@@ -58,7 +66,21 @@ flowchart LR
 2. session conditioning -> adds `session_emb(input_session_index)` to every input token
 3. latent/query setup -> latent embeddings + rotary time embeddings
 4. `PerceiverIOBackbone` -> encoder cross-attn, processor self-attn, decoder cross-attn
-5. `MultitaskReadout` -> task-specific heads chosen by `output_decoder_index`
+5. Output routing (mode-dependent):
+   - **Supervised**: `MultitaskReadout` -> task-specific heads chosen by `output_decoder_index`
+   - **Pretrain**: `ReconstructionHead` -> signal reconstruction at masked positions
+   - **Joint**: both heads receive their portion of the decoder output
+
+### Three Operating Modes
+
+The model supports three modes, controlled entirely by which optional
+components are configured (no mode flag):
+
+| Mode | `readout_specs` | `reconstruction_head` | Output keys |
+|---|---|---|---|
+| **Supervised** | provided | `None` | `{"task_name": tensor, ...}` |
+| **Pretrain** | `None` | provided | `{"reconstruction": tensor}` |
+| **Joint** | provided | provided | `{"task_name": ..., "reconstruction": tensor}` |
 
 ## EEGTokenizer Architecture
 
@@ -66,6 +88,22 @@ The tokenizer has two phases:
 
 - `pretokenize(...)`: CPU-side per-sample prep in dataloading
 - `forward(...)`: GPU-side token embedding in training/inference
+
+### Masking (Pretraining)
+
+When a `MaskingStrategy` is configured on the tokenizer:
+
+- `pretokenize()` generates a boolean mask, extracts reconstruction targets at
+  masked positions, and returns them alongside the standard fields.
+- `forward()` replaces masked token embeddings with a learned `mask_emb`
+  parameter after the temporal embedding and layer norm.
+
+Available strategies:
+
+| Strategy | Description |
+|---|---|
+| `RandomPatchMasking` | Each token masked independently with probability `mask_ratio` |
+| `ContiguousSpanMasking` | Contiguous spans with geometric length distribution |
 
 ### Channel Strategies (`embeddings/channel/processors.py`)
 
@@ -94,6 +132,25 @@ Used only by `SpatialProjectionStrategy`:
 | `PerTimepointIdentityEmbedding` | `(B, T, input_dim)` | `(B, T, D)` |
 | `CWTEmbedding` | `(B, num_sources, T)` + `input_sampling_rate`, `input_seq_len` | `(B, target_time_tokens, D)` |
 
+## ReconstructionHead
+
+`reconstruction_head.py` provides a simple MLP that projects decoder
+embeddings back to raw signal space:
+
+```
+LayerNorm -> Linear(embed_dim, hidden_dim) -> GELU -> Linear(hidden_dim, output_dim)
+```
+
+The `output_dim` depends on the tokenizer combination:
+
+| Combination | `output_dim` |
+|---|---|
+| Fixed/SpatialProj + Patch | `num_channels * patch_samples` |
+| PerChannel + Patch | `patch_samples` |
+| Fixed/SpatialProj + CWT | `num_channels` |
+| Fixed/SpatialProj + PerTimepoint | `num_channels` |
+| PerChannel + PerTimepoint | `1` |
+
 ## How Tokenizer Variants Relate
 
 Tokenizer configs live in `configs/model/tokenizer/` and combine:
@@ -103,7 +160,7 @@ Tokenizer configs live in `configs/model/tokenizer/` and combine:
 
 ## API Reference (Practical)
 
-### Build a tokenizer + POYO model
+### Build a tokenizer + POYO model (supervised)
 
 ```python
 from foundry.models import (
@@ -146,6 +203,45 @@ model = POYOEEGModel(
 )
 ```
 
+### Build a pretraining model
+
+```python
+from foundry.models import (
+    EEGTokenizer,
+    POYOEEGModel,
+    FixedChannelStrategy,
+    PatchLinearEmbedding,
+    RandomPatchMasking,
+    ReconstructionHead,
+)
+
+embed_dim = 128
+num_channels = 64
+patch_samples = 25
+
+tokenizer = EEGTokenizer(
+    channel_strategy=FixedChannelStrategy(num_channels=num_channels),
+    temporal_embedding=PatchLinearEmbedding(
+        embed_dim=embed_dim,
+        num_input_channels=num_channels,
+        patch_samples=patch_samples,
+    ),
+    embed_dim=embed_dim,
+    patch_duration=0.1,
+    masking=RandomPatchMasking(mask_ratio=0.15),
+)
+
+model = POYOEEGModel(
+    tokenizer=tokenizer,
+    embed_dim=embed_dim,
+    sequence_length=2.0,
+    reconstruction_head=ReconstructionHead(
+        embed_dim=embed_dim,
+        output_dim=num_channels * patch_samples,
+    ),
+)
+```
+
 ### Perceiver IO components directly
 
 `backbones/perceiver.py` exposes:
@@ -164,3 +260,12 @@ model = POYOEEGModel(
 - `EEGNetEncoder`
 
 These use the same multitask readout interface, but do not use `EEGTokenizer`.
+
+## Training Modules
+
+Two LightningModule wrappers are available in `foundry/training/`:
+
+| Module | Use case | Config |
+|---|---|---|
+| `EEGModule` | Supervised multitask classification | `configs/module/default.yaml` |
+| `PretrainModule` | Masked reconstruction pretraining | `configs/module/pretrain.yaml` |

@@ -105,6 +105,45 @@ def _patch_samples_resolver(patch_duration: float, sampling_rate: float) -> int:
     return max(1, round(float(patch_duration) * float(sampling_rate)))
 
 
+def _recon_output_dim_resolver(
+    num_channels: int, patch_duration: float, sampling_rate: float
+) -> int:
+    """Reconstruction target dimensionality for fixed-channel patch tokenizers.
+
+    ``num_channels * patch_samples`` -- the flattened patch vector length.
+    """
+    patch_samples = max(1, round(float(patch_duration) * float(sampling_rate)))
+    return int(num_channels) * patch_samples
+
+
+def _recon_output_dim_general_resolver(
+    num_channels: int,
+    patch_duration: Optional[float],
+    sampling_rate: Optional[float],
+    is_per_channel: bool = False,
+) -> int:
+    """General reconstruction target dimensionality across tokenizer modes.
+
+    Rules:
+      - patching + fixed/spatial: ``num_channels * patch_samples``
+      - patching + per-channel: ``patch_samples``
+      - non-patching + fixed/spatial: ``num_channels``
+      - non-patching + per-channel: ``1``
+    """
+    per_channel = bool(is_per_channel)
+    has_patching = patch_duration is not None and float(patch_duration) > 0
+    if not has_patching:
+        return 1 if per_channel else int(num_channels)
+
+    if sampling_rate is None:
+        raise ValueError(
+            "sampling_rate is required when patch_duration is provided."
+        )
+
+    patch_samples = max(1, round(float(patch_duration) * float(sampling_rate)))
+    return patch_samples if per_channel else int(num_channels) * patch_samples
+
+
 def _sweep_choices(values: List[str] | tuple[str, ...]) -> str:
     """Hydra-compatible choice string from a list/tuple of string values."""
     if not values:
@@ -204,6 +243,8 @@ def register_resolvers() -> None:
         "get_checkpoints_from_folder": _get_checkpoints_from_folder,
         "get_overrides_from_ckpt": _get_overrides_from_ckpt,
         "patch_samples": _patch_samples_resolver,
+        "recon_output_dim": _recon_output_dim_resolver,
+        "recon_output_dim_general": _recon_output_dim_general_resolver,
         "get_suffix": _get_suffix,
         "sweep_choices": _sweep_choices,
         "config_list_sweep_choices": _config_list_sweep_choices,

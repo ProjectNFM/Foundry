@@ -24,9 +24,12 @@ Typical usage::
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 
 NEURAL_MODALITIES = frozenset({"eeg", "ecog", "seeg", "ieeg"})
+logger = logging.getLogger(__name__)
 
 
 def compute_patch_samples(patch_duration: float, sampling_rate: float) -> int:
@@ -66,6 +69,27 @@ def _count_modality_channels(data) -> int:
     return len(data.channels.id)
 
 
+def _infer_sampling_rate(data) -> float:
+    """Infer the sampling rate from one recording's neural timestamps."""
+    modality = _resolve_signal_modality(data)
+    signal_source = getattr(data, modality)
+    deltas = np.diff(signal_source.timestamps)
+    return 1.0 / float(deltas[0])
+
+
+def get_all_sampling_rates(dataset) -> list[float]:
+    """Get sorted unique sampling rates across all recordings in a dataset.
+
+    Sampling rates are rounded to 6 decimals so rates inferred from timestamp
+    deltas remain stable under floating-point noise.
+    """
+    rates = {
+        round(_infer_sampling_rate(dataset.get_recording(rid)), 6)
+        for rid in dataset.recording_ids
+    }
+    return sorted(rates)
+
+
 def get_sampling_rate(dataset) -> float:
     """Infer sampling rate from the first recording in the dataset.
 
@@ -85,11 +109,17 @@ def get_sampling_rate(dataset) -> float:
         ValueError: If no neural signal field is found.
     """
     rid = dataset.recording_ids[0]
-    data = dataset.get_recording(rid)
-    modality = _resolve_signal_modality(data)
-    signal_source = getattr(data, modality)
-    deltas = np.diff(signal_source.timestamps)
-    return 1.0 / float(deltas[0])
+    sampling_rate = _infer_sampling_rate(dataset.get_recording(rid))
+    all_rates = get_all_sampling_rates(dataset)
+    if len(all_rates) > 1:
+        logger.warning(
+            "Detected multiple sampling rates in dataset: %s. "
+            "Using %.6f Hz from first recording %s for backward compatibility.",
+            all_rates,
+            sampling_rate,
+            rid,
+        )
+    return sampling_rate
 
 
 def get_channel_counts(dataset) -> dict[str, int]:
@@ -171,6 +201,7 @@ def get_session_configs(dataset) -> dict[str, int]:
 __all__ = [
     "NEURAL_MODALITIES",
     "compute_patch_samples",
+    "get_all_sampling_rates",
     "get_sampling_rate",
     "get_channel_counts",
     "get_max_channels",

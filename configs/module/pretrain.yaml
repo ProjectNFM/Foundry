@@ -1,0 +1,5 @@
+_target_: foundry.training.MaskedReconstructionModule
+
+learning_rate: ${hyperparameters.learning_rate}
+weight_decay: ${hyperparameters.weight_decay}
+loss_type: normalized_mse

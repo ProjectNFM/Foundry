@@ -1,0 +1,41 @@
+# @package _global_
+#
+# Masked reconstruction pretraining on OpenNeuro EEG data.
+# No task_type is set -- the model operates in pretrain-only mode.
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: openneuro/default
+  - override /module: pretrain
+  - override /trainer: pretrain
+
+model:
+  tokenizer:
+    patch_duration: ${hyperparameters.patch_duration}
+    masking:
+      _target_: foundry.models.masking.RandomPatchMasking
+      mask_ratio: 0.50
+    channel_strategy:
+      num_channels: ${hyperparameters.num_channels}
+  reconstruction_head:
+    _target_: foundry.models.reconstruction_head.ReconstructionHead
+    embed_dim: ${model.embed_dim}
+    output_dim: ${recon_output_dim_general:${hyperparameters.num_channels},${model.tokenizer.patch_duration},${hyperparameters.sampling_rate},false}
+
+run:
+  name: pretrain_openneuro_eeg
+  group: PRETRAIN
+  tags: [pretrain, openneuro, masked_reconstruction]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 128
+  sequence_length: 2.0
+  patch_duration: 0.1
+  fold_number: 0
+  num_workers: 8
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  num_channels: null
+  sampling_rate: null
