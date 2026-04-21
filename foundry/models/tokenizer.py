@@ -11,6 +11,7 @@ from foundry.models.embeddings.channel import (
     PerChannelStrategy,
 )
 from foundry.models.embeddings.patching import (
+    compute_patching_layout,
     compute_patch_timestamps,
     patch_signal,
 )
@@ -132,7 +133,8 @@ class EEGTokenizer(nn.Module):
         Returns:
             dict with model input tensors including ``input_timestamps``.
             When masking is active also includes ``masking_mask``,
-            ``reconstruction_targets``, and ``masked_timestamps``.
+            ``reconstruction_targets``, ``reconstruction_target_mask``,
+            and ``masked_timestamps``.
         """
         result = self.channel_strategy.prepare_pretokenize(
             signal,
@@ -144,14 +146,12 @@ class EEGTokenizer(nn.Module):
 
         if self._do_patching:
             num_samples = signal.shape[0]
-            patch_samples = max(1, round(self.patch_duration * sampling_rate))
-            stride_samples = max(1, round(self.stride * sampling_rate))
-            if num_samples > patch_samples:
-                num_patches = (
-                    num_samples - patch_samples
-                ) // stride_samples + 1
-            else:
-                num_patches = 1
+            num_patches, _, _, _ = compute_patching_layout(
+                sequence_length_samples=num_samples,
+                patch_duration=self.patch_duration,
+                stride=self.stride,
+                sampling_rate=sampling_rate,
+            )
 
             patch_timestamps = compute_patch_timestamps(
                 start_time=0.0,
@@ -212,6 +212,9 @@ class EEGTokenizer(nn.Module):
           tensor.  Entries at unmasked positions are zero; masked entries
           contain the raw-signal patch/sample that the model should
           reconstruct.
+        * ``reconstruction_target_mask`` -- ``(num_tokens, output_dim)``
+          bool tensor indicating which target dimensions correspond to real
+          (non-padded) channels.
         * ``masked_timestamps`` -- ``(n_masked,)`` timestamps of masked
           tokens (used as output query timestamps for reconstruction).
 
@@ -238,22 +241,23 @@ class EEGTokenizer(nn.Module):
 
         if self._do_patching:
             num_samples = raw_signal.shape[0]
-            patch_samples = max(1, round(self.patch_duration * sampling_rate))
-            stride_samples = max(1, round(self.stride * sampling_rate))
-            if num_samples > patch_samples:
-                num_patches = (
-                    num_samples - patch_samples
-                ) // stride_samples + 1
-            else:
-                num_patches = 1
+            (
+                num_patches,
+                patch_samples,
+                stride_samples,
+                pad_right_samples,
+            ) = compute_patching_layout(
+                sequence_length_samples=num_samples,
+                patch_duration=self.patch_duration,
+                stride=self.stride,
+                sampling_rate=sampling_rate,
+            )
 
             # CPU-side patching: unfold (C_pad, T) -> (C_pad, num_patches, patch_samples)
             sig_t = padded_signal  # (C_pad, T)
-            T = sig_t.shape[1]
-            if T >= patch_samples:
-                patches_cpu = sig_t.unfold(1, patch_samples, stride_samples)
-            else:
-                patches_cpu = sig_t.unsqueeze(1)
+            if pad_right_samples:
+                sig_t = torch.nn.functional.pad(sig_t, (0, pad_right_samples))
+            patches_cpu = sig_t.unfold(1, patch_samples, stride_samples)
 
             if self.uses_per_channel:
                 # Flat token order: all patches of ch0, then ch1, ...
@@ -321,8 +325,37 @@ class EEGTokenizer(nn.Module):
         full_targets = torch.zeros(num_tokens, output_dim)
         full_targets[mask] = targets.reshape(-1, output_dim)
 
+        channel_mask = result["input_mask"]
+        if isinstance(channel_mask, np.ndarray):
+            channel_mask = torch.from_numpy(channel_mask).bool()
+        else:
+            channel_mask = channel_mask.bool()
+
+        if self.uses_per_channel:
+            tokens_per_channel = num_tokens // channel_mask.numel()
+            token_valid_mask = (
+                channel_mask.unsqueeze(1)
+                .expand(channel_mask.numel(), tokens_per_channel)
+                .reshape(-1)
+            )
+            full_target_mask = token_valid_mask.unsqueeze(-1).expand(
+                num_tokens, output_dim
+            )
+        else:
+            if self._do_patching:
+                values_per_channel = output_dim // channel_mask.numel()
+                dim_valid_mask = channel_mask.repeat_interleave(
+                    values_per_channel
+                )
+            else:
+                dim_valid_mask = channel_mask
+            full_target_mask = dim_valid_mask.unsqueeze(0).expand(
+                num_tokens, output_dim
+            )
+
         result["masking_mask"] = mask
         result["reconstruction_targets"] = full_targets
+        result["reconstruction_target_mask"] = full_target_mask
         result["masked_timestamps"] = timestamps[mask]
 
     def forward(

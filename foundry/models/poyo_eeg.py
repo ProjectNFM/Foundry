@@ -456,6 +456,9 @@ class POYOEEGModel(nn.Module):
         reconstruction_targets = pretokenized.pop(
             "reconstruction_targets", None
         )
+        reconstruction_target_mask = pretokenized.pop(
+            "reconstruction_target_mask", None
+        )
         masked_timestamps = pretokenized.pop("masked_timestamps", None)
 
         latent_index = self._latent_index
@@ -518,7 +521,7 @@ class POYOEEGModel(nn.Module):
             and masked_timestamps is not None
         ):
             n_masked = masked_timestamps.shape[0]
-            recon_timestamps = torch.zeros(n_masked, dtype=torch.float32)
+            recon_timestamps = masked_timestamps.to(dtype=torch.float32)
             recon_decoder_index = torch.full(
                 (n_masked,), RECON_DECODER_ID, dtype=torch.long
             )
@@ -547,6 +550,8 @@ class POYOEEGModel(nn.Module):
             result["masking_mask"] = masking_mask
         if reconstruction_targets is not None:
             result["reconstruction_targets"] = reconstruction_targets
+        if reconstruction_target_mask is not None:
+            result["reconstruction_target_mask"] = reconstruction_target_mask
 
         return result
 

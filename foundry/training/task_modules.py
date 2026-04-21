@@ -327,6 +327,7 @@ class MaskedReconstructionModule(BaseModule):
         learning_rate: float = 1e-4,
         weight_decay: float = 0.01,
         loss_type: str = "mse",
+        normalized_mse_eps: float = 1e-6,
     ):
         super().__init__(
             model=model,
@@ -337,10 +338,17 @@ class MaskedReconstructionModule(BaseModule):
         loss_factories = {
             "mse": nn.MSELoss,
             "smooth_l1": nn.SmoothL1Loss,
+            "normalized_mse": None,
         }
         if loss_type not in loss_factories:
             raise ValueError(f"Unsupported loss_type: {loss_type!r}")
-        self.loss_fn = loss_factories[loss_type]()
+        self.loss_type = loss_type
+        self.loss_fn = (
+            loss_factories[loss_type]()
+            if loss_factories[loss_type] is not None
+            else None
+        )
+        self.normalized_mse_eps = normalized_mse_eps
 
         self.train_r2 = R2Score()
         self.val_r2 = R2Score()
@@ -370,42 +378,109 @@ class MaskedReconstructionModule(BaseModule):
     def _shared_reconstruction_step(
         self, stage: str, batch: Dict[str, Any]
     ) -> torch.Tensor:
-        recon_targets, model_inputs = self._unpack_batch(batch)
+        recon_targets, recon_target_mask, model_inputs = self._unpack_batch(
+            batch
+        )
         outputs = self.model(**model_inputs, unpack_output=False)
         predictions = outputs["reconstruction"]
-        targets = self._flatten_targets(recon_targets, model_inputs)
-
-        loss = self.loss_fn(predictions, targets)
+        targets, target_mask = self._flatten_targets(
+            recon_targets, recon_target_mask, model_inputs
+        )
+        loss, valid_predictions, valid_targets = self._compute_loss(
+            predictions, targets, target_mask
+        )
         self.log(f"{stage}/loss", loss, prog_bar=True)
 
         r2_metric = self.train_r2 if stage == "train" else self.val_r2
-        r2_metric.update(predictions.flatten(), targets.flatten())
-        self.log(f"{stage}/r2", r2_metric, on_step=False, on_epoch=True)
+        r2_metric.update(valid_predictions, valid_targets)
+        self.log(f"{stage}/r2", r2_metric, prog_bar=True)
 
         return loss
 
+    def _compute_loss(
+        self,
+        predictions: torch.Tensor,
+        targets: torch.Tensor,
+        target_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if self.loss_type != "normalized_mse":
+            valid_predictions = predictions[target_mask]
+            valid_targets = targets[target_mask]
+            if valid_predictions.numel() == 0:
+                raise ValueError(
+                    "No valid reconstruction targets available after applying "
+                    "the reconstruction target mask."
+                )
+            return (
+                self.loss_fn(valid_predictions, valid_targets),
+                valid_predictions,
+                valid_targets,
+            )
+
+        valid_count_per_patch = target_mask.sum(dim=-1)
+        valid_patch_mask = valid_count_per_patch > 0
+        if not valid_patch_mask.any():
+            raise ValueError(
+                "No valid reconstruction targets available after applying "
+                "the reconstruction target mask."
+            )
+
+        patch_predictions = predictions[valid_patch_mask]
+        patch_targets = targets[valid_patch_mask]
+        patch_target_mask = target_mask[valid_patch_mask]
+        patch_valid_count = valid_count_per_patch[valid_patch_mask].to(
+            dtype=patch_targets.dtype
+        )
+
+        squared_error = (patch_predictions - patch_targets).pow(2)
+        masked_squared_error = squared_error * patch_target_mask
+        mse_per_patch = masked_squared_error.sum(dim=-1) / patch_valid_count
+
+        masked_targets = patch_targets * patch_target_mask
+        patch_mean = masked_targets.sum(dim=-1) / patch_valid_count
+        centered_targets = (
+            patch_targets - patch_mean.unsqueeze(-1)
+        ) * patch_target_mask
+        variance_per_patch = (
+            centered_targets.pow(2).sum(dim=-1) / patch_valid_count
+        )
+        normalized_mse_per_patch = mse_per_patch / variance_per_patch.clamp_min(
+            self.normalized_mse_eps
+        )
+        loss = normalized_mse_per_patch.mean()
+
+        valid_predictions = patch_predictions[patch_target_mask]
+        valid_targets = patch_targets[patch_target_mask]
+        return loss, valid_predictions, valid_targets
+
     def _unpack_batch(self, batch: Dict[str, Any]):
         recon_targets = batch.pop("reconstruction_targets")
+        recon_target_mask = batch.pop("reconstruction_target_mask", None)
         batch.pop("target_values", None)
         batch.pop("target_weights", None)
         batch.pop("session_id", None)
         batch.pop("absolute_start", None)
         batch.pop("eval_mask", None)
-        return recon_targets, batch
+        return recon_targets, recon_target_mask, batch
 
     def _flatten_targets(
         self,
         recon_targets: torch.Tensor,
+        recon_target_mask: torch.Tensor | None,
         model_inputs: Dict[str, Any],
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if recon_target_mask is None:
+            recon_target_mask = torch.ones_like(recon_targets, dtype=torch.bool)
+
         masking_mask = model_inputs.get("masking_mask")
         if masking_mask is not None:
-            return recon_targets[masking_mask]
+            return recon_targets[masking_mask], recon_target_mask[masking_mask]
 
         from foundry.models.poyo_eeg import RECON_DECODER_ID
 
         decoder_idx = model_inputs["output_decoder_index"]
         per_batch_targets = []
+        per_batch_target_masks = []
         for batch_idx in range(decoder_idx.shape[0]):
             num_reconstruction_queries = (
                 (decoder_idx[batch_idx] == RECON_DECODER_ID).sum().item()
@@ -413,7 +488,12 @@ class MaskedReconstructionModule(BaseModule):
             per_batch_targets.append(
                 recon_targets[batch_idx, :num_reconstruction_queries]
             )
-        return torch.cat(per_batch_targets, dim=0)
+            per_batch_target_masks.append(
+                recon_target_mask[batch_idx, :num_reconstruction_queries]
+            )
+        return torch.cat(per_batch_targets, dim=0), torch.cat(
+            per_batch_target_masks, dim=0
+        )
 
 
 class ClassificationModule(BaseMultitaskModule):

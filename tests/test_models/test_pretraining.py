@@ -677,3 +677,44 @@ class TestPretrainModule:
         )
         module = PretrainModule(model=model, loss_type="smooth_l1")
         assert isinstance(module.loss_fn, torch.nn.SmoothL1Loss)
+
+    def test_normalized_mse_uses_per_patch_variance(self):
+        tokenizer = EEGTokenizer(
+            channel_strategy=FixedChannelStrategy(num_channels=NUM_CHANNELS),
+            temporal_embedding=PatchLinearEmbedding(
+                embed_dim=EMBED_DIM,
+                num_input_channels=NUM_CHANNELS,
+                patch_samples=PATCH_SAMPLES,
+            ),
+            embed_dim=EMBED_DIM,
+            patch_duration=PATCH_DURATION,
+            masking=RandomPatchMasking(mask_ratio=0.3),
+        )
+        model = POYOEEGModel(
+            tokenizer=tokenizer,
+            embed_dim=EMBED_DIM,
+            sequence_length=SEQUENCE_LENGTH,
+            reconstruction_head=ReconstructionHead(
+                embed_dim=EMBED_DIM,
+                output_dim=NUM_CHANNELS * PATCH_SAMPLES,
+            ),
+            latent_step=0.5,
+            num_latents_per_step=1,
+        )
+        module = PretrainModule(model=model, loss_type="normalized_mse")
+        assert module.loss_fn is None
+
+        predictions = torch.tensor([[3.0, 5.0], [12.0, 18.0]])
+        targets = torch.tensor([[1.0, 3.0], [10.0, 20.0]])
+        target_mask = torch.ones_like(targets, dtype=torch.bool)
+
+        loss, _, _ = module._compute_loss(predictions, targets, target_mask)
+
+        expected_loss = torch.tensor((4.0 + 0.16) / 2.0)
+        assert torch.isclose(loss, expected_loss)
+
+        global_variance = torch.var(targets.reshape(-1), unbiased=False)
+        global_normalized_mse = (
+            torch.mean((predictions - targets) ** 2) / global_variance
+        )
+        assert not torch.isclose(loss, global_normalized_mse)
