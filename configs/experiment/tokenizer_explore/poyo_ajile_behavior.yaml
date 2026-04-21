@@ -3,6 +3,7 @@
 defaults:
   - override /model: poyo_eeg
   - override /data: ajile/singlesess
+  - override /model/tokenizer: spatial_session_cwt
 
 model:
   zero_output_timestamps: true

@@ -10,13 +10,14 @@ devices: auto
 default_root_dir: .
 log_every_n_steps: 10
 enable_progress_bar: true
-enable_model_summary: true
+enable_model_summary: false
+num_sanity_val_steps: 0
 logger: ${logger}
 callbacks:
   vocab_initializer:
     _target_: foundry.training.callbacks.VocabInitializerCallback
-  rich_model_summary:
-    _target_: lightning.pytorch.callbacks.RichModelSummary
+  # rich_model_summary:
+  #   _target_: lightning.pytorch.callbacks.RichModelSummary
   rich_progress_bar:
     _target_: lightning.pytorch.callbacks.RichProgressBar
   early_stopping:

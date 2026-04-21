@@ -27,10 +27,12 @@ class ContinuousCWTLayer(nn.Module):
         init_freqs: list[float],
         target_time_tokens: int,
         n_cycles: float = 7.0,
+        phase_stability_eps: float = 1e-4,
     ):
         super().__init__()
         self.freqs = nn.Parameter(torch.tensor(init_freqs, dtype=torch.float32))
         self.target_time_tokens = target_time_tokens
+        self.phase_stability_eps = phase_stability_eps
         self.n_cycles = nn.Parameter(
             torch.full((len(init_freqs),), float(n_cycles), dtype=torch.float32)
         )
@@ -57,6 +59,11 @@ class ContinuousCWTLayer(nn.Module):
         device = x.device
         dtype = x.dtype
 
+        if torch.any(~torch.isfinite(fs)) or torch.any(fs <= 0):
+            raise ValueError(
+                f"input_sampling_rate must be finite and > 0. Got {fs}."
+            )
+
         f = torch.clamp(self.freqs, min=0.1).view(1, F_dim, 1)
         n_c = torch.clamp(self.n_cycles, min=1.0).view(1, F_dim, 1)
 
@@ -66,19 +73,15 @@ class ContinuousCWTLayer(nn.Module):
         t_sec = t / fs.view(B, 1, 1)
 
         sigma = n_c / (2 * math.pi * f)
-        envelope = torch.exp(-(t_sec**2) / (2 * sigma**2))
+        envelope_exponent = -(t_sec**2) / (2 * sigma**2)
+        envelope = torch.exp(envelope_exponent.clamp(min=-60.0))
 
         real_wavelet = torch.cos(2 * math.pi * f * t_sec) * envelope
         imag_wavelet = torch.sin(2 * math.pi * f * t_sec) * envelope
 
-        norm_factor = (
-            torch.sum(
-                torch.sqrt(real_wavelet**2 + imag_wavelet**2),
-                dim=-1,
-                keepdim=True,
-            )
-            + 1e-8
-        )
+        # For Morlet components, sqrt(real^2 + imag^2) equals the envelope.
+        # Using envelope directly avoids undefined sqrt gradients at zero.
+        norm_factor = torch.sum(envelope, dim=-1, keepdim=True) + 1e-8
         real_wavelet = real_wavelet / norm_factor
         imag_wavelet = imag_wavelet / norm_factor
 
@@ -108,7 +111,8 @@ class ContinuousCWTLayer(nn.Module):
         out_complex_flat = out_complex.view(B, C * 2, F_dim, Max_T)
 
         y_coords = torch.linspace(-1.0, 1.0, F_dim, device=device)
-        end_x = -1.0 + 2.0 * (seq_lens.float() - 1) / (Max_T - 1)
+        seq_lens = seq_lens.clamp(min=1, max=Max_T)
+        end_x = -1.0 + 2.0 * (seq_lens.float() - 1) / max(1, (Max_T - 1))
         steps = torch.linspace(
             0.0, 1.0, self.target_time_tokens, device=device
         ).unsqueeze(0)
@@ -135,8 +139,14 @@ class ContinuousCWTLayer(nn.Module):
         cont_real = continuous_complex[:, :, 0, :, :]
         cont_imag = continuous_complex[:, :, 1, :, :]
 
-        cont_mag = torch.sqrt(cont_real**2 + cont_imag**2 + 1e-8)
-        cont_phase = torch.atan2(cont_imag, cont_real) / math.pi
+        mag_sq = cont_real.square() + cont_imag.square()
+        cont_mag = torch.sqrt(mag_sq + 1e-8)
+        raw_phase = torch.atan2(cont_imag, cont_real) / math.pi
+
+        # Phase is undefined for near-zero magnitude and can explode gradients.
+        # Smoothly suppressing phase there keeps learnable CWT params stable.
+        phase_weight = mag_sq / (mag_sq + self.phase_stability_eps)
+        cont_phase = raw_phase * phase_weight
 
         return torch.stack([cont_mag, cont_phase], dim=2)
 

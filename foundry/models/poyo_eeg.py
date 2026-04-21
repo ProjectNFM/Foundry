@@ -286,8 +286,15 @@ class POYOEEGModel(nn.Module):
         channel_ids = data.channels.id[modality_mask].astype(str)
         channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
 
-        sample_deltas = np.diff(signal_source.timestamps)
-        sampling_rate = 1.0 / float(sample_deltas[0])
+        sample_deltas = np.diff(signal_source.timestamps).astype(np.float64)
+        valid_deltas = sample_deltas[
+            np.isfinite(sample_deltas) & (sample_deltas > 0)
+        ]
+        if valid_deltas.size == 0:
+            raise ValueError(
+                "Could not infer a valid sampling rate from timestamps."
+            )
+        sampling_rate = 1.0 / float(np.median(valid_deltas))
 
         pretokenized = self.tokenizer.pretokenize(
             signal=signal_source.signal[:, modality_mask],
