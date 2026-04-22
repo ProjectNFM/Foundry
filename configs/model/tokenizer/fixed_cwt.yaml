@@ -9,5 +9,5 @@ temporal_embedding:
   embed_dim: ${model.embed_dim}
   num_sources: ${hyperparameters.num_channels}
   init_freqs: [2, 4, 8, 13, 20, 30, 50, 70, 100]
-  target_time_tokens: 128
+  target_time_tokens: 
   n_cycles: 7.0
