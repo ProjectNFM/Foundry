@@ -3,6 +3,7 @@ set -euo pipefail
 
 TOKENIZERS=(
   per_channel_per_timepoint_linear
+  per_channel_cwt
   spatial_session_per_timepoint_identity
   spatial_session_cwt
 )
