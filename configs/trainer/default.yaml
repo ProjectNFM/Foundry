@@ -1,6 +1,6 @@
 _target_: lightning.Trainer
 
-max_epochs: 100
+max_epochs: 10000
 # 32-true  — full FP32, safest baseline (all GPUs)
 # 16-mixed — FP16 mixed precision, needs grad scaling (RTX 8000, A100, L40S)
 # bf16-mixed — BF16 mixed precision, most stable speedup (A100, L40S only — NOT RTX 8000)
@@ -12,6 +12,7 @@ log_every_n_steps: 10
 enable_progress_bar: true
 enable_model_summary: false
 num_sanity_val_steps: 2
+accumulate_grad_batches: 1
 logger: ${logger}
 callbacks:
   vocab_initializer:
