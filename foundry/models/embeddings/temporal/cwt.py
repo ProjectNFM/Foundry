@@ -7,6 +7,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def _inverse_softplus(x: torch.Tensor) -> torch.Tensor:
+    threshold = 20.0
+    return torch.where(x > threshold, x, torch.log(torch.expm1(x)))
+
+
 class ContinuousCWTLayer(nn.Module):
     """Learnable Continuous Wavelet Transform with time resampling.
 
@@ -28,14 +33,39 @@ class ContinuousCWTLayer(nn.Module):
         target_time_tokens: int,
         n_cycles: float = 7.0,
         phase_stability_eps: float = 1e-4,
+        min_freq_hz: float = 0.1,
+        min_cycles: float = 1.0,
     ):
         super().__init__()
-        self.freqs = nn.Parameter(torch.tensor(init_freqs, dtype=torch.float32))
+        init_freqs_tensor = torch.tensor(init_freqs, dtype=torch.float32)
+        init_cycles_tensor = torch.full(
+            (len(init_freqs),), float(n_cycles), dtype=torch.float32
+        )
+        if torch.any(init_freqs_tensor <= min_freq_hz):
+            raise ValueError(
+                f"All init_freqs must be > min_freq_hz ({min_freq_hz})."
+            )
+        if torch.any(init_cycles_tensor <= min_cycles):
+            raise ValueError(f"n_cycles must be > min_cycles ({min_cycles}).")
+
+        self.min_freq_hz = min_freq_hz
+        self.min_cycles = min_cycles
         self.target_time_tokens = target_time_tokens
         self.phase_stability_eps = phase_stability_eps
-        self.n_cycles = nn.Parameter(
-            torch.full((len(init_freqs),), float(n_cycles), dtype=torch.float32)
+        self.freqs_unconstrained = nn.Parameter(
+            _inverse_softplus(init_freqs_tensor - min_freq_hz)
         )
+        self.n_cycles_unconstrained = nn.Parameter(
+            _inverse_softplus(init_cycles_tensor - min_cycles)
+        )
+
+    @property
+    def freqs(self) -> torch.Tensor:
+        return self.min_freq_hz + F.softplus(self.freqs_unconstrained)
+
+    @property
+    def n_cycles(self) -> torch.Tensor:
+        return self.min_cycles + F.softplus(self.n_cycles_unconstrained)
 
     def forward(
         self,
@@ -55,7 +85,7 @@ class ContinuousCWTLayer(nn.Module):
             across learnable frequency bins and resampled time tokens.
         """
         B, C, Max_T = x.shape
-        F_dim = len(self.freqs)
+        F_dim = self.freqs_unconstrained.numel()
         device = x.device
         dtype = x.dtype
 
@@ -64,8 +94,8 @@ class ContinuousCWTLayer(nn.Module):
                 f"input_sampling_rate must be finite and > 0. Got {fs}."
             )
 
-        f = torch.clamp(self.freqs, min=0.1).view(1, F_dim, 1)
-        n_c = torch.clamp(self.n_cycles, min=1.0).view(1, F_dim, 1)
+        f = self.freqs.to(device=device, dtype=dtype).view(1, F_dim, 1)
+        n_c = self.n_cycles.to(device=device, dtype=dtype).view(1, F_dim, 1)
 
         K = Max_T if Max_T % 2 != 0 else Max_T + 1
         t = torch.arange(-(K // 2), K // 2 + 1, device=device, dtype=dtype)
@@ -85,27 +115,32 @@ class ContinuousCWTLayer(nn.Module):
         real_wavelet = real_wavelet / norm_factor
         imag_wavelet = imag_wavelet / norm_factor
 
-        x_reshaped = x.reshape(1, B * C, Max_T)
-        weight_real = (
-            real_wavelet.unsqueeze(1)
-            .expand(B, C, F_dim, K)
-            .reshape(B * C * F_dim, 1, K)
-        )
-        weight_imag = (
-            imag_wavelet.unsqueeze(1)
-            .expand(B, C, F_dim, K)
-            .reshape(B * C * F_dim, 1, K)
-        )
+        # FFT-based correlation keeps per-sample wavelets, so mixed fs in a
+        # batch is naturally supported without approximating to one global fs.
+        kernel_real = real_wavelet.flip(-1)
+        kernel_imag = imag_wavelet.flip(-1)
+        full_len = Max_T + K - 1
+        n_fft = 1 << (full_len - 1).bit_length()
 
-        out_real = F.conv1d(
-            x_reshaped, weight_real, groups=B * C, padding="same"
-        )
-        out_imag = F.conv1d(
-            x_reshaped, weight_imag, groups=B * C, padding="same"
-        )
+        x_fft = torch.fft.rfft(x, n=n_fft, dim=-1)
+        real_fft = torch.fft.rfft(kernel_real, n=n_fft, dim=-1)
+        imag_fft = torch.fft.rfft(kernel_imag, n=n_fft, dim=-1)
 
-        out_real = out_real.view(B, C, F_dim, Max_T)
-        out_imag = out_imag.view(B, C, F_dim, Max_T)
+        out_real_full = torch.fft.irfft(
+            x_fft.unsqueeze(2) * real_fft.unsqueeze(1),
+            n=n_fft,
+            dim=-1,
+        )[..., :full_len]
+        out_imag_full = torch.fft.irfft(
+            x_fft.unsqueeze(2) * imag_fft.unsqueeze(1),
+            n=n_fft,
+            dim=-1,
+        )[..., :full_len]
+
+        start = K // 2
+        end = start + Max_T
+        out_real = out_real_full[..., start:end]
+        out_imag = out_imag_full[..., start:end]
 
         out_complex = torch.stack([out_real, out_imag], dim=2)
         out_complex_flat = out_complex.view(B, C * 2, F_dim, Max_T)
