@@ -26,6 +26,8 @@ callbacks:
     patience: 10
     mode: min
     verbose: true
+    check_on_train_epoch_end: false
+    strict: false
   model_checkpoint:
     _target_: lightning.pytorch.callbacks.ModelCheckpoint
     dirpath: checkpoints
@@ -35,3 +37,4 @@ callbacks:
     mode: min
     save_top_k: 1
     verbose: true
+    save_on_train_epoch_end: false

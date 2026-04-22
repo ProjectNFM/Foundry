@@ -1,0 +1,46 @@
+# @package _global_
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: ajile/multisess
+
+model:
+  zero_output_timestamps: true
+
+data:
+  split_type: intrasession
+  task_type: behavior
+
+run:
+  name: ajile_tokenizer_matrix_behavior
+  group: AJILE12_INTRASESSION_TOKENIZER_MATRIX
+  tags: [tokenizer_matrix, poyo_eeg, ajile, intrasession]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 1.0
+  patch_duration: 0.1
+  fold_number: 0
+  num_workers: 32
+  learning_rate: 0.0006
+  weight_decay: 0.09
+  num_channels: null
+  sampling_rate: null
+  session_configs: null
+
+trainer:
+  accelerator: gpu
+  devices: 1
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/ajile_active_behavior_f1
+      mode: max
+      patience: 20
+    model_checkpoint:
+      monitor: val/ajile_active_behavior_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/ajile_active_behavior_f1:.4f}"
