@@ -19,6 +19,8 @@ from torch_brain.transforms import Compose
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_STRIP_KEYS = ("splits",)
+
 
 class NeuralDataModule(LightningDataModule):
     """Generic LightningDataModule for neural datasets with optional tokenization.
@@ -81,6 +83,8 @@ class NeuralDataModule(LightningDataModule):
         seed: int = 42,
         dataset_kwargs: Optional[dict] = None,
         task_type: Optional[str] = None,
+        strip_keys: Optional[tuple[str, ...]] = _DEFAULT_STRIP_KEYS,
+        prefetch_factor: Optional[int] = None,
     ):
         super().__init__()
         self.dataset_class = dataset_class
@@ -92,6 +96,8 @@ class NeuralDataModule(LightningDataModule):
         self.seed = seed
         self.dataset_kwargs = dataset_kwargs or {}
         self.task_type = task_type
+        self.strip_keys = strip_keys or ()
+        self.prefetch_factor = prefetch_factor
 
         # Build transform pipeline
         transform_list = transforms or []
@@ -100,6 +106,7 @@ class NeuralDataModule(LightningDataModule):
 
         self.transform = transform_list if transform_list else None
         self.dataset = None
+        self._sampling_intervals_stripped = False
 
     def setup(self, stage: Optional[str] = None):
         """Setup the DataModule.
@@ -204,6 +211,38 @@ class NeuralDataModule(LightningDataModule):
 
         return class_weights
 
+    def _strip_unused_keys_from_cache(self) -> None:
+        """Remove bulky metadata (e.g. ``splits``) from cached Data objects.
+
+        Attributes listed in ``self.strip_keys`` are only needed during
+        ``get_sampling_intervals()`` / ``compute_class_weights()`` and are
+        never accessed during per-sample ``__getitem__`` calls.  Stripping
+        them avoids the cost of deep-copying and slicing dozens of nested
+        ``Interval`` objects on every sample.
+        """
+        if self._sampling_intervals_stripped or not self.strip_keys:
+            return
+
+        data_objects = getattr(self.dataset, "_data_objects", None)
+        if data_objects is None:
+            return
+
+        total_removed = 0
+        for data in data_objects.values():
+            for key in self.strip_keys:
+                if key in data.__dict__:
+                    del data.__dict__[key]
+                    total_removed += 1
+
+        if total_removed:
+            logger.info(
+                "Stripped %d '%s' attributes from cached recordings to "
+                "speed up per-sample data loading.",
+                total_removed,
+                "', '".join(self.strip_keys),
+            )
+        self._sampling_intervals_stripped = True
+
     def _create_dataloader(
         self, split: Literal["train", "valid", "test"]
     ) -> DataLoader:
@@ -217,12 +256,20 @@ class NeuralDataModule(LightningDataModule):
         """
         sampling_intervals = self.dataset.get_sampling_intervals(split=split)
 
+        # After get_sampling_intervals has read splits metadata, strip those
+        # keys from the cache so every subsequent __getitem__ is cheaper.
+        self._strip_unused_keys_from_cache()
+
         sampler = RandomFixedWindowSampler(
             sampling_intervals=sampling_intervals,
             window_length=self.sequence_length,
             drop_short=True,
             generator=torch.Generator().manual_seed(self.seed),
         )
+
+        pf = self.prefetch_factor
+        if pf is None:
+            pf = 2 if self.num_workers > 0 else None
 
         return DataLoader(
             self.dataset,
@@ -232,8 +279,8 @@ class NeuralDataModule(LightningDataModule):
             pin_memory=self.pin_memory,
             collate_fn=collate,
             persistent_workers=self.num_workers > 0,
-            prefetch_factor=2 if self.num_workers > 0 else None,
-            drop_last=(split == "train"),  # Only drop last for training
+            prefetch_factor=pf,
+            drop_last=(split == "train"),
         )
 
     def train_dataloader(self) -> DataLoader:
