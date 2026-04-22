@@ -49,7 +49,7 @@ class AjileDataModule(NeuralDataModule):
             "recording_ids": recording_ids,
             "split_type": split_type,
             "task_type": task_type,
-            "fold_num": fold_number,
+            "fold_number": fold_number,
         }
         super().__init__(
             dataset_class=PetersonBruntonPoseTrajectory2022,

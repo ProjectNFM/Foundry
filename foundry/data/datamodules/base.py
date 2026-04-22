@@ -107,6 +107,7 @@ class NeuralDataModule(LightningDataModule):
         self.transform = transform_list if transform_list else None
         self.dataset = None
         self._sampling_intervals_stripped = False
+        self._cached_sampling_intervals: dict[str, dict] = {}
 
     def setup(self, stage: Optional[str] = None):
         """Setup the DataModule.
@@ -211,20 +212,30 @@ class NeuralDataModule(LightningDataModule):
 
         return class_weights
 
-    def _strip_unused_keys_from_cache(self) -> None:
-        """Remove bulky metadata (e.g. ``splits``) from cached Data objects.
+    def _prefetch_and_strip(self) -> None:
+        """Pre-fetch sampling intervals for every split, then strip bulky keys.
 
-        Attributes listed in ``self.strip_keys`` are only needed during
-        ``get_sampling_intervals()`` / ``compute_class_weights()`` and are
-        never accessed during per-sample ``__getitem__`` calls.  Stripping
-        them avoids the cost of deep-copying and slicing dozens of nested
-        ``Interval`` objects on every sample.
+        Lightning calls ``train_dataloader()`` and ``val_dataloader()``
+        independently.  Attributes listed in ``self.strip_keys`` (e.g.
+        ``splits``) are needed by ``get_sampling_intervals()`` but are
+        never accessed during per-sample ``__getitem__`` calls.  We
+        pre-fetch intervals for **all** splits before stripping so that
+        later ``_create_dataloader`` calls can use the cached result.
         """
-        if self._sampling_intervals_stripped or not self.strip_keys:
+        if self._sampling_intervals_stripped:
             return
 
+        for split in ("train", "valid", "test"):
+            try:
+                self._cached_sampling_intervals[split] = (
+                    self.dataset.get_sampling_intervals(split=split)
+                )
+            except (ValueError, AttributeError):
+                pass
+
         data_objects = getattr(self.dataset, "_data_objects", None)
-        if data_objects is None:
+        if data_objects is None or not self.strip_keys:
+            self._sampling_intervals_stripped = True
             return
 
         total_removed = 0
@@ -254,11 +265,14 @@ class NeuralDataModule(LightningDataModule):
         Returns:
             DataLoader for the split.
         """
-        sampling_intervals = self.dataset.get_sampling_intervals(split=split)
+        self._prefetch_and_strip()
 
-        # After get_sampling_intervals has read splits metadata, strip those
-        # keys from the cache so every subsequent __getitem__ is cheaper.
-        self._strip_unused_keys_from_cache()
+        if split in self._cached_sampling_intervals:
+            sampling_intervals = self._cached_sampling_intervals[split]
+        else:
+            sampling_intervals = self.dataset.get_sampling_intervals(
+                split=split
+            )
 
         sampler = RandomFixedWindowSampler(
             sampling_intervals=sampling_intervals,

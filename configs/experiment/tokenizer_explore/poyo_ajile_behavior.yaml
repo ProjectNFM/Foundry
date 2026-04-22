@@ -23,7 +23,7 @@ hyperparameters:
   sequence_length: 1.0
   patch_duration: 0.1
   fold_number: 0
-  num_workers: 5
+  num_workers: 4
   learning_rate: 1e-4
   weight_decay: 0.01
   sampling_rate: 500
