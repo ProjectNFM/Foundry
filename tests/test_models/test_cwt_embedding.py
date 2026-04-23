@@ -93,8 +93,8 @@ class TestContinuousCWTLayer:
 
         out = layer(x, fs, seq_lens)
         out.sum().backward()
-        assert layer.freqs.grad is not None
-        assert layer.n_cycles.grad is not None
+        assert layer.freqs_unconstrained.grad is not None
+        assert layer.n_cycles_unconstrained.grad is not None
 
     def test_learnable_parameters(self):
         layer = ContinuousCWTLayer(
@@ -177,7 +177,7 @@ class TestCWTEmbeddingForward:
         out.sum().backward()
         assert x.grad is not None
 
-        assert emb.cwt.freqs.grad is not None
+        assert emb.cwt.freqs_unconstrained.grad is not None
         assert emb.feature_proj.weight.grad is not None
 
     def test_device_placement_cpu(self, batch_size):
