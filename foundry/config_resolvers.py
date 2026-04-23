@@ -136,6 +136,42 @@ def _config_list_sweep_choices(config_path: str, key: str) -> str:
     return _sweep_choices(tuple(str(value) for value in values))
 
 
+def _pair_int(pair: str, index: int) -> int:
+    """Extract integer item at *index* from a underscore-separated pair."""
+    parts = [part.strip() for part in str(pair).split("x")]
+    print(parts)
+    if len(parts) != 2:
+        raise ValueError(f"Expected pair in the form 'axb', got '{pair}'.")
+    if index not in (0, 1):
+        raise ValueError(f"pair index must be 0 or 1, got {index}.")
+    return int(parts[index])
+
+
+def _neuroprobe_ss_dm_pair_choices(subset_tier: str = "lite") -> str:
+    """Hydra choice values for valid Neuroprobe SS-DM subject/session pairs."""
+    if subset_tier != "lite":
+        raise ValueError(
+            "Only subset_tier='lite' is supported by this resolver."
+        )
+
+    # SS-DM lite valid target pairs from Neuroprobe benchmark defaults.
+    pairs = (
+        "1x1",
+        "1x2",
+        "2x0",
+        "2x4",
+        "3x0",
+        "3x1",
+        "4x0",
+        "4x1",
+        "7x0",
+        "7x1",
+        "10x0",
+        "10x1",
+    )
+    return _sweep_choices(pairs)
+
+
 def _count_ecog_channels(h5_path: str) -> int:
     """Count ECoG-like channels in an HDF5 recording file."""
     import h5py
@@ -207,6 +243,8 @@ def register_resolvers() -> None:
         "get_suffix": _get_suffix,
         "sweep_choices": _sweep_choices,
         "config_list_sweep_choices": _config_list_sweep_choices,
+        "pair_int": _pair_int,
+        "neuroprobe_ss_dm_pair_choices": _neuroprobe_ss_dm_pair_choices,
         "get_num_ecog_channels_by_name": _get_num_ecog_channels_by_name,
     }
     for name, fn in _resolvers.items():

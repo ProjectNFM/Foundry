@@ -1,0 +1,19 @@
+_target_: foundry.data.datamodules.NeuroprobeDataModule
+
+root: ./data/processed/
+batch_size: ${hyperparameters.batch_size}
+num_workers: ${hyperparameters.num_workers}
+pin_memory: false
+sequence_length: ${hyperparameters.sequence_length}
+seed: 42
+
+task_type: speech_binary
+subset_tier: full
+test_subject: 1
+test_session: 0
+label_mode: binary
+task: speech
+regime: SS-SM
+fold: 0
+recording_ids: null
+dirname: neuroprobe_2025

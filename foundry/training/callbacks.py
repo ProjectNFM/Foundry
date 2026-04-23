@@ -17,10 +17,10 @@ class VocabInitializerCallback(L.Callback):
         trainer = Trainer(callbacks=[VocabInitializerCallback()])
     """
 
-    def on_fit_start(
+    def _initialize_vocabs_if_needed(
         self, trainer: Trainer, pl_module: L.LightningModule
     ) -> None:
-        """Initialize vocabularies at the start of training.
+        """Initialize vocabularies when entering a stage that needs them.
 
         Args:
             trainer: Lightning Trainer instance.
@@ -57,3 +57,15 @@ class VocabInitializerCallback(L.Callback):
                 vocab_info[key] = getattr(dataset, method_name)()
 
         model.initialize_vocabs(vocab_info)
+
+    def on_fit_start(
+        self, trainer: Trainer, pl_module: L.LightningModule
+    ) -> None:
+        """Initialize vocabularies at the start of training."""
+        self._initialize_vocabs_if_needed(trainer, pl_module)
+
+    def on_validation_start(
+        self, trainer: Trainer, pl_module: L.LightningModule
+    ) -> None:
+        """Initialize vocabularies for eval-only validation runs."""
+        self._initialize_vocabs_if_needed(trainer, pl_module)

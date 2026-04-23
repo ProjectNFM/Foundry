@@ -127,3 +127,138 @@ NEUROSOFT_ACOUSTIC_STIM = register_modality(
     value_key="acoustic_stim_trials.behavior_ids",
     loss_fn=CrossEntropyLoss(),
 )
+
+NEUROPROBE_SPEECH_BINARY = register_modality(
+    "neuroprobe_speech_binary",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="splits.start",
+    value_key="splits.label",
+    loss_fn=CrossEntropyLoss(),
+)
+
+NEUROPROBE_ONSET_BINARY = register_modality(
+    "neuroprobe_onset_binary",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="splits.start",
+    value_key="splits.label",
+    loss_fn=CrossEntropyLoss(),
+)
+
+NEUROPROBE_VOLUME_BINARY = register_modality(
+    "neuroprobe_volume_binary",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="splits.start",
+    value_key="splits.label",
+    loss_fn=CrossEntropyLoss(),
+)
+
+NEUROPROBE_DELTA_VOLUME_BINARY = register_modality(
+    "neuroprobe_delta_volume_binary",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="splits.start",
+    value_key="splits.label",
+    loss_fn=CrossEntropyLoss(),
+)
+
+NEUROPROBE_PITCH_BINARY = register_modality(
+    "neuroprobe_pitch_binary",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="splits.start",
+    value_key="splits.label",
+    loss_fn=CrossEntropyLoss(),
+)
+
+NEUROPROBE_WORD_INDEX_BINARY = register_modality(
+    "neuroprobe_word_index_binary",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="splits.start",
+    value_key="splits.label",
+    loss_fn=CrossEntropyLoss(),
+)
+
+NEUROPROBE_WORD_GAP_BINARY = register_modality(
+    "neuroprobe_word_gap_binary",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="splits.start",
+    value_key="splits.label",
+    loss_fn=CrossEntropyLoss(),
+)
+
+NEUROPROBE_GPT2_SURPRISAL_BINARY = register_modality(
+    "neuroprobe_gpt2_surprisal_binary",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="splits.start",
+    value_key="splits.label",
+    loss_fn=CrossEntropyLoss(),
+)
+
+NEUROPROBE_WORD_HEAD_POS_BINARY = register_modality(
+    "neuroprobe_word_head_pos_binary",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="splits.start",
+    value_key="splits.label",
+    loss_fn=CrossEntropyLoss(),
+)
+
+NEUROPROBE_WORD_PART_SPEECH_BINARY = register_modality(
+    "neuroprobe_word_part_speech_binary",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="splits.start",
+    value_key="splits.label",
+    loss_fn=CrossEntropyLoss(),
+)
+
+NEUROPROBE_WORD_LENGTH_BINARY = register_modality(
+    "neuroprobe_word_length_binary",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="splits.start",
+    value_key="splits.label",
+    loss_fn=CrossEntropyLoss(),
+)
+
+NEUROPROBE_GLOBAL_FLOW_BINARY = register_modality(
+    "neuroprobe_global_flow_binary",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="splits.start",
+    value_key="splits.label",
+    loss_fn=CrossEntropyLoss(),
+)
+
+NEUROPROBE_LOCAL_FLOW_BINARY = register_modality(
+    "neuroprobe_local_flow_binary",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="splits.start",
+    value_key="splits.label",
+    loss_fn=CrossEntropyLoss(),
+)
+
+NEUROPROBE_FRAME_BRIGHTNESS_BINARY = register_modality(
+    "neuroprobe_frame_brightness_binary",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="splits.start",
+    value_key="splits.label",
+    loss_fn=CrossEntropyLoss(),
+)
+
+NEUROPROBE_FACE_NUM_BINARY = register_modality(
+    "neuroprobe_face_num_binary",
+    dim=2,
+    type=DataType.BINARY,
+    timestamp_key="splits.start",
+    value_key="splits.label",
+    loss_fn=CrossEntropyLoss(),
+)

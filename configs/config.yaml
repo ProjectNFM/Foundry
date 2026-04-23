@@ -22,6 +22,12 @@ stage:
   skip: false
 
 run:
+  # Execution mode:
+  # - train: run trainer.fit()
+  # - eval: run trainer.validate() from run.eval_checkpoint
+  mode: train
+  # Path to checkpoint used when run.mode=eval.
+  eval_checkpoint: null
   # Keep fresh runs independent unless resume is explicitly requested.
   # SLURM restarts still auto-resume from last.ckpt in main.py.
   resume_if_checkpoint_exists: false
