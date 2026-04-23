@@ -13,6 +13,8 @@ from torch_brain.nn.loss import CrossEntropyLoss
 
 from foundry.models import (
     TemporalConvAvgPoolClassifier,
+    LinearBaseline,
+    MLPBaseline,
     ShallowConvNet,
     EEGNetEncoder,
 )
@@ -164,6 +166,26 @@ def eegnet_model(readout_specs):
         readout_specs=readout_specs,
         num_channels=4,
         num_samples=512,
+    )
+
+
+@pytest.fixture
+def linear_model(readout_specs):
+    """Create LinearBaseline instance."""
+    return LinearBaseline(
+        readout_specs=readout_specs,
+        num_channels=4,
+    )
+
+
+@pytest.fixture
+def mlp_model(readout_specs):
+    """Create MLPBaseline instance."""
+    return MLPBaseline(
+        readout_specs=readout_specs,
+        num_channels=4,
+        hidden_dims=[64, 32],
+        dropout_rate=0.3,
     )
 
 
@@ -591,6 +613,197 @@ class TestEEGNetEncoder:
 
 
 # ============================================================================
+# LinearBaseline Tests
+# ============================================================================
+
+
+class TestLinearBaseline:
+    """Test LinearBaseline model."""
+
+    def test_init(self, readout_specs):
+        """Test LinearBaseline initialization."""
+        model = LinearBaseline(
+            readout_specs=readout_specs,
+            num_channels=4,
+        )
+
+        assert model.num_channels == 4
+        assert hasattr(model, "readout")
+        assert hasattr(model, "pool")
+
+    def test_forward_backward_pass(self, linear_model):
+        """Test tokenize -> collate -> forward -> backward end-to-end."""
+        data = create_baseline_data_sample(num_channels=4, num_samples=200)
+        tokens = linear_model.tokenize(data)
+        batch = collate([tokens])
+
+        x = batch["input_values"]
+        output_decoder_index = batch["output_decoder_index"]
+        target_values = batch["target_values"]
+        target_weights = batch["target_weights"]
+
+        outputs = linear_model(
+            input_values=x,
+            output_decoder_index=output_decoder_index,
+        )
+
+        assert isinstance(outputs, dict)
+        assert "test_baseline_task" in outputs
+
+        loss = compute_multitask_loss(
+            linear_model,
+            outputs,
+            target_values,
+            target_weights,
+            output_decoder_index,
+        )
+
+        assert loss.requires_grad
+        loss.backward()
+
+        has_gradients = False
+        for param in linear_model.parameters():
+            if param.grad is not None:
+                has_gradients = True
+                break
+        assert has_gradients
+
+    def test_forward_backward_batched(self, linear_model):
+        """Test forward + backward with batched samples."""
+        data1 = create_baseline_data_sample(num_channels=4, num_samples=200)
+        data2 = create_baseline_data_sample(num_channels=4, num_samples=200)
+
+        tokens1 = linear_model.tokenize(data1)
+        tokens2 = linear_model.tokenize(data2)
+        batch = collate([tokens1, tokens2])
+
+        x = batch["input_values"]
+        output_decoder_index = batch["output_decoder_index"]
+        target_values = batch["target_values"]
+        target_weights = batch["target_weights"]
+
+        outputs = linear_model(
+            input_values=x,
+            output_decoder_index=output_decoder_index,
+        )
+
+        loss = compute_multitask_loss(
+            linear_model,
+            outputs,
+            target_values,
+            target_weights,
+            output_decoder_index,
+        )
+
+        assert loss.requires_grad
+        loss.backward()
+
+        has_gradients = False
+        for param in linear_model.parameters():
+            if param.grad is not None:
+                has_gradients = True
+                break
+        assert has_gradients
+
+
+# ============================================================================
+# MLPBaseline Tests
+# ============================================================================
+
+
+class TestMLPBaseline:
+    """Test MLPBaseline model."""
+
+    def test_init(self, readout_specs):
+        """Test MLPBaseline initialization."""
+        model = MLPBaseline(
+            readout_specs=readout_specs,
+            num_channels=4,
+            hidden_dims=[64, 32],
+        )
+
+        assert model.num_channels == 4
+        assert hasattr(model, "readout")
+        assert hasattr(model, "pool")
+        assert hasattr(model, "mlp")
+        assert model.mlp_out_dim == 32
+
+    def test_forward_backward_pass(self, mlp_model):
+        """Test tokenize -> collate -> forward -> backward end-to-end."""
+        data = create_baseline_data_sample(num_channels=4, num_samples=200)
+        tokens = mlp_model.tokenize(data)
+        batch = collate([tokens])
+
+        x = batch["input_values"]
+        output_decoder_index = batch["output_decoder_index"]
+        target_values = batch["target_values"]
+        target_weights = batch["target_weights"]
+
+        outputs = mlp_model(
+            input_values=x,
+            output_decoder_index=output_decoder_index,
+        )
+
+        assert isinstance(outputs, dict)
+        assert "test_baseline_task" in outputs
+
+        loss = compute_multitask_loss(
+            mlp_model,
+            outputs,
+            target_values,
+            target_weights,
+            output_decoder_index,
+        )
+
+        assert loss.requires_grad
+        loss.backward()
+
+        has_gradients = False
+        for param in mlp_model.parameters():
+            if param.grad is not None:
+                has_gradients = True
+                break
+        assert has_gradients
+
+    def test_forward_backward_batched(self, mlp_model):
+        """Test forward + backward with batched samples."""
+        data1 = create_baseline_data_sample(num_channels=4, num_samples=200)
+        data2 = create_baseline_data_sample(num_channels=4, num_samples=200)
+
+        tokens1 = mlp_model.tokenize(data1)
+        tokens2 = mlp_model.tokenize(data2)
+        batch = collate([tokens1, tokens2])
+
+        x = batch["input_values"]
+        output_decoder_index = batch["output_decoder_index"]
+        target_values = batch["target_values"]
+        target_weights = batch["target_weights"]
+
+        outputs = mlp_model(
+            input_values=x,
+            output_decoder_index=output_decoder_index,
+        )
+
+        loss = compute_multitask_loss(
+            mlp_model,
+            outputs,
+            target_values,
+            target_weights,
+            output_decoder_index,
+        )
+
+        assert loss.requires_grad
+        loss.backward()
+
+        has_gradients = False
+        for param in mlp_model.parameters():
+            if param.grad is not None:
+                has_gradients = True
+                break
+        assert has_gradients
+
+
+# ============================================================================
 # Integration Tests
 # ============================================================================
 
@@ -624,3 +837,21 @@ class TestBaselineIntegration:
         assert "input_values" in tokens
         assert "output_decoder_index" in tokens
         assert tokens["input_values"].obj.shape == (512, 4)
+
+    def test_tokenize_then_forward_linear(self, linear_model):
+        """Test tokenize output can be used with LinearBaseline."""
+        data = create_baseline_data_sample(num_channels=4, num_samples=200)
+        tokens = linear_model.tokenize(data)
+
+        assert "input_values" in tokens
+        assert "output_decoder_index" in tokens
+        assert tokens["input_values"].obj.shape == (200, 4)
+
+    def test_tokenize_then_forward_mlp(self, mlp_model):
+        """Test tokenize output can be used with MLPBaseline."""
+        data = create_baseline_data_sample(num_channels=4, num_samples=200)
+        tokens = mlp_model.tokenize(data)
+
+        assert "input_values" in tokens
+        assert "output_decoder_index" in tokens
+        assert tokens["input_values"].obj.shape == (200, 4)

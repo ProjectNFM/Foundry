@@ -1,0 +1,5 @@
+_target_: foundry.models.MLPBaseline
+
+num_channels: 64
+hidden_dims: [128, 64]
+dropout_rate: 0.5

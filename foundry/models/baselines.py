@@ -42,9 +42,12 @@ class BaselineEEGModel(nn.Module):
     def readout_specs(self) -> dict[str, ModalitySpec]:
         return self._readout_specs
 
-    def _check_input_shape_conv1d(self, x: torch.Tensor) -> torch.Tensor:
+    def _normalize_input_shape(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Ensures input tensor has correct shape for Conv1d layer: (B, C, T).
+        Normalizes input tensor to (B, C, T) format.
+
+        Converts (B, T, C) to (B, C, T) if the last dimension matches num_channels.
+        This is a generic shape normalization utility for all baseline models.
 
         Args:
             x (torch.Tensor): Input of shape (B, C, T) or (B, T, C).
@@ -57,6 +60,18 @@ class BaselineEEGModel(nn.Module):
             if x.shape[-1] == self.num_channels:
                 x = x.transpose(1, 2)
         return x
+
+    def _check_input_shape_conv1d(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Ensures input tensor has correct shape for Conv1d layer: (B, C, T).
+
+        Args:
+            x (torch.Tensor): Input of shape (B, C, T) or (B, T, C).
+
+        Returns:
+            torch.Tensor: Input tensor of shape (B, C, T).
+        """
+        return self._normalize_input_shape(x)
 
     def _check_input_shape_conv2d(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -256,6 +271,147 @@ class TemporalConvAvgPoolClassifier(BaselineEEGModel):
         x = self.act(x)
         x = self.pool(x)
         x = x.view(x.size(0), -1)
+
+        batch_size = x.shape[0]
+        n_out = output_decoder_index.shape[1]
+        x = x.unsqueeze(1).expand(batch_size, n_out, -1)
+
+        return self.readout(
+            output_embs=x,
+            output_readout_index=output_decoder_index,
+            unpack_output=False,
+        )
+
+
+class LinearBaseline(BaselineEEGModel):
+    """
+    A simple linear baseline for EEG classification.
+
+    This minimal model applies temporal average pooling to the input EEG signal
+    and then passes the pooled features directly to a multitask linear readout.
+    Useful as a sanity check and lower-bound reference for model performance.
+    """
+
+    def __init__(
+        self,
+        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
+        num_channels: int = 64,
+    ):
+        """
+        Args:
+            readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s).
+            num_channels (int, optional): Number of EEG channels. Default: 64.
+        """
+        super().__init__(num_channels, readout_specs)
+
+        self.pool = nn.AdaptiveAvgPool1d(1)
+
+        self.readout = MultitaskReadout(
+            dim=num_channels,
+            readout_specs=self._readout_specs,
+        )
+
+    def forward(
+        self,
+        *,
+        input_values: torch.Tensor,
+        output_decoder_index: torch.Tensor,
+        **kwargs,
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Forward pass for the LinearBaseline.
+
+        Args:
+            input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
+            output_decoder_index (torch.Tensor): Task index tensor of shape (B, n_out).
+
+        Returns:
+            Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
+        """
+        x = self._normalize_input_shape(input_values)
+        x = self.pool(x)
+        x = x.view(x.size(0), -1)
+
+        batch_size = x.shape[0]
+        n_out = output_decoder_index.shape[1]
+        x = x.unsqueeze(1).expand(batch_size, n_out, -1)
+
+        return self.readout(
+            output_embs=x,
+            output_readout_index=output_decoder_index,
+            unpack_output=False,
+        )
+
+
+class MLPBaseline(BaselineEEGModel):
+    """
+    An MLP-based baseline for EEG classification.
+
+    This model applies temporal average pooling to the input EEG signal,
+    then passes the pooled features through a configurable MLP (multi-layer perceptron)
+    before the final multitask linear readout. Useful as an intermediate-complexity
+    reference between LinearBaseline and convolutional baselines.
+    """
+
+    def __init__(
+        self,
+        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
+        num_channels: int = 64,
+        hidden_dims: list[int] | None = None,
+        dropout_rate: float = 0.5,
+    ):
+        """
+        Args:
+            readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s).
+            num_channels (int, optional): Number of EEG channels. Default: 64.
+            hidden_dims (list[int], optional): Hidden layer dimensions. Default: [128, 64].
+            dropout_rate (float, optional): Dropout rate after each hidden layer. Default: 0.5.
+        """
+        super().__init__(num_channels, readout_specs)
+
+        if hidden_dims is None:
+            hidden_dims = [128, 64]
+
+        self.pool = nn.AdaptiveAvgPool1d(1)
+
+        layers = []
+        in_dim = num_channels
+        for hidden_dim in hidden_dims:
+            layers.append(nn.Linear(in_dim, hidden_dim))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout_rate))
+            in_dim = hidden_dim
+
+        self.mlp = nn.Sequential(*layers)
+        self.mlp_out_dim = in_dim
+
+        self.readout = MultitaskReadout(
+            dim=self.mlp_out_dim,
+            readout_specs=self._readout_specs,
+        )
+
+    def forward(
+        self,
+        *,
+        input_values: torch.Tensor,
+        output_decoder_index: torch.Tensor,
+        **kwargs,
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Forward pass for the MLPBaseline.
+
+        Args:
+            input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
+            output_decoder_index (torch.Tensor): Task index tensor of shape (B, n_out).
+
+        Returns:
+            Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
+        """
+        x = self._normalize_input_shape(input_values)
+        x = self.pool(x)
+        x = x.view(x.size(0), -1)
+
+        x = self.mlp(x)
 
         batch_size = x.shape[0]
         n_out = output_decoder_index.shape[1]
