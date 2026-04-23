@@ -3,7 +3,7 @@ name: ${run.name}
 project: foundry
 save_dir: ${oc.env:SCRATCH,./outputs}
 offline: false
-log_model: False
+log_model: false
 group: ${run.group}
 tags: ${run.tags}
 resume: allow
