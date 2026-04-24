@@ -4,7 +4,7 @@
 
 defaults:
   - override /model: poyo_eeg
-  - override /model/tokenizer: session_per_timepoint # or session_mlp_per_timepoint
+  - override /model/tokenizer: spatial_session_per_timepoint_identity # or session_mlp_per_timepoint
   - override /data: ajile/multisess
 
 model:
@@ -28,7 +28,7 @@ hyperparameters:
   patch_duration: 0.1
   sampling_rate: 500
   fold_number: 0
-  num_workers: 24
+  num_workers: 8
   session_configs: null
   num_channels: null
 
@@ -39,4 +39,4 @@ trainer:
     early_stopping:
       monitor: val/ajile_active_behavior_f1
       mode: max
-      patience: 10
+      patience: 20

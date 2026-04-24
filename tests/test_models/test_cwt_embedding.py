@@ -93,8 +93,8 @@ class TestContinuousCWTLayer:
 
         out = layer(x, fs, seq_lens)
         out.sum().backward()
-        assert layer.freqs.grad is not None
-        assert layer.n_cycles.grad is not None
+        assert layer.freqs_unconstrained.grad is not None
+        assert layer.n_cycles_unconstrained.grad is not None
 
     def test_learnable_parameters(self):
         layer = ContinuousCWTLayer(
@@ -103,6 +103,18 @@ class TestContinuousCWTLayer:
         assert layer.freqs.requires_grad
         assert layer.n_cycles.requires_grad
         assert (layer.n_cycles == 5.0).all()
+
+    def test_bfloat16_input(self):
+        layer = ContinuousCWTLayer(init_freqs=INIT_FREQS, target_time_tokens=16)
+        layer = layer.to(torch.bfloat16)
+        x = torch.randn(1, 2, 100, dtype=torch.bfloat16)
+        fs = torch.tensor([250.0])
+        seq_lens = torch.tensor([100])
+
+        out = layer(x, fs, seq_lens)
+        assert out.dtype == torch.bfloat16
+        assert out.shape == (1, 2, 2, NUM_FREQS, 16)
+        assert torch.isfinite(out).all()
 
 
 # ------------------------------------------------------------------ #
@@ -177,7 +189,7 @@ class TestCWTEmbeddingForward:
         out.sum().backward()
         assert x.grad is not None
 
-        assert emb.cwt.freqs.grad is not None
+        assert emb.cwt.freqs_unconstrained.grad is not None
         assert emb.feature_proj.weight.grad is not None
 
     def test_device_placement_cpu(self, batch_size):
@@ -189,6 +201,18 @@ class TestCWTEmbeddingForward:
 
         out = emb(x, input_sampling_rate=fs, input_seq_len=seq_lens)
         assert out.device.type == "cpu"
+
+    def test_bfloat16_input(self, embed_dim):
+        emb = _make_cwt_embedding(embed_dim=embed_dim, target_time_tokens=16)
+        emb = emb.to(torch.bfloat16)
+        x = torch.randn(1, 4, 100, dtype=torch.bfloat16)
+        fs = torch.tensor([250.0])
+        seq_lens = torch.tensor([100])
+
+        out = emb(x, input_sampling_rate=fs, input_seq_len=seq_lens)
+        assert out.dtype == torch.bfloat16
+        assert out.shape == (1, 16, embed_dim)
+        assert torch.isfinite(out).all()
 
     def test_device_placement_cuda(self, batch_size):
         if not torch.cuda.is_available():
