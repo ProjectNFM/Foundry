@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Literal
 
 import numpy as np
 import torch
@@ -39,6 +39,15 @@ class EEGTokenizer(nn.Module):
             seconds on GPU.  If ``None``, no patching is applied.
         stride: Stride between patches in seconds.  Defaults to
             ``patch_duration`` (non-overlapping patches).
+        channel_fusion: How channel identity embeddings are combined with
+            token embeddings in per-channel mode.  ``"add"`` adds them
+            (both must be ``embed_dim``).  ``"concat"`` concatenates them
+            along the feature axis -- the temporal embedding produces
+            tokens of size ``embed_dim - channel_emb_dim`` and the
+            channel embedding fills the remaining dimensions.
+        channel_emb_dim: Dimension of channel identity embeddings.
+            Required when ``channel_fusion="concat"``.  Ignored (defaults
+            to ``embed_dim``) when ``channel_fusion="add"``.
     """
 
     def __init__(
@@ -48,6 +57,8 @@ class EEGTokenizer(nn.Module):
         embed_dim: int,
         patch_duration: float | None = None,
         stride: float | None = None,
+        channel_fusion: Literal["add", "concat"] = "add",
+        channel_emb_dim: int | None = None,
     ):
         super().__init__()
         self.channel_strategy = channel_strategy
@@ -56,7 +67,39 @@ class EEGTokenizer(nn.Module):
         self.patch_duration = patch_duration
         self.stride = stride if stride is not None else patch_duration
         self._do_patching = patch_duration is not None
-        self.post_proj_norm = nn.LayerNorm(embed_dim)
+        self.channel_fusion = channel_fusion
+
+        if channel_fusion == "concat":
+            if channel_emb_dim is None:
+                raise ValueError(
+                    "channel_emb_dim is required when channel_fusion='concat'"
+                )
+            if channel_emb_dim >= embed_dim:
+                raise ValueError(
+                    f"channel_emb_dim ({channel_emb_dim}) must be less than "
+                    f"embed_dim ({embed_dim})"
+                )
+            self._channel_emb_dim = channel_emb_dim
+        else:
+            self._channel_emb_dim = embed_dim
+
+        self.post_proj_norm = nn.LayerNorm(self.token_embed_dim)
+
+    @property
+    def channel_emb_dim(self) -> int:
+        """Dimension expected for channel identity embeddings."""
+        return self._channel_emb_dim
+
+    @property
+    def token_embed_dim(self) -> int:
+        """Dimension the temporal embedding should produce.
+
+        Equals ``embed_dim`` for add fusion, or
+        ``embed_dim - channel_emb_dim`` for concat fusion.
+        """
+        if self.channel_fusion == "concat":
+            return self.embed_dim - self._channel_emb_dim
+        return self.embed_dim
 
     @property
     def uses_per_channel(self) -> bool:
@@ -215,30 +258,34 @@ class EEGTokenizer(nn.Module):
         channel_index,
         channel_emb_fn,
     ):
-        """Reshape per-channel tokens and add channel identity embedding.
+        """Reshape per-channel tokens and fuse channel identity embedding.
 
         Args:
-            tokens: (B * C_pad, N, D) where N = P (patched) or T (per-timepoint).
+            tokens: (B * C_pad, N, D_tok) where N = P (patched) or
+                T (per-timepoint) and D_tok = ``token_embed_dim``.
             B: Original batch size.
             channel_mask: (B, C_pad) which channels are real.
             channel_index: (B, C_pad) channel token indices.
             channel_emb_fn: Maps channel indices to embedding vectors.
 
         Returns:
-            (B, C_pad * N, D) with channel identity embeddings added and
-            padded channels zeroed out.
+            (B, C_pad * N, embed_dim) with channel identity embeddings
+            fused (added or concatenated) and padded channels zeroed out.
         """
         C = channel_mask.shape[1]
         N = tokens.shape[1]
-        D = tokens.shape[2]
 
-        tokens = tokens.reshape(B, C, N, D)
+        tokens = tokens.reshape(B, C, N, -1)
 
         if channel_emb_fn is not None:
             ch_emb = channel_emb_fn(channel_index)
-            tokens = tokens + ch_emb.unsqueeze(2)
+            if self.channel_fusion == "concat":
+                ch_emb = ch_emb.unsqueeze(2).expand(-1, -1, N, -1)
+                tokens = torch.cat([tokens, ch_emb], dim=-1)
+            else:
+                tokens = tokens + ch_emb.unsqueeze(2)
 
-        tokens = tokens.reshape(B, C * N, D)
+        tokens = tokens.reshape(B, C * N, -1)
 
         token_mask = channel_mask.unsqueeze(2).expand(B, C, N).reshape(B, C * N)
         tokens = tokens * token_mask.unsqueeze(-1).float()

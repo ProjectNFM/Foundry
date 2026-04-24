@@ -110,7 +110,7 @@ class POYOEEGModel(nn.Module):
         )
 
         self.channel_emb = InfiniteVocabEmbedding(
-            self.embed_dim, init_scale=emb_init_scale
+            self.tokenizer.channel_emb_dim, init_scale=emb_init_scale
         )
         self.session_emb = InfiniteVocabEmbedding(
             self.embed_dim, init_scale=emb_init_scale
