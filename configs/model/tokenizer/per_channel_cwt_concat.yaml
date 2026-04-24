@@ -1,0 +1,15 @@
+_target_: foundry.models.tokenizer.EEGTokenizer
+patch_duration: null
+embed_dim: ${model.embed_dim}
+channel_fusion: concat
+channel_emb_dim: 64
+channel_strategy:
+  _target_: foundry.models.embeddings.PerChannelStrategy
+  max_channels: ${hyperparameters.num_channels}
+temporal_embedding:
+  _target_: foundry.models.embeddings.CWTEmbedding
+  embed_dim: 192
+  num_sources: 1
+  init_freqs: [2, 3, 4, 5, 8, 13, 17, 20, 30, 35, 40, 50, 60, 70, 85, 90, 100]
+  target_time_tokens: 200
+  n_cycles: 7.0
