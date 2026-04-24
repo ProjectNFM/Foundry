@@ -4,14 +4,18 @@ set -euo pipefail
 TOKENIZERS=(
   per_channel_per_timepoint_linear
   per_channel_cwt
+  per_channel_resample_cnn
   spatial_session_per_timepoint_identity
   spatial_session_cwt
+  spatial_session_resample_cnn
 )
 
 EFFECTIVE_BATCH_SIZE=1024
 MAX_BATCH_SIZES=(
   64
   128
+  128
+  512
   512
   512
 )

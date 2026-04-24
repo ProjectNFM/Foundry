@@ -14,7 +14,6 @@ from foundry.models.embeddings.patching import (
     compute_patch_timestamps,
     patch_signal,
 )
-from foundry.models.embeddings.temporal import CWTEmbedding
 
 
 class EEGTokenizer(nn.Module):
@@ -185,7 +184,7 @@ class EEGTokenizer(nn.Module):
             )
             tokens = self.temporal_embedding(patches)
         else:
-            if isinstance(self.temporal_embedding, CWTEmbedding):
+            if hasattr(self.temporal_embedding, "target_time_tokens"):
                 tokens = self.temporal_embedding(
                     transformed,
                     input_sampling_rate=sr,

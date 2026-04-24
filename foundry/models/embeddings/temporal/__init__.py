@@ -9,6 +9,7 @@ from foundry.models.embeddings.temporal.per_timepoint import (
     PerTimepointIdentityEmbedding,
     PerTimepointLinearEmbedding,
 )
+from foundry.models.embeddings.temporal.resample_cnn import ResampleCNNEmbedding
 
 __all__ = [
     "PatchLinearEmbedding",
@@ -18,4 +19,5 @@ __all__ = [
     "PerTimepointIdentityEmbedding",
     "CWTEmbedding",
     "ContinuousCWTLayer",
+    "ResampleCNNEmbedding",
 ]

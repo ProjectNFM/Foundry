@@ -20,6 +20,7 @@ from foundry.models.embeddings.temporal import (
     PatchLinearEmbedding,
     PatchMLPEmbedding,
     PerTimepointLinearEmbedding,
+    ResampleCNNEmbedding,
 )
 
 __all__ = [
@@ -45,4 +46,5 @@ __all__ = [
     "PerTimepointIdentityEmbedding",
     "CWTEmbedding",
     "ContinuousCWTLayer",
+    "ResampleCNNEmbedding",
 ]
