@@ -87,12 +87,18 @@ class ContinuousCWTLayer(nn.Module):
         B, C, Max_T = x.shape
         F_dim = self.freqs_unconstrained.numel()
         device = x.device
-        dtype = x.dtype
+        orig_dtype = x.dtype
 
         if torch.any(~torch.isfinite(fs)) or torch.any(fs <= 0):
             raise ValueError(
                 f"input_sampling_rate must be finite and > 0. Got {fs}."
             )
+
+        # FFT and grid_sample do not support bfloat16; run in float32 and
+        # restore dtype at the end.
+        if orig_dtype == torch.bfloat16:
+            x = x.float()
+        dtype = x.dtype
 
         f = self.freqs.to(device=device, dtype=dtype).view(1, F_dim, 1)
         n_c = self.n_cycles.to(device=device, dtype=dtype).view(1, F_dim, 1)
@@ -183,7 +189,8 @@ class ContinuousCWTLayer(nn.Module):
         phase_weight = mag_sq / (mag_sq + self.phase_stability_eps)
         cont_phase = raw_phase * phase_weight
 
-        return torch.stack([cont_mag, cont_phase], dim=2)
+        result = torch.stack([cont_mag, cont_phase], dim=2)
+        return result.to(orig_dtype) if orig_dtype != dtype else result
 
 
 class CWTEmbedding(nn.Module):
