@@ -1,4 +1,8 @@
-from brainsets.datasets import PetersonBruntonPoseTrajectory2022
+from brainsets.datasets import (
+    PetersonBruntonPoseTrajectory2022,
+    AJILE_ACTIVE_BEHAVIOR_LABELS,
+    AJILE_ACTIVE_VS_INACTIVE_LABELS,
+)
 from foundry.data.datamodules.base import NeuralDataModule
 from foundry.data.transforms import PreparePoseTrajectories
 from typing import Optional, Callable, Literal
@@ -12,14 +16,8 @@ class AjileDataModule(NeuralDataModule):
     }
 
     READOUT_CLASS_NAMES: dict[str, list[str]] = {
-        "ajile_inactive_active": ["Active", "Inactive"],
-        "ajile_active_behavior": [
-            "Eat",
-            "Talk",
-            "TV",
-            "Computer/Phone",
-            "Other Activity",
-        ],
+        "ajile_inactive_active": list(AJILE_ACTIVE_VS_INACTIVE_LABELS),
+        "ajile_active_behavior": list(AJILE_ACTIVE_BEHAVIOR_LABELS),
     }
 
     def __init__(
@@ -49,7 +47,7 @@ class AjileDataModule(NeuralDataModule):
             "recording_ids": recording_ids,
             "split_type": split_type,
             "task_type": task_type,
-            "fold_num": fold_number,
+            "fold_number": fold_number,
         }
         super().__init__(
             dataset_class=PetersonBruntonPoseTrajectory2022,

@@ -1,4 +1,8 @@
 import torch
+from brainsets.ajile_behavior_labels import (
+    ACTIVE_BEHAVIOR_LABELS,
+    ACTIVE_VS_INACTIVE_LABELS,
+)
 from torch_brain.registry import register_modality, DataType
 from torch_brain.nn.loss import CrossEntropyLoss, Loss, MSELoss
 
@@ -85,7 +89,7 @@ MOTOR_IMAGERY_RIGHT_FEET = register_modality(
 
 AJILE_INACTIVE_ACTIVE = register_modality(
     "ajile_inactive_active",
-    dim=2,
+    dim=len(ACTIVE_VS_INACTIVE_LABELS),
     type=DataType.BINARY,
     timestamp_key="active_vs_inactive_trials.timestamps",
     value_key="active_vs_inactive_trials.behavior_id",
@@ -94,7 +98,7 @@ AJILE_INACTIVE_ACTIVE = register_modality(
 
 AJILE = register_modality(
     "ajile_active_behavior",
-    dim=5,
+    dim=len(ACTIVE_BEHAVIOR_LABELS),
     type=DataType.MULTINOMIAL,
     timestamp_key="active_behavior_trials.timestamps",
     value_key="active_behavior_trials.behavior_id",
