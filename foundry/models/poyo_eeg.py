@@ -287,10 +287,18 @@ class POYOEEGModel(nn.Module):
         channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
 
         sample_deltas = np.diff(signal_source.timestamps)
-        sampling_rate = 1.0 / float(sample_deltas[0])
+        dt = float(sample_deltas[0])
+        if dt <= 0:
+            dt = float(np.median(sample_deltas[sample_deltas > 0]))
+        sampling_rate = 1.0 / dt
+
+        signal = signal_source.signal[:, modality_mask]
+        non_finite = ~np.isfinite(signal)
+        if non_finite.any():
+            signal = np.where(non_finite, 0.0, signal)
 
         pretokenized = self.tokenizer.pretokenize(
-            signal=signal_source.signal[:, modality_mask],
+            signal=signal,
             channel_tokens=channel_tokens,
             sampling_rate=sampling_rate,
             sequence_length=self.sequence_length,
