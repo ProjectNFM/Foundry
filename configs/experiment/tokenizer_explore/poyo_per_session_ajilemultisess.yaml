@@ -14,8 +14,8 @@ data:
   task_type: behavior
 
 run:
-  name: TOKsession_per_timepoint_RUNpoyo_per_session_ajile_multisess_
-  group: POYO_PER_SESSION_AJILE_MULTI_SESSION
+  name: enter_name
+  group: DEBUG
   tags: [poyo_eeg, ajile, multisess, per_session]
   seed: 42
   log_level: INFO

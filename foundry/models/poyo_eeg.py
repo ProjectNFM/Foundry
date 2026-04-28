@@ -242,6 +242,7 @@ class POYOEEGModel(nn.Module):
         self, timestamps: np.ndarray
     ) -> float:
         sample_deltas = np.diff(timestamps).astype(np.float64)
+
         valid_deltas = sample_deltas[
             np.isfinite(sample_deltas) & (sample_deltas > 0)
         ]
@@ -302,9 +303,13 @@ class POYOEEGModel(nn.Module):
         sampling_rate = self._infer_sampling_rate_from_timestamps(
             signal_source.timestamps
         )
+        signal = signal_source.signal[:, modality_mask]
+        non_finite = ~np.isfinite(signal)
+        if non_finite.any():
+            signal = np.where(non_finite, 0.0, signal)
 
         pretokenized = self.tokenizer.pretokenize(
-            signal=signal_source.signal[:, modality_mask],
+            signal=signal,
             channel_tokens=channel_tokens,
             sampling_rate=sampling_rate,
             sequence_length=self.sequence_length,
