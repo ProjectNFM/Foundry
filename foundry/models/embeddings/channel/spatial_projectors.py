@@ -53,10 +53,16 @@ class SessionSpatialProjector(nn.Module):
         session_configs: dict[str, int],
         num_sources: int,
         hidden_dim: int | None = None,
+        common_layer: bool = False,
     ):
         super().__init__()
         self.num_sources = num_sources
         self.hidden_dim = hidden_dim
+
+        if common_layer:
+            self.common_layer = nn.Linear(num_sources, num_sources)
+        else:
+            self.common_layer = None
 
         self.session_layers = nn.ModuleDict()
         if hidden_dim is not None:
@@ -86,7 +92,7 @@ class SessionSpatialProjector(nn.Module):
         channel_counts = kwargs["input_channel_counts"]
         seq_lens = kwargs["input_seq_len"]
 
-        B, Max_C, Max_T = x.shape
+        B, _, Max_T = x.shape
         device = x.device
 
         out = torch.zeros(
@@ -113,6 +119,9 @@ class SessionSpatialProjector(nn.Module):
                 projected[:, t:] = 0.0
 
             out[i] = projected
+
+        if self.common_layer is not None:
+            out = self.common_layer(out.transpose(1, 2)).transpose(1, 2)
 
         return out
 

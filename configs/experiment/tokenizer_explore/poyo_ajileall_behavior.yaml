@@ -3,6 +3,7 @@
 defaults:
   - override /model: poyo_eeg
   - override /data: ajile/allsess
+  - override /model/tokenizer: spatial_session_cwt
 
 model:
   zero_output_timestamps: true
@@ -18,12 +19,13 @@ run:
   log_level: INFO
 
 hyperparameters:
-  batch_size: 2048
+  batch_size: 512
   sequence_length: 1.0
   patch_duration: 0.1
   fold_number: 0
-  num_workers: 32
-  learning_rate: 1e-4
-  weight_decay: 0.01
-  sampling_rate: 500
-  num_channels: 94
+  num_workers: 128
+  learning_rate: 0.0006
+  weight_decay: 0.09
+  sampling_rate: null
+  num_channels: null
+  session_configs: null

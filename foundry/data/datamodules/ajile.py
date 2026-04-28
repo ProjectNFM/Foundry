@@ -2,10 +2,12 @@ from brainsets.datasets import (
     PetersonBruntonPoseTrajectory2022,
     AJILE_ACTIVE_BEHAVIOR_LABELS,
     AJILE_ACTIVE_VS_INACTIVE_LABELS,
+    PetersonBruntonSplitType,
+    PetersonBruntonTaskType,
 )
 from foundry.data.datamodules.base import NeuralDataModule
 from foundry.data.transforms import PreparePoseTrajectories
-from typing import Optional, Callable, Literal
+from typing import Optional, Callable
 
 
 class AjileDataModule(NeuralDataModule):
@@ -30,12 +32,8 @@ class AjileDataModule(NeuralDataModule):
         transforms: Optional[list[Callable]] = None,
         tokenizer: Optional[Callable] = None,
         seed: int = 42,
-        split_type: Optional[
-            Literal["intersubject", "intersession", "intrasession"]
-        ] = "intersubject",
-        task_type: Optional[
-            Literal["active_vs_inactive", "behavior", "pose_estimation"]
-        ] = "behavior",
+        split_type: Optional[PetersonBruntonSplitType] = "intersession",
+        task_type: Optional[PetersonBruntonTaskType] = "behavior",
         fold_number: Optional[int] = 0,
         recording_ids: Optional[list[str]] = None,
     ):

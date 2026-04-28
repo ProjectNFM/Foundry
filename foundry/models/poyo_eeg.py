@@ -238,6 +238,20 @@ class POYOEEGModel(nn.Module):
 
         raise ValueError("Data must have an 'eeg', 'ecog', or 'seeg' field")
 
+    def _infer_sampling_rate_from_timestamps(
+        self, timestamps: np.ndarray
+    ) -> float:
+        sample_deltas = np.diff(timestamps).astype(np.float64)
+
+        valid_deltas = sample_deltas[
+            np.isfinite(sample_deltas) & (sample_deltas > 0)
+        ]
+        if valid_deltas.size == 0:
+            raise ValueError(
+                "Could not infer a valid sampling rate from timestamps."
+            )
+        return 1.0 / float(np.median(valid_deltas))
+
     def tokenize(self, data: Data) -> dict:
         """Tokenize the input data.
 
@@ -286,12 +300,9 @@ class POYOEEGModel(nn.Module):
         channel_ids = data.channels.id[modality_mask].astype(str)
         channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
 
-        sample_deltas = np.diff(signal_source.timestamps)
-        dt = float(sample_deltas[0])
-        if dt <= 0:
-            dt = float(np.median(sample_deltas[sample_deltas > 0]))
-        sampling_rate = 1.0 / dt
-
+        sampling_rate = self._infer_sampling_rate_from_timestamps(
+            signal_source.timestamps
+        )
         signal = signal_source.signal[:, modality_mask]
         non_finite = ~np.isfinite(signal)
         if non_finite.any():
