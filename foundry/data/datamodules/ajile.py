@@ -1,5 +1,7 @@
 from brainsets.datasets import (
     PetersonBruntonPoseTrajectory2022,
+    AJILE_ACTIVE_BEHAVIOR_LABELS,
+    AJILE_ACTIVE_VS_INACTIVE_LABELS,
     PetersonBruntonSplitType,
     PetersonBruntonTaskType,
 )
@@ -16,14 +18,8 @@ class AjileDataModule(NeuralDataModule):
     }
 
     READOUT_CLASS_NAMES: dict[str, list[str]] = {
-        "ajile_inactive_active": ["Active", "Inactive"],
-        "ajile_active_behavior": [
-            "Eat",
-            "Talk",
-            "TV",
-            "Computer/Phone",
-            "Other Activity",
-        ],
+        "ajile_inactive_active": list(AJILE_ACTIVE_VS_INACTIVE_LABELS),
+        "ajile_active_behavior": list(AJILE_ACTIVE_BEHAVIOR_LABELS),
     }
 
     def __init__(

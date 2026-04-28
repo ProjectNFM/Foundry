@@ -1,0 +1,21 @@
+_target_: foundry.models.tokenizer.EEGTokenizer
+patch_duration: null
+embed_dim: ${model.embed_dim}
+channel_strategy:
+  _target_: foundry.models.embeddings.SpatialProjectionStrategy
+  num_channels: ${hyperparameters.num_channels}
+  num_sources: ${model.embed_dim}
+  projector:
+    _target_: foundry.models.embeddings.SessionSpatialProjector
+    session_configs: ${hyperparameters.session_configs}
+    num_sources: ${model.tokenizer.channel_strategy.num_sources}
+    common_layer: true
+temporal_embedding:
+  _target_: foundry.models.embeddings.ResampleCNNEmbedding
+  embed_dim: ${model.embed_dim}
+  num_sources: ${model.embed_dim}
+  target_time_tokens: 200
+  num_filters: 64
+  kernel_size: 7
+  num_conv_layers: 2
+  activation: "gelu"
