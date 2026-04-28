@@ -137,6 +137,126 @@ class TestMode2aPerChannelPatched:
         assert out.shape == (B, C * 10, embed_dim)
 
 
+class TestMode2aConcatPerChannelPatched:
+    """Mode 2a-concat: Per-channel patched with channel_fusion='concat'."""
+
+    EMBED_DIM = 64
+    CHANNEL_EMB_DIM = 16
+    TOKEN_EMBED_DIM = EMBED_DIM - CHANNEL_EMB_DIM
+
+    def _make_tokenizer(self):
+        return EEGTokenizer(
+            channel_strategy=PerChannelStrategy(max_channels=16),
+            temporal_embedding=CNNEmbedding(
+                embed_dim=self.TOKEN_EMBED_DIM,
+                num_input_channels=1,
+                patch_samples=25,
+                num_filters=16,
+                kernel_size=3,
+            ),
+            embed_dim=self.EMBED_DIM,
+            patch_duration=0.1,
+            channel_fusion="concat",
+            channel_emb_dim=self.CHANNEL_EMB_DIM,
+        )
+
+    def test_token_embed_dim_property(self):
+        tokenizer = self._make_tokenizer()
+        assert tokenizer.token_embed_dim == self.TOKEN_EMBED_DIM
+        assert tokenizer.channel_emb_dim == self.CHANNEL_EMB_DIM
+
+    def test_forward_shape(self):
+        tokenizer = self._make_tokenizer()
+        B, C, T = 2, 16, 250
+        x = torch.randn(B, C, T)
+        mask = torch.ones(B, C, dtype=torch.bool)
+        mask[:, 4:] = False
+        ch_idx = torch.arange(C).unsqueeze(0).expand(B, C)
+        fs = torch.full((B,), 250.0)
+
+        emb = torch.nn.Embedding(C, self.CHANNEL_EMB_DIM)
+        out = tokenizer(
+            x,
+            input_mask=mask,
+            input_channel_index=ch_idx,
+            input_sampling_rate=fs,
+            channel_emb_fn=emb,
+        )
+        assert out.shape == (B, C * 10, self.EMBED_DIM)
+
+    def test_padded_channels_zeroed(self):
+        tokenizer = self._make_tokenizer()
+        B, C, T = 1, 16, 250
+        x = torch.randn(B, C, T)
+        mask = torch.zeros(B, C, dtype=torch.bool)
+        mask[:, :3] = True
+        ch_idx = torch.arange(C).unsqueeze(0).expand(B, C)
+        fs = torch.full((B,), 250.0)
+
+        emb = torch.nn.Embedding(C, self.CHANNEL_EMB_DIM)
+        out = tokenizer(
+            x,
+            input_mask=mask,
+            input_channel_index=ch_idx,
+            input_sampling_rate=fs,
+            channel_emb_fn=emb,
+        )
+        out_reshaped = out.reshape(B, C, 10, self.EMBED_DIM)
+        assert (out_reshaped[:, 3:, :, :] == 0).all()
+
+    def test_forward_gradient_flow(self):
+        tokenizer = self._make_tokenizer()
+        B, C, T = 1, 16, 250
+        x = torch.randn(B, C, T, requires_grad=True)
+        mask = torch.ones(B, C, dtype=torch.bool)
+        ch_idx = torch.arange(C).unsqueeze(0).expand(B, C)
+        fs = torch.full((B,), 250.0)
+
+        emb = torch.nn.Embedding(C, self.CHANNEL_EMB_DIM)
+        out = tokenizer(
+            x,
+            input_mask=mask,
+            input_channel_index=ch_idx,
+            input_sampling_rate=fs,
+            channel_emb_fn=emb,
+        )
+        out.sum().backward()
+        assert x.grad is not None
+
+    def test_concat_requires_channel_emb_dim(self):
+        with pytest.raises(ValueError, match="channel_emb_dim is required"):
+            EEGTokenizer(
+                channel_strategy=PerChannelStrategy(max_channels=16),
+                temporal_embedding=CNNEmbedding(
+                    embed_dim=48,
+                    num_input_channels=1,
+                    patch_samples=25,
+                    num_filters=16,
+                    kernel_size=3,
+                ),
+                embed_dim=64,
+                patch_duration=0.1,
+                channel_fusion="concat",
+            )
+
+    def test_channel_emb_dim_must_be_less_than_embed_dim(self):
+        with pytest.raises(ValueError, match="must be less than"):
+            EEGTokenizer(
+                channel_strategy=PerChannelStrategy(max_channels=16),
+                temporal_embedding=CNNEmbedding(
+                    embed_dim=1,
+                    num_input_channels=1,
+                    patch_samples=25,
+                    num_filters=16,
+                    kernel_size=3,
+                ),
+                embed_dim=64,
+                patch_duration=0.1,
+                channel_fusion="concat",
+                channel_emb_dim=64,
+            )
+
+
 class TestMode2bSpatialProjectionPatched:
     """Mode 2b: Variable channels, fixed fs, spatial projection + patched."""
 
