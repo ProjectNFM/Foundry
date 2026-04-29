@@ -67,6 +67,13 @@ class ContinuousCWTLayer(nn.Module):
     def n_cycles(self) -> torch.Tensor:
         return self.min_cycles + F.softplus(self.n_cycles_unconstrained)
 
+    def get_watched_params(self) -> dict[str, torch.Tensor]:
+        """Expose human-interpretable CWT parameters for logging."""
+        return {
+            "freqs_hz": self.freqs.detach(),
+            "n_cycles": self.n_cycles.detach(),
+        }
+
     def forward(
         self,
         x: torch.Tensor,
