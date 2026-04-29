@@ -168,6 +168,23 @@ def _get_num_ecog_channels_by_name(data_dir: str, recording_id: str) -> int:
     return _count_ecog_channels(h5_path)
 
 
+def _int_div(numerator: int, denominator: int) -> int:
+    """Integer division, raising on non-divisible operands.
+
+    Useful for computing ``accumulate_grad_batches`` from an effective batch
+    size and a per-step batch size::
+
+        trainer:
+          accumulate_grad_batches: ${int_div:1024,${hyperparameters.batch_size}}
+    """
+    n, d = int(numerator), int(denominator)
+    if d == 0:
+        raise ZeroDivisionError("int_div: denominator is 0")
+    if n % d != 0:
+        raise ValueError(f"int_div: {n} is not evenly divisible by {d}")
+    return n // d
+
+
 def _get_suffix(s: str) -> str:
     """Last segment of an underscore-separated string, upper-cased."""
     return s.split("_")[-1].upper()
@@ -204,6 +221,7 @@ def register_resolvers() -> None:
         "get_checkpoints_from_folder": _get_checkpoints_from_folder,
         "get_overrides_from_ckpt": _get_overrides_from_ckpt,
         "patch_samples": _patch_samples_resolver,
+        "int_div": _int_div,
         "get_suffix": _get_suffix,
         "sweep_choices": _sweep_choices,
         "config_list_sweep_choices": _config_list_sweep_choices,

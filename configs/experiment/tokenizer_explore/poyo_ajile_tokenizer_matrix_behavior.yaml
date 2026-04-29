@@ -1,0 +1,70 @@
+# @package _global_
+#
+# Tokenizer matrix (behavior task): sweep over CWT tokenizers × folds.
+#
+# Single dry-run (one tokenizer, one fold, no multirun):
+#   uv run python main.py experiment=tokenizer_explore/poyo_ajile_tokenizer_matrix_behavior model/tokenizer=per_channel_cwt
+#
+# Full 8-GPU sweep (4 tokenizers × 2 folds):
+#   uv run python main.py experiment=tokenizer_explore/poyo_ajile_tokenizer_matrix_behavior -m
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: ajile/multisess
+  - override /hydra/launcher: local_gpu
+
+_matrix:
+  effective_batch_size: 1024
+  batch_sizes:
+    per_channel_cwt: 128
+    per_channel_cwt_concat: 128
+    spatial_session_cwt: 1024
+    spatial_session_cwt_common: 1024
+
+model:
+  zero_output_timestamps: true
+
+data:
+  split_type: intrasession
+  task_type: behavior
+
+run:
+  name: ajile_behavior_${hydra:runtime.choices.model/tokenizer}_fold${hyperparameters.fold_number}
+  group: AJILE12_MATRIX_ALLFOLDS_BEHAVIOR
+  tags: [tokenizer_matrix, poyo_eeg, ajile, intrasession]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: ${oc.select:_matrix.batch_sizes.${hydra:runtime.choices.model/tokenizer}}
+  sequence_length: 1.0
+  patch_duration: 0.1
+  fold_number: 0
+  num_workers: 32
+  learning_rate: 0.0006
+  weight_decay: 0.09
+  num_channels: null
+  sampling_rate: null
+  session_configs: null
+
+trainer:
+  accelerator: gpu
+  devices: 1
+  precision: bf16-mixed
+  accumulate_grad_batches: ${int_div:${_matrix.effective_batch_size},${hyperparameters.batch_size}}
+  callbacks:
+    early_stopping:
+      monitor: val/ajile_active_behavior_auroc
+      mode: max
+      patience: 20
+    model_checkpoint:
+      monitor: val/ajile_active_behavior_auroc
+      mode: max
+      auto_insert_metric_name: false
+      filename: best-behavior
+
+hydra:
+  sweeper:
+    params:
+      model/tokenizer: per_channel_cwt,per_channel_cwt_concat,spatial_session_cwt,spatial_session_cwt_common
+      hyperparameters.fold_number: "0,1"
