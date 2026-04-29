@@ -91,6 +91,11 @@ class EffectiveBatchSizeCallback(L.Callback):
         import gc
 
         try:
+            # Suppress self.log() calls -- Lightning forbids logging
+            # during on_fit_start, but training_step uses self.log().
+            _orig_log = pl_module.log
+            pl_module.log = lambda *a, **kw: None
+
             it = iter(dl)
             for _ in range(3):
                 try:
@@ -98,7 +103,12 @@ class EffectiveBatchSizeCallback(L.Callback):
                 except StopIteration:
                     break
                 batch = trainer.strategy.batch_to_device(batch, device)
-                pl_module.training_step(batch, 0)
+                loss = pl_module.training_step(batch, 0)
+                if loss is not None:
+                    loss.backward()
+                pl_module.zero_grad(set_to_none=True)
+
+            pl_module.log = _orig_log
             return True
         except RuntimeError as e:
             if "out of memory" in str(e).lower() or "cuda" in str(e).lower():
