@@ -90,12 +90,10 @@ class EffectiveBatchSizeCallback(L.Callback):
     ) -> bool:
         import gc
 
-        try:
-            # Suppress self.log() calls -- Lightning forbids logging
-            # during on_fit_start, but training_step uses self.log().
-            _orig_log = pl_module.log
-            pl_module.log = lambda *a, **kw: None
+        _orig_log = pl_module.log
+        pl_module.log = lambda *a, **kw: None
 
+        try:
             it = iter(dl)
             for _ in range(3):
                 try:
@@ -108,7 +106,6 @@ class EffectiveBatchSizeCallback(L.Callback):
                     loss.backward()
                 pl_module.zero_grad(set_to_none=True)
 
-            pl_module.log = _orig_log
             return True
         except RuntimeError as e:
             if "out of memory" in str(e).lower() or "cuda" in str(e).lower():
@@ -116,6 +113,7 @@ class EffectiveBatchSizeCallback(L.Callback):
                 return False
             raise
         finally:
+            pl_module.log = _orig_log
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
