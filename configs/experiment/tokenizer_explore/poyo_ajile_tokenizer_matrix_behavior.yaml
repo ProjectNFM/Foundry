@@ -18,8 +18,8 @@ _matrix:
   batch_sizes:
     per_channel_cwt: 128
     per_channel_cwt_concat: 128
-    spatial_session_cwt: 1024
-    spatial_session_cwt_common: 1024
+    spatial_session_cwt: 512
+    spatial_session_cwt_common: 512
 
 model:
   zero_output_timestamps: true
