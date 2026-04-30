@@ -1,8 +1,10 @@
 import math
 
+import pytest
 import torch
 
 from foundry.models import CWTEmbedding, ContinuousCWTLayer
+from foundry.models.embeddings.temporal.cwt import generate_freqs
 
 
 INIT_FREQS = torch.logspace(math.log10(2), math.log10(50), 8).tolist()
@@ -227,3 +229,147 @@ class TestCWTEmbeddingForward:
 
         out = emb(x, input_sampling_rate=fs, input_seq_len=seq_lens)
         assert out.device.type == "cuda"
+
+
+# ------------------------------------------------------------------ #
+# generate_freqs
+# ------------------------------------------------------------------ #
+
+
+class TestGenerateFreqs:
+    @pytest.mark.parametrize("spacing", ["linear", "log", "mel", "inverse"])
+    def test_length_and_endpoints(self, spacing):
+        freqs = generate_freqs(10, 2.0, 100.0, spacing=spacing)
+        assert len(freqs) == 10
+        assert freqs[0] == pytest.approx(2.0, rel=1e-6)
+        assert freqs[-1] == pytest.approx(100.0, rel=1e-6)
+
+    @pytest.mark.parametrize("spacing", ["linear", "log", "mel", "inverse"])
+    def test_monotonically_increasing(self, spacing):
+        freqs = generate_freqs(20, 1.0, 200.0, spacing=spacing)
+        for a, b in zip(freqs, freqs[1:]):
+            assert b > a
+
+    def test_single_freq_is_geometric_mean(self):
+        freqs = generate_freqs(1, 4.0, 100.0)
+        assert freqs[0] == pytest.approx(math.sqrt(4.0 * 100.0), rel=1e-6)
+
+    def test_linear_spacing_is_uniform(self):
+        freqs = generate_freqs(5, 10.0, 50.0, spacing="linear")
+        diffs = [b - a for a, b in zip(freqs, freqs[1:])]
+        for d in diffs:
+            assert d == pytest.approx(diffs[0], rel=1e-6)
+
+    def test_log_spacing_is_uniform_in_log(self):
+        freqs = generate_freqs(5, 2.0, 128.0, spacing="log")
+        log_diffs = [
+            math.log(b) - math.log(a) for a, b in zip(freqs, freqs[1:])
+        ]
+        for d in log_diffs:
+            assert d == pytest.approx(log_diffs[0], rel=1e-6)
+
+    def test_invalid_spacing_raises(self):
+        with pytest.raises(ValueError, match="Unknown spacing"):
+            generate_freqs(5, 1.0, 100.0, spacing="cubic")
+
+    def test_min_gt_max_raises(self):
+        with pytest.raises(ValueError, match="max_freq"):
+            generate_freqs(5, 100.0, 10.0)
+
+    @pytest.mark.parametrize("spacing", ["linear", "log", "mel", "inverse"])
+    def test_equal_endpoints(self, spacing):
+        freqs = generate_freqs(5, 30.0, 30.0, spacing=spacing)
+        assert len(freqs) == 5
+        assert all(f == 30.0 for f in freqs)
+
+    def test_zero_num_freqs_raises(self):
+        with pytest.raises(ValueError, match="num_freqs"):
+            generate_freqs(0, 1.0, 100.0)
+
+
+# ------------------------------------------------------------------ #
+# ContinuousCWTLayer — generated freq init
+# ------------------------------------------------------------------ #
+
+
+class TestContinuousCWTLayerGeneratedFreqs:
+    def test_num_freqs_init(self):
+        layer = ContinuousCWTLayer(
+            target_time_tokens=16,
+            num_freqs=6,
+            min_freq=2.0,
+            max_freq=50.0,
+        )
+        assert layer.freqs.shape == (6,)
+
+    def test_freq_spacing_kwarg(self):
+        layer = ContinuousCWTLayer(
+            target_time_tokens=16,
+            num_freqs=8,
+            min_freq=1.0,
+            max_freq=100.0,
+            freq_spacing="linear",
+        )
+        assert layer.freqs.shape == (8,)
+
+    def test_both_paths_raises(self):
+        with pytest.raises(ValueError, match="not both"):
+            ContinuousCWTLayer(
+                target_time_tokens=16,
+                init_freqs=[2.0, 10.0],
+                num_freqs=5,
+                min_freq=1.0,
+                max_freq=100.0,
+            )
+
+    def test_neither_path_raises(self):
+        with pytest.raises(ValueError, match="Must specify"):
+            ContinuousCWTLayer(target_time_tokens=16)
+
+    def test_forward_with_generated_freqs(self):
+        layer = ContinuousCWTLayer(
+            target_time_tokens=16,
+            num_freqs=5,
+            min_freq=2.0,
+            max_freq=80.0,
+        )
+        x = torch.randn(1, 2, 100)
+        fs = torch.tensor([250.0])
+        seq_lens = torch.tensor([100])
+        out = layer(x, fs, seq_lens)
+        assert out.shape == (1, 2, 2, 5, 16)
+
+
+# ------------------------------------------------------------------ #
+# CWTEmbedding — generated freq init
+# ------------------------------------------------------------------ #
+
+
+class TestCWTEmbeddingGeneratedFreqs:
+    def test_num_freqs_init(self):
+        emb = CWTEmbedding(
+            embed_dim=64,
+            num_sources=4,
+            target_time_tokens=16,
+            num_freqs=6,
+            min_freq=2.0,
+            max_freq=50.0,
+        )
+        assert emb._num_freqs == 6
+        assert emb.feature_proj.in_features == 4 * 2 * 6
+
+    def test_forward_with_generated_freqs(self):
+        emb = CWTEmbedding(
+            embed_dim=32,
+            num_sources=2,
+            target_time_tokens=16,
+            num_freqs=5,
+            min_freq=2.0,
+            max_freq=80.0,
+            freq_spacing="mel",
+        )
+        x = torch.randn(1, 2, 100)
+        fs = torch.tensor([250.0])
+        seq_lens = torch.tensor([100])
+        out = emb(x, input_sampling_rate=fs, input_seq_len=seq_lens)
+        assert out.shape == (1, 16, 32)

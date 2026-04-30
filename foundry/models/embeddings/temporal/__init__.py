@@ -1,6 +1,7 @@
 from foundry.models.embeddings.temporal.cwt import (
     CWTEmbedding,
     ContinuousCWTLayer,
+    generate_freqs,
 )
 from foundry.models.embeddings.temporal.patch_cnn import PatchCNNEmbedding
 from foundry.models.embeddings.temporal.patch_linear import PatchLinearEmbedding
@@ -19,5 +20,6 @@ __all__ = [
     "PerTimepointIdentityEmbedding",
     "CWTEmbedding",
     "ContinuousCWTLayer",
+    "generate_freqs",
     "ResampleCNNEmbedding",
 ]
