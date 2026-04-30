@@ -68,7 +68,7 @@ trainer:
       _target_: foundry.training.callbacks.EffectiveBatchSizeCallback
       effective_batch_size: 1024
       init_val: 16
-      max_val: 512
+      max_val: 128
     early_stopping:
       monitor: val/ajile_active_behavior_auroc
       mode: max
@@ -83,9 +83,5 @@ hydra:
   sweeper:
     params:
       model/tokenizer: >-
-        per_channel_cwt,
-        per_channel_resample_cnn,
-        per_channel_per_timepoint_linear,
-        per_channel_cwt_dim512,
-        per_channel_per_timepoint_linear_dim512
+        spatial_session_cwt_dim512
       hyperparameters.fold_number: "0,1"

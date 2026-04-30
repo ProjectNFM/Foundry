@@ -43,6 +43,8 @@ from omegaconf import DictConfig
 
 log = logging.getLogger(__name__)
 
+FREE_MEM_THRESHOLD_MIB = 1024
+
 
 class LocalGpuLauncher(Launcher):
     """Hydra launcher that runs multirun jobs in parallel across local GPUs."""
@@ -51,9 +53,11 @@ class LocalGpuLauncher(Launcher):
         self,
         gpus: Optional[List[int]] = None,
         stop_on_failure: bool = False,
+        only_free_gpus: bool = True,
     ) -> None:
         self.gpus = gpus
         self.stop_on_failure = stop_on_failure
+        self.only_free_gpus = only_free_gpus
         self.config: Optional[DictConfig] = None
         self.task_function: Optional[TaskFunction] = None
         self.hydra_context: Optional[HydraContext] = None
@@ -72,23 +76,65 @@ class LocalGpuLauncher(Launcher):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _detect_gpus() -> List[int]:
+    def _query_gpu_status() -> List[tuple[int, int]]:
+        """Return ``[(gpu_index, memory_used_mib), ...]`` for all GPUs."""
         try:
             out = subprocess.run(
-                ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
+                [
+                    "nvidia-smi",
+                    "--query-gpu=index,memory.used",
+                    "--format=csv,noheader,nounits",
+                ],
                 capture_output=True,
                 text=True,
                 check=True,
             ).stdout
-            return [
-                int(tok)
-                for tok in out.strip().splitlines()
-                if tok.strip().isdigit()
-            ]
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return [0]
+            results = []
+            for line in out.strip().splitlines():
+                parts = line.split(",")
+                if len(parts) != 2:
+                    continue
+                results.append((int(parts[0].strip()), int(parts[1].strip())))
+            return results
+        except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+            return [(0, 0)]
+
+    @classmethod
+    def _detect_free_gpus(cls) -> List[int]:
+        """Return indices of GPUs with memory usage below threshold."""
+        statuses = cls._query_gpu_status()
+        free = [idx for idx, mem in statuses if mem < FREE_MEM_THRESHOLD_MIB]
+        busy = [
+            (idx, mem) for idx, mem in statuses if mem >= FREE_MEM_THRESHOLD_MIB
+        ]
+        if busy:
+            log.info(
+                "Skipping busy GPUs: %s",
+                ", ".join(f"{idx} ({mem} MiB)" for idx, mem in busy),
+            )
+        return free
+
+    @classmethod
+    def _detect_all_gpus(cls) -> List[int]:
+        return [idx for idx, _ in cls._query_gpu_status()]
 
     # ------------------------------------------------------------------
+
+    def _resolve_gpus(self) -> List[int]:
+        if self.gpus:
+            candidates = list(self.gpus)
+        elif self.only_free_gpus:
+            candidates = self._detect_free_gpus()
+        else:
+            candidates = self._detect_all_gpus()
+
+        if not candidates:
+            raise RuntimeError(
+                "LocalGpuLauncher: no GPUs available. All GPUs are in use. "
+                "Either wait for running jobs to finish or explicitly set "
+                "hydra.launcher.gpus=[...] to target specific GPUs."
+            )
+        return candidates
 
     def launch(
         self,
@@ -105,7 +151,7 @@ class LocalGpuLauncher(Launcher):
         sweep_dir = Path(str(self.config.hydra.sweep.dir))
         sweep_dir.mkdir(parents=True, exist_ok=True)
 
-        gpus = list(self.gpus) if self.gpus else self._detect_gpus()
+        gpus = self._resolve_gpus()
         num_jobs = len(job_overrides)
 
         log.info(
