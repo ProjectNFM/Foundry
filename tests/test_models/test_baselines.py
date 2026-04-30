@@ -15,6 +15,7 @@ from foundry.models import (
     TemporalConvAvgPoolClassifier,
     LinearBaseline,
     MLPBaseline,
+    GRUBaseline,
     ShallowConvNet,
     EEGNetEncoder,
 )
@@ -175,6 +176,7 @@ def linear_model(readout_specs):
     return LinearBaseline(
         readout_specs=readout_specs,
         num_channels=4,
+        num_samples=200,
     )
 
 
@@ -184,7 +186,23 @@ def mlp_model(readout_specs):
     return MLPBaseline(
         readout_specs=readout_specs,
         num_channels=4,
+        num_samples=200,
         hidden_dims=[64, 32],
+        dropout_rate=0.3,
+    )
+
+
+@pytest.fixture
+def gru_model(readout_specs):
+    """Create GRUBaseline instance."""
+    return GRUBaseline(
+        readout_specs=readout_specs,
+        num_channels=4,
+        num_samples=200,
+        input_proj_dim=64,
+        hidden_size=32,
+        num_layers=2,
+        bidirectional=True,
         dropout_rate=0.3,
     )
 
@@ -625,11 +643,14 @@ class TestLinearBaseline:
         model = LinearBaseline(
             readout_specs=readout_specs,
             num_channels=4,
+            num_samples=200,
         )
 
         assert model.num_channels == 4
+        assert model.num_samples == 200
         assert hasattr(model, "readout")
-        assert hasattr(model, "pool")
+        for proj in model.readout.projections.values():
+            assert proj.in_features == 4 * 200
 
     def test_forward_backward_pass(self, linear_model):
         """Test tokenize -> collate -> forward -> backward end-to-end."""
@@ -719,14 +740,16 @@ class TestMLPBaseline:
         model = MLPBaseline(
             readout_specs=readout_specs,
             num_channels=4,
+            num_samples=200,
             hidden_dims=[64, 32],
         )
 
         assert model.num_channels == 4
+        assert model.num_samples == 200
         assert hasattr(model, "readout")
-        assert hasattr(model, "pool")
         assert hasattr(model, "mlp")
-        assert model.mlp_out_dim == 32
+        first_linear = model.mlp[0]
+        assert first_linear.in_features == 4 * 200
 
     def test_forward_backward_pass(self, mlp_model):
         """Test tokenize -> collate -> forward -> backward end-to-end."""
@@ -804,6 +827,112 @@ class TestMLPBaseline:
 
 
 # ============================================================================
+# GRUBaseline Tests
+# ============================================================================
+
+
+class TestGRUBaseline:
+    """Test GRUBaseline model."""
+
+    def test_init(self, readout_specs):
+        """Test GRUBaseline initialization."""
+        model = GRUBaseline(
+            readout_specs=readout_specs,
+            num_channels=4,
+            num_samples=200,
+            input_proj_dim=64,
+            hidden_size=32,
+            num_layers=2,
+            bidirectional=True,
+        )
+
+        assert model.num_channels == 4
+        assert model.num_samples == 200
+        assert hasattr(model, "readout")
+        assert hasattr(model, "input_norm")
+        assert hasattr(model, "input_proj")
+        assert hasattr(model, "gru")
+
+        # Bidirectional GRU doubles readout input dimension.
+        for proj in model.readout.projections.values():
+            assert proj.in_features == 64
+
+    def test_forward_backward_pass(self, gru_model):
+        """Test tokenize -> collate -> forward -> backward end-to-end."""
+        data = create_baseline_data_sample(num_channels=4, num_samples=200)
+        tokens = gru_model.tokenize(data)
+        batch = collate([tokens])
+
+        x = batch["input_values"]
+        output_decoder_index = batch["output_decoder_index"]
+        target_values = batch["target_values"]
+        target_weights = batch["target_weights"]
+
+        outputs = gru_model(
+            input_values=x,
+            output_decoder_index=output_decoder_index,
+        )
+
+        assert isinstance(outputs, dict)
+        assert "test_baseline_task" in outputs
+
+        loss = compute_multitask_loss(
+            gru_model,
+            outputs,
+            target_values,
+            target_weights,
+            output_decoder_index,
+        )
+
+        assert loss.requires_grad
+        loss.backward()
+
+        has_gradients = False
+        for param in gru_model.parameters():
+            if param.grad is not None:
+                has_gradients = True
+                break
+        assert has_gradients
+
+    def test_forward_backward_batched(self, gru_model):
+        """Test forward + backward with batched samples."""
+        data1 = create_baseline_data_sample(num_channels=4, num_samples=200)
+        data2 = create_baseline_data_sample(num_channels=4, num_samples=200)
+
+        tokens1 = gru_model.tokenize(data1)
+        tokens2 = gru_model.tokenize(data2)
+        batch = collate([tokens1, tokens2])
+
+        x = batch["input_values"]
+        output_decoder_index = batch["output_decoder_index"]
+        target_values = batch["target_values"]
+        target_weights = batch["target_weights"]
+
+        outputs = gru_model(
+            input_values=x,
+            output_decoder_index=output_decoder_index,
+        )
+
+        loss = compute_multitask_loss(
+            gru_model,
+            outputs,
+            target_values,
+            target_weights,
+            output_decoder_index,
+        )
+
+        assert loss.requires_grad
+        loss.backward()
+
+        has_gradients = False
+        for param in gru_model.parameters():
+            if param.grad is not None:
+                has_gradients = True
+                break
+        assert has_gradients
+
+
+# ============================================================================
 # Integration Tests
 # ============================================================================
 
@@ -851,6 +980,15 @@ class TestBaselineIntegration:
         """Test tokenize output can be used with MLPBaseline."""
         data = create_baseline_data_sample(num_channels=4, num_samples=200)
         tokens = mlp_model.tokenize(data)
+
+        assert "input_values" in tokens
+        assert "output_decoder_index" in tokens
+        assert tokens["input_values"].obj.shape == (200, 4)
+
+    def test_tokenize_then_forward_gru(self, gru_model):
+        """Test tokenize output can be used with GRUBaseline."""
+        data = create_baseline_data_sample(num_channels=4, num_samples=200)
+        tokens = gru_model.tokenize(data)
 
         assert "input_values" in tokens
         assert "output_decoder_index" in tokens

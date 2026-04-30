@@ -1,0 +1,9 @@
+_target_: foundry.models.GRUBaseline
+
+num_channels: 64
+num_samples: 128
+input_proj_dim: 128
+hidden_size: 128
+num_layers: 2
+bidirectional: true
+dropout_rate: 0.3

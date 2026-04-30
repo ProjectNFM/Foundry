@@ -1,3 +1,4 @@
 _target_: foundry.models.LinearBaseline
 
 num_channels: 64
+num_samples: 128

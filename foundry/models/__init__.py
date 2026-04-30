@@ -29,6 +29,7 @@ from foundry.models.baselines import (
     TemporalConvAvgPoolClassifier,
     LinearBaseline,
     MLPBaseline,
+    GRUBaseline,
     ShallowConvNet,
     EEGNetEncoder,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "TemporalConvAvgPoolClassifier",
     "LinearBaseline",
     "MLPBaseline",
+    "GRUBaseline",
     "ShallowConvNet",
     "EEGNetEncoder",
     "ChannelStrategy",
