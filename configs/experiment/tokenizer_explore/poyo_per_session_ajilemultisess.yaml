@@ -4,7 +4,7 @@
 
 defaults:
   - override /model: poyo_eeg
-  - override /model/tokenizer: spatial_session_per_timepoint_identity # or session_mlp_per_timepoint
+  - override /model/tokenizer: spatial_session_cwt # or session_mlp_per_timepoint
   - override /data: ajile/multisess
 
 model:

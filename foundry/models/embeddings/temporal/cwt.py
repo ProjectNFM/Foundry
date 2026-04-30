@@ -1,15 +1,135 @@
 from __future__ import annotations
 
 import math
+from typing import Literal
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+FreqSpacing = Literal["linear", "log", "mel", "inverse"]
+
+_VALID_SPACINGS: set[str] = {"linear", "log", "mel", "inverse"}
+
+_MEL_BREAK_HZ = 700.0
+
+
+def _hz_to_mel(hz: float) -> float:
+    return 2595.0 * math.log10(1.0 + hz / _MEL_BREAK_HZ)
+
+
+def _mel_to_hz(mel: float) -> float:
+    return _MEL_BREAK_HZ * (10.0 ** (mel / 2595.0) - 1.0)
+
+
+def generate_freqs(
+    num_freqs: int,
+    min_freq: float,
+    max_freq: float,
+    spacing: FreqSpacing = "log",
+) -> list[float]:
+    """Generate a list of center frequencies between *min_freq* and *max_freq*.
+
+    Args:
+        num_freqs: How many frequencies to produce.
+        min_freq: Lowest frequency (Hz), inclusive.
+        max_freq: Highest frequency (Hz), inclusive.
+        spacing: Distribution of frequencies between the endpoints.
+
+            * ``"linear"`` -- uniform spacing in Hz.
+            * ``"log"`` -- uniform spacing in log-Hz (more resolution at low
+              frequencies, natural for 1/f-like neural signals).
+            * ``"mel"`` -- uniform spacing on the mel scale (perceptually
+              motivated, less aggressive than log at the low end).
+            * ``"inverse"`` -- uniform spacing in 1/Hz (the most aggressive
+              low-frequency concentration).
+
+    Returns:
+        Sorted list of *num_freqs* floats in ``[min_freq, max_freq]``.
+    """
+    if num_freqs < 1:
+        raise ValueError(f"num_freqs must be >= 1, got {num_freqs}")
+    if min_freq <= 0:
+        raise ValueError(f"min_freq must be > 0, got {min_freq}")
+    if max_freq < min_freq:
+        raise ValueError(
+            f"max_freq ({max_freq}) must be >= min_freq ({min_freq})"
+        )
+    if spacing not in _VALID_SPACINGS:
+        raise ValueError(
+            f"Unknown spacing {spacing!r}. Choose from {sorted(_VALID_SPACINGS)}."
+        )
+
+    if min_freq == max_freq:
+        return [min_freq] * num_freqs
+
+    if num_freqs == 1:
+        return [math.sqrt(min_freq * max_freq)]
+
+    if spacing == "linear":
+        step = (max_freq - min_freq) / (num_freqs - 1)
+        return [min_freq + i * step for i in range(num_freqs)]
+
+    if spacing == "log":
+        log_min, log_max = math.log(min_freq), math.log(max_freq)
+        step = (log_max - log_min) / (num_freqs - 1)
+        return [math.exp(log_min + i * step) for i in range(num_freqs)]
+
+    if spacing == "mel":
+        mel_min, mel_max = _hz_to_mel(min_freq), _hz_to_mel(max_freq)
+        step = (mel_max - mel_min) / (num_freqs - 1)
+        return [_mel_to_hz(mel_min + i * step) for i in range(num_freqs)]
+
+    # spacing == "inverse": uniform in 1/f, then reverse so result is ascending
+    inv_min, inv_max = 1.0 / max_freq, 1.0 / min_freq
+    step = (inv_max - inv_min) / (num_freqs - 1)
+    return [1.0 / (inv_max - i * step) for i in range(num_freqs)]
+
 
 def _inverse_softplus(x: torch.Tensor) -> torch.Tensor:
     threshold = 20.0
     return torch.where(x > threshold, x, torch.log(torch.expm1(x)))
+
+
+def _resolve_init_freqs(
+    init_freqs: list[float] | None,
+    num_freqs: int | None,
+    min_freq: float | None,
+    max_freq: float | None,
+    freq_spacing: FreqSpacing | None,
+) -> list[float]:
+    """Resolve the explicit-vs-generated frequency interface.
+
+    Exactly one path must be specified: either *init_freqs* directly, or the
+    ``(num_freqs, min_freq, max_freq)`` triple (with optional *freq_spacing*).
+    """
+    have_explicit = init_freqs is not None
+    have_generated = num_freqs is not None
+
+    if have_explicit and have_generated:
+        raise ValueError(
+            "Specify either 'init_freqs' or the (num_freqs, min_freq, "
+            "max_freq) parameters, not both."
+        )
+    if not have_explicit and not have_generated:
+        raise ValueError(
+            "Must specify either 'init_freqs' or 'num_freqs' (with "
+            "'min_freq' and 'max_freq')."
+        )
+
+    if have_explicit:
+        return init_freqs  # type: ignore[return-value]
+
+    if min_freq is None or max_freq is None:
+        raise ValueError(
+            "'min_freq' and 'max_freq' are required when using 'num_freqs'."
+        )
+    return generate_freqs(
+        num_freqs=num_freqs,  # type: ignore[arg-type]
+        min_freq=min_freq,
+        max_freq=max_freq,
+        spacing=freq_spacing or "log",
+    )
 
 
 class ContinuousCWTLayer(nn.Module):
@@ -20,26 +140,39 @@ class ContinuousCWTLayer(nn.Module):
     resulting time-frequency map to a fixed number of time tokens using
     differentiable ``grid_sample``.
 
-    Args:
-        init_freqs: Initial center frequencies (Hz) for the wavelets.
-        target_time_tokens: Number of output time tokens after resampling.
-        n_cycles: Initial wavelet width parameter (trades time vs frequency
-            resolution).
+    Frequencies can be supplied in two ways:
+
+    1. **Explicit** -- pass ``init_freqs`` as a list of Hz values.
+    2. **Generated** -- pass ``num_freqs``, ``min_freq``, ``max_freq``
+       (and optionally ``freq_spacing``) to have them computed
+       automatically via :func:`generate_freqs`.
     """
 
     def __init__(
         self,
-        init_freqs: list[float],
         target_time_tokens: int,
+        init_freqs: list[float] | None = None,
+        *,
+        num_freqs: int | None = None,
+        min_freq: float | None = None,
+        max_freq: float | None = None,
+        freq_spacing: FreqSpacing | None = None,
         n_cycles: float = 7.0,
         phase_stability_eps: float = 1e-4,
         min_freq_hz: float = 0.1,
         min_cycles: float = 1.0,
     ):
         super().__init__()
-        init_freqs_tensor = torch.tensor(init_freqs, dtype=torch.float32)
+        resolved_freqs = _resolve_init_freqs(
+            init_freqs,
+            num_freqs,
+            min_freq,
+            max_freq,
+            freq_spacing,
+        )
+        init_freqs_tensor = torch.tensor(resolved_freqs, dtype=torch.float32)
         init_cycles_tensor = torch.full(
-            (len(init_freqs),), float(n_cycles), dtype=torch.float32
+            (len(resolved_freqs),), float(n_cycles), dtype=torch.float32
         )
         if torch.any(init_freqs_tensor <= min_freq_hz):
             raise ValueError(
@@ -210,35 +343,49 @@ class CWTEmbedding(nn.Module):
     The spatial projection is handled by the upstream channel strategy;
     this module is purely temporal.
 
-    Args:
-        embed_dim: Output embedding dimension per time token.
-        num_sources: Number of input source channels (after spatial projection).
-        init_freqs: Initial CWT center frequencies in Hz.
-        target_time_tokens: Number of time tokens produced by the CWT layer.
-        n_cycles: Initial wavelet width (time-frequency trade-off).
+    Frequencies can be supplied in two ways (same interface as
+    :class:`ContinuousCWTLayer`):
+
+    1. **Explicit** -- pass ``init_freqs`` as a list of Hz values.
+    2. **Generated** -- pass ``num_freqs``, ``min_freq``, ``max_freq``
+       (and optionally ``freq_spacing``) to have them computed via
+       :func:`generate_freqs`.
     """
 
     def __init__(
         self,
         embed_dim: int,
         num_sources: int,
-        init_freqs: list[float],
         target_time_tokens: int = 128,
+        init_freqs: list[float] | None = None,
+        *,
+        num_freqs: int | None = None,
+        min_freq: float | None = None,
+        max_freq: float | None = None,
+        freq_spacing: FreqSpacing | None = None,
         n_cycles: float = 7.0,
     ):
         super().__init__()
+        resolved_freqs = _resolve_init_freqs(
+            init_freqs,
+            num_freqs,
+            min_freq,
+            max_freq,
+            freq_spacing,
+        )
+
         self.embed_dim = embed_dim
         self.num_sources = num_sources
         self.target_time_tokens = target_time_tokens
-        self._num_freqs = len(init_freqs)
+        self._num_freqs = len(resolved_freqs)
 
         self.cwt = ContinuousCWTLayer(
-            init_freqs=init_freqs,
             target_time_tokens=target_time_tokens,
+            init_freqs=resolved_freqs,
             n_cycles=n_cycles,
         )
 
-        feat_dim = num_sources * 2 * len(init_freqs)
+        feat_dim = num_sources * 2 * len(resolved_freqs)
         self.feature_proj = nn.Linear(feat_dim, embed_dim)
         nn.init.xavier_uniform_(self.feature_proj.weight, gain=1.0)
         nn.init.zeros_(self.feature_proj.bias)
@@ -268,4 +415,4 @@ class CWTEmbedding(nn.Module):
         return self.feature_proj(cwt_flat)
 
 
-__all__ = ["ContinuousCWTLayer", "CWTEmbedding"]
+__all__ = ["ContinuousCWTLayer", "CWTEmbedding", "generate_freqs"]
