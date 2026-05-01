@@ -1,0 +1,86 @@
+# @package _global_
+#
+# Tokenizer ablation matrix (pose task): sweep over tokenizers × folds.
+#
+# Single dry-run (one tokenizer, one fold, no multirun):
+#   uv run python main.py experiment=tokenizer_explore/poyo_ajile_alltokenizers_matrix_pose model/tokenizer=spatial_session_cwt
+#
+# Full sweep (11 tokenizers × 2 folds = 22 runs):
+#   uv run python main.py experiment=tokenizer_explore/poyo_ajile_alltokenizers_matrix_pose -m
+
+# spatial_session_cwt,
+# spatial_session_cwt_common,
+# spatial_session_resample_cnn,
+# spatial_session_per_timepoint_linear,
+# spatial_session_per_timepoint_identity,
+# spatial_session_cwt_dim512,
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: ajile/multisess
+  - override /module: regression
+  - override /hydra/launcher: local_gpu
+
+_matrix:
+  embed_dims:
+    spatial_session_cwt_dim512: 512
+    per_channel_cwt_dim512: 512
+    per_channel_per_timepoint_linear_dim512: 512
+
+model:
+  zero_output_timestamps: true
+  embed_dim: ${oc.select:_matrix.embed_dims.${hydra:runtime.choices.model/tokenizer},256}
+
+data:
+  split_type: intrasession
+  task_type: pose_estimation
+
+run:
+  name: ajile_pose_estimation_${hydra:runtime.choices.model/tokenizer}_fold${hyperparameters.fold_number}
+  group: AJILE12_TOKENIZER_ABLATION_POSE
+  tags: [tokenizer_ablation, pose, poyo_eeg, ajile, intrasession]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 1.0
+  patch_duration: 0.1
+  fold_number: 0
+  num_workers: 32
+  learning_rate: 0.0006
+  weight_decay: 0.09
+  num_channels: null
+  sampling_rate: null
+  session_configs: null
+
+trainer:
+  accelerator: gpu
+  devices: 1
+  precision: bf16-mixed
+  callbacks:
+    effective_batch_size:
+      _target_: foundry.training.callbacks.EffectiveBatchSizeCallback
+      effective_batch_size: 1024
+      init_val: 16
+      max_val: 512
+    early_stopping:
+      monitor: val/ajile_pose_estimation_r2
+      mode: max
+      patience: 20
+    model_checkpoint:
+      monitor: val/ajile_pose_estimation_r2
+      mode: max
+      auto_insert_metric_name: false
+      filename: best-pose
+
+hydra:
+  sweeper:
+    params:
+      model/tokenizer: >-
+        spatial_session_cwt_common,
+        spatial_session_resample_cnn,
+        spatial_session_per_timepoint_linear,
+        spatial_session_per_timepoint_identity,
+        spatial_session_cwt_dim512,
+      hyperparameters.fold_number: "0,1"
