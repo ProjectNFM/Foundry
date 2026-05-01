@@ -1,5 +1,0 @@
-_target_: foundry.models.TemporalConvAvgPoolClassifier
-
-num_channels: 64
-num_filters: 32
-kernel_size: 64
