@@ -36,7 +36,7 @@ class BaselineEEGModel(nn.Module):
             readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s) for multitask head.
             num_samples (int | None, optional): Number of time samples per input window. Subclasses that require
                 a fixed window length (e.g., for shape checks or flattened readout dimensions) should pass this value.
-                Subclasses with adaptive pooling (e.g., TemporalConvAvgPoolClassifier) may leave it as None. Default: None.
+                Subclasses with adaptive pooling (e.g., TemporalConvAvgPool) may leave it as None. Default: None.
         """
         super().__init__()
         self.num_channels = num_channels
@@ -273,11 +273,10 @@ class LinearBaseline(BaselineEEGModel):
             )
         # Flattens each input in the batch into a single feature vector (combining all channels and time samples)
         x = x.reshape(x.size(0), -1)
- 
 
         batch_size = x.shape[0]
         n_out = output_decoder_index.shape[1]
-        
+
         # Repeat (broadcast) the feature vector for each output task in the batch,
         # so its shape is (batch_size, n_out, feature_dim) as required by MultitaskReadout
         x = x.unsqueeze(1).expand(batch_size, n_out, -1)
@@ -474,7 +473,7 @@ class GRUBaseline(BaselineEEGModel):
         )
 
 
-class TemporalConvAvgPoolClassifier(BaselineEEGModel):
+class TemporalConvAvgPool(BaselineEEGModel):
     """
     A simple baseline classifier for EEG data.
 

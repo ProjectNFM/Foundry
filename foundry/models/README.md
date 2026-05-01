@@ -159,7 +159,7 @@ model = POYOEEGModel(
 
 `baselines.py` provides non-Perceiver references:
 
-- `TemporalConvAvgPoolClassifier`
+- `TemporalConvAvgPool`
 - `ShallowConvNet`
 - `EEGNetEncoder`
 
