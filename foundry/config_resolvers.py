@@ -173,6 +173,11 @@ def _get_suffix(s: str) -> str:
     return s.split("_")[-1].upper()
 
 
+def _get_prefix(s: str) -> str:
+    """First segment of an underscore-separated string, lower-cased."""
+    return s.split("_")[0].lower()
+
+
 def hydra_main_wrapper(func):
     """Decorator that ensures exceptions are printed and streams flushed.
 
@@ -205,6 +210,7 @@ def register_resolvers() -> None:
         "get_overrides_from_ckpt": _get_overrides_from_ckpt,
         "patch_samples": _patch_samples_resolver,
         "get_suffix": _get_suffix,
+        "get_prefix": _get_prefix,
         "sweep_choices": _sweep_choices,
         "config_list_sweep_choices": _config_list_sweep_choices,
         "get_num_ecog_channels_by_name": _get_num_ecog_channels_by_name,

@@ -15,7 +15,7 @@
 # - SLURM packed (example 4 tasks per node):
 #   uv run python main.py experiment=auditory_decoding/baseline_freqdec_singlesess_multirun hydra/launcher=slurm_default hydra.launcher.tasks_per_node=4 -m
 
-model_name: gru_baseline
+model_name: linear_baseline
 
 defaults:
   - override /model: ${model_name}
