@@ -42,7 +42,7 @@ data:
 
 run:
   name: ajile_behavior_${hydra:runtime.choices.model/tokenizer}_fold${hyperparameters.fold_number}
-  group: AJILE12_TOKENIZER_ABLATION
+  group: AJILE12_TOKENIZER_ABLATION_lowerLR
   tags: [tokenizer_ablation, poyo_eeg, ajile, intrasession]
   seed: 42
   log_level: INFO
@@ -53,8 +53,8 @@ hyperparameters:
   patch_duration: 0.1
   fold_number: 0
   num_workers: 32
-  learning_rate: 0.0006
-  weight_decay: 0.09
+  learning_rate: 0.00006
+  weight_decay: 0.01
   num_channels: null
   sampling_rate: null
   session_configs: null
@@ -78,10 +78,19 @@ trainer:
       mode: max
       auto_insert_metric_name: false
       filename: best-behavior
-
+  
 hydra:
+  launcher:
+    gpus: 
+      - 1
+      - 2
+      - 3
+      - 6
   sweeper:
     params:
       model/tokenizer: >-
-        spatial_session_cwt_dim512
+        spatial_session_cwt_dim512,
+        spatial_session_cwt_common,
+        spatial_session_resample_cnn,
+        spatial_session_per_timepoint_linear
       hyperparameters.fold_number: "0,1"
