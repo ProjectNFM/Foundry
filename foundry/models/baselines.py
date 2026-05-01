@@ -488,6 +488,7 @@ class TemporalConvAvgPool(BaselineEEGModel):
         num_channels: int = 64,
         num_filters: int = 32,
         kernel_size: int = 64,
+        **kwargs,
     ):
         """
         Args:
@@ -495,6 +496,7 @@ class TemporalConvAvgPool(BaselineEEGModel):
             num_channels (int, optional): Number of EEG channels. Default: 64.
             num_filters (int, optional): Number of convolutional filters. Default: 32.
             kernel_size (int, optional): Temporal kernel size for Conv1d. Default: 64.
+            **kwargs: Additional keyword arguments.
         """
         super().__init__(
             num_channels=num_channels,

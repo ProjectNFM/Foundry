@@ -15,10 +15,8 @@
 # - SLURM packed (example 4 tasks per node):
 #   uv run python main.py experiment=auditory_decoding/baseline_freqdec_singlesess_multirun hydra/launcher=slurm_default hydra.launcher.tasks_per_node=4 -m
 
-baseline_name: linear # linear, mlp, gru, shallowcnn, temporalcnn, eegnet
-
 defaults:
-  - override /model: ${baseline_name}
+  - override /model: linear # linear, mlp, gru, shallowcnn, temporalcnn, eegnet
   - override /data: neurosoft_minipigs/singlesess
 
 model:
@@ -30,13 +28,13 @@ data:
   task_type: acoustic_stim
 
 run:
-  name: ${baseline_name}_neurosoft_${data.recording_ids.0}
+  name: ${hydra:runtime.choices.model}_neurosoft_${data.recording_ids.0}
   group: NEUROSOFT_SINGLE_SESSION
   tags:
     - neurosoft
     - baselines
     - training
-    - ${baseline_name}
+    - ${hydra:runtime.choices.model}
   seed: 42
   log_level: INFO
 
