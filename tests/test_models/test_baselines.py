@@ -13,9 +13,9 @@ from torch_brain.nn.loss import CrossEntropyLoss
 
 from foundry.models import (
     TemporalConvAvgPool,
-    LinearBaseline,
-    MLPBaseline,
-    GRUBaseline,
+    Linear,
+    MLP,
+    GRU,
     ShallowConvNet,
     EEGNetEncoder,
 )
@@ -172,8 +172,8 @@ def eegnet_model(readout_specs):
 
 @pytest.fixture
 def linear_model(readout_specs):
-    """Create LinearBaseline instance."""
-    return LinearBaseline(
+    """Create Linear instance."""
+    return Linear(
         readout_specs=readout_specs,
         num_channels=4,
         num_samples=200,
@@ -182,8 +182,8 @@ def linear_model(readout_specs):
 
 @pytest.fixture
 def mlp_model(readout_specs):
-    """Create MLPBaseline instance."""
-    return MLPBaseline(
+    """Create MLP instance."""
+    return MLP(
         readout_specs=readout_specs,
         num_channels=4,
         num_samples=200,
@@ -194,8 +194,8 @@ def mlp_model(readout_specs):
 
 @pytest.fixture
 def gru_model(readout_specs):
-    """Create GRUBaseline instance."""
-    return GRUBaseline(
+    """Create GRU instance."""
+    return GRU(
         readout_specs=readout_specs,
         num_channels=4,
         num_samples=200,
@@ -208,7 +208,7 @@ def gru_model(readout_specs):
 
 
 # ============================================================================
-# Shared Tokenize Tests (BaselineModel)
+# Shared Tokenize Tests (BaselineEEGModel)
 # ============================================================================
 
 
@@ -631,16 +631,16 @@ class TestEEGNetEncoder:
 
 
 # ============================================================================
-# LinearBaseline Tests
+# Linear Tests
 # ============================================================================
 
 
-class TestLinearBaseline:
-    """Test LinearBaseline model."""
+class TestLinear:
+    """Test Linear model."""
 
     def test_init(self, readout_specs):
-        """Test LinearBaseline initialization."""
-        model = LinearBaseline(
+        """Test Linear initialization."""
+        model = Linear(
             readout_specs=readout_specs,
             num_channels=4,
             num_samples=200,
@@ -728,16 +728,16 @@ class TestLinearBaseline:
 
 
 # ============================================================================
-# MLPBaseline Tests
+# MLP Tests
 # ============================================================================
 
 
-class TestMLPBaseline:
-    """Test MLPBaseline model."""
+class TestMLP:
+    """Test MLP model."""
 
     def test_init(self, readout_specs):
-        """Test MLPBaseline initialization."""
-        model = MLPBaseline(
+        """Test MLP initialization."""
+        model = MLP(
             readout_specs=readout_specs,
             num_channels=4,
             num_samples=200,
@@ -827,16 +827,16 @@ class TestMLPBaseline:
 
 
 # ============================================================================
-# GRUBaseline Tests
+# GRU Tests
 # ============================================================================
 
 
-class TestGRUBaseline:
-    """Test GRUBaseline model."""
+class TestGRU:
+    """Test GRU model."""
 
     def test_init(self, readout_specs):
-        """Test GRUBaseline initialization."""
-        model = GRUBaseline(
+        """Test GRU initialization."""
+        model = GRU(
             readout_specs=readout_specs,
             num_channels=4,
             num_samples=200,
@@ -968,7 +968,7 @@ class TestBaselineIntegration:
         assert tokens["input_values"].obj.shape == (512, 4)
 
     def test_tokenize_then_forward_linear(self, linear_model):
-        """Test tokenize output can be used with LinearBaseline."""
+        """Test tokenize output can be used with Linear."""
         data = create_baseline_data_sample(num_channels=4, num_samples=200)
         tokens = linear_model.tokenize(data)
 
@@ -977,7 +977,7 @@ class TestBaselineIntegration:
         assert tokens["input_values"].obj.shape == (200, 4)
 
     def test_tokenize_then_forward_mlp(self, mlp_model):
-        """Test tokenize output can be used with MLPBaseline."""
+        """Test tokenize output can be used with MLP."""
         data = create_baseline_data_sample(num_channels=4, num_samples=200)
         tokens = mlp_model.tokenize(data)
 
@@ -986,7 +986,7 @@ class TestBaselineIntegration:
         assert tokens["input_values"].obj.shape == (200, 4)
 
     def test_tokenize_then_forward_gru(self, gru_model):
-        """Test tokenize output can be used with GRUBaseline."""
+        """Test tokenize output can be used with GRU."""
         data = create_baseline_data_sample(num_channels=4, num_samples=200)
         tokens = gru_model.tokenize(data)
 

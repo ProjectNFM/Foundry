@@ -5,7 +5,7 @@
 - a composable `EEGTokenizer` (`tokenizer.py`) for channel handling + temporal embedding,
 - a Perceiver IO backbone (`backbones/perceiver.py`),
 - the integrated POYO-style model (`poyo_eeg.py`),
-- and baseline CNN models (`baselines.py`).
+- and reference EEG models (`baselines.py`).
 
 ## Current Layout
 
@@ -159,6 +159,9 @@ model = POYOEEGModel(
 
 `baselines.py` provides non-Perceiver references:
 
+- `Linear`
+- `MLP`
+- `GRU`
 - `TemporalConvAvgPool`
 - `ShallowConvNet`
 - `EEGNetEncoder`

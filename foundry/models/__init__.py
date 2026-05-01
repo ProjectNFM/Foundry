@@ -27,9 +27,9 @@ from foundry.models.tokenizer import EEGTokenizer
 from foundry.models.poyo_eeg import POYOEEGModel
 from foundry.models.baselines import (
     TemporalConvAvgPool,
-    LinearBaseline,
-    MLPBaseline,
-    GRUBaseline,
+    Linear,
+    MLP,
+    GRU,
     ShallowConvNet,
     EEGNetEncoder,
 )
@@ -38,9 +38,9 @@ __all__ = [
     "POYOEEGModel",
     "EEGTokenizer",
     "TemporalConvAvgPool",
-    "LinearBaseline",
-    "MLPBaseline",
-    "GRUBaseline",
+    "Linear",
+    "MLP",
+    "GRU",
     "ShallowConvNet",
     "EEGNetEncoder",
     "ChannelStrategy",

@@ -19,7 +19,7 @@ from foundry.models.utils import resolve_readout_specs
 
 class BaselineEEGModel(nn.Module):
     """
-    Base class for all baseline EEG/iEEG models.
+    Base class for all reference EEG/iEEG models.
     """
 
     SUPPORTED_MODALITIES = {"eeg", "ecog", "seeg", "ieeg"}
@@ -216,7 +216,7 @@ class BaselineEEGModel(nn.Module):
         return model_inputs, target_values, target_weights, output_decoder_index
 
 
-class LinearBaseline(BaselineEEGModel):
+class Linear(BaselineEEGModel):
     """
     A simple linear baseline for EEG classification.
 
@@ -257,7 +257,7 @@ class LinearBaseline(BaselineEEGModel):
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
         """
-        Forward pass for the LinearBaseline.
+        Forward pass for the Linear model.
 
         Args:
             input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
@@ -288,14 +288,14 @@ class LinearBaseline(BaselineEEGModel):
         )
 
 
-class MLPBaseline(BaselineEEGModel):
+class MLP(BaselineEEGModel):
     """
     An MLP-based baseline for EEG classification.
 
     This model flattens the full EEG input across channels and time, then passes
     those features through a configurable MLP (multi-layer perceptron) before the
     final multitask linear readout. Useful as an intermediate-complexity
-    reference between LinearBaseline and convolutional baselines.
+    reference between Linear and convolutional baselines.
     """
 
     def __init__(
@@ -347,7 +347,7 @@ class MLPBaseline(BaselineEEGModel):
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
         """
-        Forward pass for the MLPBaseline.
+        Forward pass for the MLP model.
 
         Args:
             input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
@@ -376,7 +376,7 @@ class MLPBaseline(BaselineEEGModel):
         )
 
 
-class GRUBaseline(BaselineEEGModel):
+class GRU(BaselineEEGModel):
     """
     A GRU-based baseline for EEG classification.
 
@@ -438,7 +438,7 @@ class GRUBaseline(BaselineEEGModel):
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
         """
-        Forward pass for GRUBaseline.
+        Forward pass for GRU.
 
         Args:
             input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
