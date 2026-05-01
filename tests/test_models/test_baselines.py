@@ -1,6 +1,6 @@
-"""Test suite for baseline EEG classification models.
+"""Test suite for baseline EEG models.
 
-Tests TemporalConvAvgPool, ShallowConvNet, and EEGNetEncoder models.
+Tests Linear, MLP, GRU, TemporalConvAvgPool, ShallowConvNet, and EEGNetEncoder models.
 """
 
 import numpy as np
