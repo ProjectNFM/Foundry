@@ -9,7 +9,6 @@
 #   uv run python main.py experiment=tokenizer_explore/poyo_ajile_alltokenizers_matrix_pose -m
 
 # spatial_session_cwt,
-# spatial_session_cwt_common,
 # spatial_session_resample_cnn,
 # spatial_session_per_timepoint_linear,
 # spatial_session_per_timepoint_identity,
@@ -85,7 +84,7 @@ hydra:
   sweeper:
     params:
       model/tokenizer: >-
-        spatial_session_cwt_common,
+        spatial_session_cwt,
         spatial_session_resample_cnn,
         spatial_session_per_timepoint_linear,
         per_channel_cwt,

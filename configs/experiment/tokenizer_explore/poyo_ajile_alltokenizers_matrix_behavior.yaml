@@ -5,8 +5,7 @@
 # Questions addressed:
 #   Q1  Spatial session vs per-channel?  (3 paired comparisons)
 #   Q2  CWT vs ResampleCNN vs per-timepoint?  (2×3 factorial)
-#   Q3  Common layer / temporal projection useful?  (2 ablation pairs)
-#   Q4  Is embed_dim a bottleneck for spatial session + CWT?  (dim512 + controls)
+#   Q3  Is embed_dim a bottleneck for spatial session + CWT?  (dim512 + controls)
 #
 # Single dry-run (one tokenizer, one fold, no multirun):
 #   uv run python main.py experiment=tokenizer_explore/poyo_ajile_alltokenizers_matrix_behavior model/tokenizer=spatial_session_cwt
@@ -15,7 +14,6 @@
 #   uv run python main.py experiment=tokenizer_explore/poyo_ajile_alltokenizers_matrix_behavior -m
 
 # spatial_session_cwt,
-# spatial_session_cwt_common,
 # spatial_session_resample_cnn,
 # spatial_session_per_timepoint_linear,
 # spatial_session_per_timepoint_identity,
@@ -90,7 +88,7 @@ hydra:
     params:
       model/tokenizer: >-
         spatial_session_cwt_dim512,
-        spatial_session_cwt_common,
+        spatial_session_cwt,
         spatial_session_resample_cnn,
         spatial_session_per_timepoint_linear
       hyperparameters.fold_number: "0,1"
