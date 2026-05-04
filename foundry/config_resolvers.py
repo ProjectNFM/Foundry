@@ -222,6 +222,7 @@ def register_resolvers() -> None:
         "get_overrides_from_ckpt": _get_overrides_from_ckpt,
         "patch_samples": _patch_samples_resolver,
         "int_div": _int_div,
+        "eval": eval,
         "get_suffix": _get_suffix,
         "sweep_choices": _sweep_choices,
         "config_list_sweep_choices": _config_list_sweep_choices,

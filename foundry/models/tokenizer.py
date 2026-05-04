@@ -56,8 +56,8 @@ class EEGTokenizer(nn.Module):
         embed_dim: int,
         patch_duration: float | None = None,
         stride: float | None = None,
-        channel_fusion: Literal["add", "concat"] = "add",
-        channel_emb_dim: int | None = None,
+        channel_fusion: Literal["add", "concat"] = "concat",
+        channel_emb_dim: int | None = 64,
     ):
         super().__init__()
         self.channel_strategy = channel_strategy

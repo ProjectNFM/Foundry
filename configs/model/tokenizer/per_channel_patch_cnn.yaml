@@ -1,12 +1,14 @@
 _target_: foundry.models.tokenizer.EEGTokenizer
 patch_duration: ${hyperparameters.patch_duration}
 embed_dim: ${model.embed_dim}
+channel_fusion: concat
+channel_emb_dim: 64
 channel_strategy:
   _target_: foundry.models.embeddings.PerChannelStrategy
   max_channels: ${hyperparameters.num_channels}
 temporal_embedding:
   _target_: foundry.models.embeddings.PatchCNNEmbedding
-  embed_dim: ${model.embed_dim}
+  embed_dim: ${eval:'${model.embed_dim} - ${channel_emb_dim}'}
   num_input_channels: 1
   patch_samples: ${patch_samples:${hyperparameters.patch_duration},${hyperparameters.sampling_rate}}
   num_filters: 32
