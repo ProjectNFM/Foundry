@@ -10,7 +10,7 @@ channel_strategy:
     session_configs: ${hyperparameters.session_configs}
     num_sources: ${model.tokenizer.channel_strategy.num_sources}
     hidden_dim: ${model.embed_dim} 
-    common_layer: true
+    common_layer: false
 temporal_embedding:
   _target_: foundry.models.embeddings.IdentityTemporalEmbedding
   embed_dim: ${model.embed_dim}
