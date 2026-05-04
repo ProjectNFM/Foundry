@@ -75,12 +75,20 @@ trainer:
       filename: best-pose
 
 hydra:
+  launcher:
+    gpus: 
+      - 1
+      - 2
+      - 3
+      - 6
+      - 7
   sweeper:
     params:
       model/tokenizer: >-
         spatial_session_cwt_common,
         spatial_session_resample_cnn,
         spatial_session_per_timepoint_linear,
-        spatial_session_per_timepoint_identity,
-        spatial_session_cwt_dim512,
+        per_channel_cwt,
+        per_channel_resample_cnn,
+        per_channel_per_timepoint_linear
       hyperparameters.fold_number: "0,1"

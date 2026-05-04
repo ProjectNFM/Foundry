@@ -137,52 +137,49 @@ class LocalGpuLauncher(Launcher):
             )
         return candidates
 
-    def _snapshot_launch_context(
-        self, sweep_dir: Path
-    ) -> tuple[Optional[Path], Optional[Path]]:
+    def _snapshot_launch_context(self, sweep_dir: Path) -> Path:
         """Snapshot configs and source code into the sweep directory so that
         every subprocess -- even ones queued for later -- uses the code and
         config as they existed at launch time.
 
-        Returns ``(config_snapshot, code_snapshot)`` absolute paths, either
-        of which may be ``None`` if the corresponding source wasn't found.
+        The snapshot mirrors the project root layout (``main.py``,
+        ``foundry/``, ``hydra_plugins/``, ``configs/``) so that Hydra's
+        ``@hydra.main(config_path="configs")`` resolves correctly without
+        needing ``--config-dir``.
+
+        Returns the absolute path of the snapshot directory.
         """
         assert self.config is not None
         ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
 
-        config_snapshot: Optional[Path] = None
+        snapshot = sweep_dir / ".launch_snapshot"
+        if snapshot.exists():
+            shutil.rmtree(snapshot)
+        snapshot.mkdir()
+
+        project_root = Path(sys.argv[0]).resolve().parent
+
+        for pkg in ("foundry", "hydra_plugins"):
+            pkg_dir = project_root / pkg
+            if pkg_dir.is_dir():
+                shutil.copytree(pkg_dir, snapshot / pkg, ignore=ignore)
+
+        for py_file in project_root.glob("*.py"):
+            shutil.copy2(py_file, snapshot / py_file.name)
+
         for src in self.config.hydra.runtime.config_sources:
             if src.schema != "file" or not src.path:
                 continue
             src_path = Path(src.path)
             if not src_path.is_dir():
                 continue
-            config_snapshot = sweep_dir / ".config_snapshot"
-            if config_snapshot.exists():
-                shutil.rmtree(config_snapshot)
-            shutil.copytree(src_path, config_snapshot, ignore=ignore)
-            config_snapshot = config_snapshot.resolve()
-            log.info("Config snapshot: %s", config_snapshot)
+            config_dest = snapshot / src_path.relative_to(project_root)
+            shutil.copytree(src_path, config_dest, ignore=ignore)
             break
 
-        project_root = Path(sys.argv[0]).resolve().parent
-        code_snapshot = sweep_dir / ".code_snapshot"
-        if code_snapshot.exists():
-            shutil.rmtree(code_snapshot)
-        code_snapshot.mkdir()
-
-        for pkg in ("foundry", "hydra_plugins"):
-            pkg_dir = project_root / pkg
-            if pkg_dir.is_dir():
-                shutil.copytree(pkg_dir, code_snapshot / pkg, ignore=ignore)
-
-        for py_file in project_root.glob("*.py"):
-            shutil.copy2(py_file, code_snapshot / py_file.name)
-
-        code_snapshot = code_snapshot.resolve()
-        log.info("Code snapshot: %s", code_snapshot)
-
-        return config_snapshot, code_snapshot
+        snapshot = snapshot.resolve()
+        log.info("Launch snapshot: %s", snapshot)
+        return snapshot
 
     def launch(
         self,
@@ -199,9 +196,7 @@ class LocalGpuLauncher(Launcher):
         sweep_dir = Path(str(self.config.hydra.sweep.dir))
         sweep_dir.mkdir(parents=True, exist_ok=True)
 
-        config_snapshot, code_snapshot = self._snapshot_launch_context(
-            sweep_dir
-        )
+        snapshot = self._snapshot_launch_context(sweep_dir)
 
         gpus = self._resolve_gpus()
         num_jobs = len(job_overrides)
@@ -220,9 +215,7 @@ class LocalGpuLauncher(Launcher):
         proc_lock = threading.Lock()
         failure_event = threading.Event()
 
-        script = sys.argv[0]
-        if code_snapshot is not None:
-            script = str(code_snapshot / Path(sys.argv[0]).name)
+        script = str(snapshot / Path(sys.argv[0]).name)
 
         def _run_one(idx: int, overrides: list[str]) -> int:
             gpu_id = gpu_pool.get()
@@ -230,17 +223,11 @@ class LocalGpuLauncher(Launcher):
                 if self.stop_on_failure and failure_event.is_set():
                     return -1
 
-                cmd = [sys.executable, script]
-                if config_snapshot is not None:
-                    cmd += ["--config-dir", str(config_snapshot)]
-                cmd += overrides
+                cmd = [sys.executable, script] + overrides
                 env = {**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)}
-                if code_snapshot is not None:
-                    env["PYTHONPATH"] = (
-                        str(code_snapshot)
-                        + os.pathsep
-                        + env.get("PYTHONPATH", "")
-                    )
+                env["PYTHONPATH"] = (
+                    str(snapshot) + os.pathsep + env.get("PYTHONPATH", "")
+                )
                 desc = " ".join(filter_overrides(overrides))
                 log.info("  #%d [GPU %d]: %s", idx, gpu_id, desc)
 
