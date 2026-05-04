@@ -8,5 +8,5 @@ channel_strategy:
   max_channels: ${hyperparameters.num_channels}
 temporal_embedding:
   _target_: foundry.models.embeddings.PerTimepointLinearEmbedding
-  embed_dim: ${eval:'${model.embed_dim} - ${channel_emb_dim}'}
+  embed_dim: ${eval:'${model.embed_dim} - ${model.tokenizer.channel_emb_dim}'}
   input_dim: 1
