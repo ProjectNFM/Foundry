@@ -128,10 +128,11 @@ class EEGTokenizer(nn.Module):
         # across samples. Normalize to a fixed length so batches can collate.
         expected_T = round(sampling_rate * sequence_length)
         T = signal.shape[0]
-        if T > expected_T:
-            signal = signal[:expected_T]
-        elif T < expected_T:
-            signal = np.pad(signal, ((0, expected_T - T), (0, 0)))
+        if abs(T - expected_T) <= 2:
+            if T > expected_T:
+                signal = signal[:expected_T]
+            elif T < expected_T:
+                signal = np.pad(signal, ((0, expected_T - T), (0, 0)))
 
         result = self.channel_strategy.prepare_pretokenize(
             signal,
