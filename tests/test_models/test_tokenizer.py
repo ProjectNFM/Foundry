@@ -302,14 +302,14 @@ class TestMode3aSpatialProjectionCWT:
                 embed_dim=embed_dim,
                 num_sources=8,
                 init_freqs=INIT_FREQS,
-                target_time_tokens=32,
+                target_token_rate=32.0,
             ),
             embed_dim=embed_dim,
         )
 
     def test_pretokenize_timestamps_match_target_tokens(self):
         tokenizer = self._make_tokenizer()
-        signal = np.random.randn(200, 30).astype(np.float32)
+        signal = np.random.randn(250, 30).astype(np.float32)
         tokens = np.arange(30)
 
         result = tokenizer.pretokenize(signal, tokens, 250.0, 1.0)
@@ -318,9 +318,9 @@ class TestMode3aSpatialProjectionCWT:
     def test_forward_shape(self, batch_size):
         embed_dim = 64
         tokenizer = self._make_tokenizer(embed_dim=embed_dim)
-        x = torch.randn(batch_size, 64, 200)
+        x = torch.randn(batch_size, 64, 250)
         fs = torch.full((batch_size,), 250.0)
-        seq_lens = torch.full((batch_size,), 200, dtype=torch.long)
+        seq_lens = torch.full((batch_size,), 250, dtype=torch.long)
 
         out = tokenizer(x, input_sampling_rate=fs, input_seq_len=seq_lens)
         assert out.shape == (batch_size, 32, embed_dim)
@@ -500,7 +500,7 @@ class TestSpatialProjectionWithSessionConfig:
                 embed_dim=embed_dim,
                 num_sources=self.NUM_SOURCES,
                 init_freqs=INIT_FREQS,
-                target_time_tokens=16,
+                target_token_rate=20.0,
             ),
             embed_dim=embed_dim,
         )

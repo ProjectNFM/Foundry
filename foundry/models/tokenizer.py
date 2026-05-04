@@ -164,9 +164,14 @@ class EEGTokenizer(nn.Module):
             else:
                 result["input_timestamps"] = patch_timestamps
         else:
-            # CWT produces target_time_tokens; PerTimepoint produces T tokens
-            if hasattr(self.temporal_embedding, "target_time_tokens"):
-                num_time_tokens = self.temporal_embedding.target_time_tokens
+            if hasattr(self.temporal_embedding, "target_token_rate"):
+                num_time_tokens = max(
+                    1,
+                    round(
+                        self.temporal_embedding.target_token_rate
+                        * sequence_length
+                    ),
+                )
             else:
                 num_time_tokens = signal.shape[0]
 
@@ -237,7 +242,7 @@ class EEGTokenizer(nn.Module):
             )
             tokens = self.temporal_embedding(patches)
         else:
-            if hasattr(self.temporal_embedding, "target_time_tokens"):
+            if hasattr(self.temporal_embedding, "target_token_rate"):
                 tokens = self.temporal_embedding(
                     transformed,
                     input_sampling_rate=sr,
