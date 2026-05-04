@@ -20,6 +20,7 @@ dependencies = [
     "torchmetrics>=1.8.2",
     "wandb>=0.24.0",
     "auditorydecoding",
+    "optuna>=4.8.0",
 ]
 
 [dependency-groups]

@@ -1,0 +1,63 @@
+# @package _global_
+#
+# Optuna hyperparameter search for single-session behavior classification.
+#
+# NOT intended for direct CLI use — driven by scripts/run_optuna_search.py,
+# which passes model/tokenizer and hyperparameter overrides per trial.
+#
+# Manual dry-run (one tokenizer, default HPs):
+#   uv run python main.py experiment=tokenizer_explore/optuna_behavior_search model/tokenizer=spatial_session_cwt
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: ajile/singlesess
+
+model:
+  zero_output_timestamps: true
+
+data:
+  split_type: intrasession
+  task_type: behavior
+
+run:
+  name: optuna_behavior
+  group: OPTUNA_BEHAVIOR_SEARCH
+  tags: [optuna, hyperparameter_search, behavior, poyo_eeg, ajile]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 1.0
+  patch_duration: 0.1
+  fold_number: 0
+  num_workers: 8
+  learning_rate: 0.0006
+  weight_decay: 0.01
+  sampling_rate: 500
+  num_channels: null
+  session_configs: null
+
+trainer:
+  accelerator: gpu
+  devices: 1
+  precision: bf16-mixed
+  callbacks:
+    effective_batch_size:
+      _target_: foundry.training.callbacks.EffectiveBatchSizeCallback
+      effective_batch_size: 1024
+      init_val: 16
+      max_val: 128
+    early_stopping:
+      monitor: val/ajile_active_behavior_auroc
+      mode: max
+      patience: 10
+    model_checkpoint:
+      monitor: val/ajile_active_behavior_auroc
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best"
+
+module:
+  class_weights: null
+  class_weight_smoothing: 0.0
