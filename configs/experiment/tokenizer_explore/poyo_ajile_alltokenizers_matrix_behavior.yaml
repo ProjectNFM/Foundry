@@ -39,8 +39,8 @@ data:
   task_type: behavior
 
 run:
-  name: ajile_behavior_${hydra:runtime.choices.model/tokenizer}_fold${hyperparameters.fold_number}
-  group: AJILE12_TOKENIZER_ABLATION_lowerLR
+  name: ${hydra:runtime.choices.model/tokenizer}_fold${hyperparameters.fold_number}
+  group: AJILE_NEW_ALLTOKS
   tags: [tokenizer_ablation, poyo_eeg, ajile, intrasession]
   seed: 42
   log_level: INFO
@@ -66,7 +66,7 @@ trainer:
       _target_: foundry.training.callbacks.EffectiveBatchSizeCallback
       effective_batch_size: 1024
       init_val: 16
-      max_val: 128
+      max_val: 512
     early_stopping:
       monitor: val/ajile_active_behavior_auroc
       mode: max
@@ -78,17 +78,16 @@ trainer:
       filename: best-behavior
   
 hydra:
-  launcher:
-    gpus: 
-      - 1
-      - 2
-      - 3
-      - 6
   sweeper:
     params:
       model/tokenizer: >-
-        spatial_session_cwt_dim512,
         spatial_session_cwt,
         spatial_session_resample_cnn,
-        spatial_session_per_timepoint_linear
+        spatial_session_per_timepoint_linear,
+        spatial_session_mlp_cwt,
+        spatial_session_mlp_resample_cnn,
+        spatial_session_mlp_per_timepoint_identity,
+        per_channel_cwt,
+        per_channel_resample_cnn,
+        per_channel_per_timepoint_linear
       hyperparameters.fold_number: "0,1"
