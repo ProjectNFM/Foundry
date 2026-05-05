@@ -18,6 +18,15 @@
 # spatial_session_per_timepoint_linear,
 # spatial_session_per_timepoint_identity,
 # spatial_session_cwt_dim512,
+# spatial_session_cwt,
+# spatial_session_resample_cnn,
+# spatial_session_per_timepoint_linear,
+# spatial_session_mlp_cwt,
+# spatial_session_mlp_resample_cnn,
+# spatial_session_mlp_per_timepoint_identity,
+# per_channel_cwt,
+# per_channel_resample_cnn,
+# per_channel_per_timepoint_linear
 
 defaults:
   - override /model: poyo_eeg
@@ -78,16 +87,15 @@ trainer:
       filename: best-behavior
   
 hydra:
+  launcher:
+    gpus: 
+      - 0
+      - 2
+      - 3
+      - 4
   sweeper:
     params:
       model/tokenizer: >-
-        spatial_session_cwt,
-        spatial_session_resample_cnn,
-        spatial_session_per_timepoint_linear,
-        spatial_session_mlp_cwt,
-        spatial_session_mlp_resample_cnn,
-        spatial_session_mlp_per_timepoint_identity,
-        per_channel_cwt,
-        per_channel_resample_cnn,
-        per_channel_per_timepoint_linear
+        per_channel_cwt_add,
+        per_channel_resample_cnn_add
       hyperparameters.fold_number: "0,1"
