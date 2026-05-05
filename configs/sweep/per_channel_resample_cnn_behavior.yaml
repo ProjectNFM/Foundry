@@ -42,17 +42,3 @@ wandb:
       distribution: log_uniform_values
       min: 1e-4
       max: 0.3
-    num_filters:
-      distribution: int_uniform
-      min: 8
-      max: 32
-    kernel_size:
-      values: [5, 7, 9, 11, 15]
-    num_conv_layers:
-      values: [1, 2, 3]
-    activation:
-      values: ["gelu", "relu", "silu"]
-    target_token_rate:
-      values: [50, 75, 100, 150, 200]
-    channel_emb_dim:
-      values: [32, 48, 64, 96, 128]

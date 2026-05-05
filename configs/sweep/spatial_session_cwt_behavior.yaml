@@ -41,19 +41,3 @@ wandb:
       distribution: log_uniform_values
       min: 1e-4
       max: 0.3
-    num_freqs:
-      values: [5, 7, 9, 12, 16]
-    n_cycles:
-      distribution: uniform
-      min: 1.0
-      max: 5.0
-    min_freq:
-      distribution: uniform
-      min: 0.1
-      max: 2.0
-    max_freq:
-      distribution: uniform
-      min: 20.0
-      max: 60.0
-    target_token_rate:
-      values: [50, 75, 100, 150, 200]
