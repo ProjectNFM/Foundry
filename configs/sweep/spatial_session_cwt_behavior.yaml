@@ -1,0 +1,59 @@
+# W&B sweep: spatial_session_cwt tokenizer — behavior classification
+#
+# Searches over CWT frequency-domain parameters and training hyperparameters.
+# The spatial-session CWT first projects all channels to embed_dim sources via
+# learned per-session spatial maps, then applies a CWT on each source.
+#
+# Launch:
+#   uv run python scripts/wandb_sweep.py configs/sweep/spatial_session_cwt_behavior.yaml --gpus 0,1,2,3
+
+experiment: tokenizer_explore/wandb_sweep_behavior
+tokenizer: spatial_session_cwt
+
+parameter_map:
+  learning_rate: hyperparameters.learning_rate
+  weight_decay: hyperparameters.weight_decay
+  num_freqs: model.tokenizer.temporal_embedding.num_freqs
+  n_cycles: model.tokenizer.temporal_embedding.n_cycles
+  min_freq: model.tokenizer.temporal_embedding.min_freq
+  max_freq: model.tokenizer.temporal_embedding.max_freq
+  target_token_rate: model.tokenizer.temporal_embedding.target_token_rate
+
+wandb:
+  name: spatial_session_cwt_behavior
+  project: foundry
+  method: bayes
+
+  metric:
+    name: val/ajile_active_behavior_auroc
+    goal: maximize
+
+  early_terminate:
+    type: hyperband
+    min_iter: 5
+
+  parameters:
+    learning_rate:
+      distribution: log_uniform_values
+      min: 1e-5
+      max: 5e-3
+    weight_decay:
+      distribution: log_uniform_values
+      min: 1e-4
+      max: 0.3
+    num_freqs:
+      values: [5, 7, 9, 12, 16]
+    n_cycles:
+      distribution: uniform
+      min: 1.0
+      max: 5.0
+    min_freq:
+      distribution: uniform
+      min: 0.1
+      max: 2.0
+    max_freq:
+      distribution: uniform
+      min: 20.0
+      max: 60.0
+    target_token_rate:
+      values: [50, 75, 100, 150, 200]

@@ -1,12 +1,14 @@
 # @package _global_
 #
-# Optuna hyperparameter search for single-session behavior classification.
+# Base experiment for W&B sweep hyperparameter searches on single-session
+# behavior classification.
 #
-# NOT intended for direct CLI use — driven by scripts/run_optuna_search.py,
-# which passes model/tokenizer and hyperparameter overrides per trial.
+# NOT intended for direct CLI use — driven by scripts/wandb_sweep.py via
+# scripts/wandb_sweep_train.py, which passes model/tokenizer, logger.id,
+# and hyperparameter overrides per trial.
 #
 # Manual dry-run (one tokenizer, default HPs):
-#   uv run python main.py experiment=tokenizer_explore/optuna_behavior_search model/tokenizer=spatial_session_cwt
+#   uv run python main.py experiment=tokenizer_explore/wandb_sweep_behavior model/tokenizer=spatial_session_cwt
 
 defaults:
   - override /model: poyo_eeg
@@ -20,9 +22,9 @@ data:
   task_type: behavior
 
 run:
-  name: optuna_behavior
-  group: OPTUNA_BEHAVIOR_SEARCH
-  tags: [optuna, hyperparameter_search, behavior, poyo_eeg, ajile]
+  name: sweep_${oc.env:WANDB_RUN_ID,default}
+  group: WANDB_SWEEP
+  tags: [wandb_sweep, hyperparameter_search, behavior, poyo_eeg, ajile]
   seed: 42
   log_level: INFO
 

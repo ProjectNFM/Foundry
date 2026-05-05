@@ -1,0 +1,56 @@
+# W&B sweep: spatial_session_resample_cnn tokenizer — behavior classification
+#
+# Searches over CNN architecture and training hyperparameters.
+# The spatial-session ResampleCNN first projects all channels to embed_dim
+# sources via learned per-session spatial maps, then applies a CNN stack on
+# the resampled source timecourses.
+#
+# Launch:
+#   uv run python scripts/wandb_sweep.py configs/sweep/spatial_session_resample_cnn_behavior.yaml --gpus 0,1,2,3
+
+experiment: tokenizer_explore/wandb_sweep_behavior
+tokenizer: spatial_session_resample_cnn
+
+parameter_map:
+  learning_rate: hyperparameters.learning_rate
+  weight_decay: hyperparameters.weight_decay
+  num_filters: model.tokenizer.temporal_embedding.num_filters
+  kernel_size: model.tokenizer.temporal_embedding.kernel_size
+  num_conv_layers: model.tokenizer.temporal_embedding.num_conv_layers
+  activation: model.tokenizer.temporal_embedding.activation
+  target_token_rate: model.tokenizer.temporal_embedding.target_token_rate
+
+wandb:
+  name: spatial_session_resample_cnn_behavior
+  project: foundry
+  method: bayes
+
+  metric:
+    name: val/ajile_active_behavior_auroc
+    goal: maximize
+
+  early_terminate:
+    type: hyperband
+    min_iter: 5
+
+  parameters:
+    learning_rate:
+      distribution: log_uniform_values
+      min: 1e-5
+      max: 5e-3
+    weight_decay:
+      distribution: log_uniform_values
+      min: 1e-4
+      max: 0.3
+    num_filters:
+      distribution: int_uniform
+      min: 100
+      max: 350
+    kernel_size:
+      values: [5, 7, 9, 11, 15]
+    num_conv_layers:
+      values: [1, 2, 3]
+    activation:
+      values: ["gelu", "relu", "silu"]
+    target_token_rate:
+      values: [50, 75, 100, 150, 200]
