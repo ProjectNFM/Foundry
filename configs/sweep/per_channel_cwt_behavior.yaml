@@ -23,7 +23,7 @@ parameter_map:
   channel_emb_dim: model.tokenizer.channel_emb_dim
 
 wandb:
-  name: per_channel_cwt_behavior
+  name: per_channel_cwt_behavior_2
   project: foundry
   method: bayes
 
