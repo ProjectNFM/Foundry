@@ -78,6 +78,7 @@ def extract_wandb_config(sweep_meta: dict) -> dict:
         "run",
         "python",
         TRAIN_SCRIPT,
+        "${args_no_hyphens}",
     ]
     return wandb_config
 
@@ -113,7 +114,12 @@ def launch_agents(
     config_path: str | None,
     count: int | None,
 ) -> list[subprocess.Popen]:
-    """Spawn one ``wandb agent`` process per GPU."""
+    """Spawn one ``wandb agent`` process per GPU.
+
+    Each agent is started in its own process group (``start_new_session=True``)
+    so that on Ctrl-C we can ``os.killpg`` the entire tree, including the
+    training subprocess that holds the GPU.
+    """
     processes: list[subprocess.Popen] = []
 
     for gpu_id in gpus:
@@ -126,26 +132,38 @@ def launch_agents(
             cmd.extend(["--count", str(count)])
 
         log.info("Starting agent on GPU %d: %s", gpu_id, " ".join(cmd))
-        p = subprocess.Popen(cmd, env=env, cwd=str(PROJECT_ROOT))
+        p = subprocess.Popen(
+            cmd, env=env, cwd=str(PROJECT_ROOT), start_new_session=True
+        )
         processes.append(p)
 
     return processes
 
 
-def wait_for_agents(processes: list[subprocess.Popen]) -> None:
-    """Wait for all agent processes, forwarding SIGINT/SIGTERM gracefully."""
-
-    def _signal_handler(signum, _frame):
-        sig_name = signal.Signals(signum).name
-        log.warning("Received %s — terminating all agents...", sig_name)
-        for p in processes:
-            p.terminate()
-
-    signal.signal(signal.SIGINT, _signal_handler)
-    signal.signal(signal.SIGTERM, _signal_handler)
-
+def _kill_process_tree(processes: list[subprocess.Popen]) -> None:
+    """SIGKILL each process group immediately."""
     for p in processes:
-        p.wait()
+        if p.poll() is None:
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except OSError:
+                pass
+    for p in processes:
+        try:
+            p.wait(timeout=5)
+        except Exception:
+            pass
+
+
+def wait_for_agents(processes: list[subprocess.Popen]) -> None:
+    """Wait for all agent processes, killing the full process tree on Ctrl-C."""
+    try:
+        for p in processes:
+            p.wait()
+    except KeyboardInterrupt:
+        log.warning("Ctrl-C received — killing all agents and children...")
+        _kill_process_tree(processes)
+        sys.exit(1)
 
 
 def main() -> None:

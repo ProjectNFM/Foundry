@@ -1,13 +1,15 @@
 """W&B sweep training wrapper.
 
-Called by ``wandb agent`` for each trial.  Reads the sweep configuration from
-the ``SWEEP_CONFIG`` environment variable, initialises a W&B run to receive
-the trial's hyperparameters, then launches ``main.py`` as a subprocess with
-the corresponding Hydra CLI overrides.
+Called by ``wandb agent`` for each trial.  Receives sweep parameters as
+``key=value`` CLI arguments (via ``${args_no_hyphens}`` in the sweep command),
+maps them to Hydra CLI overrides using the ``parameter_map`` from the sweep
+config, and launches ``main.py`` as a subprocess.
 
-The wrapper passes ``logger.id=<run_id>`` so that ``main.py``'s WandbLogger
-resumes the *same* W&B run that the sweep controller allocated — all training
-metrics flow directly into the sweep dashboard with no duplicate runs.
+The wrapper passes ``logger.id=<WANDB_RUN_ID>`` so that ``main.py``'s
+WandbLogger creates the W&B run with the ID that the sweep controller
+allocated.  ``WANDB_SWEEP_ID`` stays in the environment so the run is
+automatically associated with the sweep — no ``wandb.init()`` is called here,
+which avoids creating extraneous short-lived runs.
 
 This script is not meant to be invoked manually; it is set as the sweep
 ``program`` by :mod:`scripts.wandb_sweep`.
@@ -21,7 +23,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import wandb
 import yaml
 
 logging.basicConfig(
@@ -43,9 +44,19 @@ def _load_sweep_meta() -> dict:
         return yaml.safe_load(f)
 
 
+def _parse_sweep_args(args: list[str]) -> dict[str, str]:
+    """Parse ``key=value`` positional args passed by ``wandb agent``."""
+    params: dict[str, str] = {}
+    for arg in args:
+        if "=" in arg:
+            key, _, value = arg.partition("=")
+            params[key] = value
+    return params
+
+
 def _build_hydra_overrides(
     sweep_meta: dict,
-    wandb_config: dict,
+    wandb_params: dict[str, str],
     run_id: str,
     sweep_id: str,
 ) -> list[str]:
@@ -67,7 +78,7 @@ def _build_hydra_overrides(
 
     overrides.extend(extra_overrides)
 
-    for param_name, value in wandb_config.items():
+    for param_name, value in wandb_params.items():
         hydra_path = parameter_map.get(param_name, param_name)
         overrides.append(f"{hydra_path}={value}")
 
@@ -77,27 +88,24 @@ def _build_hydra_overrides(
 def main() -> None:
     sweep_meta = _load_sweep_meta()
 
-    # wandb.init() picks up WANDB_SWEEP_ID / WANDB_RUN_ID set by the agent
-    run = wandb.init()
-    config = dict(run.config)
-    run_id = run.id
-    sweep_id = run.sweep_id or "wandb_sweep"
-    wandb.finish(quiet=True)
+    run_id = os.environ.get("WANDB_RUN_ID", "")
+    sweep_id = os.environ.get("WANDB_SWEEP_ID", "wandb_sweep")
 
-    overrides = _build_hydra_overrides(sweep_meta, config, run_id, sweep_id)
+    if not run_id:
+        log.error("WANDB_RUN_ID not set — is this being called by wandb agent?")
+        sys.exit(1)
+
+    wandb_params = _parse_sweep_args(sys.argv[1:])
+    overrides = _build_hydra_overrides(
+        sweep_meta, wandb_params, run_id, sweep_id
+    )
 
     cmd = [sys.executable, str(PROJECT_ROOT / "main.py")] + overrides
-
-    # Remove WANDB_RUN_ID so main.py's WandbLogger doesn't conflict with the
-    # explicit logger.id we pass.  Keep WANDB_SWEEP_ID so the resumed run
-    # stays associated with the sweep.
-    env = {**os.environ}
-    env.pop("WANDB_RUN_ID", None)
 
     log.info("Trial %s — launching main.py", run_id)
     log.info("  overrides: %s", " ".join(overrides))
 
-    result = subprocess.run(cmd, env=env, cwd=str(PROJECT_ROOT))
+    result = subprocess.run(cmd, cwd=str(PROJECT_ROOT))
 
     if result.returncode != 0:
         log.error("Trial %s FAILED (exit %d)", run_id, result.returncode)

@@ -9,6 +9,8 @@
 
 experiment: tokenizer_explore/wandb_sweep_behavior
 tokenizer: spatial_session_cwt
+extra_overrides:
+  - hyperparameters.batch_size=512
 
 parameter_map:
   learning_rate: hyperparameters.learning_rate
@@ -30,14 +32,10 @@ wandb:
 
   early_terminate:
     type: hyperband
-    min_iter: 5
+    min_iter: 15
 
   parameters:
     learning_rate:
       distribution: log_uniform_values
       min: 1e-5
       max: 5e-3
-    weight_decay:
-      distribution: log_uniform_values
-      min: 1e-4
-      max: 0.3

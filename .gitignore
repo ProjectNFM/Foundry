@@ -215,5 +215,6 @@ __marimo__/
 /logs/
 /profiling_output/
 /runs/
+/wandb/
 runs
 wandb_exports/
