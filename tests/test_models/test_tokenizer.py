@@ -725,3 +725,256 @@ class TestTokenizerProperties:
             channel_fusion="add",
         )
         assert tokenizer.stride == 0.1
+
+
+class TestCWTCompressor:
+    """CWTEmbedding with the learned strided-CNN compressor."""
+
+    GRID_HZ = 100.0
+    STRIDES = [5, 2]
+    TOTAL_STRIDE = 10
+    NUM_SOURCES = 8
+
+    def _make_embedding(self, embed_dim=64, **overrides):
+        kwargs = dict(
+            embed_dim=embed_dim,
+            num_sources=self.NUM_SOURCES,
+            init_freqs=INIT_FREQS,
+            grid_resample_hz=self.GRID_HZ,
+            compressor_strides=self.STRIDES,
+            compressor_num_filters=32,
+            compressor_kernel_size=9,
+        )
+        kwargs.update(overrides)
+        return CWTEmbedding(**kwargs)
+
+    def _make_tokenizer(self, embed_dim=64):
+        return EEGTokenizer(
+            channel_strategy=SpatialProjectionStrategy(
+                num_channels=64,
+                num_sources=self.NUM_SOURCES,
+                projector=LinearSpatialProjector(
+                    num_channels=64, num_sources=self.NUM_SOURCES
+                ),
+            ),
+            temporal_embedding=self._make_embedding(embed_dim=embed_dim),
+            embed_dim=embed_dim,
+            channel_fusion="add",
+        )
+
+    def test_target_token_rate_derived_from_hz_and_strides(self):
+        emb = self._make_embedding()
+        assert emb.target_token_rate == self.GRID_HZ / self.TOTAL_STRIDE
+
+    def test_output_hz_property(self):
+        emb = self._make_embedding()
+        assert emb.output_hz == self.GRID_HZ / self.TOTAL_STRIDE
+
+    def test_seconds_per_token_property(self):
+        emb = self._make_embedding()
+        expected = 1.0 / (self.GRID_HZ / self.TOTAL_STRIDE)
+        assert emb.seconds_per_token == pytest.approx(expected)
+
+    def test_compute_num_tokens_exact(self):
+        emb = self._make_embedding()
+        grid_tokens = round(self.GRID_HZ * 1.0)  # 100
+        after_s0 = (grid_tokens - 1) // 5 + 1  # 20
+        after_s1 = (after_s0 - 1) // 2 + 1  # 10
+        assert emb.compute_num_tokens(1.0) == after_s1
+
+    def test_compute_num_tokens_fractional_duration(self):
+        emb = self._make_embedding()
+        duration = 0.8
+        grid_tokens = round(self.GRID_HZ * duration)  # 80
+        after_s0 = (grid_tokens - 1) // 5 + 1  # 16
+        after_s1 = (after_s0 - 1) // 2 + 1  # 8
+        assert emb.compute_num_tokens(duration) == after_s1
+
+    def test_forward_shape_matches_compute_num_tokens(self, batch_size):
+        embed_dim = 64
+        emb = self._make_embedding(embed_dim=embed_dim)
+
+        fs_val = 250.0
+        T = 250
+        x = torch.randn(batch_size, self.NUM_SOURCES, T)
+        fs = torch.full((batch_size,), fs_val)
+        seq_lens = torch.full((batch_size,), T, dtype=torch.long)
+
+        out = emb(x, input_sampling_rate=fs, input_seq_len=seq_lens)
+        duration = T / fs_val
+        expected_tokens = emb.compute_num_tokens(duration)
+        assert out.shape == (batch_size, expected_tokens, embed_dim)
+
+    def test_forward_shape_2s_duration(self, batch_size):
+        embed_dim = 64
+        emb = self._make_embedding(embed_dim=embed_dim)
+
+        fs_val = 250.0
+        duration = 2.0
+        T = round(fs_val * duration)
+        x = torch.randn(batch_size, self.NUM_SOURCES, T)
+        fs = torch.full((batch_size,), fs_val)
+        seq_lens = torch.full((batch_size,), T, dtype=torch.long)
+
+        out = emb(x, input_sampling_rate=fs, input_seq_len=seq_lens)
+        expected_tokens = emb.compute_num_tokens(duration)
+        assert out.shape == (batch_size, expected_tokens, embed_dim)
+
+    def test_output_tokens_scale_with_duration(self):
+        emb = self._make_embedding()
+        tokens_1s = emb.compute_num_tokens(1.0)
+        tokens_2s = emb.compute_num_tokens(2.0)
+        assert tokens_2s == pytest.approx(tokens_1s * 2, abs=1)
+
+    def test_pretokenize_timestamps_match_forward(self):
+        """Pretokenize and forward must agree on token count."""
+        embed_dim = 64
+        tokenizer = self._make_tokenizer(embed_dim=embed_dim)
+
+        fs_val = 250.0
+        duration = 1.0
+        T = round(fs_val * duration)
+        signal = np.random.randn(T, 30).astype(np.float32)
+        tokens = np.arange(30)
+
+        result = tokenizer.pretokenize(signal, tokens, fs_val, duration)
+        pretok_count = result["input_timestamps"].shape[0]
+
+        x = torch.randn(1, 64, T)
+        fs = torch.full((1,), fs_val)
+        seq_lens = torch.full((1,), T, dtype=torch.long)
+        out = tokenizer(x, input_sampling_rate=fs, input_seq_len=seq_lens)
+
+        assert pretok_count == out.shape[1]
+
+    def test_pretokenize_timestamps_span_duration(self):
+        tokenizer = self._make_tokenizer()
+        duration = 1.0
+        T = 250
+        signal = np.random.randn(T, 30).astype(np.float32)
+        tokens = np.arange(30)
+
+        result = tokenizer.pretokenize(signal, tokens, 250.0, duration)
+        ts = result["input_timestamps"]
+        assert ts[0].item() == pytest.approx(0.0)
+        assert ts[-1].item() == pytest.approx(duration)
+
+    def test_gradient_flow(self):
+        emb = self._make_embedding()
+        x = torch.randn(1, self.NUM_SOURCES, 250, requires_grad=True)
+        fs = torch.full((1,), 250.0)
+        seq_lens = torch.full((1,), 250, dtype=torch.long)
+
+        out = emb(x, input_sampling_rate=fs, input_seq_len=seq_lens)
+        out.sum().backward()
+        assert x.grad is not None
+
+    def test_full_tokenizer_forward(self, batch_size):
+        embed_dim = 64
+        tokenizer = self._make_tokenizer(embed_dim=embed_dim)
+
+        x = torch.randn(batch_size, 64, 250)
+        fs = torch.full((batch_size,), 250.0)
+        seq_lens = torch.full((batch_size,), 250, dtype=torch.long)
+
+        out = tokenizer(x, input_sampling_rate=fs, input_seq_len=seq_lens)
+        expected_tokens = tokenizer.temporal_embedding.compute_num_tokens(1.0)
+        assert out.shape == (batch_size, expected_tokens, embed_dim)
+
+    def test_variable_seq_lens(self):
+        embed_dim = 64
+        emb = self._make_embedding(embed_dim=embed_dim)
+
+        B = 2
+        Max_T = 300
+        x = torch.randn(B, self.NUM_SOURCES, Max_T)
+        fs = torch.tensor([250.0, 500.0])
+        seq_lens = torch.tensor([200, 300])
+
+        out = emb(x, input_sampling_rate=fs, input_seq_len=seq_lens)
+        max_duration = max(200 / 250.0, 300 / 500.0)
+        expected_tokens = emb.compute_num_tokens(max_duration)
+        assert out.shape == (B, expected_tokens, embed_dim)
+
+    def test_backward_compat_no_compressor(self, batch_size):
+        """CWTEmbedding without compressor args works identically to before."""
+        embed_dim = 64
+        emb = CWTEmbedding(
+            embed_dim=embed_dim,
+            num_sources=self.NUM_SOURCES,
+            init_freqs=INIT_FREQS,
+            target_token_rate=32.0,
+        )
+        assert emb.compressor is None
+        assert emb.grid_resample_hz is None
+        assert emb.target_token_rate == 32.0
+
+        x = torch.randn(batch_size, self.NUM_SOURCES, 250)
+        fs = torch.full((batch_size,), 250.0)
+        seq_lens = torch.full((batch_size,), 250, dtype=torch.long)
+
+        out = emb(x, input_sampling_rate=fs, input_seq_len=seq_lens)
+        assert out.shape == (batch_size, 32, embed_dim)
+
+    def test_compressor_strides_without_grid_hz_raises(self):
+        with pytest.raises(ValueError, match="grid_resample_hz"):
+            CWTEmbedding(
+                embed_dim=64,
+                num_sources=self.NUM_SOURCES,
+                init_freqs=INIT_FREQS,
+                compressor_strides=[2, 2],
+            )
+
+    def test_grid_hz_without_strides_raises(self):
+        with pytest.raises(ValueError, match="compressor_strides"):
+            CWTEmbedding(
+                embed_dim=64,
+                num_sources=self.NUM_SOURCES,
+                init_freqs=INIT_FREQS,
+                grid_resample_hz=100.0,
+            )
+
+    def test_three_layer_strides(self):
+        emb = self._make_embedding(compressor_strides=[2, 3, 2])
+        assert emb.target_token_rate == pytest.approx(self.GRID_HZ / 12)
+        duration = 1.2
+        grid = round(self.GRID_HZ * duration)  # 120
+        l1 = (grid - 1) // 2 + 1  # 60
+        l2 = (l1 - 1) // 3 + 1  # 20
+        l3 = (l2 - 1) // 2 + 1  # 10
+        assert emb.compute_num_tokens(duration) == l3
+
+    def test_per_layer_kernel_sizes(self, batch_size):
+        """Per-layer kernel sizes: larger first layer, smaller second."""
+        embed_dim = 64
+        emb = self._make_embedding(
+            embed_dim=embed_dim, compressor_kernel_size=[9, 4]
+        )
+        assert emb._compressor_kernel_sizes == [9, 4]
+
+        fs_val = 250.0
+        T = 250
+        x = torch.randn(batch_size, self.NUM_SOURCES, T)
+        fs = torch.full((batch_size,), fs_val)
+        seq_lens = torch.full((batch_size,), T, dtype=torch.long)
+
+        out = emb(x, input_sampling_rate=fs, input_seq_len=seq_lens)
+        duration = T / fs_val
+        expected_tokens = emb.compute_num_tokens(duration)
+        assert out.shape == (batch_size, expected_tokens, embed_dim)
+
+    def test_per_layer_kernel_sizes_token_count(self):
+        """Verify exact token math with mixed odd/even kernel sizes."""
+        emb = self._make_embedding(compressor_kernel_size=[9, 4])
+        grid = round(self.GRID_HZ * 1.0)  # 100
+        # ks=9, padding=4, stride=5: (100+8-9)//5+1 = 20
+        l1 = (grid + 2 * 4 - 9) // 5 + 1
+        assert l1 == 20
+        # ks=4, padding=2, stride=2: (20+4-4)//2+1 = 11
+        l2 = (l1 + 2 * 2 - 4) // 2 + 1
+        assert l2 == 11
+        assert emb.compute_num_tokens(1.0) == l2
+
+    def test_kernel_size_list_length_mismatch_raises(self):
+        with pytest.raises(ValueError, match="must match"):
+            self._make_embedding(compressor_kernel_size=[9, 4, 3])

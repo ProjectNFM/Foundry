@@ -7,6 +7,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from foundry.models.embeddings.activations import get_activation
+
 FreqSpacing = Literal["linear", "log", "mel", "inverse"]
 
 _VALID_SPACINGS: set[str] = {"linear", "log", "mel", "inverse"}
@@ -336,18 +338,21 @@ class ContinuousCWTLayer(nn.Module):
 
 
 class CWTEmbedding(nn.Module):
-    """Temporal embedding via learnable CWT.
+    """Temporal embedding via learnable CWT with optional learned compression.
 
     Operates on spatially-projected signal (``num_sources`` channels) and
-    produces time tokens through differentiable wavelet analysis and time
-    resampling.
+    produces time tokens through differentiable wavelet analysis, grid
+    resampling, and an optional strided CNN compressor.
 
-    The output token count is determined at runtime from ``target_token_rate``
-    and the input sequence duration, ensuring a consistent temporal resolution
-    regardless of input length.
+    **Without compressor** (default, backward-compatible): grid resampling
+    produces tokens at ``target_token_rate`` Hz.
 
-    The spatial projection is handled by the upstream channel strategy;
-    this module is purely temporal.
+    **With compressor**: grid resampling produces tokens at
+    ``grid_resample_hz``, then a strided 1-D CNN compresses the time axis.
+    The final output rate is ``grid_resample_hz / prod(compressor_strides)``
+    Hz, and ``target_token_rate`` is set to that value automatically.  Both
+    rates are expressed in Hz so users can reason about sampling frequencies
+    and per-token temporal extent.
 
     Frequencies can be supplied in two ways (same interface as
     :class:`ContinuousCWTLayer`):
@@ -356,6 +361,24 @@ class CWTEmbedding(nn.Module):
     2. **Generated** -- pass ``num_freqs``, ``min_freq``, ``max_freq``
        (and optionally ``freq_spacing``) to have them computed via
        :func:`generate_freqs`.
+
+    Args:
+        embed_dim: Output embedding dimension per time token.
+        num_sources: Number of input source channels (after spatial projection).
+        target_token_rate: Final output token rate in Hz.  Used directly when
+            no compressor is active; **ignored** when ``grid_resample_hz`` is
+            set (the rate is derived from strides instead).
+        grid_resample_hz: Sampling rate (Hz) for the CWT grid-resampling step.
+            When set, enables the learned compressor path.
+        compressor_strides: Per-layer strides for the compressor CNN.  Required
+            when ``grid_resample_hz`` is set.  The product of strides determines
+            the temporal compression factor, yielding an output rate of
+            ``grid_resample_hz / prod(compressor_strides)`` Hz.
+        compressor_num_filters: Channel width of the compressor conv layers.
+        compressor_kernel_size: 1-D kernel width for each compressor layer.
+            A single int applies to every layer; a list sets per-layer sizes
+            (must match the length of ``compressor_strides``).
+        compressor_activation: Activation function between compressor layers.
     """
 
     def __init__(
@@ -370,6 +393,11 @@ class CWTEmbedding(nn.Module):
         max_freq: float | None = None,
         freq_spacing: FreqSpacing | None = None,
         n_cycles: float = 2.5,
+        grid_resample_hz: float | None = None,
+        compressor_strides: list[int] | None = None,
+        compressor_num_filters: int = 64,
+        compressor_kernel_size: int | list[int] = 9,
+        compressor_activation: str = "gelu",
     ):
         super().__init__()
         resolved_freqs = _resolve_init_freqs(
@@ -382,7 +410,6 @@ class CWTEmbedding(nn.Module):
 
         self.embed_dim = embed_dim
         self.num_sources = num_sources
-        self.target_token_rate = target_token_rate
         self._num_freqs = len(resolved_freqs)
 
         self.cwt = ContinuousCWTLayer(
@@ -391,17 +418,126 @@ class CWTEmbedding(nn.Module):
         )
 
         feat_dim = num_sources * 2 * len(resolved_freqs)
-        self.feature_proj = nn.Linear(feat_dim, embed_dim)
+
+        if grid_resample_hz is not None:
+            if compressor_strides is None or len(compressor_strides) == 0:
+                raise ValueError(
+                    "compressor_strides is required (non-empty) when "
+                    "grid_resample_hz is set."
+                )
+            if grid_resample_hz <= 0:
+                raise ValueError(
+                    f"grid_resample_hz must be > 0, got {grid_resample_hz}"
+                )
+            for s in compressor_strides:
+                if s < 1:
+                    raise ValueError(
+                        f"All compressor strides must be >= 1, got {s}"
+                    )
+
+            self.grid_resample_hz = grid_resample_hz
+            self._compressor_strides = list(compressor_strides)
+
+            num_layers = len(compressor_strides)
+            if isinstance(compressor_kernel_size, int):
+                kernel_sizes = [compressor_kernel_size] * num_layers
+            else:
+                kernel_sizes = list(compressor_kernel_size)
+                if len(kernel_sizes) != num_layers:
+                    raise ValueError(
+                        f"compressor_kernel_size list length "
+                        f"({len(kernel_sizes)}) must match "
+                        f"compressor_strides length ({num_layers})."
+                    )
+            self._compressor_kernel_sizes = kernel_sizes
+
+            total_stride = math.prod(compressor_strides)
+            self.target_token_rate = grid_resample_hz / total_stride
+
+            layers: list[nn.Module] = []
+            in_ch = feat_dim
+            for stride, ks in zip(compressor_strides, kernel_sizes):
+                layers.append(
+                    nn.Conv1d(
+                        in_ch,
+                        compressor_num_filters,
+                        ks,
+                        stride=stride,
+                        padding=ks // 2,
+                    )
+                )
+                layers.append(get_activation(compressor_activation))
+                in_ch = compressor_num_filters
+            self.compressor = nn.Sequential(*layers)
+
+            for m in self.compressor:
+                if isinstance(m, nn.Conv1d):
+                    nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
+                    nn.init.zeros_(m.bias)
+
+            self.feature_proj = nn.Linear(compressor_num_filters, embed_dim)
+        else:
+            if compressor_strides is not None:
+                raise ValueError(
+                    "compressor_strides requires grid_resample_hz to be set."
+                )
+            self.grid_resample_hz = None
+            self._compressor_strides = None
+            self._compressor_kernel_sizes = None
+            self.compressor = None
+            self.target_token_rate = target_token_rate
+
+            self.feature_proj = nn.Linear(feat_dim, embed_dim)
+
         nn.init.xavier_uniform_(self.feature_proj.weight, gain=1.0)
         nn.init.zeros_(self.feature_proj.bias)
 
-    def _compute_target_tokens(
+    @property
+    def output_hz(self) -> float:
+        """Final output token rate in Hz (alias for ``target_token_rate``)."""
+        return self.target_token_rate
+
+    @property
+    def seconds_per_token(self) -> float:
+        """Physical time duration represented by each output token."""
+        return 1.0 / self.target_token_rate
+
+    @staticmethod
+    def _conv1d_output_length(
+        length: int, kernel_size: int, stride: int
+    ) -> int:
+        """Output length for Conv1d with ``padding=kernel_size // 2``."""
+        padding = kernel_size // 2
+        return (length + 2 * padding - kernel_size) // stride + 1
+
+    def _compressed_length(self, grid_tokens: int) -> int:
+        """Number of tokens after applying all compressor strides."""
+        length = grid_tokens
+        for ks, stride in zip(
+            self._compressor_kernel_sizes, self._compressor_strides
+        ):
+            length = self._conv1d_output_length(length, ks, stride)
+        return max(1, length)
+
+    def compute_num_tokens(self, duration: float) -> int:
+        """Exact number of output tokens for a given signal duration.
+
+        Accounts for Conv1d rounding when the compressor is active.
+        """
+        if self.grid_resample_hz is not None:
+            grid_tokens = max(1, round(self.grid_resample_hz * duration))
+            return self._compressed_length(grid_tokens)
+        return max(1, round(self.target_token_rate * duration))
+
+    def _compute_grid_tokens(
         self,
         input_seq_len: torch.Tensor,
         input_sampling_rate: torch.Tensor,
     ) -> int:
         durations = input_seq_len.float() / input_sampling_rate
         max_duration = durations.max().item()
+        if self.grid_resample_hz is not None:
+            return max(1, round(self.grid_resample_hz * max_duration))
         return max(1, round(self.target_token_rate * max_duration))
 
     def forward(
@@ -418,19 +554,23 @@ class CWTEmbedding(nn.Module):
             input_seq_len: ``(B,)`` true sample count per item.
 
         Returns:
-            ``(B, target_time_tokens, embed_dim)`` where
-            ``target_time_tokens = round(target_token_rate × max_duration)``.
+            ``(B, output_tokens, embed_dim)`` where ``output_tokens`` equals
+            ``compute_num_tokens(max_duration)`` — i.e. approximately
+            ``target_token_rate × max_duration``.
         """
-        target_time_tokens = self._compute_target_tokens(
+        grid_tokens = self._compute_grid_tokens(
             input_seq_len, input_sampling_rate
         )
-        cwt_out = self.cwt(
-            x, input_sampling_rate, input_seq_len, target_time_tokens
-        )
+        cwt_out = self.cwt(x, input_sampling_rate, input_seq_len, grid_tokens)
 
         B, S, two, F_dim, T = cwt_out.shape
-        cwt_flat = cwt_out.permute(0, 4, 1, 2, 3).reshape(B, T, S * two * F_dim)
 
+        if self.compressor is not None:
+            cwt_channels = cwt_out.reshape(B, S * two * F_dim, T)
+            compressed = self.compressor(cwt_channels)
+            return self.feature_proj(compressed.transpose(1, 2))
+
+        cwt_flat = cwt_out.permute(0, 4, 1, 2, 3).reshape(B, T, S * two * F_dim)
         return self.feature_proj(cwt_flat)
 
 
