@@ -19,7 +19,7 @@ temporal_embedding:
   # Grid-resample CWT output at 200 Hz, then compress with strided CNN.
   # Strides [5, 2] yield a total 10× reduction → 10 Hz output (10 tokens/s).
   grid_resample_hz: ${model.tokenizer.temporal_embedding.target_token_rate}
-  compressor_strides: [5, 2]
+  compressor_strides: [2, 2]
   compressor_num_filters: 64
-  compressor_kernel_size: [9, 4]
+  compressor_kernel_size: [7, 4]
   compressor_activation: gelu

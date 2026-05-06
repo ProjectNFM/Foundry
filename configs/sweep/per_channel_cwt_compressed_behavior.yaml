@@ -10,7 +10,7 @@
 experiment: tokenizer_explore/wandb_sweep_behavior
 tokenizer: per_channel_cwt_compressor
 extra_overrides:
-  - hyperparameters.batch_size=248
+  - hyperparameters.batch_size=512
 
 parameter_map:
   learning_rate: hyperparameters.learning_rate
@@ -23,7 +23,7 @@ parameter_map:
   channel_emb_dim: model.tokenizer.channel_emb_dim
 
 wandb:
-  name: per_channel_cwt_behavior_2
+  name: per_channel_cwt_compressed_behavior
   project: foundry
   method: bayes
 
@@ -33,7 +33,7 @@ wandb:
 
   early_terminate:
     type: hyperband
-    min_iter: 15
+    min_iter: 20
 
   parameters:
     learning_rate:
