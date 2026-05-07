@@ -1,32 +1,12 @@
 # @package _global_
 #
-# Tokenizer ablation matrix (behavior task): sweep over tokenizers × folds.
+# CWT vs ResampleCNN scaling comparison (behavior task).
 #
-# Questions addressed:
-#   Q1  Spatial session vs per-channel?  (3 paired comparisons)
-#   Q2  CWT vs ResampleCNN vs per-timepoint?  (2×3 factorial)
-#   Q3  Is embed_dim a bottleneck for spatial session + CWT?  (dim512 + controls)
+# Compares per_channel_cwt and per_channel_resample_cnn at embed_dim 256 and
+# 512 across 2 folds.  4 tokenizers × 2 folds = 8 runs.
 #
-# Single dry-run (one tokenizer, one fold, no multirun):
-#   uv run python main.py experiment=tokenizer_explore/poyo_ajile_alltokenizers_matrix_behavior model/tokenizer=spatial_session_cwt
-#
-# Full sweep (11 tokenizers × 2 folds = 22 runs):
+# Launch:
 #   uv run python main.py experiment=tokenizer_explore/poyo_ajile_alltokenizers_matrix_behavior -m
-
-# spatial_session_cwt,
-# spatial_session_resample_cnn,
-# spatial_session_per_timepoint_linear,
-# spatial_session_per_timepoint_identity,
-# spatial_session_cwt_dim512,
-# spatial_session_cwt,
-# spatial_session_resample_cnn,
-# spatial_session_per_timepoint_linear,
-# spatial_session_mlp_cwt,
-# spatial_session_mlp_resample_cnn,
-# spatial_session_mlp_per_timepoint_identity,
-# per_channel_cwt,
-# per_channel_resample_cnn,
-# per_channel_per_timepoint_linear
 
 defaults:
   - override /model: poyo_eeg
@@ -35,9 +15,8 @@ defaults:
 
 _matrix:
   embed_dims:
-    spatial_session_cwt_dim512: 512
     per_channel_cwt_dim512: 512
-    per_channel_per_timepoint_linear_dim512: 512
+    per_channel_resample_cnn_dim512: 512
 
 model:
   zero_output_timestamps: true
@@ -49,8 +28,8 @@ data:
 
 run:
   name: ${hydra:runtime.choices.model/tokenizer}_fold${hyperparameters.fold_number}
-  group: AJILE_NEW_ALLTOKS
-  tags: [tokenizer_ablation, poyo_eeg, ajile, intrasession]
+  group: CWT_VS_CNN_BEHAVIOR
+  tags: [cwt_vs_cnn, scaling, behavior, poyo_eeg, ajile, intrasession]
   seed: 42
   log_level: INFO
 
@@ -60,8 +39,8 @@ hyperparameters:
   patch_duration: 0.1
   fold_number: 0
   num_workers: 32
-  learning_rate: 0.00006
-  weight_decay: 0.01
+  learning_rate: 3e-4
+  weight_decay: 0.007
   num_channels: null
   sampling_rate: null
   session_configs: null
@@ -85,17 +64,13 @@ trainer:
       mode: max
       auto_insert_metric_name: false
       filename: best-behavior
-  
+
 hydra:
-  launcher:
-    gpus: 
-      - 0
-      - 2
-      - 3
-      - 4
   sweeper:
     params:
       model/tokenizer: >-
-        per_channel_cwt_add,
-        per_channel_resample_cnn_add
+        per_channel_cwt,
+        per_channel_cwt_dim512,
+        per_channel_resample_cnn,
+        per_channel_resample_cnn_dim512
       hyperparameters.fold_number: "0,1"
