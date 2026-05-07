@@ -1,0 +1,42 @@
+# W&B sweep: per_channel_cwt tokenizer — behavior classification
+#
+# Searches over CWT frequency-domain parameters and training hyperparameters.
+# The per-channel CWT operates on each EEG channel independently with a
+# learnable Morlet wavelet bank.
+#
+# Launch:
+#   uv run python scripts/wandb_sweep.py configs/sweep/per_channel_cwt_behavior.yaml --gpus 0,1,2,3
+
+experiment: tokenizer_explore/wandb_sweep_behavior
+tokenizer: per_channel_cwt_compressor
+extra_overrides:
+  - hyperparameters.batch_size=512
+
+parameter_map:
+  learning_rate: hyperparameters.learning_rate
+  weight_decay: hyperparameters.weight_decay
+  num_freqs: model.tokenizer.temporal_embedding.num_freqs
+  n_cycles: model.tokenizer.temporal_embedding.n_cycles
+  min_freq: model.tokenizer.temporal_embedding.min_freq
+  max_freq: model.tokenizer.temporal_embedding.max_freq
+  target_token_rate: model.tokenizer.temporal_embedding.target_token_rate
+  channel_emb_dim: model.tokenizer.channel_emb_dim
+
+wandb:
+  name: per_channel_cwt_compressed_behavior
+  project: foundry
+  method: bayes
+
+  metric:
+    name: val/ajile_active_behavior_auroc
+    goal: maximize
+
+  early_terminate:
+    type: hyperband
+    min_iter: 20
+
+  parameters:
+    learning_rate:
+      distribution: log_uniform_values
+      min: 1e-5
+      max: 5e-3

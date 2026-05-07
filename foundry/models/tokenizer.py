@@ -164,7 +164,11 @@ class EEGTokenizer(nn.Module):
             else:
                 result["input_timestamps"] = patch_timestamps
         else:
-            if hasattr(self.temporal_embedding, "target_token_rate"):
+            if hasattr(self.temporal_embedding, "compute_num_tokens"):
+                num_time_tokens = self.temporal_embedding.compute_num_tokens(
+                    sequence_length
+                )
+            elif hasattr(self.temporal_embedding, "target_token_rate"):
                 num_time_tokens = max(
                     1,
                     round(

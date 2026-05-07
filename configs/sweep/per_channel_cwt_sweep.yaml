@@ -1,0 +1,61 @@
+# W&B sweep: per_channel_cwt tokenizer — behavior classification
+#
+# Bayesian search over CWT frequency-domain parameters and model
+# dimensions.  Learning rate and weight decay are held fixed (set in
+# the base experiment config).
+#
+# Uses EffectiveBatchSizeCallback to auto-find the largest micro-batch
+# size that fits on each GPU.
+#
+# Launch:
+#   uv run python scripts/wandb_sweep.py configs/sweep/per_channel_cwt_sweep.yaml --gpus 0,1,2,3
+
+experiment: tokenizer_explore/wandb_sweep_behavior
+tokenizer: per_channel_cwt
+extra_overrides:
+  - "++trainer.callbacks.effective_batch_size._target_=foundry.training.callbacks.EffectiveBatchSizeCallback"
+  - "++trainer.callbacks.effective_batch_size.effective_batch_size=1024"
+  - "++trainer.callbacks.effective_batch_size.init_val=16"
+  - "++trainer.callbacks.effective_batch_size.max_val=512"
+
+parameter_map:
+  num_freqs: model.tokenizer.temporal_embedding.num_freqs
+  n_cycles: model.tokenizer.temporal_embedding.n_cycles
+  min_freq: model.tokenizer.temporal_embedding.min_freq
+  max_freq: model.tokenizer.temporal_embedding.max_freq
+  target_token_rate: model.tokenizer.temporal_embedding.target_token_rate
+  channel_emb_dim: model.tokenizer.channel_emb_dim
+
+wandb:
+  name: per_channel_cwt_sweep
+  project: foundry
+  method: bayes
+  run_cap: 200
+
+  metric:
+    name: val/ajile_active_behavior_auroc
+    goal: maximize
+
+  early_terminate:
+    type: hyperband
+    min_iter: 25
+
+  parameters:
+    num_freqs:
+      values: [5, 7, 9, 12, 16, 20]
+    n_cycles:
+      distribution: uniform
+      min: 1.0
+      max: 5.0
+    min_freq:
+      distribution: log_uniform_values
+      min: 0.1
+      max: 2.0
+    max_freq:
+      distribution: log_uniform_values
+      min: 15.0
+      max: 100.0
+    target_token_rate:
+      values: [50, 100, 200]
+    channel_emb_dim:
+      values: [32, 64, 128]

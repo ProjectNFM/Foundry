@@ -1,0 +1,25 @@
+_target_: foundry.models.tokenizer.EEGTokenizer
+patch_duration: null
+embed_dim: ${model.embed_dim}
+channel_fusion: concat
+channel_emb_dim: 64
+channel_strategy:
+  _target_: foundry.models.embeddings.PerChannelStrategy
+  max_channels: ${hyperparameters.num_channels}
+temporal_embedding:
+  _target_: foundry.models.embeddings.CWTEmbedding
+  embed_dim: ${eval:'${model.embed_dim} - ${model.tokenizer.channel_emb_dim}'}
+  num_sources: 1
+  num_freqs: 9
+  min_freq: 0.5
+  max_freq: 30.0
+  freq_spacing: log
+  target_token_rate: 200.0
+  n_cycles: 2.5
+  # Grid-resample CWT output at 200 Hz, then compress with strided CNN.
+  # Strides [5, 2] yield a total 10× reduction → 10 Hz output (10 tokens/s).
+  grid_resample_hz: ${model.tokenizer.temporal_embedding.target_token_rate}
+  compressor_strides: [2, 2]
+  compressor_num_filters: 64
+  compressor_kernel_size: [7, 4]
+  compressor_activation: gelu
