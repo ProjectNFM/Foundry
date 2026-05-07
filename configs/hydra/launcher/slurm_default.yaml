@@ -10,8 +10,8 @@ tasks_per_node: 1
 cpus_per_task: ${hyperparameters.num_workers}
 nodes: 1
 mem_gb: 32
-gres: gpu:1
-array_parallelism: 256
+gres: gpu:l40s:1
+array_parallelism: 10
 additional_parameters:
   requeue: true
 setup:

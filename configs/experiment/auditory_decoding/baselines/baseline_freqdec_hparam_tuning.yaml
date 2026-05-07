@@ -1,0 +1,76 @@
+# @package _global_
+#
+# Per-recording EEGNet sweep over all NeuroSoft minipig raw sessions.
+# The sweep choices are generated from `configs/data/neurosoft_minipigs/multisess_raw.yaml`.
+#
+# Execution policy:
+# - Default is truly sequential because `hydra.sweeper.max_batch_size: 1`.
+# - Override parallelism from CLI with `hydra.sweeper.max_batch_size=<N>`.
+#
+# Launcher usage:
+# - Local sequential (default launcher, no parallelism):
+#   uv run python main.py experiment=auditory_decoding/baseline_freqdec_hparam_tuning -m
+# - SLURM (one job per sweep point):
+#   uv run python main.py experiment=auditory_decoding/baseline_freqdec_hparam_tuning hydra/launcher=slurm_default -m
+# - SLURM packed (example 4 tasks per node):
+#   uv run python main.py experiment=auditory_decoding/baseline_freqdec_hparam_tuning hydra/launcher=slurm_default hydra.launcher.tasks_per_node=4 -m
+
+defaults:
+  - override /model: linear # e.g. linear, mlp, gru, shallowcnn, temporalcnn, eegnet
+  - override /data: neurosoft_minipigs/singlesess
+
+model:
+  num_channels: ${get_num_ecog_channels_by_name:${data.root}/neurosoft_minipigs_2026,${data.recording_ids.0}}
+  num_samples: 1000 # sequence length * sampling rate
+
+data:
+  split_type: intrasession-causal
+  task_type: acoustic_stim
+
+run:
+  project: auditory_decoding
+  name: ${hydra:runtime.choices.model}_BS:${hyperparameters.batch_size}_LR:${hyperparameters.learning_rate}_WD:${hyperparameters.weight_decay}
+  group: NEUROSOFT_SINGLE_SESSION
+  tags:
+    - neurosoft
+    - baselines
+    - hparam_tuning
+    - ${hydra:runtime.choices.model}
+    - raw_data
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: ???
+  sequence_length: 0.5
+  fold_number: 0
+  num_workers: 4
+  learning_rate: ???
+  weight_decay: ???
+
+trainer:
+  max_epochs: 1000
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/loss
+      mode: min
+      patience: 20
+    model_checkpoint:
+      monitor: val/loss
+      mode: min
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_loss_{val/loss:.4f}"
+
+stage:
+  skip: true
+
+hydra:
+  sweeper:
+    max_batch_size: 10000 # max number of launched runs
+    params:
+      data.recording_ids.0: ${config_list_sweep_choices:configs/data/neurosoft_minipigs/multisess_raw.yaml,recording_ids}
+      model: choice(mlp, gru, shallowcnn, temporalcnn, eegnet)
+      hyperparameters.batch_size: choice(16, 32, 64)
+      hyperparameters.learning_rate: choice(0.15, 0.015)
+      hyperparameters.weight_decay: choice(0.018, 0.18)
