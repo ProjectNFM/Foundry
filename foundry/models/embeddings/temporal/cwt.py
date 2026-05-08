@@ -434,4 +434,132 @@ class CWTEmbedding(nn.Module):
         return self.feature_proj(cwt_flat)
 
 
-__all__ = ["ContinuousCWTLayer", "CWTEmbedding", "generate_freqs"]
+class CWTCNNEmbedding(nn.Module):
+    """Temporal embedding via learnable CWT followed by a 1-D CNN.
+
+    Combines CWT's sampling-rate-invariant frequency decomposition with a
+    convolutional stack that learns temporal patterns across frequency bins.
+    The CWT provides an interpretable time-frequency representation; the CNN
+    refines it by learning cross-frequency and local-temporal interactions.
+
+    The pipeline is:
+        CWT → (B, S*2*F, T) → Conv1d stack → (B, num_filters, T) → Linear → (B, T, embed_dim)
+
+    Frequencies can be supplied in two ways (same interface as
+    :class:`ContinuousCWTLayer`):
+
+    1. **Explicit** -- pass ``init_freqs`` as a list of Hz values.
+    2. **Generated** -- pass ``num_freqs``, ``min_freq``, ``max_freq``
+       (and optionally ``freq_spacing``) to have them computed via
+       :func:`generate_freqs`.
+    """
+
+    def __init__(
+        self,
+        embed_dim: int,
+        num_sources: int,
+        target_token_rate: float = 100.0,
+        init_freqs: list[float] | None = None,
+        *,
+        num_freqs: int | None = None,
+        min_freq: float | None = None,
+        max_freq: float | None = None,
+        freq_spacing: FreqSpacing | None = None,
+        n_cycles: float = 2.5,
+        num_filters: int = 64,
+        kernel_size: int = 9,
+        num_conv_layers: int = 2,
+        activation: str = "gelu",
+    ):
+        super().__init__()
+        from foundry.models.embeddings.activations import get_activation
+
+        resolved_freqs = _resolve_init_freqs(
+            init_freqs,
+            num_freqs,
+            min_freq,
+            max_freq,
+            freq_spacing,
+        )
+
+        self.embed_dim = embed_dim
+        self.num_sources = num_sources
+        self.target_token_rate = target_token_rate
+        self._num_freqs = len(resolved_freqs)
+
+        self.cwt = ContinuousCWTLayer(
+            init_freqs=resolved_freqs,
+            n_cycles=n_cycles,
+        )
+
+        cwt_channels = num_sources * 2 * len(resolved_freqs)
+        layers: list[nn.Module] = []
+        in_channels = cwt_channels
+        for _ in range(num_conv_layers):
+            layers.append(
+                nn.Conv1d(
+                    in_channels,
+                    num_filters,
+                    kernel_size,
+                    padding=kernel_size // 2,
+                )
+            )
+            layers.append(get_activation(activation))
+            in_channels = num_filters
+        self.cnn = nn.Sequential(*layers)
+
+        self.feature_proj = nn.Linear(num_filters, embed_dim)
+
+        for m in self.cnn:
+            if isinstance(m, nn.Conv1d):
+                nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
+                nn.init.zeros_(m.bias)
+        nn.init.xavier_uniform_(self.feature_proj.weight, gain=1.0)
+        nn.init.zeros_(self.feature_proj.bias)
+
+    def _compute_target_tokens(
+        self,
+        input_seq_len: torch.Tensor,
+        input_sampling_rate: torch.Tensor,
+    ) -> int:
+        durations = input_seq_len.float() / input_sampling_rate
+        max_duration = durations.max().item()
+        return max(1, round(self.target_token_rate * max_duration))
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        *,
+        input_sampling_rate: torch.Tensor,
+        input_seq_len: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Args:
+            x: ``(B, num_sources, max_T)`` spatially-projected signal.
+            input_sampling_rate: ``(B,)`` sampling rate per item.
+            input_seq_len: ``(B,)`` true sample count per item.
+
+        Returns:
+            ``(B, target_time_tokens, embed_dim)`` where
+            ``target_time_tokens = round(target_token_rate × max_duration)``.
+        """
+        target_time_tokens = self._compute_target_tokens(
+            input_seq_len, input_sampling_rate
+        )
+        cwt_out = self.cwt(
+            x, input_sampling_rate, input_seq_len, target_time_tokens
+        )
+
+        B, S, two, F_dim, T = cwt_out.shape
+        cwt_flat = cwt_out.permute(0, 1, 2, 3, 4).reshape(B, S * two * F_dim, T)
+
+        features = self.cnn(cwt_flat)
+        return self.feature_proj(features.transpose(1, 2))
+
+
+__all__ = [
+    "ContinuousCWTLayer",
+    "CWTEmbedding",
+    "CWTCNNEmbedding",
+    "generate_freqs",
+]
