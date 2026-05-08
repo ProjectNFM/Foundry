@@ -3,7 +3,7 @@ LATEX = pdflatex
 FIGURES_DIR = ../../figures
 REPO_ROOT = ../../..
 
-.PHONY: all clean figures figures-cwt figures-ablation figures-alltoks figures-appendix figures-experiment
+.PHONY: all clean figures figures-cwt figures-ablation figures-alltoks figures-appendix figures-experiment figures-cwt-params
 
 all: $(TEX).pdf
 
@@ -12,7 +12,7 @@ $(TEX).pdf: $(TEX).tex $(wildcard $(FIGURES_DIR)/*.pdf)
 	$(LATEX) -interaction=nonstopmode $(TEX).tex
 	$(LATEX) -interaction=nonstopmode $(TEX).tex
 
-figures: figures-cwt figures-ablation figures-alltoks figures-appendix figures-experiment
+figures: figures-cwt figures-ablation figures-alltoks figures-appendix figures-experiment figures-cwt-params
 
 figures-cwt:
 	cd $(REPO_ROOT) && uv run scripts/analysis/cwt_vs_cnn.py
@@ -29,6 +29,9 @@ figures-appendix:
 
 figures-experiment:
 	cd $(REPO_ROOT) && uv run scripts/analysis/experiment_figures.py
+
+figures-cwt-params:
+	cd $(REPO_ROOT) && uv run scripts/analysis/cwt_learned_params.py
 
 clean:
 	rm -f $(TEX).pdf $(TEX).aux $(TEX).log $(TEX).out $(TEX).toc \

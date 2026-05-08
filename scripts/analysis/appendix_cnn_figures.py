@@ -35,11 +35,11 @@ matplotlib.rcParams.update(
 )
 
 OUTPUT_DIR = Path("docs/figures")
-BLUE = "#2196F3"
-ORANGE = "#FF9800"
-GREEN = "#4CAF50"
-PURPLE = "#9C27B0"
-RED = "#E53935"
+BLUE = "#0072B2"
+ORANGE = "#D55E00"
+GREEN = "#009E73"
+PURPLE = "#CC79A7"
+RED = "#D55E00"
 
 ANTIALIAS_ORDER = 6
 

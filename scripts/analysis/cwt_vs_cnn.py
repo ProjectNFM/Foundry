@@ -22,9 +22,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from common import (
-    BEHAVIOR_METRIC,
     EXPERIMENT_GROUPS,
-    POSE_METRIC,
+    get_color,
     load_or_fetch_group,
     make_base_parser,
     plot_group_bar_chart,
@@ -35,68 +34,80 @@ from common import (
 GROUPS = ["CWT_VS_CNN_BEHAVIOR", "CWT_VS_CNN_POSE"]
 
 
-def plot_scaling(df_behavior, df_pose, output_dir: Path) -> Path | None:
-    """Side-by-side comparison for CWT vs CNN at dim256 and dim512."""
-    import pandas as pd
+def plot_scaling(df_behavior, output_dir: Path) -> Path | None:
+    """Behavior-only comparison for CWT vs CNN at dim256 and dim512.
 
-    panels: list[tuple[str, pd.DataFrame, str]] = []
-    if df_behavior is not None and not df_behavior.empty:
-        panels.append(("Behavior AUROC", df_behavior, BEHAVIOR_METRIC))
-    if df_pose is not None and not df_pose.empty:
-        panels.append(("Pose R²", df_pose, POSE_METRIC))
-    if not panels:
+    Bars are colored by tokenizer family, hatched by dimension.
+    """
+    if df_behavior is None or df_behavior.empty:
         return None
 
-    fig, axes = plt.subplots(1, len(panels), figsize=(5 * len(panels), 4.5))
-    if len(panels) == 1:
-        axes = [axes]
+    agg = (
+        df_behavior.groupby(["tokenizer_label", "embed_dim"])["best_metric"]
+        .agg(["mean", "std"])
+        .reset_index()
+    )
+    agg["std"] = agg["std"].fillna(0)
 
-    for ax, (title, df, metric) in zip(axes, panels):
-        agg = (
-            df.groupby(["tokenizer_label", "embed_dim"])["best_metric"]
-            .agg(["mean", "std"])
-            .reset_index()
+    families = ["Per-Ch CWT", "Per-Ch CNN"]
+    dims = sorted(agg["embed_dim"].unique())
+    width = 0.35
+    x = np.arange(len(families))
+    hatches = ["", "///"]
+
+    fig, ax = plt.subplots(figsize=(5, 4.5))
+    for i, dim in enumerate(dims):
+        sub = agg[agg["embed_dim"] == dim]
+        vals, stds = [], []
+        for fam in families:
+            label_256 = fam
+            label_512 = f"{fam} (512)"
+            target = label_256 if dim == 256 else label_512
+            row = sub[sub["tokenizer_label"] == target]
+            vals.append(row["mean"].values[0] if not row.empty else 0)
+            stds.append(row["std"].values[0] if not row.empty else 0)
+
+        bar_colors = [get_color(fam) for fam in families]
+        bars = ax.bar(
+            x + i * width - width / 2,
+            vals,
+            width,
+            yerr=stds,
+            capsize=3,
+            color=bar_colors,
+            edgecolor="white",
+            linewidth=0.5,
+            hatch=hatches[i],
+            label=f"dim {dim}",
         )
-        agg["std"] = agg["std"].fillna(0)
+        for bar, val, std in zip(bars, vals, stds):
+            if val > 0:
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + std + 0.003,
+                    f"{val:.3f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                )
 
-        dims = sorted(agg["embed_dim"].unique())
-        tokenizers = agg["tokenizer_label"].unique()
-        width = 0.35
-        x = np.arange(len(tokenizers))
+    ax.set_xticks(x)
+    ax.set_xticklabels(families, fontsize=9)
+    ax.set_title("CWT vs CNN — Embedding Dimension Scaling\n(Behavior AUROC)")
+    ax.set_ylabel("Behavior AUROC")
 
-        for i, dim in enumerate(dims):
-            sub = agg[agg["embed_dim"] == dim]
-            vals = [
-                sub[sub["tokenizer_label"] == t]["mean"].values[0]
-                if t in sub["tokenizer_label"].values
-                else 0
-                for t in tokenizers
-            ]
-            stds = [
-                sub[sub["tokenizer_label"] == t]["std"].values[0]
-                if t in sub["tokenizer_label"].values
-                else 0
-                for t in tokenizers
-            ]
-            ax.bar(
-                x + i * width - width / 2,
-                vals,
-                width,
-                yerr=stds,
-                capsize=3,
-                label=f"dim={dim}",
-            )
+    import matplotlib.patches as mpatches
 
-        ax.set_xticks(x)
-        ax.set_xticklabels(tokenizers, rotation=25, ha="right", fontsize=8)
-        ax.set_title(title)
-        metric_label = metric.split("/")[-1].replace("_", " ").title()
-        ax.set_ylabel(metric_label)
-        ax.legend(fontsize=8)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
+    handles = [
+        mpatches.Patch(facecolor=get_color("CWT"), label="CWT"),
+        mpatches.Patch(facecolor=get_color("CNN"), label="CNN"),
+        mpatches.Patch(facecolor="#CCCCCC", label="dim 256"),
+        mpatches.Patch(facecolor="#CCCCCC", hatch="///", label="dim 512"),
+    ]
+    ax.legend(handles=handles, fontsize=7, loc="lower right")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
 
-    fig.suptitle("CWT vs CNN — Embedding Dimension Scaling", fontsize=13)
     fig.tight_layout()
 
     path = output_dir / "cwt_vs_cnn_scaling.pdf"
@@ -105,6 +116,13 @@ def plot_scaling(df_behavior, df_pose, output_dir: Path) -> Path | None:
     plt.close(fig)
     print(f"  Saved {path}")
     return path
+
+
+def _filter_dim256(df):
+    """Keep only dim-256 runs (drop dim512 tokenizer configs)."""
+    if df is None:
+        return None
+    return df[~df["tokenizer"].str.contains("dim512")]
 
 
 def main():
@@ -121,15 +139,13 @@ def main():
         if df is None:
             continue
         dfs[name] = df
-        plot_group_bar_chart(df, group, args.output_dir)
-        if not args.no_curves and api is not None:
-            plot_training_curves(api, df, group, args.output_dir)
 
-    plot_scaling(
-        dfs.get("CWT_VS_CNN_BEHAVIOR"),
-        dfs.get("CWT_VS_CNN_POSE"),
-        args.output_dir,
-    )
+        df_256 = _filter_dim256(df)
+        plot_group_bar_chart(df_256, group, args.output_dir)
+        if not args.no_curves and api is not None:
+            plot_training_curves(api, df_256, group, args.output_dir)
+
+    plot_scaling(dfs.get("CWT_VS_CNN_BEHAVIOR"), args.output_dir)
     print("\nDone!")
 
 

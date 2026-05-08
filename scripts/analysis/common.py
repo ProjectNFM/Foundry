@@ -145,14 +145,42 @@ TOKENIZER_DISPLAY_NAMES = {
 }
 
 # ---------------------------------------------------------------------------
-# Color palette keyed by temporal-embedding class name
+# Unified color palette — Okabe-Ito colorblind-friendly
+# Keyed by temporal embedding family, inferred from tokenizer_label strings
 # ---------------------------------------------------------------------------
-PALETTE = {
-    "CWTEmbedding": "#2196F3",
-    "ResampleCNNEmbedding": "#FF9800",
-    "PerTimepointLinearEmbedding": "#4CAF50",
-    "PerTimepointIdentityEmbedding": "#9C27B0",
+PALETTE_TEMPORAL = {
+    "cwt": "#0072B2",  # blue
+    "cnn": "#D55E00",  # vermillion
+    "linear": "#009E73",  # bluish green
+    "identity": "#CC79A7",  # reddish purple
 }
+
+# Legacy palette (kept for backward compatibility)
+PALETTE = {
+    "CWTEmbedding": PALETTE_TEMPORAL["cwt"],
+    "ResampleCNNEmbedding": PALETTE_TEMPORAL["cnn"],
+    "PerTimepointLinearEmbedding": PALETTE_TEMPORAL["linear"],
+    "PerTimepointIdentityEmbedding": PALETTE_TEMPORAL["identity"],
+}
+
+
+def get_color(label: str) -> str:
+    """Return a color for a tokenizer label by matching its temporal family.
+
+    Works on tokenizer_label strings (e.g. 'Per-Ch CWT', 'Spatial CNN')
+    or tokenizer keys (e.g. 'per_channel_cwt', 'spatial_session_resample_cnn').
+    """
+    s = label.lower()
+    if "cwt" in s:
+        return PALETTE_TEMPORAL["cwt"]
+    if "cnn" in s or "resample" in s:
+        return PALETTE_TEMPORAL["cnn"]
+    if "identity" in s:
+        return PALETTE_TEMPORAL["identity"]
+    if "linear" in s:
+        return PALETTE_TEMPORAL["linear"]
+    return "#888888"
+
 
 # ---------------------------------------------------------------------------
 # Parsing helpers
@@ -344,10 +372,7 @@ def plot_group_bar_chart(
     )
     agg["std"] = agg["std"].fillna(0)
 
-    colors = []
-    for label in agg["tokenizer_label"]:
-        row = df[df["tokenizer_label"] == label].iloc[0]
-        colors.append(PALETTE.get(row["temporal_embedding"], "#607D8B"))
+    colors = [get_color(label) for label in agg["tokenizer_label"]]
 
     fig, ax = plt.subplots(figsize=(max(7, len(agg) * 0.9), 4.5))
     x = np.arange(len(agg))
@@ -379,11 +404,20 @@ def plot_group_bar_chart(
         agg["tokenizer_label"], rotation=35, ha="right", fontsize=8
     )
 
-    legend_handles = [
-        mpatches.Patch(color=color, label=emb.replace("Embedding", ""))
-        for emb, color in PALETTE.items()
-        if any(df["temporal_embedding"] == emb)
-    ]
+    seen = set()
+    legend_handles = []
+    for name, key in [
+        ("CWT", "cwt"),
+        ("CNN", "cnn"),
+        ("Linear", "linear"),
+        ("Identity", "identity"),
+    ]:
+        c = PALETTE_TEMPORAL[key]
+        if c not in seen and any(
+            get_color(label) == c for label in agg["tokenizer_label"]
+        ):
+            legend_handles.append(mpatches.Patch(color=c, label=name))
+            seen.add(c)
     if legend_handles:
         ax.legend(handles=legend_handles, loc="lower right", fontsize=7)
 
@@ -426,7 +460,7 @@ def plot_training_curves(
         if hist.empty or metric_key not in hist.columns:
             continue
 
-        color = PALETTE.get(row["temporal_embedding"], "#607D8B")
+        color = get_color(row["tokenizer_label"])
         ax.plot(
             hist["epoch"] if "epoch" in hist.columns else hist.index,
             hist[metric_key],

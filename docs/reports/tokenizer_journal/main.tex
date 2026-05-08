@@ -34,23 +34,23 @@
 \maketitle
 
 \begin{abstract}
-    This document tracks ongoing experiments comparing different EEG tokenizer
-    architectures within the Foundry framework. The goal is to determine
-    whether the current baseline tokenizer---a simple per-channel,
-    per-timepoint linear projection---can be improved upon, particularly
-    for neural foundation models that must handle variable sampling rates
-    and variable channel counts.
+      This document tracks ongoing experiments comparing different EEG tokenizer
+      architectures within the Foundry framework. The goal is to determine
+      whether the current baseline tokenizer---a simple per-channel,
+      per-timepoint linear projection---can be improved upon, particularly
+      for neural foundation models that must handle variable sampling rates
+      and variable channel counts.
 
-    Two orthogonal design axes are explored: the \emph{channel strategy}
-    (how multi-channel signals are handled before temporal processing) and
-    the \emph{temporal embedding} (how the time-domain signal is mapped to
-    tokens). Experiments use the AJILE12 intracranial ECoG dataset
-    (12~subjects) with the POYO-EEG Perceiver-IO backbone, varying only the
-    tokenizer. Two downstream tasks are evaluated: 5-class activity behavior
-    classification (AUROC) and pose estimation regression ($R^2$).
+      Two orthogonal design axes are explored: the \emph{channel strategy}
+      (how multi-channel signals are handled before temporal processing) and
+      the \emph{temporal embedding} (how the time-domain signal is mapped to
+      tokens). Experiments use the AJILE12 intracranial ECoG dataset
+      (12~subjects) with the POYO-EEG Perceiver-IO backbone, varying only the
+      tokenizer. Two downstream tasks are evaluated: 5-class activity behavior
+      classification (AUROC) and pose estimation regression ($R^2$).
 
-    This is a living document. Conclusions are tentative and reflect the
-    current state of an ongoing investigation.
+      This is a living document. Conclusions are tentative and reflect the
+      current state of an ongoing investigation.
 \end{abstract}
 
 \tableofcontents
@@ -78,18 +78,18 @@ requirements---it works for any sampling rate and any number of
 channels---it has significant drawbacks:
 
 \begin{itemize}[nosep]
-    \item \textbf{Compute scaling.} Token count grows as
-          $C \times T$, where $C$ is the number of channels and
-          $T$ is the number of timepoints. For high-density recordings
-          (e.g., 128 channels at 1000\,Hz), a single 1-second window
-          produces 128{,}000 tokens---an enormous burden on the Perceiver
-          backbone's attention mechanism.
-    \item \textbf{Ignoring temporal structure.} Each timepoint is projected
-          independently, discarding the rich temporal correlation structure
-          that is fundamental to neural signals.
-    \item \textbf{Ignoring spatial correlation.} Each channel is tokenized
-          independently, even though neighboring electrodes in EEG/ECoG
-          often carry highly correlated signals.
+      \item \textbf{Compute scaling.} Token count grows as
+            $C \times T$, where $C$ is the number of channels and
+            $T$ is the number of timepoints. For high-density recordings
+            (e.g., 128 channels at 1000\,Hz), a single 1-second window
+            produces 128{,}000 tokens---an enormous burden on the Perceiver
+            backbone's attention mechanism.
+      \item \textbf{Ignoring temporal structure.} Each timepoint is projected
+            independently, discarding the rich temporal correlation structure
+            that is fundamental to neural signals.
+      \item \textbf{Ignoring spatial correlation.} Each channel is tokenized
+            independently, even though neighboring electrodes in EEG/ECoG
+            often carry highly correlated signals.
 \end{itemize}
 
 In practice, we had trained large models with this baseline and did not
@@ -101,26 +101,26 @@ of alternatives.
 The experiments documented here explore two orthogonal axes of improvement:
 
 \begin{enumerate}[nosep]
-    \item \textbf{Temporal embedding:} Can we replace the per-timepoint
-          linear projection with something that captures temporal structure
-          while remaining sampling-rate agnostic? Two candidates are
-          investigated:
-          \begin{itemize}[nosep]
-              \item A \emph{learnable Continuous Wavelet Transform} (CWT),
-                    which decomposes the signal into frequency bands using
-                    differentiable Morlet wavelets defined in physical
-                    units (Hz, seconds)---making it inherently
-                    sampling-rate invariant.
-              \item A \emph{ResampleCNN}, which first resamples to a
-                    fixed token rate via differentiable interpolation
-                    (with anti-aliasing), then applies a 1D convolutional
-                    stack.
-          \end{itemize}
-    \item \textbf{Channel strategy:} Can we reduce the per-channel token
-          explosion by mixing channels \emph{before} temporal processing?
-          The hypothesis is that a learned spatial projection can capture
-          most of the relevant variance while dramatically reducing token
-          count.
+      \item \textbf{Temporal embedding:} Can we replace the per-timepoint
+            linear projection with something that captures temporal structure
+            while remaining sampling-rate agnostic? Two candidates are
+            investigated:
+            \begin{itemize}[nosep]
+                  \item A \emph{learnable Continuous Wavelet Transform} (CWT),
+                        which decomposes the signal into frequency bands using
+                        differentiable Morlet wavelets defined in physical
+                        units (Hz, seconds)---making it inherently
+                        sampling-rate invariant.
+                  \item A \emph{ResampleCNN}, which first resamples to a
+                        fixed token rate via differentiable interpolation
+                        (with anti-aliasing), then applies a 1D convolutional
+                        stack.
+            \end{itemize}
+      \item \textbf{Channel strategy:} Can we reduce the per-channel token
+            explosion by mixing channels \emph{before} temporal processing?
+            The hypothesis is that a learned spatial projection can capture
+            most of the relevant variance while dramatically reducing token
+            count.
 \end{enumerate}
 
 The goal is not to prove a specific claim, but to verify whether the
@@ -137,14 +137,14 @@ configurable target token rate), and spatial session further decouples
 it from channel count.
 
 \begin{figure}[H]
-    \centering
-    \includegraphics[width=0.85\textwidth]{token_count_scaling.pdf}
-    \caption{Token count scaling for a 1\,s window with 64 channels.
-    Per-timepoint linear scales linearly with sampling rate and channel
-    count. CWT/CNN-based tokenizers fix the temporal token rate (here
-    100\,Hz), and spatial session further reduces to a single stream
-    of tokens independent of channel count.}
-    \label{fig:token-scaling}
+      \centering
+      \includegraphics[width=0.85\textwidth]{token_count_scaling.pdf}
+      \caption{Token count scaling for a 1\,s window with 64 channels.
+            Per-timepoint linear scales linearly with sampling rate and channel
+            count. CWT/CNN-based tokenizers fix the temporal token rate (here
+            100\,Hz), and spatial session further reduces to a single stream
+            of tokens independent of channel count.}
+      \label{fig:token-scaling}
 \end{figure}
 
 
@@ -172,24 +172,24 @@ tokenizer module.
 \subsection{Common Configuration}
 
 \begin{table}[H]
-    \centering
-    \begin{tabular}{ll}
-        \toprule
-        \textbf{Parameter} & \textbf{Value} \\
-        \midrule
-        Dataset            & AJILE12 (Peterson \& Brunton, 2022), 12 ECoG subjects \\
-        Split              & Intrasession (train/val from same sessions) \\
-        Sequence length    & 1.0\,s \\
-        Backbone           & POYOEEGModel (depth=4, heads=8, dim\_head=128) \\
-        Default embed\_dim & 256 \\
-        Precision          & bf16-mixed \\
-        Early stopping     & patience=20 on validation metric \\
-        Folds              & 2 (fold 0 and fold 1) \\
-        Seed               & 42 \\
-        \bottomrule
-    \end{tabular}
-    \caption{Shared configuration across all tokenizer experiments.}
-    \label{tab:common-config}
+      \centering
+      \begin{tabular}{ll}
+            \toprule
+            \textbf{Parameter} & \textbf{Value}                                        \\
+            \midrule
+            Dataset            & AJILE12 (Peterson \& Brunton, 2022), 12 ECoG subjects \\
+            Split              & Intrasession (train/val from same sessions)           \\
+            Sequence length    & 1.0\,s                                                \\
+            Backbone           & POYOEEGModel (depth=4, heads=8, dim\_head=128)        \\
+            Default embed\_dim & 256                                                   \\
+            Precision          & bf16-mixed                                            \\
+            Early stopping     & patience=20 on validation metric                      \\
+            Folds              & 2 (fold 0 and fold 1)                                 \\
+            Seed               & 42                                                    \\
+            \bottomrule
+      \end{tabular}
+      \caption{Shared configuration across all tokenizer experiments.}
+      \label{tab:common-config}
 \end{table}
 
 
@@ -199,7 +199,7 @@ tokenizer module.
 %% ===================================================================
 
 The tokenizer consists of two orthogonal components: a \emph{channel
-strategy} that determines how multi-channel input is handled, and a
+      strategy} that determines how multi-channel input is handled, and a
 \emph{temporal embedding} that maps the (possibly projected) time-domain
 signal into token representations.
 
@@ -214,11 +214,11 @@ $C \times N_\text{time}$ tokens per window.
 
 Two fusion variants exist:
 \begin{itemize}[nosep]
-    \item \textbf{Concat:} Channel embedding (dimension $d_\text{ch}$) is
-          concatenated with temporal features (dimension
-          $d_\text{embed} - d_\text{ch}$).
-    \item \textbf{Add:} Channel embedding and temporal features both have
-          dimension $d_\text{embed}$ and are summed.
+      \item \textbf{Concat:} Channel embedding (dimension $d_\text{ch}$) is
+            concatenated with temporal features (dimension
+            $d_\text{embed} - d_\text{ch}$).
+      \item \textbf{Add:} Channel embedding and temporal features both have
+            dimension $d_\text{embed}$ and are summed.
 \end{itemize}
 
 \subsubsection{Spatial Session}
@@ -248,13 +248,13 @@ resampled to a fixed number of time tokens via \texttt{grid\_sample}.
 
 Key properties:
 \begin{itemize}[nosep]
-    \item \textbf{Sampling-rate invariant} by construction: wavelets are
-          defined in Hz and seconds, not samples.
-    \item \textbf{Interpretable:} the learned frequencies reveal which
-          spectral bands the model finds useful.
-    \item \textbf{Fixed token rate:} output tokens are determined by
-          \texttt{target\_token\_rate} $\times$ duration, independent of
-          input sampling rate.
+      \item \textbf{Sampling-rate invariant} by construction: wavelets are
+            defined in Hz and seconds, not samples.
+      \item \textbf{Interpretable:} the learned frequencies reveal which
+            spectral bands the model finds useful.
+      \item \textbf{Fixed token rate:} output tokens are determined by
+            \texttt{target\_token\_rate} $\times$ duration, independent of
+            input sampling rate.
 \end{itemize}
 
 See Appendix~\ref{app:cwt} for a detailed technical description.
@@ -266,11 +266,11 @@ filter before downsampling.
 
 Key properties:
 \begin{itemize}[nosep]
-    \item Also handles variable sampling rates via
-          \texttt{grid\_sample} resampling.
-    \item Learns temporal features directly from the waveform (no
-          explicit frequency decomposition).
-    \item Comparable parameter count to the CWT approach.
+      \item Also handles variable sampling rates via
+            \texttt{grid\_sample} resampling.
+      \item Learns temporal features directly from the waveform (no
+            explicit frequency decomposition).
+      \item Comparable parameter count to the CWT approach.
 \end{itemize}
 
 See Appendix~\ref{app:cnn} for a detailed technical description.
@@ -297,22 +297,21 @@ across groups (see Table~\ref{tab:hp-summary}), so absolute performance
 numbers should only be compared within a group unless otherwise noted.
 
 \begin{table}[H]
-    \centering
-    \footnotesize
-    \begin{tabular}{llrrr}
-        \toprule
-        \textbf{Group} & \textbf{Task} & \textbf{LR} & \textbf{WD} & \textbf{Configs $\times$ Folds} \\
-        \midrule
-        AJILE12\_TOKENIZER\_ABLATION      & Behavior & 6e-4 & 0.09 & 11 $\times$ 2 \\
-        AJILE12\_TOKENIZER\_ABLATION\_POSE & Pose     & 6e-4 & 0.09 & 6 $\times$ 2 \\
-        AJILE\_NEW\_ALLTOKS               & Behavior & 6e-5 & 0.01 & 11 $\times$ 2 \\
-        CWT\_VS\_CNN\_BEHAVIOR            & Behavior & 3e-4 & 0.007 & 4 $\times$ 2 \\
-        CWT\_VS\_CNN\_POSE                & Pose     & 3e-4 & 0.007 & 2 $\times$ 2 \\
-        \bottomrule
-    \end{tabular}
-    \caption{Hyperparameter summary per experiment group. Absolute
-    performance is comparable only within a group.}
-    \label{tab:hp-summary}
+      \centering
+      \footnotesize
+      \begin{tabular}{llrrr}
+            \toprule
+            \textbf{Group}               & \textbf{Task} & \textbf{LR} & \textbf{WD} & \textbf{Configs $\times$ Folds} \\
+            \midrule
+            AJILE12\_TOKENIZER\_ABLATION & Behavior      & 6e-4        & 0.09        & 11 $\times$ 2                   \\
+            AJILE\_NEW\_ALLTOKS          & Behavior      & 6e-5        & 0.01        & 11 $\times$ 2                   \\
+            CWT\_VS\_CNN\_BEHAVIOR       & Behavior      & 3e-4        & 0.007       & 4 $\times$ 2                    \\
+            CWT\_VS\_CNN\_POSE           & Pose          & 3e-4        & 0.007       & 2 $\times$ 2                    \\
+            \bottomrule
+      \end{tabular}
+      \caption{Hyperparameter summary per experiment group. Absolute
+            performance is comparable only within a group.}
+      \label{tab:hp-summary}
 \end{table}
 
 
@@ -332,73 +331,36 @@ may not be optimal for all tokenizer families. Token rate was set to
 200\,Hz for CWT and ResampleCNN in this group.
 
 \begin{figure}[H]
-    \centering
-    \includegraphics[width=\textwidth]{ajile12_tokenizer_ablation_bar.pdf}
-    \caption{Full tokenizer ablation --- behavior AUROC (mean $\pm$ std
-    over 2 folds). Per-channel configurations occupy the right side;
-    spatial session configurations cluster on the left.}
-    \label{fig:ablation-behavior}
+      \centering
+      \includegraphics[width=\textwidth]{ablation_behavior_filtered_bar.pdf}
+      \caption{Full tokenizer ablation --- behavior AUROC (mean $\pm$ std
+            over folds). One fold of Per-Ch Linear (dim 256) was excluded due to
+            a training crash. Per-channel configurations occupy the right side;
+            spatial session configurations cluster on the left.}
+      \label{fig:ablation-behavior}
 \end{figure}
 
 \textbf{Observations:}
 \begin{itemize}[nosep]
-    \item Per-channel CWT (dim 512) achieves the highest AUROC
-          ($\sim$0.91), followed by per-channel CWT (dim 256) and
-          per-channel CNN.
-    \item Per-channel configurations consistently outperform their
-          spatial session counterparts, suggesting that preserving
-          per-electrode identity is valuable for this task.
-    \item The per-timepoint linear baseline at dim 256 shows high
-          variance across folds and is among the weakest performers,
-          confirming the intuition that ignoring temporal structure
-          is costly.
-    \item Spatial session variants cluster in the 0.84--0.87 range,
-          with the ``common layer'' CWT variant performing best among
-          them.
+      \item Per-channel CWT (dim 512) achieves the highest AUROC
+            ($\sim$0.91), followed by per-channel CWT (dim 256) and
+            per-channel CNN.
+      \item Per-channel configurations consistently outperform their
+            spatial session counterparts, suggesting that preserving
+            per-electrode identity is valuable for this task.
+      \item The per-timepoint linear baseline is among the weakest
+            performers, confirming the intuition that ignoring temporal
+            structure is costly.
+      \item Spatial session variants cluster in the 0.84--0.87 range,
+            with the ``common layer'' CWT variant performing best among
+            them.
 \end{itemize}
 
 \textbf{Caveats:} Hyperparameters were tuned for the baseline, which
 may disadvantage other architectures. The ResampleCNN used in this
-group may not have had anti-aliasing enabled (this was added during the
+group did not have had anti-aliasing enabled (this was added during the
 course of these experiments). Parameter counts were not perfectly
 matched between CWT and CNN.
-
-
-% -------------------------------------------------------------------
-\subsection{Full Tokenizer Ablation --- Pose Estimation}
-\label{sec:ablation-pose}
-% -------------------------------------------------------------------
-
-\textbf{Question:} Do the same patterns hold for a regression task
-(pose estimation)?
-
-\textbf{Setup:} 6 tokenizer configurations $\times$ 2 folds, same
-hyperparameters as the behavior ablation (LR=6e-4, WD=0.09).
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\textwidth]{ajile12_tokenizer_ablation_pose_bar.pdf}
-    \caption{Full tokenizer ablation --- pose $R^2$ (mean $\pm$ std
-    over 2 folds). High variance reflects sensitivity to fold.}
-    \label{fig:ablation-pose}
-\end{figure}
-
-\textbf{Observations:}
-\begin{itemize}[nosep]
-    \item Fold variance is very high for pose estimation (e.g.,
-          per-channel CWT: fold 0 $R^2 \approx 0.31$, fold 1
-          $R^2 \approx 0.07$). This makes it difficult to draw strong
-          conclusions from these results.
-    \item Spatial CWT (common) achieves the highest mean $R^2$ (0.20),
-          but with large standard deviation.
-    \item Per-channel CWT and CNN perform similarly, as in the behavior
-          task.
-    \item Per-timepoint linear is again the weakest performer.
-\end{itemize}
-
-\textbf{Caveats:} The high fold variance suggests that pose estimation
-results should be treated as preliminary. The fold-1 runs may have
-suffered from optimization issues unrelated to the tokenizer.
 
 
 % -------------------------------------------------------------------
@@ -413,7 +375,7 @@ With concatenation, the temporal embedding produces features of dimension
 $d_\text{embed} - d_\text{ch}$ (typically $256 - 64 = 192$), and the
 channel embedding fills the remaining dimensions. With addition, both
 the temporal and channel embeddings are full-dimensional ($d_\text{embed}
-= 256$) and are summed. Concatenation was expected to perform better
+      = 256$) and are summed. Concatenation was expected to perform better
 because it preserves channel identity in a dedicated subspace rather
 than mixing it with temporal features.
 
@@ -421,22 +383,68 @@ than mixing it with temporal features.
 WD=0.01), which includes both concat and add variants for CWT and CNN.
 
 \begin{figure}[H]
-    \centering
-    \includegraphics[width=0.65\textwidth]{concat_vs_add_comparison.pdf}
-    \caption{Concat vs.\ add fusion for per-channel CWT and CNN. Concat
-    is consistently better, but the margin is small.}
-    \label{fig:concat-vs-add}
+      \centering
+      \includegraphics[width=0.65\textwidth]{concat_vs_add_comparison.pdf}
+      \caption{Concat vs.\ add fusion for per-channel CWT and CNN. Concat
+            is consistently better, but the margin is small.}
+      \label{fig:concat-vs-add}
 \end{figure}
 
 \textbf{Observations:}
 \begin{itemize}[nosep]
-    \item Concatenation outperforms addition for both CWT and CNN, but
-          the margin is modest ($\sim$0.01--0.02 AUROC).
-    \item The advantage of concat may stem from preventing the channel
-          identity signal from being ``washed out'' by temporal features
-          during summation.
-    \item Based on these results, concat fusion was used as the default
-          for subsequent per-channel experiments.
+      \item Concatenation outperforms addition for both CWT and CNN, but
+            the margin is modest ($\sim$0.01--0.02 AUROC).
+      \item The advantage of concat may stem from preventing the channel
+            identity signal from being ``washed out'' by temporal features
+            during summation.
+      \item Based on these results and some previous idea that concat was better, concat fusion was used as the default
+            for subsequent per-channel experiments.
+\end{itemize}
+
+
+% -------------------------------------------------------------------
+\subsection{Spatial Session Variants: Common Layer and MLP Projector}
+\label{sec:spatial-comparison}
+% -------------------------------------------------------------------
+
+\textbf{Question:} Within the spatial session family, does adding a
+shared ``common layer'' after the per-session projection improve
+performance? And does replacing the single linear projector with a
+2-layer MLP help?
+
+The spatial session strategy uses a per-session linear projection to
+mix channels into latent sources. Two extensions were tested:
+\begin{itemize}[nosep]
+      \item A \textbf{common layer}: a shared linear transform applied
+            after all per-session projections, allowing cross-session
+            feature alignment.
+      \item An \textbf{MLP projector}: replacing the single linear layer
+            with a 2-layer MLP (with hidden dimension equal to
+            $d_\text{embed}$), adding nonlinearity to the spatial mixing.
+\end{itemize}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=\textwidth]{spatial_comparison.pdf}
+      \caption{Left: Effect of adding a common layer to spatial session CWT
+            (from the ablation group), with per-timepoint baselines for context.
+            Right: Linear vs.\ MLP spatial projector (from the extended sweep
+            group). Note the different hyperparameter settings between panels.}
+      \label{fig:spatial-comparison}
+\end{figure}
+
+\textbf{Observations:}
+\begin{itemize}[nosep]
+      \item Adding a common layer provides a modest improvement for
+            spatial CWT ($\sim$+1\% AUROC), bringing it closer to
+            the per-timepoint linear and identity baselines.
+      \item The MLP projector does not consistently outperform the simpler
+            linear projector for either CWT or CNN temporal embeddings.
+      \item These results suggest that the spatial mixing itself is the
+            main bottleneck, not the projector's capacity. A simple
+            linear combination appears sufficient.
+      \item It is possible that Spatial Projection could be improved by
+            moving it to after the temporal embedding, but this was not tested.
 \end{itemize}
 
 
@@ -458,56 +466,16 @@ weight decay.
 
 \textbf{Key findings:}
 \begin{itemize}[nosep]
-    \item The optimal learning rate did not vary dramatically across
-          tokenizer families. All families performed well in the
-          $2\text{e-4}$ to $4\text{e-4}$ range.
-    \item This gives some confidence that the ablation results are not
-          purely an artifact of hyperparameter mismatch, though it does
-          not rule it out entirely.
-    \item A shared setting of LR=3e-4, WD=0.007 was identified as a
-          good common ground, and was used for the subsequent clean
-          head-to-head comparison.
+      \item The optimal learning rate did not vary dramatically across
+            tokenizer families. All families performed well in the
+            $2\text{e-4}$ to $4\text{e-4}$ range.
+      \item This gives some confidence that the ablation results are not
+            purely an artifact of hyperparameter mismatch, though it does
+            not rule it out entirely.
+      \item A shared setting of LR=3e-4, WD=0.007 was identified as a
+            good common ground, and was used for the subsequent clean
+            head-to-head comparison.
 \end{itemize}
-
-
-% -------------------------------------------------------------------
-\subsection{Extended Sweep with Lower Learning Rate}
-\label{sec:new-alltoks}
-% -------------------------------------------------------------------
-
-\textbf{Question:} With a lower learning rate, do the relative rankings
-between tokenizers change?
-
-\textbf{Setup:} 11 configurations (including add-fusion and MLP spatial
-variants) $\times$ 2 folds, LR=6e-5, WD=0.01.
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\textwidth]{ajile_new_alltoks_bar.pdf}
-    \caption{Extended tokenizer sweep with lower learning rate ---
-    behavior AUROC (mean $\pm$ std over folds).}
-    \label{fig:new-alltoks}
-\end{figure}
-
-\textbf{Observations:}
-\begin{itemize}[nosep]
-    \item At this lower learning rate, performance differences between
-          tokenizers compress significantly. Most variants cluster in
-          the 0.84--0.86 range.
-    \item Per-channel CWT and CNN remain at the top, but the gap to
-          spatial session variants shrinks.
-    \item Per-timepoint linear remains the clear underperformer
-          ($\sim$0.79), reinforcing that temporal context is important
-          regardless of learning rate.
-    \item The MLP spatial projector does not consistently outperform the
-          simpler linear projector.
-\end{itemize}
-
-\textbf{Interpretation:} The lower learning rate likely prevents all
-models from fully converging, compressing performance toward a lower
-plateau. The fact that relative rankings are preserved (per-channel
-$>$ spatial, CWT $\geq$ CNN $>$ linear) despite the compression is
-encouraging for the robustness of these conclusions.
 
 
 % -------------------------------------------------------------------
@@ -520,8 +488,8 @@ the learnable CWT compare to ResampleCNN?
 
 This is the most controlled comparison in this journal. Following the
 hyperparameter sweeps, both tokenizers are evaluated with the same
-LR (3e-4), WD (0.007), and two embedding dimensions (256 and 512),
-using the per-channel strategy with concat fusion.
+LR (3e-4), WD (0.007), embed\_dim 256, using the per-channel strategy
+with concat fusion.
 
 A deliberate choice was made to reduce the target token rate from
 200\,Hz (used in earlier ablations) to 100\,Hz for this group, halving
@@ -532,53 +500,58 @@ ablation.
 \subsubsection{Behavior Classification}
 
 \begin{figure}[H]
-    \centering
-    \includegraphics[width=0.85\textwidth]{cwt_vs_cnn_behavior_bar.pdf}
-    \caption{CWT vs.\ CNN behavior classification --- best AUROC per
-    tokenizer (mean $\pm$ std over folds).}
-    \label{fig:cwt-cnn-behavior}
+      \centering
+      \includegraphics[width=0.85\textwidth]{cwt_vs_cnn_behavior_bar.pdf}
+      \caption{CWT vs.\ CNN behavior classification (dim 256) --- best
+            AUROC per tokenizer (mean $\pm$ std over folds).}
+      \label{fig:cwt-cnn-behavior}
 \end{figure}
 
 \begin{figure}[H]
-    \centering
-    \includegraphics[width=0.85\textwidth]{cwt_vs_cnn_behavior_curves.pdf}
-    \caption{Training curves (validation AUROC vs.\ epoch) for
-    CWT vs.\ CNN behavior runs (fold 0).}
-    \label{fig:cwt-cnn-behavior-curves}
+      \centering
+      \includegraphics[width=0.85\textwidth]{cwt_vs_cnn_behavior_curves.pdf}
+      \caption{Training curves (validation AUROC vs.\ epoch) for
+            CWT vs.\ CNN behavior runs (fold 0).}
+      \label{fig:cwt-cnn-behavior-curves}
 \end{figure}
 
 \subsubsection{Pose Estimation}
 
 \begin{figure}[H]
-    \centering
-    \includegraphics[width=0.85\textwidth]{cwt_vs_cnn_pose_bar.pdf}
-    \caption{CWT vs.\ CNN pose estimation --- best $R^2$ per tokenizer
-    (mean $\pm$ std over folds).}
-    \label{fig:cwt-cnn-pose}
+      \centering
+      \includegraphics[width=0.85\textwidth]{cwt_vs_cnn_pose_bar.pdf}
+      \caption{CWT vs.\ CNN pose estimation (dim 256) --- best $R^2$
+            per tokenizer (mean $\pm$ std over folds).}
+      \label{fig:cwt-cnn-pose}
 \end{figure}
 
 \subsubsection{Embedding Dimension Scaling}
 
+Additional runs at dim 512 were conducted for behavior classification
+to assess whether the tokenizers scale differently with embedding
+dimension.
+
 \begin{figure}[H]
-    \centering
-    \includegraphics[width=0.95\textwidth]{cwt_vs_cnn_scaling.pdf}
-    \caption{Effect of embedding dimension (256 vs.\ 512) on CWT
-    and CNN tokenizers across both tasks.}
-    \label{fig:cwt-cnn-scaling}
+      \centering
+      \includegraphics[width=0.65\textwidth]{cwt_vs_cnn_scaling.pdf}
+      \caption{Effect of embedding dimension (256 vs.\ 512) on CWT
+            and CNN tokenizers for behavior classification.}
+      \label{fig:cwt-cnn-scaling}
 \end{figure}
 
 \textbf{Observations:}
 \begin{itemize}[nosep]
-    \item For behavior classification, CWT and CNN perform similarly at
-          dim 256 ($\sim$0.88 AUROC), with CWT holding a slight edge.
-    \item For pose estimation, CNN takes a slight edge over CWT, though
-          both achieve similar $R^2$ values.
-    \item At dim 512, both tokenizers show reduced performance compared
-          to dim 256 in this setup, possibly due to overfitting at the
-          larger embedding size or the interaction with the reduced
-          token rate.
-    \item Training curves suggest CWT may converge slightly faster in
-          early epochs, though both reach similar final performance.
+      \item For behavior classification, CWT and CNN perform similarly at
+            dim 256 ($\sim$0.88 AUROC), with CWT holding a slight edge.
+      \item For pose estimation, CNN takes a slight edge over CWT, though
+            both achieve similar $R^2$ values.
+      \item At dim 512, both tokenizers show reduced behavior performance
+            compared to dim 256, possibly due to overfitting at the
+            larger embedding size or the interaction with the reduced
+            token rate. Note that these runs were stopped early to allow
+            for more training time for the other runs.
+      \item Training curves suggest CWT may converge slightly faster in
+            early epochs, though both reach similar final performance.
 \end{itemize}
 
 \textbf{Interpretation:} The similar performance of CWT and CNN
@@ -590,14 +563,73 @@ construction, interpretable learned frequencies, and the potential
 for regularization effects discussed in Section~\ref{sec:discussion}.
 
 
+% -------------------------------------------------------------------
+\subsection{Learned CWT Frequencies and Cycle Counts}
+\label{sec:cwt-learned-params}
+% -------------------------------------------------------------------
+
+\textbf{Question:} Do the CWT's learnable center frequencies and cycle
+counts change meaningfully during training, and do they differ between
+tasks?
+
+The CWT layer initializes 9 center frequencies log-spaced from 0.5 to
+30\,Hz, and all cycle counts at 2.5. Both are free to evolve during
+training via gradient descent (constrained to be positive through
+softplus reparameterization; see Appendix~\ref{app:cwt}).
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=\textwidth]{cwt_learned_freqs.pdf}
+      \caption{Learned center frequencies vs.\ initialization for behavior
+            (left) and pose (right) tasks. Frequencies shift only slightly from
+            their initial values, with larger relative changes at the low end.}
+      \label{fig:cwt-learned-freqs}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=\textwidth]{cwt_learned_freqs_training.pdf}
+      \caption{Evolution of CWT parameters during training (behavior,
+            fold 0). Left: center frequencies. Right: cycle counts. Dotted
+            lines show initialization values.}
+      \label{fig:cwt-learned-training}
+\end{figure}
+
+\textbf{Observations:}
+\begin{itemize}[nosep]
+      \item Center frequencies barely move during training. The largest
+            relative changes occur at the lowest frequency bin (0.5\,Hz
+            $\to$ $\sim$0.45\,Hz for behavior, $\sim$0.40\,Hz for pose),
+            while mid- and high-frequency bins shift by less than 5\%.
+      \item Note that there wasn't an explicit Hparam sweep to find the
+            best frequencies and cycle counts, so these may not be the best values.
+      \item Cycle counts remain very close to their initialization of 2.5
+            across all frequency bins and both tasks, suggesting the
+            initial time--frequency trade-off is reasonable.
+      \item The pose task shows slightly larger frequency shifts than
+            behavior, particularly at the low end (0.5 $\to$ 0.40\,Hz)
+            and in the 2--4\,Hz range, which may reflect the different
+            spectral content relevant to movement kinematics vs.\
+            activity classification.
+      \item The stability of the learned parameters suggests that the
+            log-spaced initialization is already a good starting point.
+            The model makes fine adjustments rather than discovering a
+            radically different frequency decomposition.
+\end{itemize}
+
+\textbf{Interpretation:} The fact that frequencies are nearly stable
+is consistent with the CWT and CNN performing similarly: if the CWT
+were finding a highly specialized frequency decomposition, we might
+expect larger shifts. Instead, the log-spaced initialization appears
+to cover the relevant spectral range well, and the model's main
+discriminative power comes from the downstream Perceiver backbone
+rather than from optimizing the wavelet bank itself.
+
+
 %% ===================================================================
 \section{Discussion and Ongoing Conclusions}
 \label{sec:discussion}
 %% ===================================================================
-
-This section summarizes the tentative conclusions from the experiments
-conducted so far. These are working hypotheses, not final claims---the
-investigation is ongoing, and several important questions remain open.
 
 \subsection{Per-Channel vs.\ Spatial Session}
 
@@ -607,21 +639,18 @@ gap is moderate (2--5\% AUROC depending on the group) but consistent.
 
 \textbf{Possible explanations:}
 \begin{itemize}[nosep]
-    \item Per-electrode identity may carry task-relevant information
-          that the spatial projection discards.
-    \item The spatial projection is learned per session, which may not
-          generalize well with only 2 folds of data.
-    \item The Perceiver backbone may benefit from having more tokens
-          (per-channel produces $C \times N_\text{time}$) even if they
-          are correlated.
+      \item Per-electrode identity may carry task-relevant information
+            that the spatial projection discards.
+      \item The spatial projection is learned per session, which may not
+            generalize well with only 2 folds of data.
+      \item The Perceiver backbone may benefit from having more tokens
+            (per-channel produces $C \times N_\text{time}$) even if they
+            are correlated. This is probably the main contributor to the performance gap.
 \end{itemize}
 
-\textbf{Caveats:} The spatial session approach was always tested with
-hyperparameters tuned for the baseline. While the sweeps suggest
-optimal learning rates are similar, we cannot rule out that the spatial
-approach would close the gap with dedicated architecture tuning
-(e.g., different $N_\text{sources}$, projection rank, or training
-schedule).
+\textbf{Caveats:} The spatial session approach was always tested applied BEFORE
+the temporal embedding. It is possible that actually, projecting some high dimensional
+features after the temporal embedding would be better.
 
 \subsection{CWT vs.\ ResampleCNN}
 
@@ -634,20 +663,20 @@ be considered conclusive with the current number of runs.
 same frequency-domain features that CWT extracts explicitly. The value
 of CWT may therefore lie not in raw task performance, but in:
 \begin{itemize}[nosep]
-    \item \textbf{Sampling-rate invariance:} CWT is invariant by
-          construction (wavelets are defined in physical units). The CNN
-          requires an explicit resampling step to handle variable
-          sampling rates.
-    \item \textbf{Interpretability:} CWT's learned center frequencies
-          reveal which spectral bands the model finds useful, providing
-          insight into the data.
-    \item \textbf{Potential regularization:} When training across
-          datasets of varying quality (different units, noise levels,
-          artifacts), the CWT's frequency decomposition may act as a
-          learned filter that regularizes the input, making the loss
-          landscape more tractable. This hypothesis is motivated by
-          preliminary observations from cross-dataset training but
-          has not yet been systematically tested.
+      \item \textbf{Sampling-rate invariance:} CWT is invariant by
+            construction (wavelets are defined in physical units). The CNN
+            requires an explicit resampling step to handle variable
+            sampling rates.
+      \item \textbf{Interpretability:} CWT's learned center frequencies
+            reveal which spectral bands the model finds useful, providing
+            insight into the data.
+      \item \textbf{Potential regularization:} When training across
+            datasets of varying quality (different units, noise levels,
+            artifacts), the CWT's frequency decomposition may act as a
+            learned filter that regularizes the input, making the loss
+            landscape more tractable. This hypothesis is motivated by
+            preliminary observations from cross-dataset training but
+            has not yet been systematically tested.
 \end{itemize}
 
 \subsection{Per-Timepoint Linear is Suboptimal}
@@ -656,15 +685,6 @@ The per-timepoint linear baseline consistently underperforms all other
 temporal embeddings, often by a large margin. This confirms the
 intuition that ignoring temporal structure is costly and validates the
 effort to explore alternatives.
-
-\subsection{Compute Efficiency}
-
-Reducing the token rate from 200\,Hz to 100\,Hz roughly halves the
-number of tokens and corresponding compute. The reduction in task
-performance appears modest, suggesting that 100\,Hz may be a
-reasonable operating point for many applications. Further investigation
-of the performance--compute trade-off at different token rates is
-warranted.
 
 \subsection{CWT + CNN Hybrid}
 
@@ -679,24 +699,17 @@ direction that has not been fully explored.
 \subsection{Open Questions}
 
 \begin{itemize}[nosep]
-    \item \textbf{Cross-dataset generalization:} All experiments so far
-          use a single dataset (AJILE12). The tokenizer comparison may
-          yield different results on scalp EEG datasets with different
-          noise characteristics and frequency content.
-    \item \textbf{Self-supervised pretraining:} The CWT's potential
-          regularization properties may be most valuable in a
-          self-supervised setting across diverse datasets of varying
-          quality. This is a priority for future experiments.
-    \item \textbf{Spatial session with more data:} The spatial
-          projection may benefit from more training data (more sessions,
-          more subjects) to learn a robust channel mixing.
-    \item \textbf{Token rate optimization:} A systematic sweep of
-          \texttt{target\_token\_rate} would clarify the
-          performance--compute trade-off.
-    \item \textbf{Learned CWT frequencies:} Analyzing how the CWT's
-          center frequencies evolve during training could provide
-          insight into which spectral bands are most informative for
-          different tasks.
+      \item \textbf{Cross-dataset generalization:} All experiments so far
+            use a single dataset (AJILE12). The tokenizer comparison may
+            yield different results on scalp EEG datasets with different
+            noise characteristics and frequency content.
+      \item \textbf{Self-supervised pretraining:} The CWT's potential
+            regularization properties may be most valuable in a
+            self-supervised setting across diverse datasets of varying
+            quality. This is a priority for future experiments.
+      \item \textbf{Token rate optimization:} A systematic sweep of
+            \texttt{target\_token\_rate} would clarify the
+            performance--compute trade-off.
 \end{itemize}
 
 
@@ -706,274 +719,275 @@ direction that has not been fully explored.
 %% ===================================================================
 
 \begin{itemize}
-    \item \textbf{Hyperparameter differences across groups:} The
-          experiment groups use different LR/WD settings (see
-          Table~\ref{tab:hp-summary}), so absolute performance numbers
-          are not directly comparable across groups. Within each group,
-          comparisons are fair.
+      \item \textbf{Hyperparameter differences across groups:} The
+            experiment groups use different LR/WD settings (see
+            Table~\ref{tab:hp-summary}), so absolute performance numbers
+            are not directly comparable across groups. Within each group,
+            comparisons are fair.
 
-    \item \textbf{Anti-aliasing for ResampleCNN:} The Butterworth
-          anti-aliasing filter was added during the course of these
-          experiments. Earlier runs (AJILE12\_TOKENIZER\_ABLATION) may
-          not have had it enabled, which could have slightly
-          disadvantaged the CNN in those comparisons.
+      \item \textbf{Anti-aliasing for ResampleCNN:} The Butterworth
+            anti-aliasing filter was added during the course of these
+            experiments. Earlier runs (AJILE12\_TOKENIZER\_ABLATION) may
+            not have had it enabled, which could have slightly
+            disadvantaged the CNN in those comparisons.
 
-    \item \textbf{Parameter count matching:} CWT and CNN were not
-          perfectly parameter-matched in all groups. The CWT has
-          learnable frequency and cycle-count parameters in addition
-          to the projection layer, while the CNN has convolutional
-          weights. This is a minor confound but worth noting.
+      \item \textbf{Parameter count matching:} CWT and CNN were not
+            perfectly parameter-matched in all groups. The CWT has
+            learnable frequency and cycle-count parameters in addition
+            to the projection layer, while the CNN has convolutional
+            weights. Note that they were parameter-matched to some
+            in the final group, so the final performance comparisons are fair.
 
-    \item \textbf{Token rate change:} The CWT\_VS\_CNN group uses
-          \texttt{target\_token\_rate}=100\,Hz, while the earlier
-          ablation used 200\,Hz. This was a deliberate choice to
-          reduce compute, but it may account for some of the
-          reduction in absolute performance.
+      \item \textbf{Token rate change:} The CWT\_VS\_CNN group uses
+            \texttt{target\_token\_rate}=100\,Hz, while the earlier
+            ablation used 200\,Hz. This was a deliberate choice to
+            reduce compute, but it may account for some of the
+            reduction in absolute performance.
 \end{itemize}
 
 
 %% ===================================================================
 \begin{appendices}
-%% ===================================================================
+      %% ===================================================================
 
-\section{Learnable CWT Layer}
-\label{app:cwt}
+      \section{Learnable CWT Layer}
+      \label{app:cwt}
 
-This appendix provides a self-contained technical description of the
-\texttt{ContinuousCWTLayer} and \texttt{CWTEmbedding} modules. The
-layer applies complex Morlet wavelets at learnable center frequencies
-to decompose a 1-D signal into a 2-D time--frequency map, then
-resamples the time axis to a fixed token count.
+      This appendix provides a self-contained technical description of the
+      \texttt{ContinuousCWTLayer} and \texttt{CWTEmbedding} modules. The
+      layer applies complex Morlet wavelets at learnable center frequencies
+      to decompose a 1-D signal into a 2-D time--frequency map, then
+      resamples the time axis to a fixed token count.
 
-\subsection{Learnable Parameters}
+      \subsection{Learnable Parameters}
 
-The layer has two sets of learnable parameters: \textbf{center
-frequencies} $\{f_k\}$ and \textbf{cycle counts} $\{n_k\}$ (one per
-frequency bin). Both must remain positive, so the layer stores
-unconstrained values and maps them through softplus with a minimum
-floor:
+      The layer has two sets of learnable parameters: \textbf{center
+            frequencies} $\{f_k\}$ and \textbf{cycle counts} $\{n_k\}$ (one per
+      frequency bin). Both must remain positive, so the layer stores
+      unconstrained values and maps them through softplus with a minimum
+      floor:
 
-\begin{equation}
-    f_k = f_\text{min} + \operatorname{softplus}(\tilde{f}_k), \qquad
-    n_k = n_\text{min} + \operatorname{softplus}(\tilde{n}_k)
-\end{equation}
+      \begin{equation}
+            f_k = f_\text{min} + \operatorname{softplus}(\tilde{f}_k), \qquad
+            n_k = n_\text{min} + \operatorname{softplus}(\tilde{n}_k)
+      \end{equation}
 
-where $\tilde{f}_k$ and $\tilde{n}_k$ are the unconstrained parameters.
-At initialization, the inverse softplus is applied so that the
-constrained values start exactly at the user-specified initial values.
+      where $\tilde{f}_k$ and $\tilde{n}_k$ are the unconstrained parameters.
+      At initialization, the inverse softplus is applied so that the
+      constrained values start exactly at the user-specified initial values.
 
-\subsection{Morlet Wavelet Construction}
+      \subsection{Morlet Wavelet Construction}
 
-A complex Morlet wavelet at frequency $f$ is a sinusoid windowed by a
-Gaussian envelope:
+      A complex Morlet wavelet at frequency $f$ is a sinusoid windowed by a
+      Gaussian envelope:
 
-\begin{equation}
-    \psi(t) = \exp\!\left(-\frac{t^2}{2\sigma^2}\right) \cdot
-    e^{\,i\,2\pi f\, t}, \qquad
-    \sigma = \frac{n_\text{cycles}}{2\pi f}
-\end{equation}
+      \begin{equation}
+            \psi(t) = \exp\!\left(-\frac{t^2}{2\sigma^2}\right) \cdot
+            e^{\,i\,2\pi f\, t}, \qquad
+            \sigma = \frac{n_\text{cycles}}{2\pi f}
+      \end{equation}
 
-The Gaussian width $\sigma$ is tied to both the frequency and the
-\emph{time--frequency trade-off} parameter $n_\text{cycles}$: more
-cycles yield sharper frequency resolution but blurrier time resolution
-(Heisenberg uncertainty principle for signal processing).
+      The Gaussian width $\sigma$ is tied to both the frequency and the
+      \emph{time--frequency trade-off} parameter $n_\text{cycles}$: more
+      cycles yield sharper frequency resolution but blurrier time resolution
+      (Heisenberg uncertainty principle for signal processing).
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.85\textwidth]{appendix_cwt_wavelets.pdf}
-    \caption{Complex Morlet wavelets at five center frequencies.
-    Higher-frequency wavelets are narrower ($\sigma \propto 1/f$),
-    while lower-frequency wavelets are wider and contain slower
-    oscillations.}
-    \label{fig:app-cwt-wavelets}
-\end{figure}
+      \begin{figure}[H]
+            \centering
+            \includegraphics[width=0.85\textwidth]{appendix_cwt_wavelets.pdf}
+            \caption{Complex Morlet wavelets at five center frequencies.
+                  Higher-frequency wavelets are narrower ($\sigma \propto 1/f$),
+                  while lower-frequency wavelets are wider and contain slower
+                  oscillations.}
+            \label{fig:app-cwt-wavelets}
+      \end{figure}
 
-\subsection{FFT-Based Convolution}
+      \subsection{FFT-Based Convolution}
 
-The wavelet is slid across the signal via cross-correlation, computed
-efficiently in the frequency domain:
+      The wavelet is slid across the signal via cross-correlation, computed
+      efficiently in the frequency domain:
 
-\begin{enumerate}[nosep]
-    \item FFT the signal and the (flipped) wavelet kernel.
-    \item Pointwise multiply in the frequency domain.
-    \item Inverse FFT and extract the valid region.
-\end{enumerate}
+      \begin{enumerate}[nosep]
+            \item FFT the signal and the (flipped) wavelet kernel.
+            \item Pointwise multiply in the frequency domain.
+            \item Inverse FFT and extract the valid region.
+      \end{enumerate}
 
-Because the wavelet kernels depend on the per-batch-item sampling rate
-$f_s$ (via $t_\text{sec} = t_\text{samples} / f_s$), different
-sampling rates within a batch are handled naturally without
-approximation.
+      Because the wavelet kernels depend on the per-batch-item sampling rate
+      $f_s$ (via $t_\text{sec} = t_\text{samples} / f_s$), different
+      sampling rates within a batch are handled naturally without
+      approximation.
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.85\textwidth]{appendix_cwt_scalogram.pdf}
-    \caption{CWT magnitude (scalogram) of a synthetic chirp signal
-    (2--20\,Hz sweep) with a 10\,Hz burst at $t = 1.5$--$2.0$\,s.
-    Each wavelet picks up energy where its frequency is present.}
-    \label{fig:app-cwt-scalogram}
-\end{figure}
+      \begin{figure}[H]
+            \centering
+            \includegraphics[width=0.85\textwidth]{appendix_cwt_scalogram.pdf}
+            \caption{CWT magnitude (scalogram) of a synthetic chirp signal
+                  (2--20\,Hz sweep) with a 10\,Hz burst at $t = 1.5$--$2.0$\,s.
+                  Each wavelet picks up energy where its frequency is present.}
+            \label{fig:app-cwt-scalogram}
+      \end{figure}
 
-\subsection{Time Resampling}
+      \subsection{Time Resampling}
 
-Signals in a batch can have different lengths (zero-padded to
-$\text{Max\_T}$). The time--frequency map is treated as a 2-D image
-(height = frequency bins, width = time) and resampled to a fixed
-\texttt{target\_time\_tokens} count using \texttt{grid\_sample} with
-bilinear interpolation. Per-item sampling coordinates are built so
-that only the valid (non-padded) region is covered.
+      Signals in a batch can have different lengths (zero-padded to
+      $\text{Max\_T}$). The time--frequency map is treated as a 2-D image
+      (height = frequency bins, width = time) and resampled to a fixed
+      \texttt{target\_time\_tokens} count using \texttt{grid\_sample} with
+      bilinear interpolation. Per-item sampling coordinates are built so
+      that only the valid (non-padded) region is covered.
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.9\textwidth]{appendix_cwt_resampling.pdf}
-    \caption{Variable-length signals resampled to the same number of
-    output tokens. The full 3\,s signal and a 1.5\,s signal both
-    produce 64 tokens, but each covers only its valid duration.}
-    \label{fig:app-cwt-resampling}
-\end{figure}
+      \begin{figure}[H]
+            \centering
+            \includegraphics[width=0.9\textwidth]{appendix_cwt_resampling.pdf}
+            \caption{Variable-length signals resampled to the same number of
+                  output tokens. The full 3\,s signal and a 1.5\,s signal both
+                  produce 64 tokens, but each covers only its valid duration.}
+            \label{fig:app-cwt-resampling}
+      \end{figure}
 
-\subsection{Magnitude and Phase Extraction}
+      \subsection{Magnitude and Phase Extraction}
 
-The complex CWT output is converted to polar form:
+      The complex CWT output is converted to polar form:
 
-\begin{align}
-    \text{magnitude} &= \sqrt{\text{re}^2 + \text{im}^2 + \epsilon} \\
-    \text{phase} &= \frac{\operatorname{atan2}(\text{im}, \text{re})}{\pi}
-    \cdot w, \qquad
-    w = \frac{|\mathbf{z}|^2}{|\mathbf{z}|^2 + \epsilon_\text{phase}}
-\end{align}
+      \begin{align}
+            \text{magnitude} & = \sqrt{\text{re}^2 + \text{im}^2 + \epsilon}            \\
+            \text{phase}     & = \frac{\operatorname{atan2}(\text{im}, \text{re})}{\pi}
+            \cdot w, \qquad
+            w = \frac{|\mathbf{z}|^2}{|\mathbf{z}|^2 + \epsilon_\text{phase}}
+      \end{align}
 
-Phase is suppressed for near-zero magnitudes via the soft weight $w$,
-preventing noisy gradients where no frequency content is present.
+      Phase is suppressed for near-zero magnitudes via the soft weight $w$,
+      preventing noisy gradients where no frequency content is present.
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.65\textwidth]{appendix_cwt_phase_stability.pdf}
-    \caption{Phase stability weighting. Where magnitude is large,
-    $w \approx 1$ and phase passes through unchanged. Near zero
-    magnitude, phase is smoothly driven toward zero.}
-    \label{fig:app-cwt-phase-stability}
-\end{figure}
+      \begin{figure}[H]
+            \centering
+            \includegraphics[width=0.65\textwidth]{appendix_cwt_phase_stability.pdf}
+            \caption{Phase stability weighting. Where magnitude is large,
+                  $w \approx 1$ and phase passes through unchanged. Near zero
+                  magnitude, phase is smoothly driven toward zero.}
+            \label{fig:app-cwt-phase-stability}
+      \end{figure}
 
-\subsection{Sampling-Rate Invariance}
+      \subsection{Sampling-Rate Invariance}
 
-A key property: the same physical signal sampled at different rates
-produces approximately the same output, because wavelets are defined
-in physical units (Hz, seconds) and the resampling maps valid duration
-to a fixed token count.
+      A key property: the same physical signal sampled at different rates
+      produces approximately the same output, because wavelets are defined
+      in physical units (Hz, seconds) and the resampling maps valid duration
+      to a fixed token count.
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.95\textwidth]{appendix_cwt_fs_invariance.pdf}
-    \caption{The same 3\,s chirp signal sampled at 128, 256, and
-    512\,Hz produces near-identical scalograms. Differences are due
-    to discretization only.}
-    \label{fig:app-cwt-fs-invariance}
-\end{figure}
+      \begin{figure}[H]
+            \centering
+            \includegraphics[width=0.95\textwidth]{appendix_cwt_fs_invariance.pdf}
+            \caption{The same 3\,s chirp signal sampled at 128, 256, and
+                  512\,Hz produces near-identical scalograms. Differences are due
+                  to discretization only.}
+            \label{fig:app-cwt-fs-invariance}
+      \end{figure}
 
-\subsection{Frequency Selectivity}
+      \subsection{Frequency Selectivity}
 
-Each wavelet acts as a bandpass filter centered at its learnable
-frequency. The selectivity (bandwidth) is controlled by
-$n_\text{cycles}$: more cycles yield a narrower, more selective
-response.
+      Each wavelet acts as a bandpass filter centered at its learnable
+      frequency. The selectivity (bandwidth) is controlled by
+      $n_\text{cycles}$: more cycles yield a narrower, more selective
+      response.
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.85\textwidth]{appendix_cwt_freq_response.pdf}
-    \caption{Frequency response of each wavelet. Pure sine waves at
-    known frequencies are passed through the layer; the response
-    confirms each wavelet is a bandpass filter peaked at its center
-    frequency.}
-    \label{fig:app-cwt-freq-response}
-\end{figure}
+      \begin{figure}[H]
+            \centering
+            \includegraphics[width=0.85\textwidth]{appendix_cwt_freq_response.pdf}
+            \caption{Frequency response of each wavelet. Pure sine waves at
+                  known frequencies are passed through the layer; the response
+                  confirms each wavelet is a bandpass filter peaked at its center
+                  frequency.}
+            \label{fig:app-cwt-freq-response}
+      \end{figure}
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.85\textwidth]{appendix_cwt_ncycles.pdf}
-    \caption{Effect of $n_\text{cycles}$ on frequency selectivity
-    (10\,Hz wavelet shown). More cycles yield a narrower bandwidth.}
-    \label{fig:app-cwt-ncycles}
-\end{figure}
+      \begin{figure}[H]
+            \centering
+            \includegraphics[width=0.85\textwidth]{appendix_cwt_ncycles.pdf}
+            \caption{Effect of $n_\text{cycles}$ on frequency selectivity
+                  (10\,Hz wavelet shown). More cycles yield a narrower bandwidth.}
+            \label{fig:app-cwt-ncycles}
+      \end{figure}
 
-\subsection{Output Shape}
+      \subsection{Output Shape}
 
-The full \texttt{CWTEmbedding} pipeline:
-\begin{enumerate}[nosep]
-    \item \texttt{ContinuousCWTLayer}: $(B, S, T) \to (B, S, 2, F, T')$
-          where $S$ = sources, $F$ = frequency bins, $T'$ = target time
-          tokens, and the 2 channels are magnitude and phase.
-    \item Flatten: $(B, T', S \cdot 2 \cdot F)$
-    \item Linear projection: $(B, T', d_\text{embed})$
-\end{enumerate}
+      The full \texttt{CWTEmbedding} pipeline:
+      \begin{enumerate}[nosep]
+            \item \texttt{ContinuousCWTLayer}: $(B, S, T) \to (B, S, 2, F, T')$
+                  where $S$ = sources, $F$ = frequency bins, $T'$ = target time
+                  tokens, and the 2 channels are magnitude and phase.
+            \item Flatten: $(B, T', S \cdot 2 \cdot F)$
+            \item Linear projection: $(B, T', d_\text{embed})$
+      \end{enumerate}
 
 
-%% -------------------------------------------------------------------
-\section{ResampleCNN Architecture}
-\label{app:cnn}
-%% -------------------------------------------------------------------
+      %% -------------------------------------------------------------------
+      \section{ResampleCNN Architecture}
+      \label{app:cnn}
+      %% -------------------------------------------------------------------
 
-This appendix describes the \texttt{ResampleCNNEmbedding} module, which
-serves as the primary non-CWT temporal embedding.
+      This appendix describes the \texttt{ResampleCNNEmbedding} module, which
+      serves as the primary non-CWT temporal embedding.
 
-\subsection{Pipeline Overview}
+      \subsection{Pipeline Overview}
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.9\textwidth]{appendix_cnn_pipeline.pdf}
-    \caption{ResampleCNN processing pipeline. The signal is optionally
-    low-pass filtered, resampled to a fixed token count, processed by
-    a convolutional stack, and linearly projected to the embedding
-    dimension.}
-    \label{fig:app-cnn-pipeline}
-\end{figure}
+      \begin{figure}[H]
+            \centering
+            \includegraphics[width=0.9\textwidth]{appendix_cnn_pipeline.pdf}
+            \caption{ResampleCNN processing pipeline. The signal is optionally
+                  low-pass filtered, resampled to a fixed token count, processed by
+                  a convolutional stack, and linearly projected to the embedding
+                  dimension.}
+            \label{fig:app-cnn-pipeline}
+      \end{figure}
 
-\subsection{Anti-Aliasing Filter}
+      \subsection{Anti-Aliasing Filter}
 
-Before downsampling, an FFT-based Butterworth low-pass filter removes
-frequencies above the target Nyquist to prevent aliasing. The filter is
-applied in the frequency domain:
+      Before downsampling, an FFT-based Butterworth low-pass filter removes
+      frequencies above the target Nyquist to prevent aliasing. The filter is
+      applied in the frequency domain:
 
-\begin{equation}
-    |H(f)| = \frac{1}{\sqrt{1 + (f / f_c)^{2n}}}
-\end{equation}
+      \begin{equation}
+            |H(f)| = \frac{1}{\sqrt{1 + (f / f_c)^{2n}}}
+      \end{equation}
 
-where $f_c$ is the per-item cutoff frequency (proportional to the
-downsampling ratio) and $n = 6$ is the filter order. The filter is a
-no-op when the signal is being upsampled.
+      where $f_c$ is the per-item cutoff frequency (proportional to the
+      downsampling ratio) and $n = 6$ is the filter order. The filter is a
+      no-op when the signal is being upsampled.
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.85\textwidth]{appendix_cnn_butterworth.pdf}
-    \caption{Butterworth low-pass filter magnitude response at different
-    downsampling ratios. Higher ratios require more aggressive
-    filtering.}
-    \label{fig:app-cnn-butterworth}
-\end{figure}
+      \begin{figure}[H]
+            \centering
+            \includegraphics[width=0.85\textwidth]{appendix_cnn_butterworth.pdf}
+            \caption{Butterworth low-pass filter magnitude response at different
+                  downsampling ratios. Higher ratios require more aggressive
+                  filtering.}
+            \label{fig:app-cnn-butterworth}
+      \end{figure}
 
-\subsection{Differentiable Resampling}
+      \subsection{Differentiable Resampling}
 
-The signal is resampled to a fixed number of time tokens using
-\texttt{grid\_sample}. The 1-D signal is treated as a single-row image,
-and bilinear interpolation along the width (time) axis provides smooth,
-differentiable resampling. Per-item grid coordinates map only the valid
-(non-padded) portion of each signal.
+      The signal is resampled to a fixed number of time tokens using
+      \texttt{grid\_sample}. The 1-D signal is treated as a single-row image,
+      and bilinear interpolation along the width (time) axis provides smooth,
+      differentiable resampling. Per-item grid coordinates map only the valid
+      (non-padded) portion of each signal.
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.85\textwidth]{appendix_cnn_resampling.pdf}
-    \caption{Anti-aliased resampling of a chirp signal (2--60\,Hz) to
-    different token counts. The Butterworth filter prevents aliasing
-    artifacts in the downsampled versions.}
-    \label{fig:app-cnn-resampling}
-\end{figure}
+      \begin{figure}[H]
+            \centering
+            \includegraphics[width=0.85\textwidth]{appendix_cnn_resampling.pdf}
+            \caption{Anti-aliased resampling of a chirp signal (2--60\,Hz) to
+                  different token counts. The Butterworth filter prevents aliasing
+                  artifacts in the downsampled versions.}
+            \label{fig:app-cnn-resampling}
+      \end{figure}
 
-\subsection{Convolutional Stack and Projection}
+      \subsection{Convolutional Stack and Projection}
 
-After resampling, a stack of 1-D convolutions (default: 2 layers,
-kernel size 9, 64 filters, GELU activation, same-padding) extracts
-temporal features. A final linear layer projects from the filter
-dimension to the model's embedding dimension. The output shape is
-$(B, T', d_\text{embed})$, matching the CWT embedding's interface.
+      After resampling, a stack of 1-D convolutions (default: 2 layers,
+      kernel size 9, 64 filters, GELU activation, same-padding) extracts
+      temporal features. A final linear layer projects from the filter
+      dimension to the model's embedding dimension. The output shape is
+      $(B, T', d_\text{embed})$, matching the CWT embedding's interface.
 
 \end{appendices}
 
