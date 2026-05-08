@@ -1,0 +1,7 @@
+# @package _global_
+hydra:
+  run:
+    dir: ${oc.env:SCRATCH,./outputs}/runs/${run.group}/${run.name}
+  sweep:
+    dir: ${oc.env:SCRATCH,./outputs}/runs/${run.group}
+    subdir: ${run.name}

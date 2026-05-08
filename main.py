@@ -9,6 +9,7 @@ from hydra.core.hydra_config import HydraConfig
 from hydra.utils import get_class, instantiate
 from lightning import seed_everything
 from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.utilities.rank_zero import rank_zero_only
 from omegaconf import DictConfig, OmegaConf
 from rich.logging import RichHandler
 
@@ -271,7 +272,7 @@ def _get_resume_checkpoint_path(
 
 # -- WandB -----------------------------------------------------------------
 
-
+@rank_zero_only
 def _log_config_to_wandb(trainer, cfg: DictConfig):
     if not isinstance(trainer.logger, WandbLogger):
         return

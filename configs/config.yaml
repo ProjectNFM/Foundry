@@ -2,6 +2,7 @@ defaults:
   - model: null
   - data: null
   - module: classification
+  - cluster: default
   - logger: wandb
   - _self_
   - trainer: default
@@ -30,10 +31,3 @@ run:
   resume_wandb_if_name_matches: false
   # A100 benefits from Tensor Core-enabled FP32 matmul kernels.
   float32_matmul_precision: high
-
-hydra:
-  run:
-    dir: ${oc.env:SCRATCH,./outputs}/runs/${run.group}/${run.name}
-  sweep:
-    dir: ${oc.env:SCRATCH,./outputs}/runs/${run.group}
-    subdir: ${run.name}

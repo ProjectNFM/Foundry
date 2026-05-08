@@ -9,15 +9,16 @@
 #
 # Launcher usage:
 # - Local sequential (default launcher, no parallelism):
-#   uv run python main.py experiment=auditory_decoding/baseline_freqdec_hparam_tuning -m
+#   uv run python main.py experiment=auditory_decoding/baselines/baseline_freqdec_hparam_tuning -m
 # - SLURM (one job per sweep point):
-#   uv run python main.py experiment=auditory_decoding/baseline_freqdec_hparam_tuning hydra/launcher=slurm_default -m
+#   uv run python main.py experiment=auditory_decoding/baselines/baseline_freqdec_hparam_tuning hydra/launcher=slurm_default -m
 # - SLURM packed (example 4 tasks per node):
-#   uv run python main.py experiment=auditory_decoding/baseline_freqdec_hparam_tuning hydra/launcher=slurm_default hydra.launcher.tasks_per_node=4 -m
+#   uv run python main.py experiment=auditory_decoding/baselines/baseline_freqdec_hparam_tuning hydra/launcher=slurm_default hydra.launcher.tasks_per_node=4 -m
 
 defaults:
   - override /model: linear # e.g. linear, mlp, gru, shallowcnn, temporalcnn, eegnet
   - override /data: neurosoft_minipigs/singlesess
+  - override /cluster: cscs
 
 model:
   num_channels: ${get_num_ecog_channels_by_name:${data.root}/neurosoft_minipigs_2026,${data.recording_ids.0}}
@@ -41,12 +42,12 @@ run:
   log_level: INFO
 
 hyperparameters:
-  batch_size: ???
+  batch_size: 64
   sequence_length: 0.5
   fold_number: 0
   num_workers: 4
-  learning_rate: ???
-  weight_decay: ???
+  learning_rate: 0.015
+  weight_decay: 0.0018
 
 trainer:
   max_epochs: 1000
@@ -69,7 +70,7 @@ hydra:
   sweeper:
     max_batch_size: 10000 # max number of launched runs
     params:
-      data.recording_ids.0: ${config_list_sweep_choices:configs/data/neurosoft_minipigs/multisess_raw.yaml,recording_ids}
+      data.recording_ids.0: ${config_list_sweep_choices:configs/data/neurosoft_minipigs/singlesess.yaml,recording_ids}
       model: choice(mlp, gru, shallowcnn, temporalcnn, eegnet)
       hyperparameters.batch_size: choice(16, 32, 64)
       hyperparameters.learning_rate: choice(0.15, 0.015)
