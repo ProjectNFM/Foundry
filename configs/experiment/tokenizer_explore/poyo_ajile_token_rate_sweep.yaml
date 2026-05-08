@@ -1,0 +1,70 @@
+# @package _global_
+#
+# Token rate sweep: how does target_token_rate affect downstream performance?
+#
+# Compares per_channel_cwt and per_channel_resample_cnn at token rates
+# 100, 200, 400 Hz across 2 folds.  2 tokenizers × 3 rates × 2 folds = 12 runs.
+#
+# Launch:
+#   uv run python main.py experiment=tokenizer_explore/poyo_ajile_token_rate_sweep -m
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: ajile/multisess
+  - override /hydra/launcher: local_gpu
+
+model:
+  zero_output_timestamps: true
+  embed_dim: 256
+
+data:
+  split_type: intrasession
+  task_type: behavior
+
+run:
+  name: ${hydra:runtime.choices.model/tokenizer}_rate${model.tokenizer.temporal_embedding.target_token_rate}_fold${hyperparameters.fold_number}
+  group: TOKEN_RATE_SWEEP
+  tags: [token_rate_sweep, behavior, poyo_eeg, ajile, intrasession]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 1.0
+  patch_duration: 0.1
+  fold_number: 0
+  num_workers: 32
+  learning_rate: 3e-4
+  weight_decay: 0.007
+  num_channels: null
+  sampling_rate: null
+  session_configs: null
+
+trainer:
+  accelerator: gpu
+  devices: 1
+  precision: bf16-mixed
+  callbacks:
+    effective_batch_size:
+      _target_: foundry.training.callbacks.EffectiveBatchSizeCallback
+      effective_batch_size: 1024
+      init_val: 32
+      max_val: 512
+    early_stopping:
+      monitor: val/ajile_active_behavior_auroc
+      mode: max
+      patience: 20
+    model_checkpoint:
+      monitor: val/ajile_active_behavior_auroc
+      mode: max
+      auto_insert_metric_name: false
+      filename: best-behavior
+
+hydra:
+  sweeper:
+    params:
+      model/tokenizer: >-
+        per_channel_cwt,
+        per_channel_resample_cnn
+      model.tokenizer.temporal_embedding.target_token_rate: "100,200,400"
+      hyperparameters.fold_number: "0,1"
