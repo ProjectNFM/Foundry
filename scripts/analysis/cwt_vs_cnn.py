@@ -38,32 +38,34 @@ def plot_scaling(df_behavior, output_dir: Path) -> Path | None:
     """Behavior-only comparison for CWT vs CNN at dim256 and dim512.
 
     Bars are colored by tokenizer family, hatched by dimension.
+    The dimension is inferred from tokenizer_label since the CSV's
+    embed_dim column always reads the backbone dim (256).
     """
     if df_behavior is None or df_behavior.empty:
         return None
 
+    families = ["CWT", "CNN"]
+    dim_labels = {
+        "CWT": {"256": "Per-Ch CWT", "512": "Per-Ch CWT (512)"},
+        "CNN": {"256": "Per-Ch CNN", "512": "Per-Ch CNN (512)"},
+    }
+
     agg = (
-        df_behavior.groupby(["tokenizer_label", "embed_dim"])["best_metric"]
+        df_behavior.groupby("tokenizer_label")["best_metric"]
         .agg(["mean", "std"])
         .reset_index()
     )
     agg["std"] = agg["std"].fillna(0)
 
-    families = ["Per-Ch CWT", "Per-Ch CNN"]
-    dims = sorted(agg["embed_dim"].unique())
     width = 0.35
     x = np.arange(len(families))
-    hatches = ["", "///"]
 
     fig, ax = plt.subplots(figsize=(5, 4.5))
-    for i, dim in enumerate(dims):
-        sub = agg[agg["embed_dim"] == dim]
+    for i, (dim_key, hatch) in enumerate([("256", ""), ("512", "///")]):
         vals, stds = [], []
         for fam in families:
-            label_256 = fam
-            label_512 = f"{fam} (512)"
-            target = label_256 if dim == 256 else label_512
-            row = sub[sub["tokenizer_label"] == target]
+            target = dim_labels[fam][dim_key]
+            row = agg[agg["tokenizer_label"] == target]
             vals.append(row["mean"].values[0] if not row.empty else 0)
             stds.append(row["std"].values[0] if not row.empty else 0)
 
@@ -75,10 +77,9 @@ def plot_scaling(df_behavior, output_dir: Path) -> Path | None:
             yerr=stds,
             capsize=3,
             color=bar_colors,
-            edgecolor="white",
+            edgecolor="white" if not hatch else "grey",
             linewidth=0.5,
-            hatch=hatches[i],
-            label=f"dim {dim}",
+            hatch=hatch,
         )
         for bar, val, std in zip(bars, vals, stds):
             if val > 0:
@@ -101,8 +102,10 @@ def plot_scaling(df_behavior, output_dir: Path) -> Path | None:
     handles = [
         mpatches.Patch(facecolor=get_color("CWT"), label="CWT"),
         mpatches.Patch(facecolor=get_color("CNN"), label="CNN"),
-        mpatches.Patch(facecolor="#CCCCCC", label="dim 256"),
-        mpatches.Patch(facecolor="#CCCCCC", hatch="///", label="dim 512"),
+        mpatches.Patch(facecolor="#CCCCCC", edgecolor="grey", label="dim 256"),
+        mpatches.Patch(
+            facecolor="#CCCCCC", edgecolor="grey", hatch="///", label="dim 512"
+        ),
     ]
     ax.legend(handles=handles, fontsize=7, loc="lower right")
     ax.spines["top"].set_visible(False)
