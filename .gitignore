@@ -218,3 +218,22 @@ __marimo__/
 /wandb/
 runs
 wandb_exports/
+
+# Analysis outputs (generated figures and cached W&B data)
+docs/figures/*.pdf
+docs/figures/*.png
+docs/figures/*.csv
+docs/figures/data/
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+docs/reports/**/main.pdf

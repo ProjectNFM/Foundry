@@ -67,11 +67,15 @@ trainer:
       filename: best-pose
 
 hydra:
+  launcher:
+    gpus:
+      - 2
+      - 3
+      - 6
+      - 7
   sweeper:
     params:
       model/tokenizer: >-
         per_channel_cwt,
-        per_channel_cwt_dim512,
-        per_channel_resample_cnn,
-        per_channel_resample_cnn_dim512
+        per_channel_resample_cnn
       hyperparameters.fold_number: "0,1"
