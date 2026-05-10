@@ -307,6 +307,7 @@ numbers should only be compared within a group unless otherwise noted.
             AJILE\_NEW\_ALLTOKS          & Behavior      & 6e-5        & 0.01        & 11 $\times$ 2                   \\
             CWT\_VS\_CNN\_BEHAVIOR       & Behavior      & 3e-4        & 0.007       & 4 $\times$ 2                    \\
             CWT\_VS\_CNN\_POSE           & Pose          & 3e-4        & 0.007       & 2 $\times$ 2                    \\
+            TOKEN\_RATE\_SWEEP           & Behavior      & 3e-4        & 0.007       & 9 $\times$ 2                    \\
             \bottomrule
       \end{tabular}
       \caption{Hyperparameter summary per experiment group. Absolute
@@ -626,6 +627,206 @@ discriminative power comes from the downstream Perceiver backbone
 rather than from optimizing the wavelet bank itself.
 
 
+% -------------------------------------------------------------------
+\subsection{Token Rate Scaling}
+\label{sec:token-rate-scaling}
+% -------------------------------------------------------------------
+
+\textbf{Question:} How does the output token rate affect downstream
+behavior classification, and do CWT and ResampleCNN scale differently
+with increasing token count?
+
+\textbf{Hypothesis:} Higher token rates provide more temporal
+granularity, which should improve performance. CWT may benefit more
+because each additional token carries a full scalogram slice (both
+magnitude and phase across all frequency bins), whereas the CNN merely
+adds another oversampled waveform sample.
+
+\textbf{Setup:} \texttt{target\_token\_rate} swept over \{100, 200,
+400\}\,Hz for per-channel CWT, per-channel ResampleCNN, and
+per-channel CWT+CNN (see Section~\ref{sec:cwt-cnn-hybrid}). All other
+hyperparameters held at the matched clean-comparison settings (LR=3e-4,
+WD=0.007, embed\_dim=256, concat fusion). Each configuration trained
+with 2 folds.
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=\textwidth]{token_rate_sweep_bar.pdf}
+      \caption{Behavior AUROC for CWT, CNN, and CWT+CNN at three
+            token rates (mean $\pm$ std over 2 folds). Parameter counts
+            are listed in the legend.}
+      \label{fig:token-rate-bar}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.7\textwidth]{token_rate_scaling_line.pdf}
+      \caption{AUROC vs.\ target token rate. All three tokenizers show
+            nearly flat scaling, with CWT+CNN consistently above CWT and
+            CNN at every rate.}
+      \label{fig:token-rate-line}
+\end{figure}
+
+\textbf{Observations:}
+\begin{itemize}[nosep]
+      \item Performance is surprisingly flat across the 100--400\,Hz
+            range for all three tokenizers. Doubling or quadrupling the
+            token count yields at most $\sim$0.5\% AUROC improvement.
+      \item CWT maintains a small but consistent edge over CNN
+            ($\sim$0.4--0.8\% AUROC) at every token rate, consistent
+            with earlier head-to-head results
+            (Section~\ref{sec:cwt-vs-cnn}).
+      \item Neither tokenizer shows a clear scaling advantage over the
+            other---both are effectively flat. The hypothesis that CWT
+            would scale better was not supported.
+      \item The flat scaling suggests that 100\,Hz already provides
+            sufficient temporal resolution for this task, and the
+            Perceiver backbone is not bottlenecked by temporal
+            granularity. This is practical: it means the 4$\times$
+            compute savings of 100\,Hz vs.\ 400\,Hz come at negligible
+            performance cost.
+\end{itemize}
+
+
+% -------------------------------------------------------------------
+\subsection{CWT + CNN Hybrid}
+\label{sec:cwt-cnn-hybrid}
+% -------------------------------------------------------------------
+
+\textbf{Question:} Does adding a convolutional stack after the CWT
+scalogram---before the final linear projection---improve performance
+over either CWT or CNN alone?
+
+\textbf{Hypothesis:} The CWT provides a structured time--frequency
+representation, but its final linear projection may not fully exploit
+cross-frequency and local-temporal interactions. Adding Conv1d layers
+after the CWT enables the model to learn richer dynamics from the
+frequency decomposition, combining the CWT's inductive bias with the
+CNN's capacity to learn arbitrary temporal filters.
+
+\textbf{Setup:} The \texttt{CWTCNNEmbedding} module runs the standard
+CWT (9 log-spaced frequencies, 0.5--30\,Hz) then feeds the
+$(B,\, S {\cdot} 2 {\cdot} F,\, T)$ scalogram through a 2-layer
+Conv1d stack (64 filters, kernel 9, GELU) before a linear projection
+to \texttt{embed\_dim}. Swept across the same 3 token rates as
+Section~\ref{sec:token-rate-scaling}.
+
+\begin{table}[H]
+      \centering
+      \begin{tabular}{lrr}
+            \toprule
+            \textbf{Tokenizer} & \textbf{Temporal Params} & \textbf{Description}          \\
+            \midrule
+            CWT                & 3{,}666                  & CWT + linear projection       \\
+            CNN                & 3{,}924                  & Resample + 2-layer Conv1d (12 filters) + linear \\
+            CWT+CNN            & 59{,}858                 & CWT + 2-layer Conv1d (64 filters) + linear       \\
+            \bottomrule
+      \end{tabular}
+      \caption{Temporal embedding parameter counts for the three
+            tokenizer variants in the token rate sweep. CWT+CNN has
+            $\sim$15$\times$ more parameters, primarily from the wider
+            convolutional stack (64 vs.\ 12 filters) operating on the
+            18-dimensional CWT output.}
+      \label{tab:tokenizer-params}
+\end{table}
+
+\textbf{Observations:}
+\begin{itemize}[nosep]
+      \item CWT+CNN consistently outperforms both CWT and CNN at every
+            token rate, achieving a mean AUROC of $\sim$0.90 compared
+            to $\sim$0.89 for CWT and $\sim$0.88 for CNN.
+      \item The improvement is $\sim$1\% over CWT alone and
+            $\sim$1.7\% over CNN, consistent across all three rates.
+      \item Like the other tokenizers, CWT+CNN shows flat token-rate
+            scaling---performance is nearly identical at 100, 200, and
+            400\,Hz.
+\end{itemize}
+
+\textbf{Caveats:} The CWT+CNN has $\sim$15$\times$ more parameters
+than either CWT or CNN alone (Table~\ref{tab:tokenizer-params}). The
+performance improvement may be partly attributable to greater model
+capacity rather than the architectural combination of CWT and CNN. A
+controlled experiment matching parameter counts (e.g., increasing CNN
+filters to 64 or reducing CWT+CNN filters) would be needed to
+disentangle these effects.
+
+\textbf{Interpretation:} Despite the parameter count caveat, the result
+is encouraging. The CWT+CNN architecture successfully combines the
+CWT's sampling-rate-invariant frequency decomposition with the CNN's
+ability to learn cross-frequency and local-temporal features. The
+convolutional stack can learn to combine magnitude and phase information
+across frequency bins in ways that a single linear projection cannot.
+Whether the improvement persists with parameter-matched architectures
+remains an open question.
+
+
+% -------------------------------------------------------------------
+\subsection{CWT Gradient Diagnostics}
+\label{sec:cwt-gradient-diagnostics}
+% -------------------------------------------------------------------
+
+\textbf{Question:} Why do the CWT's learnable center frequencies and
+cycle counts barely move during training
+(Section~\ref{sec:cwt-learned-params})? Is the loss landscape flat with
+respect to those parameters, or are the gradients being attenuated
+before they reach the CWT layer?
+
+\textbf{Hypothesis:} The CWT parameters sit at the very bottom of the
+network (first layer), and gradients must backpropagate through the
+Perceiver backbone, the linear projection, and the FFT-based
+convolution before reaching \texttt{freqs\_unconstrained} and
+\texttt{n\_cycles\_unconstrained}. The parameters are effectively
+frozen by vanishing gradients rather than being at a true optimum.
+
+\textbf{Setup:} Gradient logging was enabled via a parameter-watching
+callback on all 18 runs in the TOKEN\_RATE\_SWEEP. For every CWT
+parameter, the callback logged per-step gradient norms, Adam optimizer
+state (momentum, variance), effective step size, and the
+update-to-parameter ratio---the ratio of Adam's actual parameter
+update to the parameter magnitude at each step.
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=\textwidth]{cwt_gradient_diagnostics.pdf}
+      \caption{Left: Adam's update-to-parameter ratio for CWT frequency
+            and cycle-count parameters across all CWT and CWT+CNN runs.
+            Values are $\sim$$10^{-5}$--$10^{-6}$, indicating
+            effectively frozen parameters. Right: gradient norm vs.\
+            effective step norm, showing that even when gradients are
+            non-trivial, Adam's effective updates remain tiny.}
+      \label{fig:gradient-diagnostics}
+\end{figure}
+
+\textbf{Observations:}
+\begin{itemize}[nosep]
+      \item The \texttt{update\_to\_param\_ratio} for frequency
+            parameters is $\sim$3--6$\times 10^{-6}$ across all runs.
+            For cycle counts it is slightly larger at
+            $\sim$3--4$\times 10^{-5}$, but still extremely small.
+      \item For context, a ratio of $10^{-6}$ means the parameter
+            changes by one millionth of its value per optimizer step.
+            Over the 5{,}000+ training steps, cumulative drift is
+            negligible.
+      \item Gradient norms are small but non-zero (0.01--0.28),
+            confirming that the issue is gradient \emph{attenuation}
+            through the deep network, not zero gradients.
+      \item The pattern is consistent across CWT and CWT+CNN runs,
+            across all token rates, and across both folds---ruling out
+            run-specific artifacts.
+\end{itemize}
+
+\textbf{Interpretation:} This confirms the gradient attenuation
+hypothesis. The CWT frequency and cycle-count parameters are
+effectively frozen during training---not because they are at an
+optimum, but because gradients are too small by the time they reach the
+first layer. The learned frequencies reported in
+Section~\ref{sec:cwt-learned-params} reflect the initialization, not a
+task-optimal decomposition. A natural follow-up is to use a separate
+parameter group with a higher learning rate (or learning rate
+multiplier) for the CWT parameters to test whether they would move
+meaningfully and improve performance.
+
+
 %% ===================================================================
 \section{Discussion and Ongoing Conclusions}
 \label{sec:discussion}
@@ -688,13 +889,45 @@ effort to explore alternatives.
 
 \subsection{CWT + CNN Hybrid}
 
-Preliminary experiments with a CWT-compressor architecture (CWT
-followed by strided convolutions to further reduce token count) did
-not improve over either CWT or CNN alone. The reduced token count may
-limit the Perceiver backbone's capacity to learn temporal features.
-However, using the CWT as an anti-aliasing or feature-extraction step
-\emph{before} a CNN on the resampled features remains an interesting
-direction that has not been fully explored.
+Earlier preliminary experiments with a CWT-compressor architecture
+(CWT followed by strided convolutions to further reduce token count)
+did not improve over either CWT or CNN alone. However, the
+TOKEN\_RATE\_SWEEP experiments (Section~\ref{sec:cwt-cnn-hybrid})
+revisited this idea with a different architecture: rather than
+reducing token count, the CWT+CNN feeds the full CWT scalogram
+through a same-length convolutional stack before projection.
+
+This approach consistently outperforms both CWT and CNN alone
+($\sim$0.90 vs.\ $\sim$0.89 vs.\ $\sim$0.88 AUROC), suggesting
+that the CNN can extract useful cross-frequency features from the
+CWT's structured representation. However, the CWT+CNN has
+$\sim$15$\times$ more parameters than either alternative
+(Table~\ref{tab:tokenizer-params}), so the improvement may partly
+reflect greater model capacity. A parameter-matched comparison is
+needed to isolate the architectural contribution.
+
+\subsection{Token Rate Is Not a Bottleneck}
+
+The TOKEN\_RATE\_SWEEP results
+(Section~\ref{sec:token-rate-scaling}) show that performance is
+nearly flat across 100--400\,Hz for all three tokenizer families.
+This suggests that temporal granularity is not the limiting factor
+for behavior classification on AJILE12, and the Perceiver backbone
+already captures the relevant dynamics at 100\,Hz. Practically, this
+means the 4$\times$ compute savings of 100\,Hz vs.\ 400\,Hz come at
+negligible performance cost.
+
+\subsection{CWT Parameters Are Effectively Frozen}
+
+The gradient diagnostics (Section~\ref{sec:cwt-gradient-diagnostics})
+confirm that CWT frequency and cycle-count parameters barely move
+during training---not because they are at a task-specific optimum,
+but because gradients attenuate to near-zero through the deep
+network. The learned frequencies in Section~\ref{sec:cwt-learned-params}
+therefore reflect initialization, not task adaptation. A higher
+learning rate for CWT parameters (via a separate param group) is a
+natural next step to determine whether meaningful frequency
+adaptation is possible and beneficial.
 
 \subsection{Open Questions}
 
@@ -707,9 +940,17 @@ direction that has not been fully explored.
             regularization properties may be most valuable in a
             self-supervised setting across diverse datasets of varying
             quality. This is a priority for future experiments.
-      \item \textbf{Token rate optimization:} A systematic sweep of
-            \texttt{target\_token\_rate} would clarify the
-            performance--compute trade-off.
+      \item \textbf{CWT+CNN parameter matching:} The CWT+CNN hybrid
+            outperforms both CWT and CNN, but has $\sim$15$\times$
+            more parameters. A parameter-matched comparison (e.g.,
+            CNN with 64 filters, or CWT+CNN with 12 filters) would
+            clarify whether the improvement comes from the
+            architecture or from increased capacity.
+      \item \textbf{CWT learning rate multiplier:} Given confirmed
+            gradient attenuation, sweeping a separate CWT learning
+            rate multiplier (\{10, 50, 100\}$\times$) would test
+            whether frequency adaptation improves downstream
+            performance.
 \end{itemize}
 
 

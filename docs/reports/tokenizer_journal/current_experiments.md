@@ -108,13 +108,44 @@ runs in the sweep above.
 | **Total** |                                 |               |       | **18** |
 
 
-## Follow-up (pending results)
+## Results Summary
 
-- **Experiment 3b:** If gradients are confirmed to be vanishingly small at the CWT
-layer, implement a separate `cwt_lr_multiplier` param group and sweep multipliers
-{10, 50, 100} to see if the frequencies move meaningfully and whether that
-improves performance.
+All 18 runs completed successfully (early stopping, patience=20).
+
+### Experiment 1: Token Rate Scaling
+- Performance is **surprisingly flat** across 100–400 Hz for both CWT and CNN.
+- CWT maintains a small edge (~0.4–0.8% AUROC) at every rate.
+- Neither tokenizer scales better than the other — both are flat.
+- **Conclusion:** 100 Hz provides sufficient temporal resolution; 4× compute
+  savings vs 400 Hz at negligible performance cost.
+
+### Experiment 2: CWT+CNN Hybrid
+- CWT+CNN **outperforms** both CWT and CNN at all token rates (~0.90 vs ~0.89 vs ~0.88 AUROC).
+- However, CWT+CNN has ~15× more parameters (59,858 vs ~3,700–3,900) due to
+  64 conv filters (vs 12 for CNN) operating on the 18-dim CWT output.
+- Parameter-matched comparison is needed to isolate the architectural benefit.
+
+### Experiment 3a: CWT Gradient Diagnostics
+- **Confirmed:** CWT parameters are effectively frozen by gradient attenuation.
+- `freqs update_to_param_ratio` ≈ 3–6 × 10⁻⁶ across all runs.
+- `n_cycles update_to_param_ratio` ≈ 3–4 × 10⁻⁵ across all runs.
+- Gradient norms are nonzero (0.01–0.28) but Adam's effective steps are tiny.
+- Pattern is consistent across CWT and CWT+CNN, all rates, both folds.
+- **Conclusion:** Frequencies reflect initialization, not task-specific adaptation.
+  Experiment 3b (higher CWT LR) is warranted.
+
+---
+
+## Follow-up (next steps)
+
+- **Experiment 3b:** Gradients are confirmed vanishingly small. Implement a
+  separate `cwt_lr_multiplier` param group and sweep multipliers {10, 50, 100}
+  to see if the frequencies move meaningfully and whether that improves
+  performance.
 - **Experiment 3c:** If the frequencies do move with higher LR, test different
-initializations (wide 0.1–100 Hz, narrow 2–15 Hz, linear spacing) to determine
-whether the model converges to a task-specific frequency set or stays near init.
+  initializations (wide 0.1–100 Hz, narrow 2–15 Hz, linear spacing) to determine
+  whether the model converges to a task-specific frequency set or stays near init.
+- **Experiment 4:** Parameter-matched CWT+CNN vs CNN comparison (either increase
+  CNN filters to 64, or reduce CWT+CNN filters to 12) to isolate the
+  architectural contribution of CWT preprocessing.
 

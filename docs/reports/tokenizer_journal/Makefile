@@ -3,7 +3,7 @@ LATEX = pdflatex
 FIGURES_DIR = ../../figures
 REPO_ROOT = ../../..
 
-.PHONY: all clean figures figures-cwt figures-ablation figures-alltoks figures-appendix figures-experiment figures-cwt-params
+.PHONY: all clean figures figures-cwt figures-ablation figures-alltoks figures-appendix figures-experiment figures-cwt-params figures-token-rate-sweep
 
 all: $(TEX).pdf
 
@@ -12,7 +12,7 @@ $(TEX).pdf: $(TEX).tex $(wildcard $(FIGURES_DIR)/*.pdf)
 	$(LATEX) -interaction=nonstopmode $(TEX).tex
 	$(LATEX) -interaction=nonstopmode $(TEX).tex
 
-figures: figures-cwt figures-ablation figures-alltoks figures-appendix figures-experiment figures-cwt-params
+figures: figures-cwt figures-ablation figures-alltoks figures-appendix figures-experiment figures-cwt-params figures-token-rate-sweep
 
 figures-cwt:
 	cd $(REPO_ROOT) && uv run scripts/analysis/cwt_vs_cnn.py
@@ -32,6 +32,9 @@ figures-experiment:
 
 figures-cwt-params:
 	cd $(REPO_ROOT) && uv run scripts/analysis/cwt_learned_params.py
+
+figures-token-rate-sweep:
+	cd $(REPO_ROOT) && uv run scripts/analysis/token_rate_sweep.py
 
 clean:
 	rm -f $(TEX).pdf $(TEX).aux $(TEX).log $(TEX).out $(TEX).toc \
