@@ -1,0 +1,83 @@
+# @package _global_
+#
+# Experiment 4: Parameter-matched CWT+CNN vs CNN comparison
+#
+# Tests whether CWT+CNN's advantage over CNN comes from the architecture
+# (CWT preprocessing) or from greater model capacity (64 vs 12 conv filters).
+# Compares CWT+CNN (64 filters, ~60k temporal params) against CNN with
+# 64 filters (~50k temporal params) on equal footing.
+#
+# 2 tokenizers × 2 folds = 4 runs. Fixed at token_rate=200 Hz.
+#
+# Launch:
+#   uv run python main.py experiment=tokenizer_explore/poyo_ajile_param_match -m
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: ajile/multisess
+  - override /hydra/launcher: local_gpu
+
+model:
+  zero_output_timestamps: true
+  embed_dim: 256
+  tokenizer:
+    temporal_embedding:
+      target_token_rate: 200
+
+data:
+  split_type: intrasession
+  task_type: behavior
+
+run:
+  name: ${hydra:runtime.choices.model/tokenizer}_rate200_fold${hyperparameters.fold_number}
+  group: CWT_LR_AND_PARAM_MATCH
+  tags: [param_match, behavior, poyo_eeg, ajile, intrasession, exp4]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 1.0
+  patch_duration: 0.1
+  fold_number: 0
+  num_workers: 32
+  learning_rate: 3e-4
+  weight_decay: 0.007
+  cwt_lr_multiplier: 1.0
+  num_channels: null
+  sampling_rate: null
+  session_configs: null
+
+trainer:
+  accelerator: gpu
+  devices: 1
+  precision: bf16-mixed
+  callbacks:
+    effective_batch_size:
+      _target_: foundry.training.callbacks.EffectiveBatchSizeCallback
+      effective_batch_size: 1024
+      init_val: 32
+      max_val: 512
+    early_stopping:
+      monitor: val/ajile_active_behavior_auroc
+      mode: max
+      patience: 20
+    model_checkpoint:
+      monitor: val/ajile_active_behavior_auroc
+      mode: max
+      auto_insert_metric_name: false
+      filename: best-behavior
+
+hydra:
+  launcher:
+    gpus:
+      - 4
+      - 5
+      - 6
+      - 7
+  sweeper:
+    params:
+      model/tokenizer: >-
+        per_channel_cwt_cnn,
+        per_channel_resample_cnn_64f
+      hyperparameters.fold_number: "0,1"

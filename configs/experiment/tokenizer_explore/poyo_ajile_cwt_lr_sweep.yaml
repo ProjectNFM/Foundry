@@ -1,0 +1,83 @@
+# @package _global_
+#
+# Experiment 3b: CWT learning rate multiplier sweep
+#
+# Tests whether boosting the CWT parameter learning rate (via a separate
+# optimizer param group) allows the learnable frequencies and cycle counts
+# to move meaningfully and whether that improves downstream performance.
+#
+# Sweeps cwt_lr_multiplier in {10, 50, 100} × 2 folds = 6 runs.
+# Fixed at token_rate=200 Hz (the rate with best CWT results from the
+# token rate sweep).
+#
+# Launch:
+#   uv run python main.py experiment=tokenizer_explore/poyo_ajile_cwt_lr_sweep -m
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: ajile/multisess
+  - override /hydra/launcher: local_gpu
+
+model:
+  zero_output_timestamps: true
+  embed_dim: 256
+  tokenizer:
+    temporal_embedding:
+      target_token_rate: 200
+
+data:
+  split_type: intrasession
+  task_type: behavior
+
+run:
+  name: per_channel_cwt_cwtlr${hyperparameters.cwt_lr_multiplier}x_rate200_fold${hyperparameters.fold_number}
+  group: CWT_LR_AND_PARAM_MATCH
+  tags: [cwt_lr_sweep, behavior, poyo_eeg, ajile, intrasession, exp3b]
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 1.0
+  patch_duration: 0.1
+  fold_number: 0
+  num_workers: 32
+  learning_rate: 3e-4
+  weight_decay: 0.007
+  cwt_lr_multiplier: 1.0
+  num_channels: null
+  sampling_rate: null
+  session_configs: null
+
+trainer:
+  accelerator: gpu
+  devices: 1
+  precision: bf16-mixed
+  callbacks:
+    effective_batch_size:
+      _target_: foundry.training.callbacks.EffectiveBatchSizeCallback
+      effective_batch_size: 1024
+      init_val: 32
+      max_val: 512
+    early_stopping:
+      monitor: val/ajile_active_behavior_auroc
+      mode: max
+      patience: 20
+    model_checkpoint:
+      monitor: val/ajile_active_behavior_auroc
+      mode: max
+      auto_insert_metric_name: false
+      filename: best-behavior
+
+hydra:
+  launcher:
+    gpus:
+      - 0
+      - 1
+      - 2
+      - 3
+  sweeper:
+    params:
+      model/tokenizer: per_channel_cwt
+      hyperparameters.cwt_lr_multiplier: "10,50,100"
+      hyperparameters.fold_number: "0,1"
