@@ -214,8 +214,16 @@ class BaseMultitaskModule(L.LightningModule):
                     "weight_decay": self.weight_decay,
                 }
             )
-            n_cwt = sum(p.numel() for p in cwt_params)
-            n_other = sum(p.numel() for p in other_params)
+            n_cwt = sum(
+                p.numel()
+                for p in cwt_params
+                if not p.__class__.__name__.startswith("Uninitialized")
+            )
+            n_other = sum(
+                p.numel()
+                for p in other_params
+                if not p.__class__.__name__.startswith("Uninitialized")
+            )
             print(
                 f"CWT LR multiplier: {self.cwt_lr_multiplier}x "
                 f"(cwt_lr={cwt_lr:.2e}, {n_cwt} params) | "
