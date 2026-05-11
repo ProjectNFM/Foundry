@@ -143,6 +143,7 @@ TOKENIZER_DISPLAY_NAMES = {
     "spatial_session_mlp_resample_cnn": "Spatial MLP-CNN",
     "spatial_session_mlp_per_timepoint_identity": "Spatial MLP-Identity",
     "per_channel_resample_cnn_64f": "Per-Ch CNN (64f)",
+    "per_channel_cwt_cnn_12f": "Per-Ch CWT+CNN (12f)",
 }
 
 # ---------------------------------------------------------------------------

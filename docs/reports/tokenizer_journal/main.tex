@@ -308,6 +308,7 @@ numbers should only be compared within a group unless otherwise noted.
             CWT\_VS\_CNN\_BEHAVIOR       & Behavior      & 3e-4        & 0.007       & 4 $\times$ 2                    \\
             CWT\_VS\_CNN\_POSE           & Pose          & 3e-4        & 0.007       & 2 $\times$ 2                    \\
             TOKEN\_RATE\_SWEEP           & Behavior      & 3e-4        & 0.007       & 9 $\times$ 2                    \\
+            CWT\_LR\_AND\_PARAM\_MATCH   & Behavior      & 3e-4        & 0.007       & 2 $\times$ 2                    \\
             \bottomrule
       \end{tabular}
       \caption{Hyperparameter summary per experiment group. Absolute
@@ -757,7 +758,82 @@ ability to learn cross-frequency and local-temporal features. The
 convolutional stack can learn to combine magnitude and phase information
 across frequency bins in ways that a single linear projection cannot.
 Whether the improvement persists with parameter-matched architectures
-remains an open question.
+remains an open question---this is addressed next.
+
+
+% -------------------------------------------------------------------
+\subsection{Parameter-Matched CWT+CNN vs.\ CNN}
+\label{sec:param-match}
+% -------------------------------------------------------------------
+
+\textbf{Question:} Does the CWT+CNN hybrid's advantage come from the
+CWT preprocessing (an architectural benefit) or simply from having
+more model capacity (64 conv filters vs.\ CNN's 12)?
+
+\textbf{Setup:} A new \texttt{per\_channel\_resample\_cnn\_64f}
+configuration mirrors the CWT+CNN's convolutional stack (64 filters,
+kernel 9, 2 layers) but operates directly on the resampled waveform
+instead of a CWT scalogram. Both tokenizers are trained at 200\,Hz
+target token rate with the same hyperparameters (LR=3e-4, WD=0.007,
+embed\_dim=256, concat fusion), 2 folds. The original CWT and CNN
+(12 filters) from the TOKEN\_RATE\_SWEEP are included for context.
+
+\begin{table}[H]
+      \centering
+      \begin{tabular}{lrrr}
+            \toprule
+            \textbf{Tokenizer}  & \textbf{Conv Filters} & \textbf{Temporal Params} & \textbf{Input to Conv1d} \\
+            \midrule
+            CWT                 & ---                   & 3{,}666                  & ---                      \\
+            CNN (12f)           & 12                    & 3{,}924                  & 1 channel                \\
+            CNN (64f)           & 64                    & 50{,}048                 & 1 channel                \\
+            CWT+CNN (64f)       & 64                    & 59{,}858                 & 18 channels              \\
+            \bottomrule
+      \end{tabular}
+      \caption{Tokenizer configurations in the parameter-matched
+            comparison. CNN (64f) and CWT+CNN (64f) are within $\sim$20\%
+            of each other in parameter count, with the remaining gap due
+            to the CWT's learnable parameters and higher input
+            dimensionality (18 scalogram channels vs.\ 1).}
+      \label{tab:param-match-configs}
+\end{table}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.85\textwidth]{param_match_bar.pdf}
+      \caption{Parameter-matched comparison at 200\,Hz. Left pair:
+            original small tokenizers from the TOKEN\_RATE\_SWEEP.
+            Right pair: parameter-matched variants with 64 conv filters.
+            CWT+CNN retains its advantage even when the CNN has
+            comparable capacity.}
+      \label{fig:param-match}
+\end{figure}
+
+\textbf{Observations:}
+\begin{itemize}[nosep]
+      \item CWT+CNN (64f) achieves a mean AUROC of $\sim$0.898,
+            outperforming the parameter-matched CNN (64f) at
+            $\sim$0.887---a gap of $\sim$1.1\%.
+      \item For context, the original CWT ($\sim$0.889) and CNN 12f
+            ($\sim$0.884) from the token-rate sweep
+            (Section~\ref{sec:token-rate-scaling}) bracket the CNN
+            (64f) result, indicating that simply scaling up CNN
+            filters from 12 to 64 ($\sim$13$\times$ more parameters)
+            yields only a marginal improvement ($\sim$0.3\%).
+      \item The CWT+CNN's advantage over both CNN variants confirms an
+            architectural benefit: the CWT scalogram provides a
+            structured input that the convolutional stack can exploit
+            more effectively than a raw waveform, even when the CNN
+            has comparable capacity.
+\end{itemize}
+
+\textbf{Caveats:} The parameter counts are not perfectly matched
+(59{,}858 vs.\ 50{,}048, a $\sim$20\% gap), with the difference
+stemming from the CWT's 18 learnable parameters and the higher
+input dimensionality to the first convolutional layer (18 channels
+from the scalogram vs.\ 1 for the plain CNN). A tighter match
+(e.g., CWT+CNN with 12 filters) could further isolate the
+architectural contribution.
 
 
 % -------------------------------------------------------------------
@@ -900,11 +976,14 @@ through a same-length convolutional stack before projection.
 This approach consistently outperforms both CWT and CNN alone
 ($\sim$0.90 vs.\ $\sim$0.89 vs.\ $\sim$0.88 AUROC), suggesting
 that the CNN can extract useful cross-frequency features from the
-CWT's structured representation. However, the CWT+CNN has
-$\sim$15$\times$ more parameters than either alternative
-(Table~\ref{tab:tokenizer-params}), so the improvement may partly
-reflect greater model capacity. A parameter-matched comparison is
-needed to isolate the architectural contribution.
+CWT's structured representation. The parameter-matched comparison
+(Section~\ref{sec:param-match}) confirms that this advantage is
+at least partly architectural: CWT+CNN outperforms a CNN with
+comparable capacity (64 filters, $\sim$50k params) by $\sim$1.1\%
+AUROC. However, the gap narrowed from $\sim$2\% (with a
+15$\times$ parameter difference) to $\sim$1.1\% (with roughly
+matched parameters), indicating that increased capacity also
+contributed to the original advantage.
 
 \subsection{Token Rate Is Not a Bottleneck}
 
@@ -940,12 +1019,13 @@ adaptation is possible and beneficial.
             regularization properties may be most valuable in a
             self-supervised setting across diverse datasets of varying
             quality. This is a priority for future experiments.
-      \item \textbf{CWT+CNN parameter matching:} The CWT+CNN hybrid
-            outperforms both CWT and CNN, but has $\sim$15$\times$
-            more parameters. A parameter-matched comparison (e.g.,
-            CNN with 64 filters, or CWT+CNN with 12 filters) would
-            clarify whether the improvement comes from the
-            architecture or from increased capacity.
+      \item \textbf{CWT+CNN parameter matching} (resolved): The
+            parameter-matched comparison
+            (Section~\ref{sec:param-match}) confirms that CWT+CNN's
+            advantage is at least partly architectural ($\sim$1.1\%
+            over a 64-filter CNN). A follow-up with CWT+CNN at 12
+            filters would test whether the hybrid still wins at lower
+            capacity.
       \item \textbf{CWT learning rate multiplier:} Given confirmed
             gradient attenuation, sweeping a separate CWT learning
             rate multiplier (\{10, 50, 100\}$\times$) would test
