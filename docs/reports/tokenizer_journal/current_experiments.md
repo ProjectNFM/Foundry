@@ -71,7 +71,7 @@ effective step size, and update-to-parameter ratio.
 
 ---
 
-## Experiment 3b: CWT Learning Rate Multiplier Sweep — RUNNING
+## Experiment 3b: CWT Learning Rate Multiplier Sweep — COMPLETED
 
 ```bash
 uv run python main.py experiment=tokenizer_explore/poyo_ajile_cwt_lr_sweep -m
@@ -88,7 +88,25 @@ at `target_token_rate=200` Hz, 2 folds. Gradient diagnostics still enabled.
 
 **Runs:** 1 tokenizer × 3 multipliers × 2 folds = 6 runs.
 
-**Status:** Still running. 10x and 50x folds completed; 100x folds in progress.
+**Results:**
+
+| Multiplier | Fold 0 | Fold 1 | Mean   | Std    |
+| ---------- | ------ | ------ | ------ | ------ |
+| 1× (base)  | 0.8859 | 0.8914 | 0.8887 | 0.0039 |
+| 10×         | 0.8813 | 0.8941 | 0.8877 | 0.0091 |
+| 50×         | 0.8781 | 0.8923 | 0.8852 | 0.0100 |
+| 100×        | 0.8771 | 0.8937 | 0.8854 | 0.0117 |
+
+- Higher LR multipliers **successfully unfreeze** the CWT parameters
+  (update-to-param ratio increases ~100× from baseline), and frequencies/cycle
+  counts visibly drift from initialization.
+- However, performance is **flat or slightly worse** — the baseline (1×) has
+  the highest mean AUROC.
+- **Conclusion:** The bottleneck is not the specific frequency values but the
+  architecture of the representation (9 broad, overlapping wavelets at low
+  n_cycles). Repositioning the filters doesn't help because the basis remains
+  redundant. Future direction: more frequencies + higher n_cycles for a
+  selective, orthogonal spectral basis.
 
 ---
 
@@ -168,7 +186,7 @@ runs are reused directly.
 | 1    | Token rate scaling            | Completed | TOKEN_RATE_SWEEP        | 12   |
 | 2    | CWT+CNN hybrid (64f)          | Completed | TOKEN_RATE_SWEEP        | 6    |
 | 3a   | CWT gradient diagnostics      | Completed | TOKEN_RATE_SWEEP        | 0    |
-| 3b   | CWT LR multiplier sweep       | Running   | CWT_LR_AND_PARAM_MATCH | 6    |
+| 3b   | CWT LR multiplier sweep       | Completed | CWT_LR_AND_PARAM_MATCH | 6    |
 | 4    | Parameter-matched CWT+CNN/CNN | Completed | CWT_LR_AND_PARAM_MATCH | 4    |
 | 5    | Low-capacity CWT+CNN (12f)    | Ready     | CWT_CNN_12F             | 2    |
 

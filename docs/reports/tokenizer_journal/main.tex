@@ -308,7 +308,7 @@ numbers should only be compared within a group unless otherwise noted.
             CWT\_VS\_CNN\_BEHAVIOR       & Behavior      & 3e-4        & 0.007       & 4 $\times$ 2                    \\
             CWT\_VS\_CNN\_POSE           & Pose          & 3e-4        & 0.007       & 2 $\times$ 2                    \\
             TOKEN\_RATE\_SWEEP           & Behavior      & 3e-4        & 0.007       & 9 $\times$ 2                    \\
-            CWT\_LR\_AND\_PARAM\_MATCH   & Behavior      & 3e-4        & 0.007       & 2 $\times$ 2                    \\
+            CWT\_LR\_AND\_PARAM\_MATCH   & Behavior      & 3e-4        & 0.007       & 5 $\times$ 2                    \\
             \bottomrule
       \end{tabular}
       \caption{Hyperparameter summary per experiment group. Absolute
@@ -694,16 +694,18 @@ with 2 folds.
 \label{sec:cwt-cnn-hybrid}
 % -------------------------------------------------------------------
 
-\textbf{Question:} Does adding a convolutional stack after the CWT
+The CWT provides a structured time--frequency representation, but its
+final linear projection may not fully exploit cross-frequency and
+local-temporal interactions. This pair of experiments tests whether
+adding a convolutional stack after the CWT improves performance, and
+whether that improvement is architectural or simply a capacity effect.
+
+\subsubsection{Initial Comparison (Unmatched Parameters)}
+\label{sec:cwt-cnn-initial}
+
+\textbf{Question:} Does adding Conv1d layers after the CWT
 scalogram---before the final linear projection---improve performance
 over either CWT or CNN alone?
-
-\textbf{Hypothesis:} The CWT provides a structured time--frequency
-representation, but its final linear projection may not fully exploit
-cross-frequency and local-temporal interactions. Adding Conv1d layers
-after the CWT enables the model to learn richer dynamics from the
-frequency decomposition, combining the CWT's inductive bias with the
-CNN's capacity to learn arbitrary temporal filters.
 
 \textbf{Setup:} The \texttt{CWTCNNEmbedding} module runs the standard
 CWT (9 log-spaced frequencies, 0.5--30\,Hz) then feeds the
@@ -743,28 +745,13 @@ Section~\ref{sec:token-rate-scaling}.
             400\,Hz.
 \end{itemize}
 
-\textbf{Caveats:} The CWT+CNN has $\sim$15$\times$ more parameters
+\textbf{Caveat:} The CWT+CNN has $\sim$15$\times$ more parameters
 than either CWT or CNN alone (Table~\ref{tab:tokenizer-params}). The
 performance improvement may be partly attributable to greater model
-capacity rather than the architectural combination of CWT and CNN. A
-controlled experiment matching parameter counts (e.g., increasing CNN
-filters to 64 or reducing CWT+CNN filters) would be needed to
-disentangle these effects.
+capacity rather than the architectural combination of CWT and CNN.
 
-\textbf{Interpretation:} Despite the parameter count caveat, the result
-is encouraging. The CWT+CNN architecture successfully combines the
-CWT's sampling-rate-invariant frequency decomposition with the CNN's
-ability to learn cross-frequency and local-temporal features. The
-convolutional stack can learn to combine magnitude and phase information
-across frequency bins in ways that a single linear projection cannot.
-Whether the improvement persists with parameter-matched architectures
-remains an open question---this is addressed next.
-
-
-% -------------------------------------------------------------------
-\subsection{Parameter-Matched CWT+CNN vs.\ CNN}
+\subsubsection{Parameter-Matched Comparison}
 \label{sec:param-match}
-% -------------------------------------------------------------------
 
 \textbf{Question:} Does the CWT+CNN hybrid's advantage come from the
 CWT preprocessing (an architectural benefit) or simply from having
@@ -829,23 +816,42 @@ embed\_dim=256, concat fusion), 2 folds. The original CWT and CNN
 
 \textbf{Caveats:} The parameter counts are not perfectly matched
 (59{,}858 vs.\ 50{,}048, a $\sim$20\% gap), with the difference
-stemming from the CWT's 18 learnable parameters and the higher
+stemming from the CWT's learnable parameters and the higher
 input dimensionality to the first convolutional layer (18 channels
 from the scalogram vs.\ 1 for the plain CNN). A tighter match
 (e.g., CWT+CNN with 12 filters) could further isolate the
 architectural contribution.
 
+\subsubsection*{Joint Interpretation}
+
+The CWT+CNN architecture successfully combines the CWT's
+sampling-rate-invariant frequency decomposition with the CNN's ability
+to learn cross-frequency and local-temporal features. The convolutional
+stack can learn to combine magnitude and phase information across
+frequency bins in ways that a single linear projection cannot. The
+parameter-matched comparison confirms that this advantage is at least
+partly architectural ($\sim$1.1\% over a 64-filter CNN), though the
+gap narrowed from $\sim$2\% (with a 15$\times$ parameter difference)
+to $\sim$1.1\% (with roughly matched parameters), indicating that
+increased capacity also contributed to the original advantage.
+
 
 % -------------------------------------------------------------------
-\subsection{CWT Gradient Diagnostics}
+\subsection{CWT Parameter Adaptation}
+\label{sec:cwt-param-adaptation}
+% -------------------------------------------------------------------
+
+Section~\ref{sec:cwt-learned-params} showed that the CWT's learnable
+frequencies and cycle counts barely move during training. This pair of
+experiments investigates \emph{why} (gradient diagnostics) and
+\emph{whether forcing them to move helps} (LR multiplier sweep).
+
+\subsubsection{Gradient Diagnostics}
 \label{sec:cwt-gradient-diagnostics}
-% -------------------------------------------------------------------
 
-\textbf{Question:} Why do the CWT's learnable center frequencies and
-cycle counts barely move during training
-(Section~\ref{sec:cwt-learned-params})? Is the loss landscape flat with
-respect to those parameters, or are the gradients being attenuated
-before they reach the CWT layer?
+\textbf{Question:} Is the loss landscape flat with respect to the CWT
+parameters, or are the gradients being attenuated before they reach
+the CWT layer?
 
 \textbf{Hypothesis:} The CWT parameters sit at the very bottom of the
 network (first layer), and gradients must backpropagate through the
@@ -891,16 +897,97 @@ update to the parameter magnitude at each step.
             run-specific artifacts.
 \end{itemize}
 
-\textbf{Interpretation:} This confirms the gradient attenuation
-hypothesis. The CWT frequency and cycle-count parameters are
-effectively frozen during training---not because they are at an
-optimum, but because gradients are too small by the time they reach the
-first layer. The learned frequencies reported in
-Section~\ref{sec:cwt-learned-params} reflect the initialization, not a
-task-optimal decomposition. A natural follow-up is to use a separate
-parameter group with a higher learning rate (or learning rate
-multiplier) for the CWT parameters to test whether they would move
-meaningfully and improve performance.
+This confirms the gradient attenuation hypothesis: the CWT parameters
+are effectively frozen during training because gradients are too small
+by the time they reach the first layer. The learned frequencies in
+Section~\ref{sec:cwt-learned-params} reflect initialization, not
+task-specific adaptation.
+
+\subsubsection{Learning Rate Multiplier Sweep}
+\label{sec:cwt-lr-sweep}
+
+\textbf{Question:} If the CWT parameters receive a substantially
+higher learning rate (via a separate Adam param group), do the
+frequencies move meaningfully and does that improve downstream
+performance?
+
+\textbf{Setup:} The CWT learning rate is multiplied by
+\{10, 50, 100\}$\times$ relative to the backbone LR (3e-4), using a
+separate Adam parameter group. All runs use
+\texttt{per\_channel\_cwt} at 200\,Hz target token rate with the
+standard hyperparameters (WD=0.007, embed\_dim=256, concat fusion),
+2~folds. The baseline (1$\times$) reuses the 200\,Hz CWT runs from
+the TOKEN\_RATE\_SWEEP.
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\textwidth]{cwt_lr_sweep_bar.pdf}
+      \caption{Behavior AUROC by CWT learning rate multiplier at
+            200\,Hz (mean $\pm$ std over 2 folds). Performance is flat
+            across all multipliers---boosting the CWT learning rate
+            does not improve downstream performance.}
+      \label{fig:cwt-lr-bar}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=\textwidth]{cwt_lr_sweep_freqs.pdf}
+      \caption{Left: learned center frequencies vs.\ initialization
+            (dashed line) for each multiplier, averaged over folds.
+            Right: learned cycle counts vs.\ initialization (2.5).
+            Higher multipliers produce larger deviations from init,
+            confirming the parameters are unfrozen, but this movement
+            does not translate to better performance.}
+      \label{fig:cwt-lr-freqs}
+\end{figure}
+
+\textbf{Observations:}
+\begin{itemize}[nosep]
+      \item Performance is flat across all multipliers (mean AUROC:
+            1$\times$\!=0.889, 10$\times$\!=0.888,
+            50$\times$\!=0.885, 100$\times$\!=0.885). If anything,
+            higher multipliers slightly degrade performance.
+      \item The higher learning rates \emph{do} successfully unfreeze
+            the CWT parameters. The update-to-parameter ratio for
+            frequencies increases from $\sim$4$\times 10^{-6}$ at
+            1$\times$ to $\sim$4$\times 10^{-4}$ at 100$\times$ (a
+            100-fold improvement, as expected).
+      \item Frequencies shift noticeably at 50--100$\times$: the
+            lowest bins drop from 0.5\,Hz to $\sim$0.25\,Hz and
+            mid-range bins shift by 10--20\%, while high-frequency
+            bins remain relatively stable.
+      \item Cycle counts diverge substantially at 50--100$\times$,
+            ranging from $\sim$2.0 to $\sim$5.1 (initialized at 2.5).
+            There is no clear monotonic trend across bins---the model
+            does not consistently prefer narrower or broader wavelets.
+      \item Variance across folds increases with the multiplier,
+            suggesting the optimization landscape for CWT parameters
+            may have multiple shallow basins rather than a single clear
+            optimum.
+\end{itemize}
+
+\subsubsection*{Joint Interpretation}
+
+The combined picture: CWT parameters are frozen by gradient
+attenuation (diagnostics), and unfreezing them does not improve
+performance (LR sweep). The bottleneck is not the \emph{specific
+frequency values} but the \emph{architecture of the representation
+itself}. With only 9 wavelets at low cycle counts ($\sim$2.5), each
+wavelet acts as a very broad bandpass filter with substantial spectral
+overlap between adjacent bins (cf.\ Appendix~\ref{app:cwt},
+Figure~\ref{fig:app-cwt-ncycles}). Repositioning these broad,
+overlapping filters provides little benefit because the representation
+remains a redundant, smeared basis over the spectrum regardless of
+exact center frequencies.
+
+This motivates a different direction: increasing both the
+\emph{number} of frequency bins and the \emph{cycle count} to produce
+a set of narrow, selective, minimally-overlapping bandpass filters---a
+cleaner orthogonal-ish basis from which downstream layers can extract
+sharp spectral contrasts. This architectural change (more freqs +
+higher $n_\text{cycles}$) addresses the root cause that the LR
+multiplier cannot: transforming the CWT from a blurred 9-bin summary
+into a precise spectral decomposition.
 
 
 %% ===================================================================
@@ -996,17 +1083,26 @@ already captures the relevant dynamics at 100\,Hz. Practically, this
 means the 4$\times$ compute savings of 100\,Hz vs.\ 400\,Hz come at
 negligible performance cost.
 
-\subsection{CWT Parameters Are Effectively Frozen}
+\subsection{CWT Parameters Are Effectively Frozen---And Unfreezing Them
+Does Not Help}
 
 The gradient diagnostics (Section~\ref{sec:cwt-gradient-diagnostics})
-confirm that CWT frequency and cycle-count parameters barely move
-during training---not because they are at a task-specific optimum,
-but because gradients attenuate to near-zero through the deep
-network. The learned frequencies in Section~\ref{sec:cwt-learned-params}
-therefore reflect initialization, not task adaptation. A higher
-learning rate for CWT parameters (via a separate param group) is a
-natural next step to determine whether meaningful frequency
-adaptation is possible and beneficial.
+confirmed that CWT parameters barely move during training due to
+gradient attenuation. The follow-up LR multiplier sweep
+(Section~\ref{sec:cwt-lr-sweep}) successfully unfroze the parameters
+(100$\times$ larger update ratios, visible frequency/cycle-count
+drift), but this produced no performance improvement. The conclusion
+is that the CWT's value comes from its \emph{structural inductive
+bias}---decomposing the signal into frequency bands---rather than from
+learning task-specific frequency positions.
+
+The deeper issue is that with only 9 wavelets at $n_\text{cycles}
+\approx 2.5$, each wavelet is a broad, overlapping bandpass filter.
+Repositioning these filters does not produce a meaningfully different
+representation. A more promising direction is architectural:
+increasing the number of frequency bins and the cycle count to create
+a set of narrow, selective filters that provide a clean spectral basis
+for downstream layers.
 
 \subsection{Open Questions}
 
@@ -1026,11 +1122,22 @@ adaptation is possible and beneficial.
             over a 64-filter CNN). A follow-up with CWT+CNN at 12
             filters would test whether the hybrid still wins at lower
             capacity.
-      \item \textbf{CWT learning rate multiplier:} Given confirmed
-            gradient attenuation, sweeping a separate CWT learning
-            rate multiplier (\{10, 50, 100\}$\times$) would test
-            whether frequency adaptation improves downstream
-            performance.
+      \item \textbf{CWT learning rate multiplier} (resolved): The LR
+            sweep (Section~\ref{sec:cwt-lr-sweep}) shows that
+            unfreezing CWT parameters does not improve performance.
+            The bottleneck is architectural (9 broad wavelets), not
+            the specific frequency values.
+      \item \textbf{CWT spectral resolution:} The negative LR-sweep
+            result motivates an architectural follow-up: increasing
+            both the number of frequency bins (e.g., 9 $\to$ 24) and
+            $n_\text{cycles}$ (e.g., 2.5 $\to$ 7--15) to produce
+            narrow, selective, minimally-overlapping bandpass filters.
+            The key comparison is whether more frequencies help only
+            when paired with higher $n_\text{cycles}$ (confirming the
+            overlap/redundancy hypothesis) or independently. A scaled
+            variant ($n_\text{cycles}$ proportional to frequency)
+            would address time-resolution constraints at low
+            frequencies.
 \end{itemize}
 
 
