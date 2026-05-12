@@ -160,7 +160,7 @@ test CWT+CNN at 12 filters → Experiment 5.
 
 ---
 
-## Experiment 5: Low-Capacity CWT+CNN Hybrid — RUNNING
+## Experiment 5: Low-Capacity CWT+CNN Hybrid — COMPLETED
 
 ```bash
 uv run python main.py experiment=tokenizer_explore/poyo_ajile_cwt_cnn_12f -m
@@ -188,6 +188,25 @@ runs are reused directly.
 
 **Runs:** 1 tokenizer × 2 folds = 2 new runs (+ 2 existing CNN 12f runs).
 
+**Results:**
+
+
+| Tokenizer     | Fold 0 | Fold 1 | Mean   | Std    |
+| ------------- | ------ | ------ | ------ | ------ |
+| CNN (12f)     | 0.8798 | 0.8885 | 0.8841 | 0.0062 |
+| CWT+CNN (12f) | 0.8842 | 0.8926 | 0.8884 | 0.0059 |
+
+
+- CWT+CNN 12f outperforms CNN 12f by **~0.4% AUROC** — a smaller gap than the
+  ~1.1% seen at 64 filters (Experiment 4).
+- CWT+CNN 12f (0.888) essentially matches CWT-alone (0.889, from Experiment 3b),
+  suggesting the 12-filter CNN stack adds negligible value on top of the CWT
+  scalogram — the linear projection is already sufficient at this width.
+- **Conclusion:** The CWT preprocessing provides a small architectural benefit
+  at any capacity, but the convolutional stack needs sufficient width (>>12
+  filters) to meaningfully exploit cross-frequency features from the scalogram.
+  At 12 filters, the hybrid degenerates to CWT-like performance.
+
 ---
 
 ## Summary of All Experiments
@@ -200,7 +219,7 @@ runs are reused directly.
 | 3a  | CWT gradient diagnostics      | Completed | TOKEN_RATE_SWEEP        | 0    |
 | 3b  | CWT LR multiplier sweep       | Completed | CWT_LR_AND_PARAM_MATCH  | 6    |
 | 4   | Parameter-matched CWT+CNN/CNN | Completed | CWT_LR_AND_PARAM_MATCH  | 4    |
-| 5   | Low-capacity CWT+CNN (12f)    | Running   | CWT_CNN_12F             | 2    |
+| 5   | Low-capacity CWT+CNN (12f)    | Completed | CWT_CNN_12F             | 2    |
 | 6   | CWT spectral resolution       | Ready     | CWT_SPECTRAL_RESOLUTION | 12   |
 
 

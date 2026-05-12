@@ -1,8 +1,9 @@
-"""Generate figures for Experiment 4: Parameter-Matched CWT+CNN vs CNN.
+"""Generate figures for Experiments 4 & 5: CWT+CNN capacity comparison.
 
-Compares four tokenizers at 200 Hz target token rate:
+Compares five tokenizers at 200 Hz target token rate:
     CWT          (3,666 params)  — from TOKEN_RATE_SWEEP cache
     CNN 12f      (3,924 params)  — from TOKEN_RATE_SWEEP cache
+    CWT+CNN 12f  (5,778 params)  — from CWT_CNN_12F local runs
     CNN 64f     (50,048 params)  — from CWT_LR_AND_PARAM_MATCH local runs
     CWT+CNN 64f (59,858 params)  — from CWT_LR_AND_PARAM_MATCH local runs
 
@@ -45,13 +46,13 @@ matplotlib.rcParams.update(
 
 OUTPUT_DIR = Path("docs/figures")
 CACHE_DIR = Path("docs/figures/data")
-RUNS_DIR = Path("outputs/runs/CWT_LR_AND_PARAM_MATCH")
+RUNS_DIR_PARAM_MATCH = Path("outputs/runs/CWT_LR_AND_PARAM_MATCH")
+RUNS_DIR_12F = Path("outputs/runs/CWT_CNN_12F")
 
 COL_CWT = PALETTE_TEMPORAL["cwt"]
 COL_CNN = PALETTE_TEMPORAL["cnn"]
-COL_CWT_CNN = (
-    "#E69F00"  # Okabe-Ito amber for hybrid (matches token_rate_sweep.py)
-)
+COL_CWT_CNN = "#E69F00"  # Okabe-Ito amber for hybrid
+COL_CWT_CNN_12F = "#F0E442"  # Okabe-Ito yellow for low-capacity hybrid
 COL_CNN_64F = "#CC79A7"  # Okabe-Ito reddish purple for param-matched CNN
 
 AUROC_KEY = "val/ajile_active_behavior_auroc"
@@ -59,6 +60,7 @@ AUROC_KEY = "val/ajile_active_behavior_auroc"
 TOKENIZER_SPECS = [
     ("CWT", 3_666, COL_CWT),
     ("CNN (12f)", 3_924, COL_CNN),
+    ("CWT+CNN (12f)", 5_778, COL_CWT_CNN_12F),
     ("CNN (64f)", 50_048, COL_CNN_64F),
     ("CWT+CNN (64f)", 59_858, COL_CWT_CNN),
 ]
@@ -106,51 +108,68 @@ def collect_exp4_data(plot_only: bool = False) -> pd.DataFrame:
             f"  Warning: {sweep_csv} not found, CWT/CNN 12f bars will be missing"
         )
 
-    # --- Pull CNN 64f and CWT+CNN from Experiment 4 local runs ---
-    exp4_prefixes = {
-        "per_channel_cwt_cnn_rate200": "CWT+CNN (64f)",
-        "per_channel_resample_cnn_64f_rate200": "CNN (64f)",
-    }
-
-    for d in sorted(os.listdir(RUNS_DIR)):
-        run_path = RUNS_DIR / d
-        if not run_path.is_dir() or d.startswith("."):
-            continue
-
-        matched_label = None
-        for prefix, label in exp4_prefixes.items():
-            if d.startswith(prefix):
-                matched_label = label
-                break
-        if matched_label is None:
-            continue
-
-        summary_files = list(run_path.rglob("wandb-summary.json"))
-        if not summary_files:
-            continue
-        with open(sorted(summary_files)[-1]) as f:
-            summary = json.load(f)
-
-        auroc = summary.get(AUROC_KEY, {})
-        if isinstance(auroc, dict):
-            auroc = auroc.get("max")
-        if auroc is None:
-            continue
-
-        parts = d.split("_")
-        fold = int(
-            [p for p in parts if p.startswith("fold")][0].replace("fold", "")
-        )
-
-        rows.append(
+    # --- Pull from local run directories ---
+    run_sources = [
+        (
+            RUNS_DIR_PARAM_MATCH,
             {
-                "run_name": d,
-                "tokenizer": matched_label,
-                "fold": fold,
-                "auroc": auroc,
-                "source": "CWT_LR_AND_PARAM_MATCH",
-            }
-        )
+                "per_channel_cwt_cnn_rate200": "CWT+CNN (64f)",
+                "per_channel_resample_cnn_64f_rate200": "CNN (64f)",
+            },
+            "CWT_LR_AND_PARAM_MATCH",
+        ),
+        (
+            RUNS_DIR_12F,
+            {"per_channel_cwt_cnn_12f_rate200": "CWT+CNN (12f)"},
+            "CWT_CNN_12F",
+        ),
+    ]
+
+    for runs_dir, prefixes, source_name in run_sources:
+        if not runs_dir.exists():
+            print(f"  Warning: {runs_dir} not found, skipping")
+            continue
+        for d in sorted(os.listdir(runs_dir)):
+            run_path = runs_dir / d
+            if not run_path.is_dir() or d.startswith("."):
+                continue
+
+            matched_label = None
+            for prefix, label in prefixes.items():
+                if d.startswith(prefix):
+                    matched_label = label
+                    break
+            if matched_label is None:
+                continue
+
+            summary_files = list(run_path.rglob("wandb-summary.json"))
+            if not summary_files:
+                continue
+            with open(sorted(summary_files)[-1]) as f:
+                summary = json.load(f)
+
+            auroc = summary.get(AUROC_KEY, {})
+            if isinstance(auroc, dict):
+                auroc = auroc.get("max")
+            if auroc is None:
+                continue
+
+            parts = d.split("_")
+            fold = int(
+                [p for p in parts if p.startswith("fold")][0].replace(
+                    "fold", ""
+                )
+            )
+
+            rows.append(
+                {
+                    "run_name": d,
+                    "tokenizer": matched_label,
+                    "fold": fold,
+                    "auroc": auroc,
+                    "source": source_name,
+                }
+            )
 
     df = pd.DataFrame(rows)
     df.to_csv(cache_csv, index=False)
@@ -172,7 +191,7 @@ def plot_param_match_bar(df: pd.DataFrame) -> None:
     )
     agg["std"] = agg["std"].fillna(0)
 
-    fig, ax = plt.subplots(figsize=(7, 5))
+    fig, ax = plt.subplots(figsize=(8.5, 5))
     x = np.arange(len(agg))
 
     bar_colors = [colors[t] for t in agg["tokenizer"]]
@@ -203,21 +222,26 @@ def plot_param_match_bar(df: pd.DataFrame) -> None:
     ax.set_xticklabels(xlabels, fontsize=8.5)
     ax.set_ylabel("Behavior AUROC")
     ax.set_title(
-        "Parameter-Matched Comparison at 200 Hz\n(mean ± std over 2 folds)"
+        "CWT+CNN Capacity Comparison at 200 Hz\n(mean ± std over 2 folds)"
     )
 
     ymin = agg["mean"].min() - 0.025
     ymax = agg["mean"].max() + agg["std"].max() + 0.015
     ax.set_ylim(ymin, ymax)
 
-    ax.axvline(1.5, color="#cccccc", linestyle="--", linewidth=0.8, zorder=0)
+    ax.axvline(2.5, color="#cccccc", linestyle="--", linewidth=0.8, zorder=0)
     ax.text(
-        0.5, ymin + 0.002, "original", ha="center", fontsize=7, color="#999999"
+        1.0,
+        ymin + 0.002,
+        "low capacity (12 filters)",
+        ha="center",
+        fontsize=7,
+        color="#999999",
     )
     ax.text(
-        2.5,
+        3.5,
         ymin + 0.002,
-        "param-matched (64 filters)",
+        "high capacity (64 filters)",
         ha="center",
         fontsize=7,
         color="#999999",
@@ -239,7 +263,7 @@ def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-    print("Generating Experiment 4 (param-match) figures...")
+    print("Generating Experiments 4 & 5 (param-match + 12f) figures...")
     df = collect_exp4_data(plot_only=args.plot_only)
     print(df.groupby("tokenizer")["auroc"].agg(["mean", "std", "count"]))
     plot_param_match_bar(df)
