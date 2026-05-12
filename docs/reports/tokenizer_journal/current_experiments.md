@@ -221,6 +221,7 @@ runs are reused directly.
 | 4   | Parameter-matched CWT+CNN/CNN | Completed | CWT_LR_AND_PARAM_MATCH  | 4    |
 | 5   | Low-capacity CWT+CNN (12f)    | Completed | CWT_CNN_12F             | 2    |
 | 6   | CWT spectral resolution       | Ready     | CWT_SPECTRAL_RESOLUTION | 12   |
+| 7   | CWT scalogram conditioning    | Ready     | CWT_CONDITIONING        | 12   |
 
 
 ---
@@ -371,7 +372,108 @@ Parameter breakdown for CWT+CNN-24f-48F:
 
 ---
 
-## Follow-up (pending results of 5 + 6)
+## Experiment 7: CWT+CNN Scalogram Conditioning — Highpass, Log-Mag, Freq-Norm — READY TO LAUNCH
+
+```bash
+uv run python main.py experiment=tokenizer_explore/poyo_ajile_cwt_conditioning -m
+```
+
+**W&B group:** `CWT_CONDITIONING`
+
+**Question:** Do input highpass filtering, log-magnitude compression, and
+per-frequency instance normalization — applied to the CWT+CNN scalogram
+between the CWT and CNN stages — improve downstream behavior classification
+on real EEG data?  Which combination works best, and does it widen the
+CWT+CNN advantage over the parameter-matched CNN 64f baseline?
+
+**Motivation:** Synthetic stability experiments (see `scripts/analysis/cwt_stability.py`)
+showed that the baseline CWT's representation is fragile under common EEG
+corruptions. Three lightweight conditioning steps were identified as
+individually effective:
+
+- **Highpass** (causal running-mean subtraction, 50 ms window): Near-perfect
+  DC offset rejection (cosine similarity 1.000 at offset=10×).
+- **Log-mag** (`log(mag + ε)`): Strong resistance to additive corruptions —
+  white noise (0.965 at 0 dB SNR vs 0.807 baseline), random spikes (0.933 at
+  20 spikes vs 0.698), zero dropout (0.844 at 60% vs 0.403).
+- **Freq-norm** (per-frequency instance norm on magnitude): Near-perfect
+  amplitude scaling invariance (0.999 at 100× scaling vs 0.473 baseline).
+
+The combined `hp+log` variant won 5 of 6 corruption categories in the
+synthetic experiment, losing only to `hp+fnorm` on extreme amplitude scaling
+(>10×).  However, synthetic stability measures architectural inductive bias
+at random init — this experiment tests whether those stability advantages
+translate to downstream performance on real data after training.
+
+Testing on CWT+CNN (64 filters) rather than CWT-only because:
+(a) CWT+CNN is the strongest CWT architecture from Experiments 2/4 (~0.898
+AUROC), and (b) the parameter-matched CNN 64f baseline (~0.887 AUROC) is
+the most relevant comparison — if conditioning widens the CWT+CNN advantage
+over CNN 64f, it confirms the CWT preprocessing provides unique value that
+a learned CNN alone cannot replicate.
+
+**Design:** Full 2³ factorial over `{highpass, log_mag, freq_norm}` boolean
+flags (minus the all-off baseline which already exists). All variants use
+the CWT+CNN architecture (9 log-spaced frequencies, 0.5–30 Hz, n_cycles=2.5,
+64 conv filters, kernel 9, 2 layers, GELU). Baselines (CWT+CNN 64f, CNN 64f)
+reused from CWT_LR_AND_PARAM_MATCH (Experiment 4).
+
+All configs use `target_token_rate=200` Hz and the standard hyperparameters
+(LR=3e-4, WD=0.007, embed_dim=256, concat fusion, 2 folds).
+
+### Conditioning options added to CWTEmbedding / CWTCNNEmbedding
+
+These three boolean flags were added to both `CWTEmbedding` and
+`CWTCNNEmbedding` in `foundry/models/embeddings/temporal/cwt.py`:
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `highpass` | `False` | Subtract causal running mean (window=`highpass_window_sec`, default 50 ms) from input before CWT |
+| `log_mag` | `False` | Apply `log(mag + 1e-6)` to CWT magnitude output |
+| `freq_norm` | `False` | Per-frequency instance norm (zero-mean, unit-var along time) on magnitude |
+
+All flags are off by default, preserving backward compatibility with existing
+configs and checkpoints.  Conditioning is applied between the CWT and CNN
+stages: highpass acts on the raw input, while log-mag and freq-norm act on
+the scalogram magnitude before it enters the Conv1d stack.
+
+### Configurations
+
+| Config | highpass | log_mag | freq_norm | Temporal Params | Config YAML |
+| --- | --- | --- | --- | --- | --- |
+| CWT+CNN (baseline) | — | — | — | 59,858 | `per_channel_cwt_cnn` |
+| CWT+CNN+hp | ✓ | — | — | 59,858 | `per_channel_cwt_cnn_hp` |
+| CWT+CNN+log | — | ✓ | — | 59,858 | `per_channel_cwt_cnn_log` |
+| CWT+CNN+fnorm | — | — | ✓ | 59,858 | `per_channel_cwt_cnn_fnorm` |
+| CWT+CNN+hp+log | ✓ | ✓ | — | 59,858 | `per_channel_cwt_cnn_hp_log` |
+| CWT+CNN+hp+fnorm | ✓ | — | ✓ | 59,858 | `per_channel_cwt_cnn_hp_fnorm` |
+| CWT+CNN+hp+log+fnorm | ✓ | ✓ | ✓ | 59,858 | `per_channel_cwt_cnn_hp_log_fnorm` |
+| CNN 64f (baseline) | — | — | — | 50,048 | `per_channel_resample_cnn_64f` |
+
+None of the conditioning options add learnable parameters — temporal param
+count is identical across all CWT+CNN variants (59,858).  The CNN 64f
+baseline has ~50k temporal params (within ~15% of CWT+CNN).
+
+### Runs
+
+- 6 new configs × 2 folds = **12 new runs**
+- 2 baselines × 2 folds = 4 reused runs (CWT_LR_AND_PARAM_MATCH, Exp 4)
+- **Total compared: 16 runs**
+
+### Predicted outcomes (from synthetic stability experiments)
+
+| Outcome | Interpretation |
+| --- | --- |
+| `hp+log` wins overall | Synthetic stability results transfer to real data; additive robustness (log) + DC rejection (hp) matter most in practice |
+| `hp+fnorm` wins overall | Amplitude variability across sessions/channels matters more than additive noise; scaling invariance is the key bottleneck |
+| `hp+log+fnorm` wins overall | All three conditioning steps are complementary in practice (log+fnorm conflict observed in synthetic experiments was an artifact of random init) |
+| Conditioning widens CWT+CNN vs CNN gap | The CWT+CNN advantage is partly limited by scalogram fragility; conditioning unlocks more of the architectural benefit |
+| All conditioned CWT+CNN ≈ baseline CWT+CNN | The CNN stack already learns to handle these corruptions; explicit conditioning is redundant when followed by learned convolutions |
+| All ≈ CNN 64f | Conditioning helps stability but the downstream task doesn't stress the corruptions that matter; CNN alone suffices |
+
+---
+
+## Follow-up (pending results of 6 + 7)
 
 - **Experiment 6b — Frequency-scaled n_cycles:** If Experiment 6 confirms that
 higher `n_cycles` helps, test a variant where `n_cycles` scales with frequency
@@ -382,6 +484,10 @@ maintaining tight bands where they matter.
 low-gamma (30–50 Hz) activity, which may be relevant for movement-related
 behavior classification. Compare against 24f at 0.5–30 Hz to isolate the
 range effect from the resolution effect.
-- **Experiment 7:** Depending on Experiment 5 results, explore CWT+CNN with
-intermediate filter counts (e.g., 32) to map the capacity–performance curve.
+- **Experiment 7b — CWT-only with conditioning:** If Experiment 7 identifies
+a winning conditioning combination, test it on CWT-only (linear projection)
+to see whether the CNN stack is still needed or if conditioning alone closes
+the gap.
+- **Experiment 8:** CWT+CNN with intermediate filter counts (e.g., 32) to map
+the capacity–performance curve.
 
