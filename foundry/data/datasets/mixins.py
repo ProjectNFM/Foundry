@@ -32,11 +32,13 @@ class EEGDatasetMixin:
         super().get_recording_hook(data)
 
     def get_channel_ids(self) -> list[str]:
-        """Return a sorted list of all channel IDs across all recordings in the dataset."""
-        ans = [
+        """Return a sorted channel vocabulary across all recordings."""
+        channel_ids = [
             self.get_recording(rid).channels.id for rid in self.recording_ids
         ]
-        return np.sort(np.concatenate(ans)).tolist()
+        if not channel_ids:
+            return []
+        return np.unique(np.concatenate(channel_ids).astype(str)).tolist()
 
     def get_recording_ids(self) -> list[str]:
         """Return a sorted list of all recording IDs in the dataset."""

@@ -362,11 +362,18 @@ class POYOEEGModel(nn.Module):
             vocab_info: Dictionary with ``session_ids`` and ``channel_ids``
                 keys.
         """
+        def _unique_str_ids(ids):
+            return list(dict.fromkeys(str(item) for item in ids))
+
         if "session_ids" in vocab_info and self.session_emb.is_lazy():
-            self.session_emb.initialize_vocab(vocab_info["session_ids"])
+            self.session_emb.initialize_vocab(
+                _unique_str_ids(vocab_info["session_ids"])
+            )
 
         if "channel_ids" in vocab_info and self.channel_emb.is_lazy():
-            self.channel_emb.initialize_vocab(vocab_info["channel_ids"])
+            self.channel_emb.initialize_vocab(
+                _unique_str_ids(vocab_info["channel_ids"])
+            )
 
     def has_lazy_vocabs(self) -> bool:
         """Check if vocabularies are still lazy (uninitialized)."""

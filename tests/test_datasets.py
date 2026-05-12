@@ -1,11 +1,38 @@
 import pytest
+import numpy as np
 
 from foundry.data.datasets import (
     KorczowskiBrainInvaders2014a,
     SchalkWolpawPhysionet2009,
 )
+from foundry.data.datasets.mixins import EEGDatasetMixin
 
 from .conftest import skip_if_missing_dataset
+
+
+class TestEEGDatasetMixin:
+    def test_get_channel_ids_returns_unique_sorted_vocab(self):
+        class Channels:
+            def __init__(self, ids):
+                self.id = np.array(ids)
+
+        class Recording:
+            def __init__(self, ids):
+                self.channels = Channels(ids)
+
+        class Dataset(EEGDatasetMixin):
+            recording_ids = ["r1", "r2"]
+
+            def __init__(self):
+                self.recordings = {
+                    "r1": Recording(["z", "a", "b"]),
+                    "r2": Recording(["b", "a", "c"]),
+                }
+
+            def get_recording(self, recording_id):
+                return self.recordings[recording_id]
+
+        assert Dataset().get_channel_ids() == ["a", "b", "c", "z"]
 
 
 class TestSchalkWolpawPhysionet2009:
