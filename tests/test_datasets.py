@@ -6,6 +6,8 @@ from foundry.data.datasets import (
     SchalkWolpawPhysionet2009,
 )
 from foundry.data.datasets.mixins import EEGDatasetMixin
+from foundry.data.datamodules.neurosoft import NeurosoftMinipigsMonkeys2026
+from torch_brain.dataset.dataset import DatasetIndex
 
 from .conftest import skip_if_missing_dataset
 
@@ -33,6 +35,78 @@ class TestEEGDatasetMixin:
                 return self.recordings[recording_id]
 
         assert Dataset().get_channel_ids() == ["a", "b", "c", "z"]
+
+
+class TestNeurosoftMinipigsMonkeys2026:
+    def test_namespaces_recordings_channels_and_samples(self):
+        class FakeDataset:
+            def __init__(
+                self,
+                root,
+                transform=None,
+                fold_num=None,
+                split_type=None,
+                task_type=None,
+                recording_ids=None,
+            ):
+                self.root = root
+                self.transform = transform
+                self.fold_num = fold_num
+                self.split_type = split_type
+                self.task_type = task_type
+                self.recording_ids = recording_ids or ["default"]
+
+            def get_sampling_intervals(self, split=None):
+                return {
+                    recording_id: f"{split}:{recording_id}"
+                    for recording_id in self.recording_ids
+                }
+
+            def get_channel_ids(self):
+                return ["sub/ch2", "sub/ch1", "sub/ch1"]
+
+            def __getitem__(self, index):
+                return (
+                    index.recording_id,
+                    index.start,
+                    index.end,
+                    index._namespace,
+                )
+
+        old_sources = NeurosoftMinipigsMonkeys2026.SOURCES
+        NeurosoftMinipigsMonkeys2026.SOURCES = {
+            "minipigs": FakeDataset,
+            "monkeys": FakeDataset,
+        }
+        try:
+            dataset = NeurosoftMinipigsMonkeys2026(
+                root="/tmp/data",
+                fold_num=2,
+                split_type="intrasession-causal",
+                task_type="acoustic_stim",
+                minipigs_recording_ids=["pig_a"],
+                monkeys_recording_ids=["monkey_b"],
+            )
+        finally:
+            NeurosoftMinipigsMonkeys2026.SOURCES = old_sources
+
+        assert dataset.recording_ids == ["minipigs/pig_a", "monkeys/monkey_b"]
+        assert dataset.get_sampling_intervals("train") == {
+            "minipigs/pig_a": "train:pig_a",
+            "monkeys/monkey_b": "train:monkey_b",
+        }
+        assert dataset.get_channel_ids() == [
+            "minipigs/sub/ch1",
+            "minipigs/sub/ch2",
+            "monkeys/sub/ch1",
+            "monkeys/sub/ch2",
+        ]
+        assert dataset[DatasetIndex("monkeys/monkey_b", 0.0, 0.5)] == (
+            "monkey_b",
+            0.0,
+            0.5,
+            "monkeys",
+        )
 
 
 class TestSchalkWolpawPhysionet2009:
