@@ -1,0 +1,16 @@
+_target_: foundry.data.datamodules.NeurosoftMonkeys2026DataModule
+
+root: ./data/processed/
+batch_size: ${hyperparameters.batch_size}
+num_workers: ${hyperparameters.num_workers}
+pin_memory: false
+sequence_length: ${hyperparameters.sequence_length}
+seed: 42
+
+split_type: ???
+task_type: ???
+fold_number: ${hyperparameters.fold_number}
+
+# Use all prepared monkey sessions by default. Override this with an explicit
+# list if you want to run a subset once the processed H5 files are available.
+recording_ids: null

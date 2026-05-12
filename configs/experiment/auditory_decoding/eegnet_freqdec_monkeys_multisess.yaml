@@ -1,0 +1,61 @@
+# @package _global_
+#
+# Multisession EEGNet frequency-decoding experiment for Neurosoft monkey
+# acoustic-stimulation recordings using the existing fixed-channel EEGNet
+# implementation from main.
+
+defaults:
+  - override /model: eegnet
+  - override /data: neurosoft_monkeys/multisess_raw
+  - override /module: classification
+
+model:
+  num_channels: ${hyperparameters.num_channels}
+  num_samples: ${patch_samples:${hyperparameters.sequence_length},${hyperparameters.sampling_rate}}
+  kernel_length: 128
+
+data:
+  split_type: intrasession-causal
+  task_type: acoustic_stim
+
+run:
+  name: eegnet_neurosoft_monkeys_freqdec_multisess
+  group: NEUROSOFT_MONKEYS_MULTISESSION
+  tags:
+    - neurosoft
+    - monkeys
+    - eegnet
+    - multisession
+    - frequency_decoding
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 128
+  sequence_length: 0.5
+  patch_duration: 0.1
+  fold_number: 0
+  num_workers: 0
+  sampling_rate: 2000
+  learning_rate: 1e-3
+  weight_decay: 0.01
+  num_channels: null
+  session_configs: null
+
+trainer:
+  devices: 1
+  max_epochs: 1000
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/neurosoft_acoustic_stim_f1
+      mode: max
+      patience: 20
+    model_checkpoint:
+      monitor: val/neurosoft_acoustic_stim_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/neurosoft_acoustic_stim_f1:.4f}"
+
+stage:
+  skip: true
