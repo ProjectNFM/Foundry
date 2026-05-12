@@ -66,6 +66,29 @@ class TestMode1FixedChannelPatched:
         # num_patches = (250-25)//25+1 = 10
         assert result["input_timestamps"].shape == (10,)
 
+    def test_pretokenize_pads_short_window_to_sequence_length(self):
+        tokenizer = self._make_tokenizer()
+        signal = np.ones((249, 4), dtype=np.float32)
+        tokens = np.arange(4)
+
+        result = tokenizer.pretokenize(signal, tokens, 250.0, 1.0)
+
+        assert result["input_values"].shape == (8, 250)
+        assert result["input_seq_len"].item() == 250
+        assert torch.all(result["input_values"][:4, -1] == 0)
+        assert result["input_timestamps"].shape == (10,)
+
+    def test_pretokenize_truncates_long_window_to_sequence_length(self):
+        tokenizer = self._make_tokenizer()
+        signal = np.ones((251, 4), dtype=np.float32)
+        tokens = np.arange(4)
+
+        result = tokenizer.pretokenize(signal, tokens, 250.0, 1.0)
+
+        assert result["input_values"].shape == (8, 250)
+        assert result["input_seq_len"].item() == 250
+        assert result["input_timestamps"].shape == (10,)
+
     def test_forward_shape(self, embed_dim, batch_size):
         tokenizer = self._make_tokenizer(embed_dim=embed_dim)
         x = torch.randn(batch_size, 8, 250)

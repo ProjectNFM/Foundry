@@ -104,6 +104,27 @@ class EEGTokenizer(nn.Module):
     def uses_per_channel(self) -> bool:
         return isinstance(self.channel_strategy, PerChannelStrategy)
 
+    @staticmethod
+    def _fit_signal_to_sequence_length(
+        signal: np.ndarray,
+        sampling_rate: float,
+        sequence_length: float | None,
+    ) -> np.ndarray:
+        if sequence_length is None:
+            return signal
+
+        target_samples = max(1, round(sequence_length * sampling_rate))
+        num_samples = signal.shape[0]
+
+        if num_samples == target_samples:
+            return signal
+        if num_samples > target_samples:
+            return signal[:target_samples]
+
+        pad_shape = (target_samples - num_samples, signal.shape[1])
+        padding = np.zeros(pad_shape, dtype=signal.dtype)
+        return np.concatenate([signal, padding], axis=0)
+
     def pretokenize(
         self,
         signal: np.ndarray,
@@ -124,6 +145,13 @@ class EEGTokenizer(nn.Module):
         Returns:
             dict with model input tensors including ``input_timestamps``.
         """
+        if self._do_patching:
+            signal = self._fit_signal_to_sequence_length(
+                signal,
+                sampling_rate,
+                sequence_length,
+            )
+
         result = self.channel_strategy.prepare_pretokenize(
             signal,
             channel_tokens,
