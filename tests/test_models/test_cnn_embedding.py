@@ -79,6 +79,10 @@ class TestCNNEmbedding:
                 activation="invalid_activation",
             )
 
+    def test_positional_activation_with_stride_keyword(self, embed_dim):
+        embedding = CNNEmbedding(embed_dim, 8, 50, 32, 3, "relu", stride=2)
+        assert embedding.cnn[0].stride == (2,)
+
     def test_different_kernel_sizes(self, embed_dim, batch_size):
         num_channels = 8
         patch_samples = 50
