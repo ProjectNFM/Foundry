@@ -310,6 +310,7 @@ numbers should only be compared within a group unless otherwise noted.
             TOKEN\_RATE\_SWEEP           & Behavior      & 3e-4        & 0.007       & 9 $\times$ 2                    \\
             CWT\_LR\_AND\_PARAM\_MATCH   & Behavior      & 3e-4        & 0.007       & 5 $\times$ 2                    \\
             CWT\_CNN\_12F               & Behavior      & 3e-4        & 0.007       & 1 $\times$ 2                    \\
+            CWT\_SPECTRAL\_RESOLUTION  & Behavior      & 3e-4        & 0.007       & 10 $\times$ 2                   \\
             \bottomrule
       \end{tabular}
       \caption{Hyperparameter summary per experiment group. Absolute
@@ -1004,6 +1005,164 @@ multiplier cannot: transforming the CWT from a blurred 9-bin summary
 into a precise spectral decomposition.
 
 
+% -------------------------------------------------------------------
+\subsection{CWT Spectral Resolution}
+\label{sec:cwt-spectral-resolution}
+% -------------------------------------------------------------------
+
+\textbf{Question:} Does increasing the number of CWT frequency bins
+(9$\to$24) while raising $n_\text{cycles}$ (2.5$\to$7.0) produce a
+better spectral decomposition for downstream classification---especially
+when the CWT frequencies are free to adapt via a 100$\times$ learning
+rate multiplier?
+
+Section~\ref{sec:cwt-param-adaptation} established that (a)~CWT
+parameters are frozen by gradient attenuation, and (b)~unfreezing them
+via a higher LR does not help \emph{given only 9 broad wavelets}.  The
+joint interpretation identified the root cause: with 9 wavelets at
+$n_\text{cycles} \approx 2.5$, each wavelet is a broad bandpass filter
+with substantial spectral overlap between adjacent bins.  Repositioning
+these broad, overlapping filters cannot help because the representation
+remains a redundant, smeared basis regardless of exact center
+frequencies.  The architectural fix should be to increase \emph{both}
+the number of frequency bins and the cycle count, producing narrow,
+selective, minimally-overlapping bandpass filters.
+
+\textbf{Hypothesis:} Performance improvement requires the
+\emph{combination} of more frequencies and higher $n_\text{cycles}$
+(an interaction effect).  More broad wavelets alone (24f + nc2.5) just
+adds redundancy.  Narrower wavelets alone (9f + nc7) improve
+selectivity but cannot resolve frequencies between the 9 widely-spaced
+bins.  The interaction (24f + nc7) should yield the clearest gain.
+
+\textbf{Setup:} A 2$\times$2 factorial crossing \texttt{num\_freqs}
+$\in \{9, 24\}$ with $n_\text{cycles} \in \{2.5, 7.0\}$, evaluated on
+both CWT-only and CWT+CNN architectures.  All CWT configs use
+\texttt{cwt\_lr\_multiplier=100} so the learnable frequencies and cycle
+counts can adapt during training.  CNN baselines (12f and 64f) are
+included for context.
+
+All configs use \texttt{target\_token\_rate}=200\,Hz,
+\texttt{freq\_range}=0.5--30\,Hz (log-spaced initialization), and the
+standard hyperparameters (LR=3e-4, WD=0.007, embed\_dim=256, concat
+fusion, 2~folds).  The CWT+CNN 24f variants use 48 conv filters
+(vs.\ 64 for 9f) to keep total temporal parameters within $\sim$15\%
+($\sim$51k vs.\ $\sim$60k).
+
+\begin{table}[H]
+      \centering
+      \footnotesize
+      \begin{tabular}{llrrrl}
+            \toprule
+            \textbf{Config}               & \textbf{Family} & \textbf{Freqs} & \textbf{$n_\text{cycles}$} & \textbf{Temp.\ Params} & \textbf{Source}            \\
+            \midrule
+            CWT 9f nc2.5                  & CWT             & 9              & 2.5                        & 3{,}666                & Exp.~3b (100$\times$ LR)  \\
+            CWT 9f nc7                    & CWT             & 9              & 7.0                        & 3{,}666                & New                        \\
+            CWT 24f nc2.5                 & CWT             & 24             & 2.5                        & 9{,}456                & New                        \\
+            CWT 24f nc7                   & CWT             & 24             & 7.0                        & 9{,}456                & New                        \\
+            \midrule
+            CWT+CNN 9f-64F nc2.5          & CWT+CNN         & 9              & 2.5                        & 59{,}858               & Exp.~4                     \\
+            CWT+CNN 9f-64F nc7            & CWT+CNN         & 9              & 7.0                        & 59{,}858               & New                        \\
+            CWT+CNN 24f-48F nc2.5         & CWT+CNN         & 24             & 2.5                        & 51{,}024               & New                        \\
+            CWT+CNN 24f-48F nc7           & CWT+CNN         & 24             & 7.0                        & 51{,}024               & New                        \\
+            \midrule
+            CNN 12f                       & CNN             & ---            & ---                        & 3{,}924                & Token rate sweep           \\
+            CNN 64f                       & CNN             & ---            & ---                        & 50{,}048               & Exp.~4                     \\
+            \bottomrule
+      \end{tabular}
+      \caption{Experiment 6 configurations.  CWT+CNN 24f variants use
+            48 conv filters (vs.\ 64 for 9f) to stay approximately
+            capacity-matched.  All CWT configs use 100$\times$ LR
+            multiplier for wavelet parameters.}
+      \label{tab:spectral-resolution-configs}
+\end{table}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=\textwidth]{cwt_spectral_resolution_bar.pdf}
+      \caption{CWT spectral resolution: \texttt{num\_freqs}
+            $\times$ $n_\text{cycles}$ factorial for CWT-only and
+            CWT+CNN architectures, with CNN baselines (mean $\pm$ std
+            over 2 folds).  Performance is flat across all spectral
+            resolution configurations within each architecture family.}
+      \label{fig:spectral-resolution-bar}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=\textwidth]{cwt_spectral_resolution_freqs.pdf}
+      \caption{Learned CWT frequencies vs.\ log-spaced initialization
+            (dashed) for 9-frequency (left) and 24-frequency (right)
+            configs.  Frequencies are sorted for readability.  With
+            the 100$\times$ LR multiplier, frequencies rearrange
+            substantially---especially the 24f configs, where the
+            original log-spacing is completely disrupted---yet this
+            freedom produces no performance improvement.}
+      \label{fig:spectral-resolution-freqs}
+\end{figure}
+
+\textbf{Observations:}
+\begin{itemize}[nosep]
+      \item Performance is flat across all four CWT-only configurations:
+            mean AUROC ranges from 0.884 (9f nc7) to 0.887 (24f nc2.5),
+            well within the fold-to-fold variance ($\sigma \approx 0.01$).
+            Neither \texttt{num\_freqs} nor $n_\text{cycles}$ shows a
+            main effect, and the predicted interaction (24f + nc7) does
+            not materialize.
+      \item CWT+CNN results are similarly flat ($\sim$0.895--0.898),
+            with all new configs within noise of the baseline CWT+CNN
+            9f-64F ($\sim$0.898).
+      \item With the 100$\times$ LR multiplier, the learned frequencies
+            move substantially from initialization
+            (Figure~\ref{fig:spectral-resolution-freqs}).  The 24f
+            configs rearrange almost completely---the original log-spacing
+            is disrupted, and many frequencies collapse toward the
+            1--5\,Hz range.  Despite this freedom to reorganize, there
+            is no performance benefit.
+      \item The overall performance hierarchy is unchanged:
+            CWT+CNN ($\sim$0.895) $>$ CWT-only ($\sim$0.886)
+            $\approx$ CNN 64f ($\sim$0.887) $>$ CNN 12f ($\sim$0.884).
+\end{itemize}
+
+\textbf{Caveats:}
+\begin{itemize}[nosep]
+      \item The 1-second sequence window limits the effective frequency
+            selectivity at low frequencies: at 0.5\,Hz with
+            $n_\text{cycles}=7$, the wavelet envelope
+            ($\sigma \approx 2.2$\,s) extends well beyond the window.
+            Higher $n_\text{cycles}$ may matter more with longer
+            windows.
+      \item CWT+CNN 24f configs use 48 conv filters vs.\ 64 for the 9f
+            baseline to stay approximately capacity-matched.  The
+            $\sim$15\% parameter difference is small relative to the
+            full model ($\sim$6M backbone parameters) but is a minor
+            confound.
+      \item Only 2 folds per configuration.  Per-fold AUROC variance
+            ($\sigma \approx 0.01$) is large relative to the between-config
+            differences, limiting statistical power.
+\end{itemize}
+
+\textbf{Interpretation:} The null result across the full factorial
+suggests that the CWT's value for this task comes from its
+\emph{structural inductive bias}---decomposing the signal into
+\emph{any} set of frequency bands---rather than from the specific
+spectral resolution of that decomposition.  Nine broad wavelets at
+$n_\text{cycles} = 2.5$ already capture sufficient spectral information
+for the downstream Perceiver backbone to classify behavior.  Providing
+a finer, more selective spectral basis (24f, nc7) does not unlock
+additional discriminative power, and allowing the frequencies to freely
+rearrange via the 100$\times$ LR multiplier does not help either.
+This is consistent with the Experiment~3b finding that unfreezing the
+CWT parameters has no effect---whether the frequencies are coarse or
+fine, fixed or free, the bottleneck lies elsewhere.
+
+That said, this conclusion is specific to the AJILE12 behavior
+classification task with 1-second windows.  Tasks requiring finer
+spectral discrimination (e.g., detecting narrow-band oscillations like
+alpha peaks or sleep spindles) or longer temporal context may benefit
+from higher spectral resolution.
+
+
 %% ===================================================================
 \section{Discussion and Ongoing Conclusions}
 \label{sec:discussion}
@@ -1113,10 +1272,12 @@ learning task-specific frequency positions.
 The deeper issue is that with only 9 wavelets at $n_\text{cycles}
 \approx 2.5$, each wavelet is a broad, overlapping bandpass filter.
 Repositioning these filters does not produce a meaningfully different
-representation. A more promising direction is architectural:
-increasing the number of frequency bins and the cycle count to create
-a set of narrow, selective filters that provide a clean spectral basis
-for downstream layers.
+representation. The follow-up experiment
+(Section~\ref{sec:cwt-spectral-resolution}) tests the natural
+architectural fix---more frequency bins and higher cycle counts---and
+finds that it does not help either, suggesting that the CWT's value
+is its structural inductive bias rather than the specifics of its
+spectral decomposition.
 
 \subsection{Open Questions}
 
@@ -1141,17 +1302,14 @@ for downstream layers.
             unfreezing CWT parameters does not improve performance.
             The bottleneck is architectural (9 broad wavelets), not
             the specific frequency values.
-      \item \textbf{CWT spectral resolution:} The negative LR-sweep
-            result motivates an architectural follow-up: increasing
-            both the number of frequency bins (e.g., 9 $\to$ 24) and
-            $n_\text{cycles}$ (e.g., 2.5 $\to$ 7--15) to produce
-            narrow, selective, minimally-overlapping bandpass filters.
-            The key comparison is whether more frequencies help only
-            when paired with higher $n_\text{cycles}$ (confirming the
-            overlap/redundancy hypothesis) or independently. A scaled
-            variant ($n_\text{cycles}$ proportional to frequency)
-            would address time-resolution constraints at low
-            frequencies.
+      \item \textbf{CWT spectral resolution} (resolved): The
+            2$\times$2 factorial (Section~\ref{sec:cwt-spectral-resolution})
+            found no effect of increasing frequency bins (9$\to$24) or
+            $n_\text{cycles}$ (2.5$\to$7), and no interaction between them.
+            The CWT's value is its structural inductive bias (any frequency
+            decomposition), not the specific spectral resolution.  This
+            conclusion may not hold for tasks requiring finer spectral
+            discrimination or longer temporal windows.
 \end{itemize}
 
 
