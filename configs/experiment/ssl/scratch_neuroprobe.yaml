@@ -1,0 +1,88 @@
+# @package _global_
+#
+# Train-from-scratch baseline on Neuroprobe (SS-SM regime).
+# Part of SSL Experiment 1 (Objective Stress Test).
+#
+# Tasks: onset, gpt2_surprisal, face_num (one per cognitive domain).
+# Sessions: subject 1 ses 1, subject 3 ses 0, subject 7 ses 0 (lite subset).
+#
+# Single run (CWT+CNN, onset, subject 1 session 1):
+#   uv run python main.py experiment=ssl/scratch_neuroprobe
+#
+# Single run (ResampleCNN):
+#   uv run python main.py experiment=ssl/scratch_neuroprobe model/tokenizer=per_channel_resample_cnn
+#
+# Full sweep (3 tasks x 3 sessions x 2 tokenizers = 18 runs):
+#   uv run python main.py -m experiment=ssl/scratch_neuroprobe
+#
+# DEBUG single run (1 epoch):
+#   uv run python main.py experiment=ssl/scratch_neuroprobe run.group=DEBUG trainer.max_epochs=1
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: neuroprobe/default
+  - override /model/tokenizer: per_channel_cwt_cnn_hp
+  - override /hydra/launcher: local_gpu
+
+model:
+  zero_output_timestamps: true
+
+data:
+  task_type: ${data.task}_binary
+  task: onset
+  label_mode: binary
+  subset_tier: lite
+  regime: SS-SM
+  fold: 0
+  test_pair: "1x1"
+  test_subject: ${pair_int:${data.test_pair},0}
+  test_session: ${pair_int:${data.test_pair},1}
+
+run:
+  mode: train
+  name: scratch_neuroprobe_${data.task}_s${data.test_subject}_ses${data.test_session}
+  group: NEUROPROBE_SCRATCH
+  tags:
+    - ssl_exp1
+    - neuroprobe
+    - scratch
+    - ${data.task}
+  seed: 42
+  log_level: INFO
+
+logger:
+  project: foundry_ssl
+
+hyperparameters:
+  batch_size: 16
+  sequence_length: 1.0
+  patch_duration: 0.1
+  sampling_rate: 2048
+  num_channels: null
+  session_configs: null
+  fold_number: 0
+  num_workers: 4
+  learning_rate: 1e-4
+  weight_decay: 0.01
+
+module:
+  class_weights: null
+
+trainer:
+  max_epochs: 1000
+  callbacks:
+    early_stopping:
+      monitor: val/neuroprobe_${data.task}_binary_auroc
+      mode: max
+      patience: 20
+    model_checkpoint: null
+
+stage:
+  skip: true
+
+hydra:
+  sweeper:
+    params:
+      data.task: onset,gpt2_surprisal,face_num
+      data.test_pair: 1x1,3x0,7x0
+      model/tokenizer: per_channel_cwt_cnn_hp,per_channel_resample_cnn

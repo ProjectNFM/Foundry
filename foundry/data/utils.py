@@ -56,14 +56,23 @@ def _resolve_signal_modality(data) -> str:
 def _count_modality_channels(data) -> int:
     """Count channels belonging to neural modalities in a single recording.
 
-    If the recording's ``channels`` object has a ``type`` attribute, only
-    channels whose type (case-insensitive) is in :data:`NEURAL_MODALITIES`
-    are counted.  Otherwise all channels are counted.
+    If the recording's ``channels`` object has a ``type`` attribute with
+    string labels, only channels whose type (case-insensitive) is in
+    :data:`NEURAL_MODALITIES` are counted. If types are non-string (e.g.
+    numeric codes) or absent, all channels are counted.
     """
-    if hasattr(data.channels, "type"):
-        types = np.char.lower(data.channels.type.astype(str))
-        return int(np.isin(types, list(NEURAL_MODALITIES)).sum())
-    return len(data.channels.id)
+    if not hasattr(data.channels, "type"):
+        return len(data.channels.id)
+
+    raw_types = np.asarray(data.channels.type)
+    if raw_types.dtype.kind not in ("U", "S", "O"):
+        return len(data.channels.id)
+
+    types = np.char.lower(raw_types.astype(str))
+    count = int(np.isin(types, list(NEURAL_MODALITIES)).sum())
+    if count == 0:
+        return len(data.channels.id)
+    return count
 
 
 def get_sampling_rate(dataset) -> float:
