@@ -224,6 +224,7 @@ docs/figures/*.pdf
 docs/figures/*.png
 docs/figures/*.csv
 docs/figures/data/
+docs/figures/cwt_stability/
 
 # LaTeX build artifacts
 *.aux

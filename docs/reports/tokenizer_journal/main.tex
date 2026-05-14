@@ -307,6 +307,11 @@ numbers should only be compared within a group unless otherwise noted.
             AJILE\_NEW\_ALLTOKS          & Behavior      & 6e-5        & 0.01        & 11 $\times$ 2                   \\
             CWT\_VS\_CNN\_BEHAVIOR       & Behavior      & 3e-4        & 0.007       & 4 $\times$ 2                    \\
             CWT\_VS\_CNN\_POSE           & Pose          & 3e-4        & 0.007       & 2 $\times$ 2                    \\
+            TOKEN\_RATE\_SWEEP           & Behavior      & 3e-4        & 0.007       & 9 $\times$ 2                    \\
+            CWT\_LR\_AND\_PARAM\_MATCH   & Behavior      & 3e-4        & 0.007       & 5 $\times$ 2                    \\
+            CWT\_CNN\_12F               & Behavior      & 3e-4        & 0.007       & 1 $\times$ 2                    \\
+            CWT\_SPECTRAL\_RESOLUTION  & Behavior      & 3e-4        & 0.007       & 10 $\times$ 2                   \\
+            CWT\_CONDITIONING          & Behavior      & 3e-4        & 0.007       & 8 $\times$ 2                    \\
             \bottomrule
       \end{tabular}
       \caption{Hyperparameter summary per experiment group. Absolute
@@ -626,6 +631,769 @@ discriminative power comes from the downstream Perceiver backbone
 rather than from optimizing the wavelet bank itself.
 
 
+% -------------------------------------------------------------------
+\subsection{Token Rate Scaling}
+\label{sec:token-rate-scaling}
+% -------------------------------------------------------------------
+
+\textbf{Question:} How does the output token rate affect downstream
+behavior classification, and do CWT and ResampleCNN scale differently
+with increasing token count?
+
+\textbf{Hypothesis:} Higher token rates provide more temporal
+granularity, which should improve performance. CWT may benefit more
+because each additional token carries a full scalogram slice (both
+magnitude and phase across all frequency bins), whereas the CNN merely
+adds another oversampled waveform sample.
+
+\textbf{Setup:} \texttt{target\_token\_rate} swept over \{100, 200,
+400\}\,Hz for per-channel CWT, per-channel ResampleCNN, and
+per-channel CWT+CNN (see Section~\ref{sec:cwt-cnn-hybrid}). All other
+hyperparameters held at the matched clean-comparison settings (LR=3e-4,
+WD=0.007, embed\_dim=256, concat fusion). Each configuration trained
+with 2 folds.
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=\textwidth]{token_rate_sweep_bar.pdf}
+      \caption{Behavior AUROC for CWT, CNN, and CWT+CNN at three
+            token rates (mean $\pm$ std over 2 folds). Parameter counts
+            are listed in the legend.}
+      \label{fig:token-rate-bar}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.7\textwidth]{token_rate_scaling_line.pdf}
+      \caption{AUROC vs.\ target token rate. All three tokenizers show
+            nearly flat scaling, with CWT+CNN consistently above CWT and
+            CNN at every rate.}
+      \label{fig:token-rate-line}
+\end{figure}
+
+\textbf{Observations:}
+\begin{itemize}[nosep]
+      \item Performance is surprisingly flat across the 100--400\,Hz
+            range for all three tokenizers. Doubling or quadrupling the
+            token count yields at most $\sim$0.5\% AUROC improvement.
+      \item CWT maintains a small but consistent edge over CNN
+            ($\sim$0.4--0.8\% AUROC) at every token rate, consistent
+            with earlier head-to-head results
+            (Section~\ref{sec:cwt-vs-cnn}).
+      \item Neither tokenizer shows a clear scaling advantage over the
+            other---both are effectively flat. The hypothesis that CWT
+            would scale better was not supported.
+      \item The flat scaling suggests that 100\,Hz already provides
+            sufficient temporal resolution for this task, and the
+            Perceiver backbone is not bottlenecked by temporal
+            granularity. This is practical: it means the 4$\times$
+            compute savings of 100\,Hz vs.\ 400\,Hz come at negligible
+            performance cost.
+\end{itemize}
+
+
+% -------------------------------------------------------------------
+\subsection{CWT + CNN Hybrid}
+\label{sec:cwt-cnn-hybrid}
+% -------------------------------------------------------------------
+
+The CWT provides a structured time--frequency representation, but its
+final linear projection may not fully exploit cross-frequency and
+local-temporal interactions. This pair of experiments tests whether
+adding a convolutional stack after the CWT improves performance, and
+whether that improvement is architectural or simply a capacity effect.
+
+\subsubsection{Initial Comparison (Unmatched Parameters)}
+\label{sec:cwt-cnn-initial}
+
+\textbf{Question:} Does adding Conv1d layers after the CWT
+scalogram---before the final linear projection---improve performance
+over either CWT or CNN alone?
+
+\textbf{Setup:} The \texttt{CWTCNNEmbedding} module runs the standard
+CWT (9 log-spaced frequencies, 0.5--30\,Hz) then feeds the
+$(B,\, S {\cdot} 2 {\cdot} F,\, T)$ scalogram through a 2-layer
+Conv1d stack (64 filters, kernel 9, GELU) before a linear projection
+to \texttt{embed\_dim}. Swept across the same 3 token rates as
+Section~\ref{sec:token-rate-scaling}.
+
+\begin{table}[H]
+      \centering
+      \begin{tabular}{lrr}
+            \toprule
+            \textbf{Tokenizer} & \textbf{Temporal Params} & \textbf{Description}          \\
+            \midrule
+            CWT                & 3{,}666                  & CWT + linear projection       \\
+            CNN                & 3{,}924                  & Resample + 2-layer Conv1d (12 filters) + linear \\
+            CWT+CNN            & 59{,}858                 & CWT + 2-layer Conv1d (64 filters) + linear       \\
+            \bottomrule
+      \end{tabular}
+      \caption{Temporal embedding parameter counts for the three
+            tokenizer variants in the token rate sweep. CWT+CNN has
+            $\sim$15$\times$ more parameters, primarily from the wider
+            convolutional stack (64 vs.\ 12 filters) operating on the
+            18-dimensional CWT output.}
+      \label{tab:tokenizer-params}
+\end{table}
+
+\textbf{Observations:}
+\begin{itemize}[nosep]
+      \item CWT+CNN consistently outperforms both CWT and CNN at every
+            token rate, achieving a mean AUROC of $\sim$0.90 compared
+            to $\sim$0.89 for CWT and $\sim$0.88 for CNN.
+      \item The improvement is $\sim$1\% over CWT alone and
+            $\sim$1.7\% over CNN, consistent across all three rates.
+      \item Like the other tokenizers, CWT+CNN shows flat token-rate
+            scaling---performance is nearly identical at 100, 200, and
+            400\,Hz.
+\end{itemize}
+
+\textbf{Caveat:} The CWT+CNN has $\sim$15$\times$ more parameters
+than either CWT or CNN alone (Table~\ref{tab:tokenizer-params}). The
+performance improvement may be partly attributable to greater model
+capacity rather than the architectural combination of CWT and CNN.
+
+\subsubsection{Parameter-Matched Comparison}
+\label{sec:param-match}
+
+\textbf{Question:} Does the CWT+CNN hybrid's advantage come from the
+CWT preprocessing (an architectural benefit) or simply from having
+more model capacity (64 conv filters vs.\ CNN's 12)?
+
+\textbf{Setup:} Two comparisons isolate the architectural contribution
+at different capacity levels. At high capacity, a new
+\texttt{per\_channel\_resample\_cnn\_64f} configuration mirrors the
+CWT+CNN's convolutional stack (64 filters, kernel 9, 2 layers) but
+operates directly on the resampled waveform. At low capacity, a
+\texttt{per\_channel\_cwt\_cnn\_12f} uses the same CWT front-end but
+with only 12 conv filters, matching the original CNN's width. All
+tokenizers are trained at 200\,Hz target token rate with the same
+hyperparameters (LR=3e-4, WD=0.007, embed\_dim=256, concat fusion),
+2~folds.
+
+\begin{table}[H]
+      \centering
+      \begin{tabular}{lrrr}
+            \toprule
+            \textbf{Tokenizer}  & \textbf{Conv Filters} & \textbf{Temporal Params} & \textbf{Input to Conv1d} \\
+            \midrule
+            CWT                 & ---                   & 3{,}666                  & ---                      \\
+            CNN (12f)           & 12                    & 3{,}924                  & 1 channel                \\
+            CWT+CNN (12f)       & 12                    & 5{,}778                  & 18 channels              \\
+            CNN (64f)           & 64                    & 50{,}048                 & 1 channel                \\
+            CWT+CNN (64f)       & 64                    & 59{,}858                 & 18 channels              \\
+            \bottomrule
+      \end{tabular}
+      \caption{Tokenizer configurations in the capacity comparison.
+            Within each capacity tier, the CNN and CWT+CNN variants
+            differ only in input representation (raw waveform vs.\
+            CWT scalogram). The CWT+CNN 12f has $\sim$47\% more
+            parameters than CNN 12f due to the higher input
+            dimensionality (18 scalogram channels vs.\ 1).}
+      \label{tab:param-match-configs}
+\end{table}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.95\textwidth]{param_match_bar.pdf}
+      \caption{CWT+CNN capacity comparison at 200\,Hz. Left group:
+            low-capacity tokenizers ($\leq$6k params). Right group:
+            high-capacity variants with 64 conv filters ($\sim$50--60k
+            params). CWT+CNN's advantage over CNN scales with conv
+            filter count: $\sim$0.4\% at 12 filters, $\sim$1.1\% at
+            64 filters.}
+      \label{fig:param-match}
+\end{figure}
+
+\textbf{Observations:}
+\begin{itemize}[nosep]
+      \item At 64 filters, CWT+CNN achieves $\sim$0.898 AUROC vs.\
+            CNN's $\sim$0.887---a gap of $\sim$1.1\%.
+      \item At 12 filters, CWT+CNN achieves $\sim$0.888 AUROC vs.\
+            CNN's $\sim$0.884---a gap of only $\sim$0.4\%.
+      \item CWT+CNN (12f) essentially matches CWT-alone ($\sim$0.889),
+            suggesting that with only 12 filters the convolutional
+            stack adds negligible value on top of the scalogram---the
+            linear projection already captures the relevant features
+            at this width.
+      \item Simply scaling CNN filters from 12 to 64
+            ($\sim$13$\times$ more parameters) yields only a marginal
+            improvement ($\sim$0.3\%), while CWT+CNN benefits
+            substantially more from the same capacity increase
+            ($\sim$0.888 $\to$ $\sim$0.898, a $\sim$1\% gain).
+      \item The CWT scalogram provides a structured, multi-channel
+            input that wider convolutional stacks can exploit more
+            effectively than a raw waveform. But the convolutional
+            stack needs sufficient width ($\gg$12 filters) to learn
+            meaningful cross-frequency features from the 18-channel
+            scalogram.
+\end{itemize}
+
+\subsubsection*{Joint Interpretation}
+
+The CWT+CNN architecture combines the CWT's sampling-rate-invariant
+frequency decomposition with the CNN's ability to learn cross-frequency
+and local-temporal features. The capacity comparison reveals that this
+combination is \emph{synergistic rather than additive}: the CWT+CNN's
+advantage over CNN \emph{grows} with convolutional width
+($\sim$0.4\% at 12 filters $\to$ $\sim$1.1\% at 64 filters). At low
+capacity, the 12-filter stack cannot exploit the rich 18-channel
+scalogram any better than a simple linear projection, so CWT+CNN 12f
+degenerates to CWT-like performance. At high capacity, the wider stack
+learns to combine magnitude and phase across frequency bins in ways
+that a linear projection cannot, producing a clear architectural
+advantage.
+
+The practical implication is that the CWT+CNN hybrid is most valuable
+when paired with a moderately wide convolutional stack. At minimal
+width it offers no benefit over CWT alone, and scaling the CNN without
+CWT yields diminishing returns. The combination of structured input
+(CWT) and sufficient learnable capacity (64+ filters) is what drives
+the improvement.
+
+
+% -------------------------------------------------------------------
+\subsection{CWT Parameter Adaptation}
+\label{sec:cwt-param-adaptation}
+% -------------------------------------------------------------------
+
+Section~\ref{sec:cwt-learned-params} showed that the CWT's learnable
+frequencies and cycle counts barely move during training. This pair of
+experiments investigates \emph{why} (gradient diagnostics) and
+\emph{whether forcing them to move helps} (LR multiplier sweep).
+
+\subsubsection{Gradient Diagnostics}
+\label{sec:cwt-gradient-diagnostics}
+
+\textbf{Question:} Is the loss landscape flat with respect to the CWT
+parameters, or are the gradients being attenuated before they reach
+the CWT layer?
+
+\textbf{Hypothesis:} The CWT parameters sit at the very bottom of the
+network (first layer), and gradients must backpropagate through the
+Perceiver backbone, the linear projection, and the FFT-based
+convolution before reaching \texttt{freqs\_unconstrained} and
+\texttt{n\_cycles\_unconstrained}. The parameters are effectively
+frozen by vanishing gradients rather than being at a true optimum.
+
+\textbf{Setup:} Gradient logging was enabled via a parameter-watching
+callback on all 18 runs in the TOKEN\_RATE\_SWEEP. For every CWT
+parameter, the callback logged per-step gradient norms, Adam optimizer
+state (momentum, variance), effective step size, and the
+update-to-parameter ratio---the ratio of Adam's actual parameter
+update to the parameter magnitude at each step.
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=\textwidth]{cwt_gradient_diagnostics.pdf}
+      \caption{Left: Adam's update-to-parameter ratio for CWT frequency
+            and cycle-count parameters across all CWT and CWT+CNN runs.
+            Values are $\sim$$10^{-5}$--$10^{-6}$, indicating
+            effectively frozen parameters. Right: gradient norm vs.\
+            effective step norm, showing that even when gradients are
+            non-trivial, Adam's effective updates remain tiny.}
+      \label{fig:gradient-diagnostics}
+\end{figure}
+
+\textbf{Observations:}
+\begin{itemize}[nosep]
+      \item The \texttt{update\_to\_param\_ratio} for frequency
+            parameters is $\sim$3--6$\times 10^{-6}$ across all runs.
+            For cycle counts it is slightly larger at
+            $\sim$3--4$\times 10^{-5}$, but still extremely small.
+      \item For context, a ratio of $10^{-6}$ means the parameter
+            changes by one millionth of its value per optimizer step.
+            Over the 5{,}000+ training steps, cumulative drift is
+            negligible.
+      \item Gradient norms are small but non-zero (0.01--0.28),
+            confirming that the issue is gradient \emph{attenuation}
+            through the deep network, not zero gradients.
+      \item The pattern is consistent across CWT and CWT+CNN runs,
+            across all token rates, and across both folds---ruling out
+            run-specific artifacts.
+\end{itemize}
+
+This confirms the gradient attenuation hypothesis: the CWT parameters
+are effectively frozen during training because gradients are too small
+by the time they reach the first layer. The learned frequencies in
+Section~\ref{sec:cwt-learned-params} reflect initialization, not
+task-specific adaptation.
+
+\subsubsection{Learning Rate Multiplier Sweep}
+\label{sec:cwt-lr-sweep}
+
+\textbf{Question:} If the CWT parameters receive a substantially
+higher learning rate (via a separate Adam param group), do the
+frequencies move meaningfully and does that improve downstream
+performance?
+
+\textbf{Setup:} The CWT learning rate is multiplied by
+\{10, 50, 100\}$\times$ relative to the backbone LR (3e-4), using a
+separate Adam parameter group. All runs use
+\texttt{per\_channel\_cwt} at 200\,Hz target token rate with the
+standard hyperparameters (WD=0.007, embed\_dim=256, concat fusion),
+2~folds. The baseline (1$\times$) reuses the 200\,Hz CWT runs from
+the TOKEN\_RATE\_SWEEP.
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\textwidth]{cwt_lr_sweep_bar.pdf}
+      \caption{Behavior AUROC by CWT learning rate multiplier at
+            200\,Hz (mean $\pm$ std over 2 folds). Performance is flat
+            across all multipliers---boosting the CWT learning rate
+            does not improve downstream performance.}
+      \label{fig:cwt-lr-bar}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=\textwidth]{cwt_lr_sweep_freqs.pdf}
+      \caption{Left: learned center frequencies vs.\ initialization
+            (dashed line) for each multiplier, averaged over folds.
+            Right: learned cycle counts vs.\ initialization (2.5).
+            Higher multipliers produce larger deviations from init,
+            confirming the parameters are unfrozen, but this movement
+            does not translate to better performance.}
+      \label{fig:cwt-lr-freqs}
+\end{figure}
+
+\textbf{Observations:}
+\begin{itemize}[nosep]
+      \item Performance is flat across all multipliers (mean AUROC:
+            1$\times$\!=0.889, 10$\times$\!=0.888,
+            50$\times$\!=0.885, 100$\times$\!=0.885). If anything,
+            higher multipliers slightly degrade performance.
+      \item The higher learning rates \emph{do} successfully unfreeze
+            the CWT parameters. The update-to-parameter ratio for
+            frequencies increases from $\sim$4$\times 10^{-6}$ at
+            1$\times$ to $\sim$4$\times 10^{-4}$ at 100$\times$ (a
+            100-fold improvement, as expected).
+      \item Frequencies shift noticeably at 50--100$\times$: the
+            lowest bins drop from 0.5\,Hz to $\sim$0.25\,Hz and
+            mid-range bins shift by 10--20\%, while high-frequency
+            bins remain relatively stable.
+      \item Cycle counts diverge substantially at 50--100$\times$,
+            ranging from $\sim$2.0 to $\sim$5.1 (initialized at 2.5).
+            There is no clear monotonic trend across bins---the model
+            does not consistently prefer narrower or broader wavelets.
+      \item Variance across folds increases with the multiplier,
+            suggesting the optimization landscape for CWT parameters
+            may have multiple shallow basins rather than a single clear
+            optimum.
+\end{itemize}
+
+\subsubsection*{Joint Interpretation}
+
+The combined picture: CWT parameters are frozen by gradient
+attenuation (diagnostics), and unfreezing them does not improve
+performance (LR sweep). The bottleneck is not the \emph{specific
+frequency values} but the \emph{architecture of the representation
+itself}. With only 9 wavelets at low cycle counts ($\sim$2.5), each
+wavelet acts as a very broad bandpass filter with substantial spectral
+overlap between adjacent bins (cf.\ Appendix~\ref{app:cwt},
+Figure~\ref{fig:app-cwt-ncycles}). Repositioning these broad,
+overlapping filters provides little benefit because the representation
+remains a redundant, smeared basis over the spectrum regardless of
+exact center frequencies.
+
+This motivates a different direction: increasing both the
+\emph{number} of frequency bins and the \emph{cycle count} to produce
+a set of narrow, selective, minimally-overlapping bandpass filters---a
+cleaner orthogonal-ish basis from which downstream layers can extract
+sharp spectral contrasts. This architectural change (more freqs +
+higher $n_\text{cycles}$) addresses the root cause that the LR
+multiplier cannot: transforming the CWT from a blurred 9-bin summary
+into a precise spectral decomposition.
+
+
+% -------------------------------------------------------------------
+\subsection{CWT Spectral Resolution}
+\label{sec:cwt-spectral-resolution}
+% -------------------------------------------------------------------
+
+\textbf{Question:} Does increasing the number of CWT frequency bins
+(9$\to$24) while raising $n_\text{cycles}$ (2.5$\to$7.0) produce a
+better spectral decomposition for downstream classification---especially
+when the CWT frequencies are free to adapt via a 100$\times$ learning
+rate multiplier?
+
+Section~\ref{sec:cwt-param-adaptation} established that (a)~CWT
+parameters are frozen by gradient attenuation, and (b)~unfreezing them
+via a higher LR does not help \emph{given only 9 broad wavelets}.  The
+joint interpretation identified the root cause: with 9 wavelets at
+$n_\text{cycles} \approx 2.5$, each wavelet is a broad bandpass filter
+with substantial spectral overlap between adjacent bins.  Repositioning
+these broad, overlapping filters cannot help because the representation
+remains a redundant, smeared basis regardless of exact center
+frequencies.  The architectural fix should be to increase \emph{both}
+the number of frequency bins and the cycle count, producing narrow,
+selective, minimally-overlapping bandpass filters.
+
+\textbf{Hypothesis:} Performance improvement requires the
+\emph{combination} of more frequencies and higher $n_\text{cycles}$
+(an interaction effect).  More broad wavelets alone (24f + nc2.5) just
+adds redundancy.  Narrower wavelets alone (9f + nc7) improve
+selectivity but cannot resolve frequencies between the 9 widely-spaced
+bins.  The interaction (24f + nc7) should yield the clearest gain.
+
+\textbf{Setup:} A 2$\times$2 factorial crossing \texttt{num\_freqs}
+$\in \{9, 24\}$ with $n_\text{cycles} \in \{2.5, 7.0\}$, evaluated on
+both CWT-only and CWT+CNN architectures.  All CWT configs use
+\texttt{cwt\_lr\_multiplier=100} so the learnable frequencies and cycle
+counts can adapt during training.  CNN baselines (12f and 64f) are
+included for context.
+
+All configs use \texttt{target\_token\_rate}=200\,Hz,
+\texttt{freq\_range}=0.5--30\,Hz (log-spaced initialization), and the
+standard hyperparameters (LR=3e-4, WD=0.007, embed\_dim=256, concat
+fusion, 2~folds).  The CWT+CNN 24f variants use 48 conv filters
+(vs.\ 64 for 9f) to keep total temporal parameters within $\sim$15\%
+($\sim$51k vs.\ $\sim$60k).
+
+\begin{table}[H]
+      \centering
+      \footnotesize
+      \begin{tabular}{llrrrl}
+            \toprule
+            \textbf{Config}               & \textbf{Family} & \textbf{Freqs} & \textbf{$n_\text{cycles}$} & \textbf{Temp.\ Params} & \textbf{Source}            \\
+            \midrule
+            CWT 9f nc2.5                  & CWT             & 9              & 2.5                        & 3{,}666                & Exp.~3b (100$\times$ LR)  \\
+            CWT 9f nc7                    & CWT             & 9              & 7.0                        & 3{,}666                & New                        \\
+            CWT 24f nc2.5                 & CWT             & 24             & 2.5                        & 9{,}456                & New                        \\
+            CWT 24f nc7                   & CWT             & 24             & 7.0                        & 9{,}456                & New                        \\
+            \midrule
+            CWT+CNN 9f-64F nc2.5          & CWT+CNN         & 9              & 2.5                        & 59{,}858               & Exp.~4                     \\
+            CWT+CNN 9f-64F nc7            & CWT+CNN         & 9              & 7.0                        & 59{,}858               & New                        \\
+            CWT+CNN 24f-48F nc2.5         & CWT+CNN         & 24             & 2.5                        & 51{,}024               & New                        \\
+            CWT+CNN 24f-48F nc7           & CWT+CNN         & 24             & 7.0                        & 51{,}024               & New                        \\
+            \midrule
+            CNN 12f                       & CNN             & ---            & ---                        & 3{,}924                & Token rate sweep           \\
+            CNN 64f                       & CNN             & ---            & ---                        & 50{,}048               & Exp.~4                     \\
+            \bottomrule
+      \end{tabular}
+      \caption{Experiment 6 configurations.  CWT+CNN 24f variants use
+            48 conv filters (vs.\ 64 for 9f) to stay approximately
+            capacity-matched.  All CWT configs use 100$\times$ LR
+            multiplier for wavelet parameters.}
+      \label{tab:spectral-resolution-configs}
+\end{table}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=\textwidth]{cwt_spectral_resolution_bar.pdf}
+      \caption{CWT spectral resolution: \texttt{num\_freqs}
+            $\times$ $n_\text{cycles}$ factorial for CWT-only and
+            CWT+CNN architectures, with CNN baselines (mean $\pm$ std
+            over 2 folds).  Performance is flat across all spectral
+            resolution configurations within each architecture family.}
+      \label{fig:spectral-resolution-bar}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=\textwidth]{cwt_spectral_resolution_freqs.pdf}
+      \caption{Learned CWT frequencies vs.\ log-spaced initialization
+            (dashed) for 9-frequency (left) and 24-frequency (right)
+            configs.  Frequencies are sorted for readability.  With
+            the 100$\times$ LR multiplier, frequencies rearrange
+            substantially---especially the 24f configs, where the
+            original log-spacing is completely disrupted---yet this
+            freedom produces no performance improvement.}
+      \label{fig:spectral-resolution-freqs}
+\end{figure}
+
+\textbf{Observations:}
+\begin{itemize}[nosep]
+      \item Performance is flat across all four CWT-only configurations:
+            mean AUROC ranges from 0.884 (9f nc7) to 0.887 (24f nc2.5),
+            well within the fold-to-fold variance ($\sigma \approx 0.01$).
+            Neither \texttt{num\_freqs} nor $n_\text{cycles}$ shows a
+            main effect, and the predicted interaction (24f + nc7) does
+            not materialize.
+      \item CWT+CNN results are similarly flat ($\sim$0.895--0.898),
+            with all new configs within noise of the baseline CWT+CNN
+            9f-64F ($\sim$0.898).
+      \item With the 100$\times$ LR multiplier, the learned frequencies
+            move substantially from initialization
+            (Figure~\ref{fig:spectral-resolution-freqs}).  The 24f
+            configs rearrange almost completely---the original log-spacing
+            is disrupted, and many frequencies collapse toward the
+            1--5\,Hz range.  Despite this freedom to reorganize, there
+            is no performance benefit.
+      \item The overall performance hierarchy is unchanged:
+            CWT+CNN ($\sim$0.895) $>$ CWT-only ($\sim$0.886)
+            $\approx$ CNN 64f ($\sim$0.887) $>$ CNN 12f ($\sim$0.884).
+\end{itemize}
+
+\textbf{Caveats:}
+\begin{itemize}[nosep]
+      \item The 1-second sequence window limits the effective frequency
+            selectivity at low frequencies: at 0.5\,Hz with
+            $n_\text{cycles}=7$, the wavelet envelope
+            ($\sigma \approx 2.2$\,s) extends well beyond the window.
+            Higher $n_\text{cycles}$ may matter more with longer
+            windows.
+      \item CWT+CNN 24f configs use 48 conv filters vs.\ 64 for the 9f
+            baseline to stay approximately capacity-matched.  The
+            $\sim$15\% parameter difference is small relative to the
+            full model ($\sim$6M backbone parameters) but is a minor
+            confound.
+      \item Only 2 folds per configuration.  Per-fold AUROC variance
+            ($\sigma \approx 0.01$) is large relative to the between-config
+            differences, limiting statistical power.
+\end{itemize}
+
+\textbf{Interpretation:} The null result across the full factorial
+suggests that the CWT's value for this task comes from its
+\emph{structural inductive bias}---decomposing the signal into
+\emph{any} set of frequency bands---rather than from the specific
+spectral resolution of that decomposition.  Nine broad wavelets at
+$n_\text{cycles} = 2.5$ already capture sufficient spectral information
+for the downstream Perceiver backbone to classify behavior.  Providing
+a finer, more selective spectral basis (24f, nc7) does not unlock
+additional discriminative power, and allowing the frequencies to freely
+rearrange via the 100$\times$ LR multiplier does not help either.
+This is consistent with the Experiment~3b finding that unfreezing the
+CWT parameters has no effect---whether the frequencies are coarse or
+fine, fixed or free, the bottleneck lies elsewhere.
+
+That said, this conclusion is specific to the AJILE12 behavior
+classification task with 1-second windows.  Tasks requiring finer
+spectral discrimination (e.g., detecting narrow-band oscillations like
+alpha peaks or sleep spindles) or longer temporal context may benefit
+from higher spectral resolution.
+
+
+% -------------------------------------------------------------------
+\subsection{Representation Stability Under Signal Corruptions}
+\label{sec:cwt-stability}
+% -------------------------------------------------------------------
+
+The preceding experiments evaluated CWT variants on a single,
+relatively clean intracranial ECoG dataset.  However, the intended
+application of these tokenizers is large-scale pretraining across
+diverse EEG and ECoG datasets, which exhibit extreme heterogeneity:
+amplitudes can vary by orders of magnitude across labs and hardware,
+DC offsets are common when high-pass filters are misconfigured or
+absent, and artifacts (electrode pops, line noise, amplifier
+saturation) are prevalent in clinical recordings.  If the tokenizer's
+internal representation is fragile under these corruptions, the
+downstream backbone will see large, uninformative representation
+shifts that destabilize training---a failure mode we have observed
+empirically in preliminary cross-dataset experiments.
+
+To characterize this risk \emph{before} committing to expensive
+pretraining runs, we designed a synthetic stability experiment that
+measures how much each tokenizer architecture's output changes when
+common corruptions are applied to the input, using randomly
+initialized weights (i.e., testing architectural inductive bias, not
+learned features).
+
+\textbf{Setup:} Synthetic EEG-like signals (superposition of
+oscillatory components with pink noise, $f_s = 500$\,Hz, 1\,s
+duration) are passed through each architecture in both clean and
+corrupted forms.  Cosine similarity between clean and corrupted
+representations is computed across 50 signals $\times$ 5 random
+initializations.  Six corruption types are tested at multiple
+severity levels:
+
+\begin{itemize}[nosep]
+      \item \textbf{Amplitude scaling:} global multiplicative factor
+            ($0.01\times$ to $100\times$).
+      \item \textbf{Additive white noise:} SNR from 20\,dB down to
+            $-10$\,dB.
+      \item \textbf{Random spikes:} 1 to 20 high-amplitude transients
+            per second.
+      \item \textbf{Zero dropout:} 5\% to 60\% of samples set to zero.
+      \item \textbf{DC offset:} constant offset from $0.1\times$ to
+            $10\times$ signal standard deviation.
+      \item \textbf{60\,Hz line noise:} sinusoidal interference at
+            $0.1\times$ to $5\times$ signal amplitude.
+\end{itemize}
+
+Five architectures are compared: baseline CWT, baseline CNN
+(ResampleCNN), and three CWT conditioning variants---highpass +
+frequency normalization (\texttt{hp+fnorm}), highpass + log-magnitude
+(\texttt{hp+log}), and highpass + log-magnitude + frequency
+normalization (\texttt{hp+log+fnorm}).
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=\textwidth]{cwt_stability/cosine_similarity.pdf}
+      \caption{Representation stability under six signal corruptions
+            (cosine similarity, higher is better).  Baseline CWT (blue)
+            is fragile under amplitude scaling and DC offset.  The
+            \texttt{hp+log} variant (green) achieves the best overall
+            stability profile, maintaining high cosine similarity
+            across most corruption types.  Frequency normalization
+            provides near-perfect amplitude scaling invariance but
+            degrades performance under additive corruptions.}
+      \label{fig:cwt-stability}
+\end{figure}
+
+\textbf{Key findings:}
+\begin{itemize}[nosep]
+      \item Baseline CWT is highly sensitive to amplitude scaling
+            (cosine similarity drops to $\sim$0.5 at $100\times$) and
+            DC offset ($\sim$0.3 at $10\times$~offset).  These are
+            precisely the corruptions most common in heterogeneous
+            multi-dataset training.
+      \item \texttt{hp+log} provides the best overall stability: near-perfect
+            DC rejection via highpass, strong resistance to additive
+            noise (0.97 at 0\,dB vs.\ 0.81 baseline) and random
+            spikes (0.93 at 20 spikes vs.\ 0.70), and reasonable
+            amplitude scaling tolerance.
+      \item Frequency normalization (\texttt{fnorm}) provides
+            near-perfect amplitude scaling invariance ($\sim$1.0 at
+            $100\times$) but interacts poorly with log-magnitude,
+            degrading performance under additive corruptions.
+      \item The CNN baseline shows generally moderate stability but
+            lacks the structured frequency decomposition that makes
+            targeted conditioning possible.
+\end{itemize}
+
+These synthetic results measure architectural inductive bias at random
+initialization.  The next experiment (Section~\ref{sec:cwt-conditioning})
+tests whether these stability advantages translate to downstream
+performance on real data after training.
+
+
+% -------------------------------------------------------------------
+\subsection{CWT+CNN Scalogram Conditioning}
+\label{sec:cwt-conditioning}
+% -------------------------------------------------------------------
+
+\textbf{Question:} Do input highpass filtering, log-magnitude
+compression, and per-frequency instance normalization---applied to the
+CWT+CNN scalogram between the CWT and CNN stages---improve downstream
+behavior classification on real EEG data?  Which combination works
+best, and does it widen the CWT+CNN advantage over the
+parameter-matched CNN 64f baseline?
+
+\textbf{Motivation:} The synthetic stability experiments
+(Section~\ref{sec:cwt-stability}) showed that the baseline CWT
+representation is fragile under common EEG corruptions, particularly
+amplitude scaling and DC offset.  Three lightweight conditioning
+steps were identified as individually or jointly effective:
+\emph{highpass} (causal running-mean subtraction), \emph{log-mag}
+($\log(\text{mag} + \epsilon)$), and \emph{freq-norm} (per-frequency
+instance normalization).  The \texttt{hp+log} variant dominated the
+synthetic experiment, winning 5 of 6 corruption categories.
+
+Testing on CWT+CNN (64 filters) rather than CWT-only because:
+(a)~CWT+CNN is the strongest CWT architecture from Experiments~2/4
+($\sim$0.898 AUROC), and (b)~the parameter-matched CNN 64f baseline
+($\sim$0.887 AUROC) provides the most relevant comparison.
+
+\textbf{Design:} Six conditioning variants from the $2^3$ factorial
+over \texttt{\{highpass,} \texttt{log\_mag,} \texttt{freq\_norm\}}
+(the all-off baseline already exists).  All variants use the CWT+CNN
+architecture (9 log-spaced frequencies, 0.5--30\,Hz,
+$n_\text{cycles}\!=\!2.5$, 64 conv filters, kernel~9, 2~layers,
+GELU).
+
+All configs use \texttt{target\_token\_rate}=200\,Hz and the standard
+hyperparameters (LR=3e-4, WD=0.007, embed\_dim=256, concat fusion,
+2~folds).
+
+\begin{table}[H]
+      \centering
+      \footnotesize
+      \begin{tabular}{lcccrl}
+            \toprule
+            \textbf{Config}            & \textbf{hp} & \textbf{log} & \textbf{fnorm} & \textbf{Temp.\ Params} & \textbf{Source}            \\
+            \midrule
+            CWT+CNN (baseline)         & ---         & ---          & ---            & 59{,}858               & Exp.~4                     \\
+            CWT+CNN+hp                 & \checkmark  & ---          & ---            & 59{,}858               & New                        \\
+            CWT+CNN+log                & ---         & \checkmark   & ---            & 59{,}858               & New                        \\
+            CWT+CNN+fnorm              & ---         & ---          & \checkmark     & 59{,}858               & New                        \\
+            CWT+CNN+hp+log             & \checkmark  & \checkmark   & ---            & 59{,}858               & New                        \\
+            CWT+CNN+hp+fnorm           & \checkmark  & ---          & \checkmark     & 59{,}858               & New                        \\
+            CWT+CNN+hp+log+fnorm       & \checkmark  & \checkmark   & \checkmark     & 59{,}858               & New                        \\
+            \midrule
+            CNN 64f (baseline)         & ---         & ---          & ---            & 50{,}048               & Exp.~4                     \\
+            \bottomrule
+      \end{tabular}
+      \caption{Experiment 7 configurations.  None of the conditioning
+            options add learnable parameters---temporal param count is
+            identical across all CWT+CNN variants (59{,}858).  The CNN
+            64f baseline has $\sim$50k temporal params (within
+            $\sim$15\% of CWT+CNN).}
+      \label{tab:conditioning-configs}
+\end{table}
+
+\textbf{Runs:} 6 new configs $\times$ 2 folds = 12 new runs, plus
+2 baselines $\times$ 2 folds = 4 reused runs
+(\texttt{CWT\_LR\_AND\_PARAM\_MATCH}, Exp.~4).  Total compared:
+16~runs.
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=\textwidth]{cwt_conditioning_bar.pdf}
+      \caption{CWT+CNN scalogram conditioning: behavior AUROC for all
+            conditioning variants and baselines (mean $\pm$ std over
+            2 folds).  Highpass-only achieves the highest mean AUROC
+            ($\sim$0.903), the best result in this report.
+            Frequency normalization consistently degrades performance.}
+      \label{fig:conditioning-bar}
+\end{figure}
+
+\textbf{Observations:}
+\begin{itemize}[nosep]
+      \item \textbf{Highpass-only is the best single conditioning step}
+            (0.903 mean AUROC), improving over the unconditioned CWT+CNN
+            baseline (0.898) by $\sim$0.5\%.  This is the highest AUROC
+            observed in this report.
+      \item Highpass + log-magnitude (0.899) and log-magnitude alone
+            (0.898) match the unconditioned baseline---log-mag neither
+            helps nor hurts when combined with training.
+      \item \textbf{Frequency normalization consistently degrades
+            performance.}  Every config containing \texttt{freq\_norm}
+            falls well below the baseline: \texttt{fnorm} alone (0.880),
+            \texttt{hp+fnorm} (0.876), \texttt{hp+log+fnorm} (0.877).
+            The $\sim$2\% drop is larger than the fold-to-fold variance
+            ($\sigma \approx 0.008$).
+      \item The CWT+CNN advantage over CNN 64f \emph{widens} with
+            highpass conditioning: $\sim$1.1\% at baseline $\to$
+            $\sim$1.7\% with \texttt{hp}.
+\end{itemize}
+
+\textbf{Caveats:}
+\begin{itemize}[nosep]
+      \item Only 2 folds per configuration.  Per-fold AUROC variance
+            ($\sigma \approx 0.008$) is comparable to some of the
+            between-config differences, limiting statistical power.
+      \item AJILE12 is relatively clean intracranial data.  The
+            conditioning steps target corruptions (DC drift, amplitude
+            variability) that are more prevalent in scalp EEG.  The
+            benefit of highpass may be larger on noisier datasets.
+      \item The \texttt{freq\_norm} degradation may be specific to this
+            task or dataset.  Per-frequency normalization discards
+            absolute spectral power, which may carry task-relevant
+            information for behavior classification.
+\end{itemize}
+
+\textbf{Interpretation:} The results reveal a clear dissociation
+between the synthetic stability experiment
+(Section~\ref{sec:cwt-stability}) and real-data performance.  Highpass
+filtering transfers well: DC drift removal helps both synthetic
+stability and real-data classification, likely because it removes a
+source of uninformative variance in the scalogram.  Log-magnitude
+compression is neutral on this clean dataset---its benefits (noise
+robustness) may emerge on noisier data where additive corruptions are
+more prevalent.  Frequency normalization, despite providing
+near-perfect amplitude scaling invariance in synthetic tests,
+\emph{hurts} real-data performance, suggesting that absolute spectral
+power carries discriminative information for behavior classification
+that per-frequency normalization discards.
+
+The practical recommendation is to enable highpass conditioning
+by default for the CWT+CNN tokenizer.  Log-magnitude can be added
+without cost, and may provide robustness benefits on noisier
+datasets.  Frequency normalization should be avoided unless the
+downstream task is known to be amplitude-invariant.
+
+
 %% ===================================================================
 \section{Discussion and Ongoing Conclusions}
 \label{sec:discussion}
@@ -688,13 +1456,90 @@ effort to explore alternatives.
 
 \subsection{CWT + CNN Hybrid}
 
-Preliminary experiments with a CWT-compressor architecture (CWT
-followed by strided convolutions to further reduce token count) did
-not improve over either CWT or CNN alone. The reduced token count may
-limit the Perceiver backbone's capacity to learn temporal features.
-However, using the CWT as an anti-aliasing or feature-extraction step
-\emph{before} a CNN on the resampled features remains an interesting
-direction that has not been fully explored.
+Earlier preliminary experiments with a CWT-compressor architecture
+(CWT followed by strided convolutions to further reduce token count)
+did not improve over either CWT or CNN alone. However, the
+TOKEN\_RATE\_SWEEP experiments (Section~\ref{sec:cwt-cnn-hybrid})
+revisited this idea with a different architecture: rather than
+reducing token count, the CWT+CNN feeds the full CWT scalogram
+through a same-length convolutional stack before projection.
+
+This approach consistently outperforms both CWT and CNN alone
+($\sim$0.90 vs.\ $\sim$0.89 vs.\ $\sim$0.88 AUROC), suggesting
+that the CNN can extract useful cross-frequency features from the
+CWT's structured representation. The capacity comparison
+(Section~\ref{sec:param-match}) reveals that this advantage is
+\emph{capacity-dependent}: CWT+CNN outperforms a parameter-matched
+CNN by $\sim$1.1\% at 64 filters but only $\sim$0.4\% at 12 filters,
+where it degenerates to CWT-like performance. The convolutional stack
+needs sufficient width to exploit cross-frequency features from the
+18-channel scalogram; at minimal width, a linear projection is
+equally effective.
+
+\subsection{Token Rate Is Not a Bottleneck}
+
+The TOKEN\_RATE\_SWEEP results
+(Section~\ref{sec:token-rate-scaling}) show that performance is
+nearly flat across 100--400\,Hz for all three tokenizer families.
+This suggests that temporal granularity is not the limiting factor
+for behavior classification on AJILE12, and the Perceiver backbone
+already captures the relevant dynamics at 100\,Hz. Practically, this
+means the 4$\times$ compute savings of 100\,Hz vs.\ 400\,Hz come at
+negligible performance cost.
+
+\subsection{CWT Parameters Are Effectively Frozen---And Unfreezing Them
+Does Not Help}
+
+The gradient diagnostics (Section~\ref{sec:cwt-gradient-diagnostics})
+confirmed that CWT parameters barely move during training due to
+gradient attenuation. The follow-up LR multiplier sweep
+(Section~\ref{sec:cwt-lr-sweep}) successfully unfroze the parameters
+(100$\times$ larger update ratios, visible frequency/cycle-count
+drift), but this produced no performance improvement. The conclusion
+is that the CWT's value comes from its \emph{structural inductive
+bias}---decomposing the signal into frequency bands---rather than from
+learning task-specific frequency positions.
+
+The deeper issue is that with only 9 wavelets at $n_\text{cycles}
+\approx 2.5$, each wavelet is a broad, overlapping bandpass filter.
+Repositioning these filters does not produce a meaningfully different
+representation. The follow-up experiment
+(Section~\ref{sec:cwt-spectral-resolution}) tests the natural
+architectural fix---more frequency bins and higher cycle counts---and
+finds that it does not help either, suggesting that the CWT's value
+is its structural inductive bias rather than the specifics of its
+spectral decomposition.
+
+\subsection{Scalogram Conditioning: Highpass Helps,
+Frequency Normalization Hurts}
+
+The synthetic stability analysis
+(Section~\ref{sec:cwt-stability}) showed that the baseline CWT
+representation is fragile under common signal corruptions,
+particularly amplitude scaling and DC offset---precisely the
+corruptions most prevalent in heterogeneous multi-dataset training.
+The conditioning experiment
+(Section~\ref{sec:cwt-conditioning}) tested whether three
+lightweight preprocessing steps (highpass, log-magnitude, frequency
+normalization) could address these fragilities on real data.
+
+The results are partially consistent with the synthetic predictions:
+highpass filtering transfers well, providing both improved stability
+\emph{and} a small but consistent performance gain ($\sim$0.5\%
+AUROC).  Log-magnitude is neutral on this clean dataset.
+Frequency normalization, however, degrades performance by
+$\sim$2\% despite providing near-perfect amplitude invariance in
+synthetic tests---a clear example of a stability measure that does
+not translate to downstream benefit when it discards
+task-relevant information (absolute spectral power).
+
+The practical recommendation for large-scale pretraining is to
+enable highpass conditioning by default.  Its DC rejection is
+always beneficial and costs nothing in parameters or compute.
+Log-magnitude may provide robustness benefits on noisier datasets
+and is worth testing in cross-dataset settings.  Frequency
+normalization should be used with caution, and only for tasks where
+amplitude invariance is explicitly desired.
 
 \subsection{Open Questions}
 
@@ -707,9 +1552,43 @@ direction that has not been fully explored.
             regularization properties may be most valuable in a
             self-supervised setting across diverse datasets of varying
             quality. This is a priority for future experiments.
-      \item \textbf{Token rate optimization:} A systematic sweep of
-            \texttt{target\_token\_rate} would clarify the
-            performance--compute trade-off.
+      \item \textbf{CWT+CNN parameter matching} (resolved): The
+            capacity comparison (Section~\ref{sec:param-match})
+            confirms that CWT+CNN's advantage is architectural but
+            capacity-dependent: $\sim$1.1\% over a 64-filter CNN,
+            shrinking to $\sim$0.4\% at 12 filters (where CWT+CNN
+            matches CWT-alone). The convolutional stack needs
+            sufficient width to exploit cross-frequency features.
+      \item \textbf{CWT learning rate multiplier} (resolved): The LR
+            sweep (Section~\ref{sec:cwt-lr-sweep}) shows that
+            unfreezing CWT parameters does not improve performance.
+            The bottleneck is architectural (9 broad wavelets), not
+            the specific frequency values.
+      \item \textbf{CWT spectral resolution} (resolved): The
+            2$\times$2 factorial (Section~\ref{sec:cwt-spectral-resolution})
+            found no effect of increasing frequency bins (9$\to$24) or
+            $n_\text{cycles}$ (2.5$\to$7), and no interaction between them.
+            The CWT's value is its structural inductive bias (any frequency
+            decomposition), not the specific spectral resolution.  This
+            conclusion may not hold for tasks requiring finer spectral
+            discrimination or longer temporal windows.
+      \item \textbf{Scalogram conditioning} (resolved): Highpass
+            filtering improves CWT+CNN performance by $\sim$0.5\%
+            AUROC (Section~\ref{sec:cwt-conditioning}), widening
+            the CWT+CNN advantage over CNN 64f to $\sim$1.7\%.
+            Log-magnitude is neutral; frequency normalization hurts
+            ($\sim$2\% drop).  Recommendation: enable highpass by
+            default, avoid \texttt{freq\_norm}.
+      \item \textbf{CWT-only with conditioning:} If highpass
+            conditioning helps CWT+CNN, does it also help CWT-only
+            (linear projection)?  If so, it could close the gap
+            between CWT and CWT+CNN without the convolutional stack.
+      \item \textbf{Conditioning on noisier data:} The AJILE12
+            dataset is relatively clean intracranial ECoG.  The
+            log-magnitude and highpass benefits may be substantially
+            larger on scalp EEG datasets with more artifact
+            contamination.  Testing on a noisier dataset is a
+            priority.
 \end{itemize}
 
 
