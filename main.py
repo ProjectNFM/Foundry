@@ -272,6 +272,7 @@ def _get_resume_checkpoint_path(
 
 # -- WandB -----------------------------------------------------------------
 
+
 @rank_zero_only
 def _log_config_to_wandb(trainer, cfg: DictConfig):
     if not isinstance(trainer.logger, WandbLogger):
