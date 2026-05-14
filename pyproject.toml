@@ -25,6 +25,7 @@ dependencies = [
 
 [dependency-groups]
 dev = ["pre-commit>=4.5.1", "pytest>=8.0.0", "ruff>=0.14.14"]
+notebooks = ["ipykernel", "pandas", "seaborn"]
 
 [tool.uv.sources]
 torch-brain = { git = "https://github.com/neuro-galaxy/torch_brain", branch = "milo/fast-sampler" }
