@@ -2,9 +2,8 @@
 #
 # Token rate sweep: how does target_token_rate affect downstream performance?
 #
-# Compares per_channel_cwt, per_channel_resample_cnn, and per_channel_cwt_cnn
-# at token rates 100, 200, 400 Hz across 2 folds.
-# 3 tokenizers × 3 rates × 2 folds = 18 runs.
+# Compares per_channel_cwt and per_channel_resample_cnn at token rates
+# 100, 200, 400 Hz across 2 folds.  2 tokenizers × 3 rates × 2 folds = 12 runs.
 #
 # Launch:
 #   uv run python main.py experiment=tokenizer_explore/poyo_ajile_token_rate_sweep -m
@@ -66,7 +65,6 @@ hydra:
     params:
       model/tokenizer: >-
         per_channel_cwt,
-        per_channel_resample_cnn,
-        per_channel_cwt_cnn
+        per_channel_resample_cnn
       model.tokenizer.temporal_embedding.target_token_rate: "100,200,400"
       hyperparameters.fold_number: "0,1"
