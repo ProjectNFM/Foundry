@@ -11,10 +11,9 @@
 # Motivated by synthetic stability experiments showing:
 #   - highpass: near-perfect DC offset rejection
 #   - log_mag:  strong additive corruption resistance (noise, spikes, dropout)
-#   - freq_norm: near-perfect amplitude scaling invariance
 #   - hp+log:   best overall (wins 5/6 corruption types in toy experiment)
 #
-# 6 new CWT+CNN variants × 2 folds = 12 new runs.
+# 3 CWT+CNN variants × 2 folds = 6 runs.
 # Baselines (CWT+CNN 64f, CNN 64f) reused from CWT_LR_AND_PARAM_MATCH.
 #
 # Launch:
@@ -81,8 +80,5 @@ hydra:
       model/tokenizer: >-
         per_channel_cwt_cnn_hp,
         per_channel_cwt_cnn_log,
-        per_channel_cwt_cnn_fnorm,
-        per_channel_cwt_cnn_hp_log,
-        per_channel_cwt_cnn_hp_fnorm,
-        per_channel_cwt_cnn_hp_log_fnorm
+        per_channel_cwt_cnn_hp_log
       hyperparameters.fold_number: "0,1"

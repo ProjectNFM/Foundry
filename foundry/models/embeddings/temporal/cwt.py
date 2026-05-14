@@ -8,7 +8,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 _LOG_MAG_EPS = 1e-6
-_FREQ_NORM_EPS = 1e-8
 
 FreqSpacing = Literal["linear", "log", "mel", "inverse"]
 
@@ -362,7 +361,6 @@ def _condition_scalogram(
     phase: torch.Tensor,
     *,
     log_mag: bool,
-    freq_norm: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Apply optional magnitude conditioning to a CWT scalogram.
 
@@ -370,18 +368,12 @@ def _condition_scalogram(
         mag: ``(B, S, F, T)`` magnitude.
         phase: ``(B, S, F, T)`` phase.
         log_mag: Compress magnitudes with ``log(mag + eps)``.
-        freq_norm: Per-frequency instance norm (zero-mean, unit-variance
-            along time) on magnitude.
 
     Returns:
         Conditioned (mag, phase) with the same shapes.
     """
     if log_mag:
         mag = torch.log(mag + _LOG_MAG_EPS)
-    if freq_norm:
-        mean = mag.mean(dim=-1, keepdim=True)
-        std = mag.std(dim=-1, keepdim=True).clamp(min=_FREQ_NORM_EPS)
-        mag = (mag - mean) / std
     return mag, phase
 
 
@@ -413,9 +405,6 @@ class CWTEmbedding(nn.Module):
       before the CWT, removing DC drift and slow offsets.
     * ``log_mag`` -- apply ``log(mag + eps)`` to the CWT magnitude,
       compressing dynamic range for robustness to additive corruptions.
-    * ``freq_norm`` -- per-frequency instance normalisation on the
-      magnitude (zero-mean, unit-variance along time per frequency bin),
-      giving invariance to amplitude scaling.
     """
 
     def __init__(
@@ -433,7 +422,6 @@ class CWTEmbedding(nn.Module):
         highpass: bool = False,
         highpass_window_sec: float = 0.05,
         log_mag: bool = False,
-        freq_norm: bool = False,
     ):
         super().__init__()
         resolved_freqs = _resolve_init_freqs(
@@ -451,7 +439,6 @@ class CWTEmbedding(nn.Module):
         self._highpass = highpass
         self._highpass_window_sec = highpass_window_sec
         self._log_mag = log_mag
-        self._freq_norm = freq_norm
 
         self.cwt = ContinuousCWTLayer(
             init_freqs=resolved_freqs,
@@ -505,10 +492,8 @@ class CWTEmbedding(nn.Module):
         mag = cwt_out[:, :, 0, :, :]
         phase = cwt_out[:, :, 1, :, :]
 
-        if self._log_mag or self._freq_norm:
-            mag, phase = _condition_scalogram(
-                mag, phase, log_mag=self._log_mag, freq_norm=self._freq_norm
-            )
+        if self._log_mag:
+            mag, phase = _condition_scalogram(mag, phase, log_mag=self._log_mag)
 
         cwt_out = torch.stack([mag, phase], dim=2)
         cwt_flat = cwt_out.permute(0, 4, 1, 2, 3).reshape(B, T, S * 2 * F_dim)
@@ -555,7 +540,6 @@ class CWTCNNEmbedding(nn.Module):
         highpass: bool = False,
         highpass_window_sec: float = 0.05,
         log_mag: bool = False,
-        freq_norm: bool = False,
     ):
         super().__init__()
         from foundry.models.embeddings.activations import get_activation
@@ -575,7 +559,6 @@ class CWTCNNEmbedding(nn.Module):
         self._highpass = highpass
         self._highpass_window_sec = highpass_window_sec
         self._log_mag = log_mag
-        self._freq_norm = freq_norm
 
         self.cwt = ContinuousCWTLayer(
             init_freqs=resolved_freqs,
@@ -647,12 +630,10 @@ class CWTCNNEmbedding(nn.Module):
 
         B, S, _two, F_dim, T = cwt_out.shape
 
-        if self._log_mag or self._freq_norm:
+        if self._log_mag:
             mag = cwt_out[:, :, 0, :, :]
             phase = cwt_out[:, :, 1, :, :]
-            mag, phase = _condition_scalogram(
-                mag, phase, log_mag=self._log_mag, freq_norm=self._freq_norm
-            )
+            mag, phase = _condition_scalogram(mag, phase, log_mag=self._log_mag)
             cwt_out = torch.stack([mag, phase], dim=2)
 
         cwt_flat = cwt_out.reshape(B, S * 2 * F_dim, T)
