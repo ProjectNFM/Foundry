@@ -1,17 +1,22 @@
 _target_: hydra_plugins.foundry_launcher.packed_launcher.SlurmLauncher
 submitit_folder: ${hydra.sweep.dir}/slurm_logs/%j
 stderr_to_stdout: true
-timeout_min: 180
+timeout_min: 60
 signal_delay_s: 300
 tasks_per_node: 1
 cpus_per_task: ${hyperparameters.num_workers}
-account: ${oc.env:CSCS_ACCOUNT,}
-# partition: ${oc.env:CSCS_PARTITION,}
+account: ${oc.env:CSCS_ACCOUNT,""}
+partition: ${oc.env:CSCS_PARTITION, ""}
 nodes: 1
 mem_gb: 32
 gres: gpu:1
+gpus_per_node: 1
 array_parallelism: 10
 name: ${hydra.job.name}
+srun_args:
+  - "--mpi=none"
+  - "--network=disable_rdzv_get"
+  - "--environment=${oc.env:SCRATCH}/edf-files/foundry.toml"
 additional_parameters:
   requeue: true
 setup:
@@ -19,8 +24,5 @@ setup:
   - "source .env"
   - "set +a"
   - "cd ${oc.env:SCRATCH}/Foundry"
-  # - "uv sync"
   - "export RANK=0"
-srun_args:
-  - "--environment=${oc.env:SCRATCH}/edf-files/foundry.toml"
-  # - "--network=disable_rdzv_get"
+  - "rm -rf /dev/shm/${oc.env:USER}/enrootrun 2>/dev/null || true"
