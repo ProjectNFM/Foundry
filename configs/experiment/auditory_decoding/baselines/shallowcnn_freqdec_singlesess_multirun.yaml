@@ -71,4 +71,4 @@ hydra:
     max_batch_size: 1000
     params:
       data.recording_ids: ${config_list_sweep_one_recording_lists:configs/data/neurosoft_minipigs/multisess_raw.yaml,recording_ids}
-      hyperparameters.fold_number: choice(0, 1, 2)
+      hyperparameters.fold_number: choice(0)
