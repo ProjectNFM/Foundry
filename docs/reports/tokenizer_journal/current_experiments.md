@@ -221,7 +221,7 @@ runs are reused directly.
 | 4   | Parameter-matched CWT+CNN/CNN | Completed | CWT_LR_AND_PARAM_MATCH  | 4    |
 | 5   | Low-capacity CWT+CNN (12f)    | Completed | CWT_CNN_12F             | 2    |
 | 6   | CWT spectral resolution       | Ready     | CWT_SPECTRAL_RESOLUTION | 12   |
-| 7   | CWT scalogram conditioning    | Ready     | CWT_CONDITIONING        | 12   |
+| 7   | CWT scalogram conditioning    | Completed | CWT_CONDITIONING        | 12   |
 
 
 ---
@@ -372,7 +372,7 @@ Parameter breakdown for CWT+CNN-24f-48F:
 
 ---
 
-## Experiment 7: CWT+CNN Scalogram Conditioning — Highpass, Log-Mag, Freq-Norm — READY TO LAUNCH
+## Experiment 7: CWT+CNN Scalogram Conditioning — Highpass, Log-Mag, Freq-Norm — COMPLETED
 
 ```bash
 uv run python main.py experiment=tokenizer_explore/poyo_ajile_cwt_conditioning -m
@@ -460,16 +460,45 @@ baseline has ~50k temporal params (within ~15% of CWT+CNN).
 - 2 baselines × 2 folds = 4 reused runs (CWT_LR_AND_PARAM_MATCH, Exp 4)
 - **Total compared: 16 runs**
 
+**Results:**
+
+| Config | Fold 0 | Fold 1 | Mean | Std |
+| --- | --- | --- | --- | --- |
+| CWT+CNN+hp | 0.8975 | 0.9088 | **0.9031** | 0.0080 |
+| CWT+CNN+hp+log | 0.8925 | 0.9059 | 0.8992 | 0.0095 |
+| CWT+CNN+log | 0.8902 | 0.9056 | 0.8979 | 0.0109 |
+| CWT+CNN (baseline) | 0.8914 | 0.9042 | 0.8978 | 0.0090 |
+| CNN 64f (baseline) | 0.8800 | 0.8932 | 0.8866 | 0.0094 |
+| CWT+CNN+fnorm | 0.8745 | 0.8854 | 0.8799 | 0.0077 |
+| CWT+CNN+hp+log+fnorm | 0.8745 | 0.8799 | 0.8772 | 0.0038 |
+| CWT+CNN+hp+fnorm | 0.8704 | 0.8808 | 0.8756 | 0.0074 |
+
+- **Highpass-only is the best single conditioning step** (0.903 mean
+  AUROC), improving over the unconditioned CWT+CNN baseline (0.898) by
+  ~0.5%. This is the highest AUROC observed across all experiments.
+- `hp+log` (0.899) and `log` alone (0.898) match the unconditioned
+  baseline — log-mag neither helps nor hurts after training.
+- **Frequency normalization consistently degrades performance.** Every
+  config containing `freq_norm` drops well below baseline: `fnorm` alone
+  (0.880), `hp+fnorm` (0.876), `hp+log+fnorm` (0.877). The ~2% drop is
+  larger than fold-to-fold variance.
+- The CWT+CNN advantage over CNN 64f **widens** with highpass conditioning:
+  ~1.1% baseline → ~1.7% with `hp`.
+- **Conclusion:** Highpass conditioning should be enabled by default for
+  CWT+CNN. Log-mag is neutral on this clean dataset but may help on noisier
+  data. Frequency normalization discards absolute spectral power and should
+  be avoided for behavior classification.
+
 ### Predicted outcomes (from synthetic stability experiments)
 
-| Outcome | Interpretation |
-| --- | --- |
-| `hp+log` wins overall | Synthetic stability results transfer to real data; additive robustness (log) + DC rejection (hp) matter most in practice |
-| `hp+fnorm` wins overall | Amplitude variability across sessions/channels matters more than additive noise; scaling invariance is the key bottleneck |
-| `hp+log+fnorm` wins overall | All three conditioning steps are complementary in practice (log+fnorm conflict observed in synthetic experiments was an artifact of random init) |
-| Conditioning widens CWT+CNN vs CNN gap | The CWT+CNN advantage is partly limited by scalogram fragility; conditioning unlocks more of the architectural benefit |
-| All conditioned CWT+CNN ≈ baseline CWT+CNN | The CNN stack already learns to handle these corruptions; explicit conditioning is redundant when followed by learned convolutions |
-| All ≈ CNN 64f | Conditioning helps stability but the downstream task doesn't stress the corruptions that matter; CNN alone suffices |
+| Outcome | Interpretation | Result |
+| --- | --- | --- |
+| `hp+log` wins overall | Synthetic stability results transfer to real data | **Partially confirmed** — `hp` alone wins; `log` is neutral |
+| `hp+fnorm` wins overall | Scaling invariance is the key bottleneck | **Rejected** — `fnorm` consistently hurts |
+| `hp+log+fnorm` wins overall | All three are complementary | **Rejected** — `fnorm` degrades all combinations |
+| Conditioning widens CWT+CNN vs CNN gap | Conditioning unlocks architectural benefit | **Confirmed** — gap widens from ~1.1% to ~1.7% with `hp` |
+| All conditioned CWT+CNN ≈ baseline CWT+CNN | CNN stack handles corruptions | **Rejected** — `hp` improves, `fnorm` hurts |
+| All ≈ CNN 64f | Task doesn't stress corruptions | **Rejected** — `hp` widens the gap |
 
 ---
 

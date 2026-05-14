@@ -311,6 +311,7 @@ numbers should only be compared within a group unless otherwise noted.
             CWT\_LR\_AND\_PARAM\_MATCH   & Behavior      & 3e-4        & 0.007       & 5 $\times$ 2                    \\
             CWT\_CNN\_12F               & Behavior      & 3e-4        & 0.007       & 1 $\times$ 2                    \\
             CWT\_SPECTRAL\_RESOLUTION  & Behavior      & 3e-4        & 0.007       & 10 $\times$ 2                   \\
+            CWT\_CONDITIONING          & Behavior      & 3e-4        & 0.007       & 8 $\times$ 2                    \\
             \bottomrule
       \end{tabular}
       \caption{Hyperparameter summary per experiment group. Absolute
@@ -1163,6 +1164,236 @@ alpha peaks or sleep spindles) or longer temporal context may benefit
 from higher spectral resolution.
 
 
+% -------------------------------------------------------------------
+\subsection{Representation Stability Under Signal Corruptions}
+\label{sec:cwt-stability}
+% -------------------------------------------------------------------
+
+The preceding experiments evaluated CWT variants on a single,
+relatively clean intracranial ECoG dataset.  However, the intended
+application of these tokenizers is large-scale pretraining across
+diverse EEG and ECoG datasets, which exhibit extreme heterogeneity:
+amplitudes can vary by orders of magnitude across labs and hardware,
+DC offsets are common when high-pass filters are misconfigured or
+absent, and artifacts (electrode pops, line noise, amplifier
+saturation) are prevalent in clinical recordings.  If the tokenizer's
+internal representation is fragile under these corruptions, the
+downstream backbone will see large, uninformative representation
+shifts that destabilize training---a failure mode we have observed
+empirically in preliminary cross-dataset experiments.
+
+To characterize this risk \emph{before} committing to expensive
+pretraining runs, we designed a synthetic stability experiment that
+measures how much each tokenizer architecture's output changes when
+common corruptions are applied to the input, using randomly
+initialized weights (i.e., testing architectural inductive bias, not
+learned features).
+
+\textbf{Setup:} Synthetic EEG-like signals (superposition of
+oscillatory components with pink noise, $f_s = 500$\,Hz, 1\,s
+duration) are passed through each architecture in both clean and
+corrupted forms.  Cosine similarity between clean and corrupted
+representations is computed across 50 signals $\times$ 5 random
+initializations.  Six corruption types are tested at multiple
+severity levels:
+
+\begin{itemize}[nosep]
+      \item \textbf{Amplitude scaling:} global multiplicative factor
+            ($0.01\times$ to $100\times$).
+      \item \textbf{Additive white noise:} SNR from 20\,dB down to
+            $-10$\,dB.
+      \item \textbf{Random spikes:} 1 to 20 high-amplitude transients
+            per second.
+      \item \textbf{Zero dropout:} 5\% to 60\% of samples set to zero.
+      \item \textbf{DC offset:} constant offset from $0.1\times$ to
+            $10\times$ signal standard deviation.
+      \item \textbf{60\,Hz line noise:} sinusoidal interference at
+            $0.1\times$ to $5\times$ signal amplitude.
+\end{itemize}
+
+Five architectures are compared: baseline CWT, baseline CNN
+(ResampleCNN), and three CWT conditioning variants---highpass +
+frequency normalization (\texttt{hp+fnorm}), highpass + log-magnitude
+(\texttt{hp+log}), and highpass + log-magnitude + frequency
+normalization (\texttt{hp+log+fnorm}).
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=\textwidth]{cwt_stability/cosine_similarity.pdf}
+      \caption{Representation stability under six signal corruptions
+            (cosine similarity, higher is better).  Baseline CWT (blue)
+            is fragile under amplitude scaling and DC offset.  The
+            \texttt{hp+log} variant (green) achieves the best overall
+            stability profile, maintaining high cosine similarity
+            across most corruption types.  Frequency normalization
+            provides near-perfect amplitude scaling invariance but
+            degrades performance under additive corruptions.}
+      \label{fig:cwt-stability}
+\end{figure}
+
+\textbf{Key findings:}
+\begin{itemize}[nosep]
+      \item Baseline CWT is highly sensitive to amplitude scaling
+            (cosine similarity drops to $\sim$0.5 at $100\times$) and
+            DC offset ($\sim$0.3 at $10\times$~offset).  These are
+            precisely the corruptions most common in heterogeneous
+            multi-dataset training.
+      \item \texttt{hp+log} provides the best overall stability: near-perfect
+            DC rejection via highpass, strong resistance to additive
+            noise (0.97 at 0\,dB vs.\ 0.81 baseline) and random
+            spikes (0.93 at 20 spikes vs.\ 0.70), and reasonable
+            amplitude scaling tolerance.
+      \item Frequency normalization (\texttt{fnorm}) provides
+            near-perfect amplitude scaling invariance ($\sim$1.0 at
+            $100\times$) but interacts poorly with log-magnitude,
+            degrading performance under additive corruptions.
+      \item The CNN baseline shows generally moderate stability but
+            lacks the structured frequency decomposition that makes
+            targeted conditioning possible.
+\end{itemize}
+
+These synthetic results measure architectural inductive bias at random
+initialization.  The next experiment (Section~\ref{sec:cwt-conditioning})
+tests whether these stability advantages translate to downstream
+performance on real data after training.
+
+
+% -------------------------------------------------------------------
+\subsection{CWT+CNN Scalogram Conditioning}
+\label{sec:cwt-conditioning}
+% -------------------------------------------------------------------
+
+\textbf{Question:} Do input highpass filtering, log-magnitude
+compression, and per-frequency instance normalization---applied to the
+CWT+CNN scalogram between the CWT and CNN stages---improve downstream
+behavior classification on real EEG data?  Which combination works
+best, and does it widen the CWT+CNN advantage over the
+parameter-matched CNN 64f baseline?
+
+\textbf{Motivation:} The synthetic stability experiments
+(Section~\ref{sec:cwt-stability}) showed that the baseline CWT
+representation is fragile under common EEG corruptions, particularly
+amplitude scaling and DC offset.  Three lightweight conditioning
+steps were identified as individually or jointly effective:
+\emph{highpass} (causal running-mean subtraction), \emph{log-mag}
+($\log(\text{mag} + \epsilon)$), and \emph{freq-norm} (per-frequency
+instance normalization).  The \texttt{hp+log} variant dominated the
+synthetic experiment, winning 5 of 6 corruption categories.
+
+Testing on CWT+CNN (64 filters) rather than CWT-only because:
+(a)~CWT+CNN is the strongest CWT architecture from Experiments~2/4
+($\sim$0.898 AUROC), and (b)~the parameter-matched CNN 64f baseline
+($\sim$0.887 AUROC) provides the most relevant comparison.
+
+\textbf{Design:} Six conditioning variants from the $2^3$ factorial
+over \texttt{\{highpass,} \texttt{log\_mag,} \texttt{freq\_norm\}}
+(the all-off baseline already exists).  All variants use the CWT+CNN
+architecture (9 log-spaced frequencies, 0.5--30\,Hz,
+$n_\text{cycles}\!=\!2.5$, 64 conv filters, kernel~9, 2~layers,
+GELU).
+
+All configs use \texttt{target\_token\_rate}=200\,Hz and the standard
+hyperparameters (LR=3e-4, WD=0.007, embed\_dim=256, concat fusion,
+2~folds).
+
+\begin{table}[H]
+      \centering
+      \footnotesize
+      \begin{tabular}{lcccrl}
+            \toprule
+            \textbf{Config}            & \textbf{hp} & \textbf{log} & \textbf{fnorm} & \textbf{Temp.\ Params} & \textbf{Source}            \\
+            \midrule
+            CWT+CNN (baseline)         & ---         & ---          & ---            & 59{,}858               & Exp.~4                     \\
+            CWT+CNN+hp                 & \checkmark  & ---          & ---            & 59{,}858               & New                        \\
+            CWT+CNN+log                & ---         & \checkmark   & ---            & 59{,}858               & New                        \\
+            CWT+CNN+fnorm              & ---         & ---          & \checkmark     & 59{,}858               & New                        \\
+            CWT+CNN+hp+log             & \checkmark  & \checkmark   & ---            & 59{,}858               & New                        \\
+            CWT+CNN+hp+fnorm           & \checkmark  & ---          & \checkmark     & 59{,}858               & New                        \\
+            CWT+CNN+hp+log+fnorm       & \checkmark  & \checkmark   & \checkmark     & 59{,}858               & New                        \\
+            \midrule
+            CNN 64f (baseline)         & ---         & ---          & ---            & 50{,}048               & Exp.~4                     \\
+            \bottomrule
+      \end{tabular}
+      \caption{Experiment 7 configurations.  None of the conditioning
+            options add learnable parameters---temporal param count is
+            identical across all CWT+CNN variants (59{,}858).  The CNN
+            64f baseline has $\sim$50k temporal params (within
+            $\sim$15\% of CWT+CNN).}
+      \label{tab:conditioning-configs}
+\end{table}
+
+\textbf{Runs:} 6 new configs $\times$ 2 folds = 12 new runs, plus
+2 baselines $\times$ 2 folds = 4 reused runs
+(\texttt{CWT\_LR\_AND\_PARAM\_MATCH}, Exp.~4).  Total compared:
+16~runs.
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=\textwidth]{cwt_conditioning_bar.pdf}
+      \caption{CWT+CNN scalogram conditioning: behavior AUROC for all
+            conditioning variants and baselines (mean $\pm$ std over
+            2 folds).  Highpass-only achieves the highest mean AUROC
+            ($\sim$0.903), the best result in this report.
+            Frequency normalization consistently degrades performance.}
+      \label{fig:conditioning-bar}
+\end{figure}
+
+\textbf{Observations:}
+\begin{itemize}[nosep]
+      \item \textbf{Highpass-only is the best single conditioning step}
+            (0.903 mean AUROC), improving over the unconditioned CWT+CNN
+            baseline (0.898) by $\sim$0.5\%.  This is the highest AUROC
+            observed in this report.
+      \item Highpass + log-magnitude (0.899) and log-magnitude alone
+            (0.898) match the unconditioned baseline---log-mag neither
+            helps nor hurts when combined with training.
+      \item \textbf{Frequency normalization consistently degrades
+            performance.}  Every config containing \texttt{freq\_norm}
+            falls well below the baseline: \texttt{fnorm} alone (0.880),
+            \texttt{hp+fnorm} (0.876), \texttt{hp+log+fnorm} (0.877).
+            The $\sim$2\% drop is larger than the fold-to-fold variance
+            ($\sigma \approx 0.008$).
+      \item The CWT+CNN advantage over CNN 64f \emph{widens} with
+            highpass conditioning: $\sim$1.1\% at baseline $\to$
+            $\sim$1.7\% with \texttt{hp}.
+\end{itemize}
+
+\textbf{Caveats:}
+\begin{itemize}[nosep]
+      \item Only 2 folds per configuration.  Per-fold AUROC variance
+            ($\sigma \approx 0.008$) is comparable to some of the
+            between-config differences, limiting statistical power.
+      \item AJILE12 is relatively clean intracranial data.  The
+            conditioning steps target corruptions (DC drift, amplitude
+            variability) that are more prevalent in scalp EEG.  The
+            benefit of highpass may be larger on noisier datasets.
+      \item The \texttt{freq\_norm} degradation may be specific to this
+            task or dataset.  Per-frequency normalization discards
+            absolute spectral power, which may carry task-relevant
+            information for behavior classification.
+\end{itemize}
+
+\textbf{Interpretation:} The results reveal a clear dissociation
+between the synthetic stability experiment
+(Section~\ref{sec:cwt-stability}) and real-data performance.  Highpass
+filtering transfers well: DC drift removal helps both synthetic
+stability and real-data classification, likely because it removes a
+source of uninformative variance in the scalogram.  Log-magnitude
+compression is neutral on this clean dataset---its benefits (noise
+robustness) may emerge on noisier data where additive corruptions are
+more prevalent.  Frequency normalization, despite providing
+near-perfect amplitude scaling invariance in synthetic tests,
+\emph{hurts} real-data performance, suggesting that absolute spectral
+power carries discriminative information for behavior classification
+that per-frequency normalization discards.
+
+The practical recommendation is to enable highpass conditioning
+by default for the CWT+CNN tokenizer.  Log-magnitude can be added
+without cost, and may provide robustness benefits on noisier
+datasets.  Frequency normalization should be avoided unless the
+downstream task is known to be amplitude-invariant.
+
+
 %% ===================================================================
 \section{Discussion and Ongoing Conclusions}
 \label{sec:discussion}
@@ -1279,6 +1510,37 @@ finds that it does not help either, suggesting that the CWT's value
 is its structural inductive bias rather than the specifics of its
 spectral decomposition.
 
+\subsection{Scalogram Conditioning: Highpass Helps,
+Frequency Normalization Hurts}
+
+The synthetic stability analysis
+(Section~\ref{sec:cwt-stability}) showed that the baseline CWT
+representation is fragile under common signal corruptions,
+particularly amplitude scaling and DC offset---precisely the
+corruptions most prevalent in heterogeneous multi-dataset training.
+The conditioning experiment
+(Section~\ref{sec:cwt-conditioning}) tested whether three
+lightweight preprocessing steps (highpass, log-magnitude, frequency
+normalization) could address these fragilities on real data.
+
+The results are partially consistent with the synthetic predictions:
+highpass filtering transfers well, providing both improved stability
+\emph{and} a small but consistent performance gain ($\sim$0.5\%
+AUROC).  Log-magnitude is neutral on this clean dataset.
+Frequency normalization, however, degrades performance by
+$\sim$2\% despite providing near-perfect amplitude invariance in
+synthetic tests---a clear example of a stability measure that does
+not translate to downstream benefit when it discards
+task-relevant information (absolute spectral power).
+
+The practical recommendation for large-scale pretraining is to
+enable highpass conditioning by default.  Its DC rejection is
+always beneficial and costs nothing in parameters or compute.
+Log-magnitude may provide robustness benefits on noisier datasets
+and is worth testing in cross-dataset settings.  Frequency
+normalization should be used with caution, and only for tasks where
+amplitude invariance is explicitly desired.
+
 \subsection{Open Questions}
 
 \begin{itemize}[nosep]
@@ -1310,6 +1572,23 @@ spectral decomposition.
             decomposition), not the specific spectral resolution.  This
             conclusion may not hold for tasks requiring finer spectral
             discrimination or longer temporal windows.
+      \item \textbf{Scalogram conditioning} (resolved): Highpass
+            filtering improves CWT+CNN performance by $\sim$0.5\%
+            AUROC (Section~\ref{sec:cwt-conditioning}), widening
+            the CWT+CNN advantage over CNN 64f to $\sim$1.7\%.
+            Log-magnitude is neutral; frequency normalization hurts
+            ($\sim$2\% drop).  Recommendation: enable highpass by
+            default, avoid \texttt{freq\_norm}.
+      \item \textbf{CWT-only with conditioning:} If highpass
+            conditioning helps CWT+CNN, does it also help CWT-only
+            (linear projection)?  If so, it could close the gap
+            between CWT and CWT+CNN without the convolutional stack.
+      \item \textbf{Conditioning on noisier data:} The AJILE12
+            dataset is relatively clean intracranial ECoG.  The
+            log-magnitude and highpass benefits may be substantially
+            larger on scalp EEG datasets with more artifact
+            contamination.  Testing on a noisier dataset is a
+            priority.
 \end{itemize}
 
 
