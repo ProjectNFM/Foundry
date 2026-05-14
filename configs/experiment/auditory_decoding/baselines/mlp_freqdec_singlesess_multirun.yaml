@@ -1,6 +1,6 @@
 # @package _global_
 #
-# Per-recording EEGNet sweep over all NeuroSoft minipig raw sessions.
+# Per-recording sweep over all NeuroSoft minipig raw sessions.
 # The sweep choices are generated from `configs/data/neurosoft_minipigs/multisess_raw.yaml`.
 #
 # Execution policy:
@@ -9,15 +9,15 @@
 #
 # Launcher usage:
 # - Local sequential (default launcher, no parallelism):
-#   uv run python main.py experiment=auditory_decoding/baselines/baseline_freqdec_hparam_tuning -m
+#   uv run python main.py experiment=auditory_decoding/baselines/baseline_freqdec_singlesess_multirun -m
 # - SLURM (one job per sweep point):
-#   uv run python main.py experiment=auditory_decoding/baselines/baseline_freqdec_hparam_tuning hydra/launcher=slurm_default -m
+#   uv run python main.py experiment=auditory_decoding/baselines/baseline_freqdec_singlesess_multirun hydra/launcher=slurm_default -m
 # - SLURM packed (example 4 tasks per node):
-#   uv run python main.py experiment=auditory_decoding/baselines/baseline_freqdec_hparam_tuning hydra/launcher=slurm_default hydra.launcher.tasks_per_node=4 -m
+#   uv run python main.py experiment=auditory_decoding/baselines/baseline_freqdec_singlesess_multirun hydra/launcher=slurm_default hydra.launcher.tasks_per_node=4 -m
 
 defaults:
-  - override /model: linear # e.g. linear, mlp, gru, shallowcnn, temporalcnn, eegnet
-  - override /data: neurosoft_minipigs/singlesess
+  - override /model: mlp
+  - override /data: neurosoft_minipigs/multisess_raw
   - override /cluster: cscs
 
 model:
@@ -30,25 +30,24 @@ data:
 
 run:
   project: auditory_decoding
-  name: ${hydra:runtime.choices.model}_BS:${hyperparameters.batch_size}_LR:${hyperparameters.learning_rate}_WD:${hyperparameters.weight_decay}
+  name: ${hydra:runtime.choices.model}_${data.recording_ids.0}_fold${hyperparameters.fold_number}
   group: NEUROSOFT_SINGLE_SESSION
   tags:
     - neurosoft
     - baselines
-    - hparam_tuning
+    - training
     - ${hydra:runtime.choices.model}
     - raw_data
-    - cscs
   seed: 42
   log_level: INFO
 
 hyperparameters:
-  batch_size: 64
+  batch_size: 16
   sequence_length: 0.5
-  fold_number: 0
+  fold_number: ???
   num_workers: 4
   learning_rate: 0.015
-  weight_decay: 0.0018
+  weight_decay: 0.18
 
 trainer:
   max_epochs: 1000
@@ -69,9 +68,7 @@ stage:
 
 hydra:
   sweeper:
-    max_batch_size: 1000 # max number of launched runs
+    max_batch_size: 1000
     params:
-      model: choice(linear) # mlp, gru, shallowcnn, temporalcnn, eegnet)
-      hyperparameters.batch_size: choice(16, 32, 64)
-      hyperparameters.learning_rate: choice(0.015, 0.15)
-      hyperparameters.weight_decay: choice(0.018, 0.18)
+      data.recording_ids: ${config_list_sweep_one_recording_lists:configs/data/neurosoft_minipigs/multisess_raw.yaml,recording_ids}
+      hyperparameters.fold_number: choice(0, 1, 2)

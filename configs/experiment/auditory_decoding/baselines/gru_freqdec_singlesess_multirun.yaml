@@ -1,6 +1,6 @@
 # @package _global_
 #
-# Per-recording EEGNet sweep over all NeuroSoft minipig raw sessions.
+# Per-recording sweep over all NeuroSoft minipig raw sessions.
 # The sweep choices are generated from `configs/data/neurosoft_minipigs/multisess_raw.yaml`.
 #
 # Execution policy:
@@ -16,8 +16,9 @@
 #   uv run python main.py experiment=auditory_decoding/baselines/baseline_freqdec_singlesess_multirun hydra/launcher=slurm_default hydra.launcher.tasks_per_node=4 -m
 
 defaults:
-  - override /model: linear # linear, mlp, gru, shallowcnn, temporalcnn, eegnet
-  - override /data: neurosoft_minipigs/singlesess
+  - override /model: gru
+  - override /data: neurosoft_minipigs/multisess_raw
+  - override /cluster: cscs
 
 model:
   num_channels: ${get_num_ecog_channels_by_name:${data.root}/neurosoft_minipigs_2026,${data.recording_ids.0}}
@@ -29,7 +30,7 @@ data:
 
 run:
   project: auditory_decoding
-  name: ${hydra:runtime.choices.model}_neurosoft_${data.recording_ids.0}
+  name: ${hydra:runtime.choices.model}_${data.recording_ids.0}_fold${hyperparameters.fold_number}
   group: NEUROSOFT_SINGLE_SESSION
   tags:
     - neurosoft
@@ -41,12 +42,12 @@ run:
   log_level: INFO
 
 hyperparameters:
-  batch_size: 64
+  batch_size: 16
   sequence_length: 0.5
-  fold_number: 0
+  fold_number: ???
   num_workers: 4
   learning_rate: 0.0015
-  weight_decay: 0.01
+  weight_decay: 0.018
 
 trainer:
   max_epochs: 1000
@@ -67,6 +68,7 @@ stage:
 
 hydra:
   sweeper:
-    max_batch_size: 1
+    max_batch_size: 1000
     params:
-      data.recording_ids.0: ${config_list_sweep_choices:configs/data/neurosoft_minipigs/multisess_raw.yaml,recording_ids}
+      data.recording_ids: ${config_list_sweep_one_recording_lists:configs/data/neurosoft_minipigs/multisess_raw.yaml,recording_ids}
+      hyperparameters.fold_number: choice(0, 1, 2)
