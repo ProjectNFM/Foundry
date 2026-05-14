@@ -136,6 +136,39 @@ def _config_list_sweep_choices(config_path: str, key: str) -> str:
     return _sweep_choices(tuple(str(value) for value in values))
 
 
+def _config_list_sweep_one_recording_lists(config_path: str, key: str) -> str:
+    """Hydra ``choice()`` string that replaces ``recording_ids`` with one session each.
+
+    Use this when the data config has a long default ``recording_ids`` list but you
+    want a **single-session** multirun. Overriding only ``data.recording_ids.0`` keeps
+    the remaining list entries from the base config, so the dataset still loads many
+    sessions while the model may be sized for the first id only. Sweeping
+    ``data.recording_ids`` with values from this resolver replaces the whole list with
+    ``[session_id]`` per job.
+    """
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    cfg = OmegaConf.load(config_path)
+    values = OmegaConf.select(cfg, key)
+    if values is None:
+        raise KeyError(f"Key '{key}' not found in config file: {config_path}")
+
+    if OmegaConf.is_config(values):
+        values = OmegaConf.to_container(values, resolve=True)
+
+    if not isinstance(values, (list, tuple)):
+        raise TypeError(
+            f"Expected '{key}' in {config_path} to be a list/tuple, got {type(values)}"
+        )
+
+    def _bracket_list(session_id: str) -> str:
+        escaped = str(session_id).replace("'", "\\'")
+        return f"['{escaped}']"
+
+    return "choice(" + ",".join(_bracket_list(v) for v in values) + ")"
+
+
 def _count_ecog_channels(h5_path: str) -> int:
     """Count ECoG-like channels in an HDF5 recording file."""
     import h5py
@@ -225,6 +258,7 @@ def register_resolvers() -> None:
         "get_suffix": _get_suffix,
         "sweep_choices": _sweep_choices,
         "config_list_sweep_choices": _config_list_sweep_choices,
+        "config_list_sweep_one_recording_lists": _config_list_sweep_one_recording_lists,
         "get_num_ecog_channels_by_name": _get_num_ecog_channels_by_name,
     }
     for name, fn in _resolvers.items():
