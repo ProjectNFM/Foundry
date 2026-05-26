@@ -252,6 +252,19 @@ class POYOEEGModel(nn.Module):
             )
         return 1.0 / float(np.median(valid_deltas))
 
+    def _ensure_supported_readout_config(self, data: Data) -> None:
+        if "multitask_readout" not in data.config:
+            data.config["multitask_readout"] = [
+                {"readout_id": spec_id} for spec_id in self.readout_specs.keys()
+            ]
+            return
+
+        data.config["multitask_readout"] = [
+            dict(readout_config)
+            for readout_config in data.config["multitask_readout"]
+            if readout_config.get("readout_id") in self.readout_specs
+        ]
+
     def tokenize(self, data: Data) -> dict:
         """Tokenize the input data.
 
@@ -272,19 +285,7 @@ class POYOEEGModel(nn.Module):
         if not hasattr(data, "config") or data.config is None:
             data.config = {}
 
-        if "multitask_readout" not in data.config:
-            data.config["multitask_readout"] = [
-                {"readout_id": spec_id} for spec_id in self.readout_specs.keys()
-            ]
-        else:
-            available = [
-                cfg["readout_id"] for cfg in data.config["multitask_readout"]
-            ]
-            data.config["multitask_readout"] = [
-                {"readout_id": name}
-                for name in available
-                if name in self.readout_specs
-            ]
+        self._ensure_supported_readout_config(data)
 
         signal_source, default_type = self._resolve_signal_source(data)
 

@@ -22,11 +22,13 @@ class TestCNNEmbedding:
             patch_samples=50,
             num_filters=64,
             kernel_size=3,
+            stride=2,
             activation="gelu",
         )
         assert embedding.embed_dim == embed_dim
         assert embedding.num_input_channels == 8
         assert embedding.patch_samples == 50
+        assert embedding.stride == 2
 
     def test_forward_pass_basic(self, embed_dim, batch_size):
         num_channels = 8
@@ -144,6 +146,28 @@ class TestCNNEmbedding:
         assert conv_layer.in_channels == num_channels
         assert conv_layer.out_channels == 32
         assert conv_layer.kernel_size == (3,)
+        assert conv_layer.stride == (1,)
+
+    def test_conv_stride_changes_flattened_dim(self, embed_dim, batch_size):
+        embedding = CNNEmbedding(
+            embed_dim=embed_dim,
+            num_input_channels=8,
+            patch_samples=50,
+            num_filters=32,
+            kernel_size=5,
+            stride=2,
+            activation="relu",
+        )
+
+        conv_layer = embedding.cnn[0]
+        linear_layer = embedding.cnn[-1]
+        input_values = torch.randn(batch_size, 4, 8, 50)
+        output = embedding(input_values)
+
+        assert conv_layer.stride == (2,)
+        # Conv1d output length: floor((50 - 5) / 2) + 1 = 23.
+        assert linear_layer.in_features == 32 * 23
+        assert output.shape == (batch_size, 4, embed_dim)
 
     def test_forward_pass_single_batch(self, embed_dim):
         num_channels = 4

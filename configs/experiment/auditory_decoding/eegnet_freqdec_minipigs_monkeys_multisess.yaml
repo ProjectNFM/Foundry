@@ -1,12 +1,11 @@
 # @package _global_
 #
-# Multisession EEGNet frequency-decoding experiment for Neurosoft monkey
-# acoustic-stimulation recordings using the existing fixed-channel EEGNet
-# implementation from main.
+# Joint multisession EEGNet frequency-decoding experiment across Neurosoft
+# minipig and monkey acoustic-stimulation recordings.
 
 defaults:
   - override /model: eegnet
-  - override /data: neurosoft_monkeys/multisess_raw
+  - override /data: neurosoft_minipigs_monkeys/multisess_raw
   - override /module: classification
 
 model:
@@ -19,10 +18,11 @@ data:
   task_type: acoustic_stim
 
 run:
-  name: eegnet_neurosoft_monkeys_freqdec_multisess
-  group: NEUROSOFT_MONKEYS_MULTISESSION
+  name: eegnet_neurosoft_minipigs_monkeys_freqdec_multisess
+  group: NEUROSOFT_JOINT_MULTISESSION
   tags:
     - neurosoft
+    - minipigs
     - monkeys
     - eegnet
     - multisession

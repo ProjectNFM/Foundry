@@ -292,6 +292,9 @@ class RegressionModule(BaseMultitaskModule):
             learning_rate=learning_rate,
             weight_decay=weight_decay,
         )
+        self.val_prediction_cache: dict[
+            str, list[tuple[torch.Tensor, torch.Tensor]]
+        ] = {}
         self._initialize_task_modules()
         self.save_hyperparameters(
             ignore=["model", "class_names", "class_weights"]
@@ -302,8 +305,156 @@ class RegressionModule(BaseMultitaskModule):
     ) -> MetricCollection:
         return _create_regression_metrics(prefix)
 
+    def _initialize_task_state(self, task_name: str, spec: Any) -> None:
+        if spec.dim == 1:
+            self.val_prediction_cache[task_name] = []
+
     def _metric_summary_mode(self, metric_name: str) -> str:
         return "max" if metric_name.endswith("_r2") else "min"
+
+    def _prepare_metric_inputs(
+        self,
+        task_output: torch.Tensor,
+        target: torch.Tensor,
+        task_name: str,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        return self._denormalize_regression_values(
+            task_name, task_output, target
+        )
+
+    def _update_validation_task_state(
+        self,
+        task_name: str,
+        metric_preds: torch.Tensor,
+        metric_target: torch.Tensor,
+    ) -> None:
+        if task_name not in self.val_prediction_cache:
+            return
+
+        self.val_prediction_cache[task_name].append(
+            (
+                metric_preds.detach().float().cpu().reshape(-1, 1),
+                metric_target.detach().float().cpu().reshape(-1, 1),
+            )
+        )
+
+    def _on_validation_epoch_end_task(self, task_name: str) -> None:
+        if task_name not in self.val_prediction_cache:
+            return
+
+        cached = self.val_prediction_cache[task_name]
+        if not cached:
+            return
+
+        import matplotlib.pyplot as plt
+        from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
+
+        predictions = torch.cat([pred for pred, _ in cached], dim=0).flatten()
+        targets = torch.cat([target for _, target in cached], dim=0).flatten()
+        finite_mask = torch.isfinite(predictions) & torch.isfinite(targets)
+        predictions = predictions[finite_mask]
+        targets = targets[finite_mask]
+
+        if predictions.numel() == 0:
+            self.val_prediction_cache[task_name] = []
+            return
+
+        r2_score = self._compute_scalar_r2(predictions, targets)
+        fig = self._plot_regression_predictions(
+            predictions=predictions,
+            targets=targets,
+            task_name=task_name,
+            r2_score=r2_score,
+        )
+
+        if self.logger:
+            if isinstance(self.logger, WandbLogger):
+                import wandb
+
+                self.logger.experiment.log(
+                    {f"val/{task_name}_prediction_scatter": wandb.Image(fig)}
+                )
+            elif isinstance(self.logger, TensorBoardLogger):
+                self.logger.experiment.add_figure(
+                    f"val/{task_name}_prediction_scatter",
+                    fig,
+                    self.current_epoch,
+                )
+
+        plt.close(fig)
+        self.val_prediction_cache[task_name] = []
+
+    def _denormalize_regression_values(
+        self,
+        task_name: str,
+        predictions: torch.Tensor,
+        targets: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if task_name != "neurosoft_acoustic_stim_logfreq":
+            return predictions, targets
+
+        from foundry.data.datamodules.neurosoft import (
+            LOGFREQ_NORMALIZE_MEAN,
+            LOGFREQ_NORMALIZE_STD,
+        )
+
+        mean = predictions.new_tensor(LOGFREQ_NORMALIZE_MEAN)
+        std = predictions.new_tensor(LOGFREQ_NORMALIZE_STD)
+        return predictions * std + mean, targets * std + mean
+
+    def _compute_scalar_r2(
+        self, predictions: torch.Tensor, targets: torch.Tensor
+    ) -> float:
+        ss_res = torch.sum((targets - predictions) ** 2)
+        ss_tot = torch.sum((targets - targets.mean()) ** 2)
+        if ss_tot <= 0:
+            return float("nan")
+        return float(1.0 - ss_res / ss_tot)
+
+    def _plot_regression_predictions(
+        self,
+        predictions: torch.Tensor,
+        targets: torch.Tensor,
+        task_name: str,
+        r2_score: float,
+    ):
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        preds = predictions.cpu().numpy()
+        true = targets.cpu().numpy()
+        min_value = float(np.minimum(preds.min(), true.min()))
+        max_value = float(np.maximum(preds.max(), true.max()))
+        if min_value == max_value:
+            min_value -= 0.5
+            max_value += 0.5
+
+        fig, ax = plt.subplots(figsize=(6, 6))
+        ax.scatter(true, preds, alpha=0.5, s=16, edgecolors="none")
+        ax.plot(
+            [min_value, max_value],
+            [min_value, max_value],
+            color="black",
+            linestyle="--",
+            linewidth=1,
+        )
+        ax.set_xlim(min_value, max_value)
+        ax.set_ylim(min_value, max_value)
+        if "logfreq" in task_name:
+            target_label = "Target ln(frequency Hz)"
+            prediction_label = "Predicted ln(frequency Hz)"
+        else:
+            target_label = "Target"
+            prediction_label = "Prediction"
+
+        ax.set_xlabel(target_label)
+        ax.set_ylabel(prediction_label)
+        ax.set_title(
+            f"{task_name} predictions (R2={r2_score:.3f}, N={len(preds)})"
+        )
+        ax.grid(True, alpha=0.25)
+        plt.tight_layout()
+        return fig
 
 
 class ClassificationModule(BaseMultitaskModule):
