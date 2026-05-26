@@ -41,6 +41,7 @@ run:
     - cscs
   seed: 42
   log_level: INFO
+  # resume_if_checkpoint_exists: true
 
 hyperparameters:
   batch_size: 64

@@ -34,11 +34,10 @@ data:
 run:
   project: auditory_decoding
   name: ${hydra:runtime.choices.model}_${data.recording_ids.0}_fold${hyperparameters.fold_number}
-  group: NEUROSOFT_SINGLE_SESSION
+  group: NEUROSOFT_MINIPIGS_SINGLE_SESSION
   tags:
     - neurosoft
     - baselines
-    - training
     - ${hydra:runtime.choices.model}
     - raw_data
   seed: 42
@@ -47,7 +46,7 @@ run:
 hyperparameters:
   batch_size: 16
   sequence_length: 0.5
-  fold_number: ???
+  fold_number: 0
   num_workers: 4
   learning_rate: 0.015
   weight_decay: 0.018
@@ -74,4 +73,3 @@ hydra:
     max_batch_size: 1000
     params:
       data.recording_ids: ${config_list_sweep_one_recording_lists:configs/data/neurosoft_minipigs/multisess_raw.yaml,recording_ids}
-      hyperparameters.fold_number: choice(0)

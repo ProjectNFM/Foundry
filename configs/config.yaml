@@ -31,3 +31,7 @@ run:
   resume_wandb_if_name_matches: false
   # A100 benefits from Tensor Core-enabled FP32 matmul kernels.
   float32_matmul_precision: high
+  # Optional: checkpoint path to use for test evaluation.
+  # If not provided, uses best checkpoint from training. Can be overridden on CLI.
+  # Example: python main.py run.eval_checkpoint=/path/to/checkpoint.ckpt
+  eval_checkpoint: null
