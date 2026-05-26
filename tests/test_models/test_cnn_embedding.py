@@ -79,6 +79,64 @@ class TestCNNEmbedding:
                 activation="invalid_activation",
             )
 
+    def test_positional_activation_argument_backward_compatible(
+        self, embed_dim
+    ):
+        embedding = CNNEmbedding(embed_dim, 8, 50, 32, 3, "relu")
+        assert isinstance(embedding.cnn[1], torch.nn.ReLU)
+
+    def test_stride_changes_conv_output_time(self, embed_dim):
+        embedding = CNNEmbedding(
+            embed_dim=embed_dim,
+            num_input_channels=8,
+            patch_samples=10,
+            num_filters=32,
+            kernel_size=4,
+            stride=2,
+            activation="relu",
+        )
+        assert embedding.cnn[0].stride == (2,)
+        assert embedding.cnn[3].in_features == 4 * 32
+
+    def test_stride_equal_kernel_size(self, embed_dim, batch_size):
+        patch_samples = 12
+        kernel_size = 3
+        embedding = CNNEmbedding(
+            embed_dim=embed_dim,
+            num_input_channels=8,
+            patch_samples=patch_samples,
+            num_filters=16,
+            kernel_size=kernel_size,
+            stride=kernel_size,
+            activation="relu",
+        )
+        input_values = torch.randn(batch_size, 5, 8, patch_samples)
+        output = embedding(input_values)
+        assert output.shape == (batch_size, 5, embed_dim)
+
+    def test_invalid_stride_raises(self, embed_dim):
+        with pytest.raises(ValueError, match="stride must be >= 1"):
+            CNNEmbedding(
+                embed_dim=embed_dim,
+                num_input_channels=8,
+                patch_samples=50,
+                num_filters=32,
+                kernel_size=3,
+                stride=0,
+            )
+
+    def test_kernel_larger_than_patch_samples_raises(self, embed_dim):
+        with pytest.raises(
+            ValueError, match="kernel_size must be <= patch_samples"
+        ):
+            CNNEmbedding(
+                embed_dim=embed_dim,
+                num_input_channels=8,
+                patch_samples=4,
+                num_filters=32,
+                kernel_size=5,
+            )
+
     def test_different_kernel_sizes(self, embed_dim, batch_size):
         num_channels = 8
         patch_samples = 50

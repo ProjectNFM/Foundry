@@ -17,6 +17,7 @@ class PatchCNNEmbedding(nn.Module):
         num_filters: Number of convolutional filters.
         kernel_size: Convolutional kernel width.
         activation: Activation function name.
+        stride: Convolutional stride over samples within each patch.
     """
 
     def __init__(
@@ -27,17 +28,30 @@ class PatchCNNEmbedding(nn.Module):
         num_filters: int = 64,
         kernel_size: int = 3,
         activation: str = "gelu",
+        stride: int = 1,
     ):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_input_channels = num_input_channels
         self.patch_samples = patch_samples
+        self.stride = stride
 
-        conv_out_time = patch_samples - kernel_size + 1
+        if stride < 1:
+            raise ValueError("stride must be >= 1")
+        if kernel_size > patch_samples:
+            raise ValueError("kernel_size must be <= patch_samples")
+
+        conv_out_time = (patch_samples - kernel_size) // stride + 1
         flattened_dim = conv_out_time * num_filters
 
         self.cnn = nn.Sequential(
-            nn.Conv1d(num_input_channels, num_filters, kernel_size, padding=0),
+            nn.Conv1d(
+                num_input_channels,
+                num_filters,
+                kernel_size,
+                stride=stride,
+                padding=0,
+            ),
             get_activation(activation),
             nn.Flatten(),
             nn.Linear(flattened_dim, embed_dim),
