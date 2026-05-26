@@ -79,7 +79,9 @@ class TestCNNEmbedding:
                 activation="invalid_activation",
             )
 
-    def test_positional_activation_argument_backward_compatible(self, embed_dim):
+    def test_positional_activation_argument_backward_compatible(
+        self, embed_dim
+    ):
         embedding = CNNEmbedding(embed_dim, 8, 50, 32, 3, "relu")
         assert isinstance(embedding.cnn[1], torch.nn.ReLU)
 
