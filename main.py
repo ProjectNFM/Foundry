@@ -296,6 +296,104 @@ def _log_config_to_wandb(trainer, cfg: DictConfig):
     )
 
 
+
+# -- Training and Testing -------------------------------------------------------
+
+
+@rank_zero_only
+def _find_best_checkpoint(checkpoint_path: str | None) -> str | None:
+    """Find the best checkpoint file.
+    
+    Args:
+        checkpoint_path: Can be:
+            - None: will search in default locations
+            - A file path: used directly
+            - A directory path: will search for best-*.ckpt in that directory
+    
+    Returns:
+        Path to best checkpoint file, or None if not found.
+    """
+    import glob
+    
+    if checkpoint_path:
+        checkpoint_path = Path(checkpoint_path)
+        
+        # If it's a file, use it directly
+        if checkpoint_path.is_file():
+            return str(checkpoint_path)
+        
+        # If it's a directory, search for best-*.ckpt
+        if checkpoint_path.is_dir():
+            best_files = sorted(
+                glob.glob(str(checkpoint_path / "best-*.ckpt")),
+                key=lambda x: Path(x).stat().st_mtime,
+                reverse=True
+            )
+            if best_files:
+                logger.info("Found best checkpoint files: %s", best_files)
+                return best_files[0]  # Return most recently modified
+            else:
+                logger.warning("No best-*.ckpt files found in directory: %s", checkpoint_path)
+                return None
+    
+    return None
+
+
+def _run_training(trainer, lightning_module, datamodule, ckpt_path: str | None) -> None:
+    """Run training loop."""
+    logger.info("Starting model training...")
+    trainer.fit(
+        lightning_module,
+        datamodule,
+        ckpt_path=ckpt_path,
+        weights_only=False,
+    )
+    logger.info("Training completed.")
+
+
+@rank_zero_only
+def _run_test_evaluation(trainer, lightning_module, datamodule, cfg: DictConfig, output_dir: str) -> None:
+    """Run test evaluation on the best checkpoint (rank 0 only)."""
+    eval_checkpoint = OmegaConf.select(cfg, "run.eval_checkpoint")
+    
+    # Try to find best checkpoint from different sources
+    best_ckpt = None
+    
+    if eval_checkpoint:
+        best_ckpt = _find_best_checkpoint(eval_checkpoint)
+        if best_ckpt:
+            logger.info("Using eval_checkpoint from config: %s", best_ckpt)
+    
+    if not best_ckpt:
+        best_ckpt = trainer.checkpoint_callback.best_model_path
+        if best_ckpt:
+            logger.info("Using best checkpoint from training: %s", best_ckpt)
+    
+    if not best_ckpt:
+        default_checkpoint_dir = Path(output_dir) / "checkpoints"
+        if default_checkpoint_dir.exists():
+            best_ckpt = _find_best_checkpoint(str(default_checkpoint_dir))
+            if best_ckpt:
+                logger.info("Found best checkpoint in default directory: %s", best_ckpt)
+    
+    if not best_ckpt or not Path(best_ckpt).exists():
+        logger.warning("No best checkpoint found; skipping test evaluation.")
+        return
+
+    try:
+        logger.info("Running test evaluation with checkpoint: %s", best_ckpt)
+        checkpoint = torch.load(best_ckpt, weights_only=False)
+        logger.info("Checkpoint loaded, loading state_dict...")
+        lightning_module.load_state_dict(checkpoint["state_dict"])
+        logger.info("State dict loaded, setting to eval mode...")
+        lightning_module.eval()
+        logger.info("Starting trainer.test()...")
+        trainer.test(lightning_module, datamodule)
+        logger.info("Test evaluation completed.")
+    except Exception as e:
+        logger.error("Error during test evaluation: %s", e, exc_info=True)
+
+
 # -- Entry point ------------------------------------------------------------
 
 
@@ -341,12 +439,8 @@ def main(cfg: DictConfig):
         cfg, checkpoint_dir, slurm_restart_count
     )
     try:
-        trainer.fit(
-            lightning_module,
-            datamodule,
-            ckpt_path=ckpt_path,
-            weights_only=False,
-        )
+        _run_training(trainer, lightning_module, datamodule, ckpt_path)
+        _run_test_evaluation(trainer, lightning_module, datamodule, cfg, output_dir)
     finally:
         if using_wandb_logger:
             _finish_active_wandb_run()

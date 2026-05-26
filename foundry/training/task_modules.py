@@ -1,6 +1,12 @@
 from typing import Any, Dict
 
 import lightning as L
+from lightning.pytorch.loggers import WandbLogger, TensorBoardLogger
+
+import wandb
+import matplotlib.pyplot as plt
+import numpy as np
+
 import torch
 import torch.nn as nn
 from torchmetrics import MetricCollection
@@ -66,6 +72,7 @@ class BaseMultitaskModule(L.LightningModule):
         self.weight_decay = weight_decay
         self.train_metrics = nn.ModuleDict()
         self.val_metrics = nn.ModuleDict()
+        self.test_metrics = nn.ModuleDict()
 
     def _initialize_task_modules(self) -> None:
         for task_name, spec in self.model.readout_specs.items():
@@ -74,6 +81,9 @@ class BaseMultitaskModule(L.LightningModule):
             )
             self.val_metrics[task_name] = self._build_task_metrics(
                 task_name, spec, f"val/{task_name}_"
+            )
+            self.test_metrics[task_name] = self._build_task_metrics(
+                task_name, spec, f"test/{task_name}_"
             )
             self._initialize_task_state(task_name, spec)
 
@@ -113,7 +123,18 @@ class BaseMultitaskModule(L.LightningModule):
     ) -> None:
         return None
 
+    def _update_test_task_state(
+        self,
+        task_name: str,
+        metric_preds: torch.Tensor,
+        metric_target: torch.Tensor,
+    ) -> None:
+        return None
+
     def _on_validation_epoch_end_task(self, task_name: str) -> None:
+        return None
+
+    def _on_test_epoch_end_task(self, task_name: str) -> None:
         return None
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
@@ -142,6 +163,11 @@ class BaseMultitaskModule(L.LightningModule):
     ) -> torch.Tensor:
         return self._shared_step("val", batch)
 
+    def test_step(
+        self, batch: Dict[str, Any], batch_idx: int
+    ) -> torch.Tensor:
+        return self._shared_step("test", batch)
+
     def _shared_step(self, stage: str, batch: Dict[str, Any]) -> torch.Tensor:
         model_inputs, target_values, target_weights, output_decoder_index = (
             self._unpack_batch(batch)
@@ -153,7 +179,12 @@ class BaseMultitaskModule(L.LightningModule):
         )
         self.log(f"{stage}/loss", total_loss, prog_bar=True)
 
-        metrics = self.train_metrics if stage == "train" else self.val_metrics
+        if stage == "train":
+            metrics = self.train_metrics
+        elif stage == "val":
+            metrics = self.val_metrics
+        else:
+            metrics = self.test_metrics
 
         for task_name, task_output in outputs.items():
             target = target_values.get(task_name)
@@ -173,6 +204,10 @@ class BaseMultitaskModule(L.LightningModule):
 
             if stage == "val":
                 self._update_validation_task_state(
+                    task_name, metric_preds, metric_target
+                )
+            elif stage == "test":
+                self._update_test_task_state(
                     task_name, metric_preds, metric_target
                 )
 
@@ -200,13 +235,11 @@ class BaseMultitaskModule(L.LightningModule):
         self._configure_wandb_metric_summaries()
 
     def _configure_wandb_metric_summaries(self):
-        from lightning.pytorch.loggers import WandbLogger
-
         if not isinstance(self.logger, WandbLogger):
             return
 
         experiment = self.logger.experiment
-        for prefix in ("train", "val"):
+        for prefix in ("train", "val", "test"):
             experiment.define_metric(f"{prefix}/loss", summary="min")
             for task_name in self.model.readout_specs:
                 experiment.define_metric(
@@ -216,6 +249,7 @@ class BaseMultitaskModule(L.LightningModule):
         for metrics in (
             *self.train_metrics.values(),
             *self.val_metrics.values(),
+            *self.test_metrics.values(),
         ):
             for metric_name in metrics:
                 experiment.define_metric(
@@ -226,6 +260,10 @@ class BaseMultitaskModule(L.LightningModule):
     def on_validation_epoch_end(self):
         for task_name in self.model.readout_specs:
             self._on_validation_epoch_end_task(task_name)
+
+    def on_test_epoch_end(self):
+        for task_name in self.model.readout_specs:
+            self._on_test_epoch_end_task(task_name)
 
     def _unpack_batch(self, batch: Dict[str, Any]):
         target_values = batch.pop("target_values")
@@ -331,6 +369,7 @@ class ClassificationModule(BaseMultitaskModule):
                 )
 
         self.val_confusion_matrices = nn.ModuleDict()
+        self.test_confusion_matrices = nn.ModuleDict()
         self._initialize_task_modules()
         self.save_hyperparameters(ignore=["model"])
 
@@ -342,6 +381,9 @@ class ClassificationModule(BaseMultitaskModule):
     def _initialize_task_state(self, task_name: str, spec: Any) -> None:
         task_type = "binary" if spec.dim == 2 else "multiclass"
         self.val_confusion_matrices[task_name] = ConfusionMatrix(
+            task=task_type, num_classes=spec.dim
+        )
+        self.test_confusion_matrices[task_name] = ConfusionMatrix(
             task=task_type, num_classes=spec.dim
         )
 
@@ -391,34 +433,86 @@ class ClassificationModule(BaseMultitaskModule):
             metric_preds, metric_target
         )
 
+    def _update_test_task_state(
+        self,
+        task_name: str,
+        metric_preds: torch.Tensor,
+        metric_target: torch.Tensor,
+    ) -> None:
+        self.test_confusion_matrices[task_name].update(
+            metric_preds, metric_target
+        )
+
     def _on_validation_epoch_end_task(self, task_name: str) -> None:
         if task_name not in self.val_confusion_matrices:
             return
 
-        import matplotlib.pyplot as plt
-        from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
-
         confusion_matrix = self.val_confusion_matrices[task_name]
         matrix = confusion_matrix.compute()
         class_names = self._class_names.get(task_name)
+        self._log_confusion_matrix("val", task_name, matrix, class_names)
+        confusion_matrix.reset()
+
+    def _on_test_epoch_end_task(self, task_name: str) -> None:
+        if task_name not in self.test_confusion_matrices:
+            return
+
+        confusion_matrix = self.test_confusion_matrices[task_name]
+        matrix = confusion_matrix.compute()
+        class_names = self._class_names.get(task_name)
+        self._log_confusion_matrix("test", task_name, matrix, class_names)
+        confusion_matrix.reset()
+
+    def _log_confusion_matrix(
+        self,
+        stage: str,
+        task_name: str,
+        matrix: torch.Tensor,
+        class_names: list[str] | None = None,
+    ) -> None:
         fig = self._plot_confusion_matrix(matrix, task_name, class_names)
 
         if self.logger:
             if isinstance(self.logger, WandbLogger):
-                import wandb
-
                 self.logger.experiment.log(
-                    {f"val/{task_name}_confusion_matrix": wandb.Image(fig)}
+                    {f"{stage}/{task_name}_confusion_matrix": wandb.Image(fig)}
+                )
+                self._log_confusion_matrix_table(
+                    stage, task_name, matrix, class_names
                 )
             elif isinstance(self.logger, TensorBoardLogger):
                 self.logger.experiment.add_figure(
-                    f"val/{task_name}_confusion_matrix",
+                    f"{stage}/{task_name}_confusion_matrix",
                     fig,
                     self.current_epoch,
                 )
 
         plt.close(fig)
-        confusion_matrix.reset()
+
+    def _log_confusion_matrix_table(
+        self,
+        stage: str,
+        task_name: str,
+        matrix: torch.Tensor,
+        class_names: list[str] | None = None,
+    ) -> None:
+        cm = matrix.cpu().numpy()
+        n_classes = cm.shape[0]
+
+        if class_names is None:
+            class_names = [str(i) for i in range(n_classes)]
+
+        columns = ["True Label"] + [f"Pred {name}" for name in class_names]
+        data = []
+
+        for i, true_label in enumerate(class_names):
+            row = [true_label] + [int(cm[i, j]) for j in range(n_classes)]
+            data.append(row)
+
+        table = wandb.Table(columns=columns, data=data)
+        self.logger.experiment.log(
+            {f"{stage}/{task_name}_confusion_matrix_table": table}
+        )
 
     def _apply_label_mapping(
         self, target: torch.Tensor, task_name: str
@@ -441,9 +535,6 @@ class ClassificationModule(BaseMultitaskModule):
         task_name: str,
         class_names: list[str] | None = None,
     ):
-        import matplotlib.pyplot as plt
-        import numpy as np
-
         cm = matrix.cpu().numpy()
         n_classes = cm.shape[0]
         row_sums = cm.sum(axis=1)
