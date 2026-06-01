@@ -47,10 +47,10 @@ def compute_patch_samples(patch_duration: float, sampling_rate: float) -> int:
 
 def _resolve_signal_modality(data) -> str:
     """Auto-detect which neural signal modality is present in a recording."""
-    for modality in ("eeg", "ecog", "seeg"):
+    for modality in ("eeg", "ecog", "seeg", "ieeg"):
         if getattr(data, modality, None) is not None:
             return modality
-    raise ValueError("Recording has no 'eeg', 'ecog', or 'seeg' field")
+    raise ValueError("Recording has no 'eeg', 'ecog', 'seeg', or 'ieeg' field")
 
 
 def _count_modality_channels(data) -> int:
@@ -84,8 +84,8 @@ def get_sampling_rate(dataset) -> float:
 
     Args:
         dataset: A :class:`torch_brain.dataset.Dataset` instance with at
-            least one recording containing an ``eeg``, ``ecog``, or ``seeg``
-            field.
+            least one recording containing an ``eeg``, ``ecog``, ``seeg``, or
+            ``ieeg`` field.
 
     Returns:
         Sampling rate in Hz.
