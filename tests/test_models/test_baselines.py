@@ -15,6 +15,7 @@ from foundry.models import (
     TemporalConvAvgPoolClassifier,
     ShallowConvNet,
     EEGNetEncoder,
+    LinearEEGClassifier,
 )
 
 
@@ -161,6 +162,16 @@ def shallow_model(readout_specs):
 def eegnet_model(readout_specs):
     """Create EEGNetEncoder instance."""
     return EEGNetEncoder(
+        readout_specs=readout_specs,
+        num_channels=4,
+        num_samples=512,
+    )
+
+
+@pytest.fixture
+def linear_model(readout_specs):
+    """Create LinearEEGClassifier instance."""
+    return LinearEEGClassifier(
         readout_specs=readout_specs,
         num_channels=4,
         num_samples=512,
@@ -590,6 +601,111 @@ class TestEEGNetEncoder:
         assert has_gradients
 
 
+class TestLinearEEGClassifier:
+    """Test LinearEEGClassifier model."""
+
+    def test_init(self, readout_specs):
+        """Test LinearEEGClassifier initialization."""
+        model = LinearEEGClassifier(
+            readout_specs=readout_specs,
+            num_channels=4,
+            num_samples=128,
+        )
+
+        assert model.num_channels == 4
+        assert hasattr(model, "readout")
+        assert hasattr(model, "dropout")
+        assert hasattr(model, "flatten")
+
+    def test_forward_backward_pass(self, linear_model):
+        """Test tokenize -> collate -> forward -> backward end-to-end."""
+        data = create_baseline_data_sample(num_channels=4, num_samples=512)
+        tokens = linear_model.tokenize(data)
+        batch = collate([tokens])
+
+        x = batch["input_values"]
+        output_decoder_index = batch["output_decoder_index"]
+        target_values = batch["target_values"]
+        target_weights = batch["target_weights"]
+
+        outputs = linear_model(
+            input_values=x,
+            output_decoder_index=output_decoder_index,
+        )
+
+        assert isinstance(outputs, dict)
+        assert "test_baseline_task" in outputs
+
+        loss = compute_multitask_loss(
+            linear_model,
+            outputs,
+            target_values,
+            target_weights,
+            output_decoder_index,
+        )
+
+        assert loss.requires_grad
+        loss.backward()
+
+        has_gradients = False
+        for param in linear_model.parameters():
+            if param.grad is not None:
+                has_gradients = True
+                break
+        assert has_gradients
+
+    def test_forward_backward_batched(self, linear_model):
+        """Test forward + backward with batched samples."""
+        data1 = create_baseline_data_sample(num_channels=4, num_samples=512)
+        data2 = create_baseline_data_sample(num_channels=4, num_samples=512)
+
+        tokens1 = linear_model.tokenize(data1)
+        tokens2 = linear_model.tokenize(data2)
+
+        batch = collate([tokens1, tokens2])
+
+        x = batch["input_values"]
+        output_decoder_index = batch["output_decoder_index"]
+        target_values = batch["target_values"]
+        target_weights = batch["target_weights"]
+
+        outputs = linear_model(
+            input_values=x,
+            output_decoder_index=output_decoder_index,
+        )
+
+        loss = compute_multitask_loss(
+            linear_model,
+            outputs,
+            target_values,
+            target_weights,
+            output_decoder_index,
+        )
+
+        assert loss.requires_grad
+        loss.backward()
+
+        has_gradients = False
+        for param in linear_model.parameters():
+            if param.grad is not None:
+                has_gradients = True
+                break
+        assert has_gradients
+
+    def test_forward_interpolates_sequence_length(self, linear_model):
+        """Test that forward pass correctly interpolates different sequence lengths."""
+        # Setup inputs with 600 samples (linear_model expects 512)
+        x = torch.randn(2, 4, 600)
+        output_decoder_index = torch.ones(2, 1, dtype=torch.long)
+
+        # Forward pass should not error out and return valid shape output
+        outputs = linear_model(
+            input_values=x,
+            output_decoder_index=output_decoder_index,
+        )
+        assert isinstance(outputs, dict)
+
+
 # ============================================================================
 # Integration Tests
 # ============================================================================
@@ -620,6 +736,15 @@ class TestBaselineIntegration:
         """Test tokenize output can be used with EEGNetEncoder."""
         data = create_baseline_data_sample(num_channels=4, num_samples=512)
         tokens = eegnet_model.tokenize(data)
+
+        assert "input_values" in tokens
+        assert "output_decoder_index" in tokens
+        assert tokens["input_values"].obj.shape == (512, 4)
+
+    def test_tokenize_then_forward_linear(self, linear_model):
+        """Test tokenize output can be used with LinearEEGClassifier."""
+        data = create_baseline_data_sample(num_channels=4, num_samples=512)
+        tokens = linear_model.tokenize(data)
 
         assert "input_values" in tokens
         assert "output_decoder_index" in tokens
