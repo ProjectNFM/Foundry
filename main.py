@@ -308,6 +308,21 @@ def main(cfg: DictConfig):
             )
         )
     )
+    # PyTorch 2.6+ defaults weights_only=True in torch.load, but Lightning's
+    # BatchSizeFinder saves/restores full checkpoints containing OmegaConf
+    # configs and UninitializedParameter, which fail the safe-globals check.
+    # All checkpoints are locally generated, so this is safe.
+    import torch.serialization as _ts
+
+    _orig_load = _ts.load
+
+    def _permissive_load(*args, **kwargs):
+        kwargs["weights_only"] = False
+        return _orig_load(*args, **kwargs)
+
+    _ts.load = _permissive_load
+    torch.load = _permissive_load
+
     seed_everything(cfg.run.seed, workers=True)
     logger.info("Starting training: %s", cfg.run.name)
 

@@ -12,7 +12,6 @@ dependencies = [
     "brainsets",
     "hydra-core>=1.3.0",
     "hydra-submitit-launcher>=1.2.0",
-    "ipykernel>=7.1.0",
     "lightning @ https://github.com/Lightning-AI/pytorch-lightning/releases/download/2.6.1/lightning-2.6.1-py3-none-any.whl",
     "torch>=2.9.1",
     "torch-brain",
@@ -21,10 +20,12 @@ dependencies = [
     "torchmetrics>=1.8.2",
     "wandb>=0.24.0",
     "auditorydecoding",
+    "optuna>=4.8.0",
 ]
 
 [dependency-groups]
 dev = ["pre-commit>=4.5.1", "pytest>=8.0.0", "ruff>=0.14.14"]
+notebook = ["ipykernel>=7.2.0", "seaborn>=0.13.2"]
 
 [tool.uv.sources]
 torch-brain = { git = "https://github.com/neuro-galaxy/torch_brain", branch = "milo/fast-sampler" }
