@@ -1,4 +1,5 @@
 from foundry.models.embeddings.temporal.cwt import (
+    CWTCNNEmbedding,
     CWTEmbedding,
     ContinuousCWTLayer,
     generate_freqs,
@@ -18,6 +19,7 @@ __all__ = [
     "PatchCNNEmbedding",
     "PerTimepointLinearEmbedding",
     "PerTimepointIdentityEmbedding",
+    "CWTCNNEmbedding",
     "CWTEmbedding",
     "ContinuousCWTLayer",
     "generate_freqs",
