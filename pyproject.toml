@@ -29,12 +29,18 @@ notebook = ["ipykernel>=7.2.0", "seaborn>=0.13.2"]
 
 [tool.uv.sources]
 torch-brain = { git = "https://github.com/neuro-galaxy/torch_brain", branch = "milo/fast-sampler" }
-brainsets = { git = "https://github.com/neuro-galaxy/brainsets", branch = "mila/dev-main" }
+brainsets = { git = "https://github.com/neuro-galaxy/brainsets", branch = "milo/ajile" }
 temporaldata = { git = "https://github.com/neuro-galaxy/temporaldata", branch = "main" }
-auditorydecoding = { git = "https://github.com/Neurosoft-Bioelectronics/auditorydecoding", branch = "milo/temp-dep-devmain" }
+auditorydecoding = { git = "https://github.com/Neurosoft-Bioelectronics/auditorydecoding", branch = "main" }
 
 [tool.hatch.metadata]
 allow-direct-references = true
+
+[tool.uv]
+override-dependencies = [
+    "torch-brain @ git+https://github.com/neuro-galaxy/torch_brain.git@milo/fast-sampler",
+    "brainsets @ git+https://github.com/neuro-galaxy/brainsets.git@milo/ajile",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

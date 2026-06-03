@@ -146,7 +146,7 @@ def create_data_sample(num_channels, session_id="session1"):
     eeg = RegularTimeSeries(
         signal=signal,
         sampling_rate=SAMPLING_RATE,
-        domain=Interval(0.0, SEQUENCE_LENGTH),
+        domain_start=0.0,
     )
 
     channel_ids = [f"ch{i}" for i in range(num_channels)]

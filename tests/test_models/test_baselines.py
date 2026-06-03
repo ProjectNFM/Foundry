@@ -110,7 +110,7 @@ def create_baseline_data_sample(
     eeg = RegularTimeSeries(
         signal=signal,
         sampling_rate=100.0,
-        domain=Interval(0.0, num_samples / 100.0),
+        domain_start=0.0,
     )
 
     channel_ids = [f"ch{i}" for i in range(num_channels)]
@@ -277,7 +277,7 @@ class TestBaselineTokenize:
         eeg = RegularTimeSeries(
             signal=signal,
             sampling_rate=100.0,
-            domain=Interval(0.0, 2.0),
+            domain_start=0.0,
         )
 
         data = Data(eeg=eeg, domain=Interval(0.0, 2.0))
