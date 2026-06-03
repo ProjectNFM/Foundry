@@ -238,3 +238,5 @@ docs/figures/cwt_stability/
 *.synctex.gz
 *.toc
 docs/reports/**/main.pdf
+
+/.scratch/
