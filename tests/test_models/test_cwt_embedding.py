@@ -4,7 +4,11 @@ import pytest
 import torch
 
 from foundry.models import CWTEmbedding, ContinuousCWTLayer
-from foundry.models.embeddings.temporal.cwt import generate_freqs
+from foundry.models.embeddings.temporal.cwt import (
+    CWTCNNEmbedding,
+    generate_freqs,
+)
+from foundry.models.embeddings.temporal.resample_cnn import ResampleCNNEmbedding
 
 
 INIT_FREQS = torch.logspace(math.log10(2), math.log10(50), 8).tolist()
@@ -368,3 +372,127 @@ class TestCWTEmbeddingGeneratedFreqs:
         seq_lens = torch.tensor([100])
         out = emb(x, input_sampling_rate=fs, input_seq_len=seq_lens)
         assert out.shape == (1, 16, 32)
+
+
+# ------------------------------------------------------------------ #
+# ContinuousCWTLayer — get_watched_params
+# ------------------------------------------------------------------ #
+
+
+class TestGetWatchedParams:
+    def test_keys_and_shapes(self):
+        layer = ContinuousCWTLayer(init_freqs=INIT_FREQS, n_cycles=5.0)
+        watched = layer.get_watched_params()
+        assert set(watched) == {"freqs_hz", "n_cycles"}
+        assert watched["freqs_hz"].shape == (NUM_FREQS,)
+        assert watched["n_cycles"].shape == (NUM_FREQS,)
+        assert (watched["n_cycles"] >= 1.0).all()
+
+
+# ------------------------------------------------------------------ #
+# CWTEmbedding — scalogram conditioning
+# ------------------------------------------------------------------ #
+
+
+class TestCWTEmbeddingConditioning:
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"highpass": True, "log_mag": False},
+            {"highpass": False, "log_mag": True},
+            {"highpass": True, "log_mag": True},
+        ],
+    )
+    def test_forward_shape(self, kwargs):
+        emb = _make_cwt_embedding(
+            embed_dim=32, target_token_rate=40.0, **kwargs
+        )
+        x = torch.randn(1, 4, 200)
+        fs = torch.tensor([250.0])
+        seq_lens = torch.tensor([200])
+        out = emb(x, input_sampling_rate=fs, input_seq_len=seq_lens)
+        assert out.shape == (1, 32, 32)
+        assert torch.isfinite(out).all()
+
+
+# ------------------------------------------------------------------ #
+# CWTCNNEmbedding
+# ------------------------------------------------------------------ #
+
+
+class TestCWTCNNEmbedding:
+    def _make(self, **kwargs):
+        defaults = dict(
+            embed_dim=64,
+            num_sources=4,
+            init_freqs=INIT_FREQS,
+            target_token_rate=40.0,
+            num_filters=12,
+            kernel_size=9,
+        )
+        defaults.update(kwargs)
+        return CWTCNNEmbedding(**defaults)
+
+    def test_forward_shape(self, embed_dim):
+        emb = self._make(embed_dim=embed_dim)
+        x = torch.randn(2, 4, 200)
+        fs = torch.full((2,), 250.0)
+        seq_lens = torch.full((2,), 200, dtype=torch.long)
+        out = emb(x, input_sampling_rate=fs, input_seq_len=seq_lens)
+        assert out.shape == (2, 32, embed_dim)
+
+    def test_highpass_and_log_mag(self):
+        emb = self._make(highpass=True, log_mag=True)
+        x = torch.randn(1, 4, 100)
+        fs = torch.tensor([250.0])
+        seq_lens = torch.tensor([100])
+        out = emb(x, input_sampling_rate=fs, input_seq_len=seq_lens)
+        assert out.shape == (1, 16, 64)
+        assert torch.isfinite(out).all()
+
+    def test_gradients_flow(self):
+        emb = self._make()
+        x = torch.randn(1, 4, 100, requires_grad=True)
+        fs = torch.tensor([250.0])
+        seq_lens = torch.tensor([100])
+        out = emb(x, input_sampling_rate=fs, input_seq_len=seq_lens)
+        out.sum().backward()
+        assert x.grad is not None
+        assert emb.cwt.freqs_unconstrained.grad is not None
+
+
+# ------------------------------------------------------------------ #
+# ResampleCNNEmbedding
+# ------------------------------------------------------------------ #
+
+
+class TestResampleCNNEmbedding:
+    def _make(self, **kwargs):
+        defaults = dict(
+            embed_dim=32,
+            num_sources=4,
+            target_token_rate=40.0,
+            num_filters=12,
+            kernel_size=9,
+        )
+        defaults.update(kwargs)
+        return ResampleCNNEmbedding(**defaults)
+
+    def test_forward_shape(self):
+        emb = self._make()
+        x = torch.randn(2, 4, 200)
+        fs = torch.full((2,), 250.0)
+        seq_lens = torch.full((2,), 200, dtype=torch.long)
+        out = emb(x, input_sampling_rate=fs, input_seq_len=seq_lens)
+        assert out.shape == (2, 32, 32)
+
+    @pytest.mark.parametrize("antialias", [True, False])
+    def test_antialias_flag(self, antialias):
+        emb = self._make(antialias=antialias)
+        x = torch.randn(1, 4, 400)
+        fs = torch.tensor([500.0])
+        seq_lens = torch.tensor([400])
+        out = emb(x, input_sampling_rate=fs, input_seq_len=seq_lens)
+        # 400 samples @ 500 Hz = 0.8 s → round(40 * 0.8) = 32 tokens
+        assert out.shape == (1, 32, 32)
+        assert torch.isfinite(out).all()

@@ -68,7 +68,9 @@ class TestSessionSpatialProjector:
         assert out.shape == (2, 4, Max_T)
 
     def test_time_padding_rezeroed(self):
-        proj = self._make_projector(session_configs={"S": 4}, num_sources=2)
+        proj = self._make_projector(
+            session_configs={"S": 4}, num_sources=2, common_layer=False
+        )
         Max_T = 100
         x = torch.randn(1, 4, Max_T)
         valid_len = 60
@@ -154,9 +156,9 @@ class TestSessionSpatialProjector:
     # common_layer tests
     # ------------------------------------------------------------ #
 
-    def test_common_layer_disabled_by_default(self):
+    def test_common_layer_enabled_by_default(self):
         proj = self._make_projector()
-        assert proj.common_layer is None
+        assert isinstance(proj.common_layer, torch.nn.Linear)
 
     def test_common_layer_initialization(self):
         proj = self._make_projector(

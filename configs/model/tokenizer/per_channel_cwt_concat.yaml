@@ -14,5 +14,5 @@ temporal_embedding:
   min_freq: 2.0
   max_freq: 100.0
   freq_spacing: log
-  target_time_tokens: 200
-  n_cycles: 7.0
+  target_token_rate: 100.0
+  n_cycles: 2.5

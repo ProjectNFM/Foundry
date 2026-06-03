@@ -63,6 +63,7 @@ def _make_model(embed_dim, readout_specs, temporal_embedding):
         embed_dim=embed_dim,
         patch_duration=PATCH_DURATION,
         stride=STRIDE,
+        channel_fusion="add",
     )
     return POYOEEGModel(
         tokenizer=tokenizer,
