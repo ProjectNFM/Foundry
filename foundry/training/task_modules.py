@@ -325,6 +325,13 @@ class BaseMultitaskModule(L.LightningModule):
 
         if total_sequences > 0:
             multitask_loss = multitask_loss / total_sequences
+        elif multitask_loss.grad_fn is None:
+            # No valid targets in this batch — create a differentiable zero
+            # so backward() doesn't crash on a detached constant.
+            multitask_loss = (
+                sum(p.sum() for p in self.model.parameters() if p.requires_grad)
+                * 0.0
+            )
 
         return multitask_loss, taskwise_loss
 

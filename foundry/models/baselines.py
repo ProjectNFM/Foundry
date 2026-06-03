@@ -581,3 +581,78 @@ class EEGNetEncoder(BaselineEEGModel):
             output_readout_index=output_decoder_index,
             unpack_output=False,
         )
+
+
+class LinearEEGClassifier(BaselineEEGModel):
+    """
+    LinearEEGClassifier: A simple linear baseline model for EEG classification.
+
+    This model flattens the input signal along the channel and temporal dimensions
+    and passes it directly through a multitask linear readout.
+    """
+
+    def __init__(
+        self,
+        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
+        num_channels: int = 64,
+        num_samples: int = 128,
+        dropout_rate: float = 0.0,
+    ):
+        """
+        Args:
+            readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s).
+            num_channels (int, optional): Number of EEG channels. Default: 64.
+            num_samples (int, optional): Number of samples (length of EEG input). Default: 128.
+            dropout_rate (float, optional): Dropout rate before the readout. Default: 0.0.
+        """
+        super().__init__(num_channels, readout_specs)
+        self.num_samples = num_samples
+        self.dropout = (
+            nn.Dropout(dropout_rate) if dropout_rate > 0 else nn.Identity()
+        )
+        self.flatten = nn.Flatten()
+
+        out_dim = num_channels * num_samples
+        self.readout = MultitaskReadout(
+            dim=out_dim,
+            readout_specs=self._readout_specs,
+        )
+
+    def forward(
+        self,
+        *,
+        input_values: torch.Tensor,
+        output_decoder_index: torch.Tensor,
+        **kwargs,
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Forward pass for LinearEEGClassifier.
+
+        Args:
+            input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
+            output_decoder_index (torch.Tensor): Task index tensor (B, n_out).
+
+        Returns:
+            Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
+        """
+        x = self._check_input_shape_conv1d(input_values)  # shape: (B, C, T)
+
+        # In case the input length T is different from num_samples due to windowing/padding/rounding,
+        # we interpolate it to ensure the feature dimension matches out_dim.
+        if x.shape[-1] != self.num_samples:
+            x = torch.nn.functional.interpolate(
+                x, size=self.num_samples, mode="linear", align_corners=False
+            )
+
+        x = self.flatten(x)  # shape: (B, C * num_samples)
+        x = self.dropout(x)
+
+        batch_size = x.shape[0]
+        n_out = output_decoder_index.shape[1]
+        x = x.unsqueeze(1).expand(batch_size, n_out, -1)
+
+        return self.readout(
+            output_embs=x,
+            output_readout_index=output_decoder_index,
+            unpack_output=False,
+        )
