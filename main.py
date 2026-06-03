@@ -190,6 +190,23 @@ def _build_model_and_data(cfg: DictConfig):
     return model, datamodule
 
 
+def _build_pretrain_model_and_data(cfg: DictConfig):
+    """Build model and datamodule for self-supervised pretraining.
+
+    Skips readout specs and uses :meth:`tokenize_pretrain` for label-free
+    data preparation.
+    """
+    _populate_data_driven_hyperparams(cfg)
+
+    model = instantiate(cfg.model, readout_specs=[])
+    tokenizer = (
+        model.tokenize_pretrain if hasattr(model, "tokenize_pretrain") else None
+    )
+    datamodule = instantiate(cfg.data, tokenizer=tokenizer)
+
+    return model, datamodule
+
+
 def _compute_class_weights(cfg: DictConfig, datamodule):
     if cfg.module.class_weights != "auto":
         return None
@@ -354,13 +371,19 @@ def main(cfg: DictConfig):
     _configure_wandb(cfg, output_dir)
     _stage_data_if_needed(cfg)
 
-    model, datamodule = _build_model_and_data(cfg)
-    lightning_module = _build_lightning_module(cfg, model, datamodule)
+    run_mode = str(OmegaConf.select(cfg, "run.mode", default="train"))
+
+    if run_mode == "pretrain":
+        model, datamodule = _build_pretrain_model_and_data(cfg)
+        lightning_module = instantiate(cfg.module, model=model)
+    else:
+        model, datamodule = _build_model_and_data(cfg)
+        lightning_module = _build_lightning_module(cfg, model, datamodule)
+
     trainer = _build_trainer(cfg)
 
     _log_config_to_wandb(trainer, cfg)
 
-    run_mode = str(OmegaConf.select(cfg, "run.mode", default="train"))
     try:
         if run_mode == "eval":
             eval_ckpt = OmegaConf.select(
@@ -376,7 +399,7 @@ def main(cfg: DictConfig):
                 datamodule=datamodule,
                 ckpt_path=str(eval_ckpt),
             )
-        elif run_mode == "train":
+        elif run_mode in ("train", "pretrain"):
             ckpt_path = _get_resume_checkpoint_path(
                 cfg, checkpoint_dir, slurm_restart_count
             )
@@ -389,7 +412,7 @@ def main(cfg: DictConfig):
         else:
             raise ValueError(
                 f"Unsupported run.mode='{run_mode}'. "
-                "Expected one of: train, eval."
+                "Expected one of: train, eval, pretrain."
             )
     finally:
         if using_wandb_logger:

@@ -252,6 +252,70 @@ class POYOEEGModel(nn.Module):
             )
         return 1.0 / float(np.median(valid_deltas))
 
+    def _prepare_signal_inputs(self, data: Data) -> dict:
+        """Shared signal preparation for both supervised and pretrain paths.
+
+        Resolves signal source, filters channels by modality, cleans
+        non-finite values, runs CPU-side pretokenization, and builds
+        session/latent metadata.
+
+        Returns:
+            dict with pretokenized inputs, timestamps, session index,
+            latent index/timestamps, and session_id.
+        """
+        if not hasattr(data, "config") or data.config is None:
+            data.config = {}
+
+        signal_source, default_type = self._resolve_signal_source(data)
+
+        modality_field = (
+            data.channels.type.astype(str)
+            if hasattr(data.channels, "type")
+            else np.array([default_type] * len(data.channels)).astype(str)
+        )
+        modality_mask = np.isin(
+            np.char.lower(modality_field), list(self.SUPPORTED_MODALITIES)
+        )
+
+        channel_ids = data.channels.id[modality_mask].astype(str)
+        channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
+
+        sampling_rate = self._infer_sampling_rate_from_timestamps(
+            signal_source.timestamps
+        )
+        signal = signal_source.signal[:, modality_mask]
+        non_finite = ~np.isfinite(signal)
+        if non_finite.any():
+            signal = np.where(non_finite, 0.0, signal)
+
+        pretokenized = self.tokenizer.pretokenize(
+            signal=signal,
+            channel_tokens=channel_tokens,
+            sampling_rate=sampling_rate,
+            sequence_length=self.sequence_length,
+        )
+        pretokenized["input_session_ids"] = str(data.session.id)
+        input_timestamps = pretokenized.pop("input_timestamps")
+
+        input_session_index = self.session_emb.tokenizer(data.session.id)
+
+        return {
+            **pretokenized,
+            "input_timestamps": input_timestamps,
+            "input_session_index": input_session_index,
+            "latent_index": self._latent_index,
+            "latent_timestamps": self._latent_timestamps,
+            "session_id": data.session.id,
+        }
+
+    def tokenize_pretrain(self, data: Data) -> dict:
+        """Label-free tokenization for self-supervised pretraining.
+
+        Like :meth:`tokenize` but skips readout target preparation entirely.
+        Returns only input and latent fields needed by :class:`SSLModule`.
+        """
+        return self._prepare_signal_inputs(data)
+
     def tokenize(self, data: Data) -> dict:
         """Tokenize the input data.
 
@@ -286,41 +350,9 @@ class POYOEEGModel(nn.Module):
                 if name in self.readout_specs
             ]
 
-        signal_source, default_type = self._resolve_signal_source(data)
+        base = self._prepare_signal_inputs(data)
 
-        modality_field = (
-            data.channels.type.astype(str)
-            if hasattr(data.channels, "type")
-            else np.array([default_type] * len(data.channels)).astype(str)
-        )
-        modality_mask = np.isin(
-            np.char.lower(modality_field), list(self.SUPPORTED_MODALITIES)
-        )
-
-        channel_ids = data.channels.id[modality_mask].astype(str)
-        channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
-
-        sampling_rate = self._infer_sampling_rate_from_timestamps(
-            signal_source.timestamps
-        )
-        signal = signal_source.signal[:, modality_mask]
-        non_finite = ~np.isfinite(signal)
-        if non_finite.any():
-            signal = np.where(non_finite, 0.0, signal)
-
-        pretokenized = self.tokenizer.pretokenize(
-            signal=signal,
-            channel_tokens=channel_tokens,
-            sampling_rate=sampling_rate,
-            sequence_length=self.sequence_length,
-        )
-        pretokenized["input_session_ids"] = str(data.session.id)
-        input_timestamps = pretokenized.pop("input_timestamps")
-
-        latent_index = self._latent_index
-        latent_timestamps = self._latent_timestamps
-
-        input_session_index = self.session_emb.tokenizer(data.session.id)
+        input_session_index = base["input_session_index"]
 
         (
             output_timestamps,
@@ -340,17 +372,12 @@ class POYOEEGModel(nn.Module):
         )
 
         return {
-            **pretokenized,
-            "input_timestamps": input_timestamps,
-            "input_session_index": input_session_index,
-            "latent_index": latent_index,
-            "latent_timestamps": latent_timestamps,
+            **base,
             "output_session_index": pad8(output_session_index),
             "output_timestamps": pad8(output_timestamps),
             "output_decoder_index": pad8(output_task_index),
             "target_values": chain(output_values, allow_missing_keys=True),
             "target_weights": chain(output_weights, allow_missing_keys=True),
-            "session_id": data.session.id,
             "absolute_start": data.absolute_start,
             "eval_mask": chain(output_eval_mask, allow_missing_keys=True),
         }

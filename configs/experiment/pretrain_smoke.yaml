@@ -1,0 +1,57 @@
+# @package _global_
+#
+# Smoke test for self-supervised MAE pretraining on Klinzing (OpenNeuro).
+# Tiny recording subset and short epochs for CI-style verification.
+#
+# Usage:
+#   uv run python main.py experiment=pretrain_smoke
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: openneuro/default
+  - override /model/tokenizer: per_channel_cwt_cnn_hp
+  - override /module: ssl_pretrain
+
+model:
+  zero_output_timestamps: false
+
+data:
+  task_type: null
+  recording_ids:
+    - sub-1_task-Sleep_acq-headband
+
+run:
+  mode: pretrain
+  name: pretrain_smoke
+  group: PRETRAIN_SMOKE
+  tags:
+    - ssl
+    - pretrain
+    - smoke
+    - mae
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 4
+  sequence_length: 1.0
+  patch_duration: 0.1
+  sampling_rate: 256
+  num_channels: null
+  session_configs: null
+  fold_number: 0
+  num_workers: 0
+  learning_rate: 1e-4
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 2
+  precision: 32-true
+  callbacks:
+    early_stopping: null
+    model_checkpoint:
+      monitor: pretrain/val_loss
+    parameter_watcher: null
+
+stage:
+  skip: true

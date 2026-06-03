@@ -1,0 +1,6 @@
+_target_: foundry.training.ssl_module.SSLModule
+
+mask_ratio: 0.75
+learning_rate: ${hyperparameters.learning_rate}
+weight_decay: ${hyperparameters.weight_decay}
+cwt_lr_multiplier: ${hyperparameters.cwt_lr_multiplier}
