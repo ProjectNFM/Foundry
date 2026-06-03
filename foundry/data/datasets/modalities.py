@@ -1,10 +1,15 @@
 import torch
-from brainsets.ajile_behavior_labels import (
-    ACTIVE_BEHAVIOR_LABELS,
-    ACTIVE_VS_INACTIVE_LABELS,
-)
 from torch_brain.registry import register_modality, DataType
 from torch_brain.nn.loss import CrossEntropyLoss, Loss, MSELoss
+
+try:
+    from brainsets.ajile_behavior_labels import (
+        ACTIVE_BEHAVIOR_LABELS,
+        ACTIVE_VS_INACTIVE_LABELS,
+    )
+except ImportError:
+    ACTIVE_BEHAVIOR_LABELS = ()
+    ACTIVE_VS_INACTIVE_LABELS = ()
 
 
 class MappedCrossEntropyLoss(Loss):
@@ -87,32 +92,33 @@ MOTOR_IMAGERY_RIGHT_FEET = register_modality(
     loss_fn=MappedCrossEntropyLoss({2: 0, 3: 1}),
 )
 
-AJILE_INACTIVE_ACTIVE = register_modality(
-    "ajile_inactive_active",
-    dim=len(ACTIVE_VS_INACTIVE_LABELS),
-    type=DataType.BINARY,
-    timestamp_key="active_vs_inactive_trials.timestamps",
-    value_key="active_vs_inactive_trials.behavior_id",
-    loss_fn=CrossEntropyLoss(),
-)
+if ACTIVE_VS_INACTIVE_LABELS:
+    AJILE_INACTIVE_ACTIVE = register_modality(
+        "ajile_inactive_active",
+        dim=len(ACTIVE_VS_INACTIVE_LABELS),
+        type=DataType.BINARY,
+        timestamp_key="active_vs_inactive_trials.timestamps",
+        value_key="active_vs_inactive_trials.behavior_id",
+        loss_fn=CrossEntropyLoss(),
+    )
 
-AJILE = register_modality(
-    "ajile_active_behavior",
-    dim=len(ACTIVE_BEHAVIOR_LABELS),
-    type=DataType.MULTINOMIAL,
-    timestamp_key="active_behavior_trials.timestamps",
-    value_key="active_behavior_trials.behavior_id",
-    loss_fn=CrossEntropyLoss(),
-)
+    AJILE = register_modality(
+        "ajile_active_behavior",
+        dim=len(ACTIVE_BEHAVIOR_LABELS),
+        type=DataType.MULTINOMIAL,
+        timestamp_key="active_behavior_trials.timestamps",
+        value_key="active_behavior_trials.behavior_id",
+        loss_fn=CrossEntropyLoss(),
+    )
 
-AJILE_POSE_ESTIMATION = register_modality(
-    "ajile_pose_estimation",
-    dim=18,
-    type=DataType.CONTINUOUS,
-    timestamp_key="pose_trajectories.timestamps",
-    value_key="pose_trajectories.values",
-    loss_fn=MSELoss(),
-)
+    AJILE_POSE_ESTIMATION = register_modality(
+        "ajile_pose_estimation",
+        dim=18,
+        type=DataType.CONTINUOUS,
+        timestamp_key="pose_trajectories.timestamps",
+        value_key="pose_trajectories.values",
+        loss_fn=MSELoss(),
+    )
 
 NEUROSOFT_ON_VS_OFF = register_modality(
     "neurosoft_on_vs_off",

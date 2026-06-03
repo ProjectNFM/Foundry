@@ -22,7 +22,7 @@ class TestRescaleSignal:
             eeg=RegularTimeSeries(
                 signal=data_array.copy(),
                 sampling_rate=100.0,
-                domain=Interval(0.0, 1.0),
+                domain_start=0.0,
             ),
             domain=Interval(0.0, 1.0),
         )
@@ -40,7 +40,7 @@ class TestRescaleSignal:
             eeg=RegularTimeSeries(
                 signal=data_array.copy(),
                 sampling_rate=100.0,
-                domain=Interval(0.0, 1.0),
+                domain_start=0.0,
             ),
             domain=Interval(0.0, 1.0),
         )
@@ -58,7 +58,7 @@ class TestRescaleSignal:
             eeg=RegularTimeSeries(
                 signal=data_array.copy(),
                 sampling_rate=100.0,
-                domain=Interval(0.0, 1.0),
+                domain_start=0.0,
             ),
             domain=Interval(0.0, 1.0),
         )
@@ -74,7 +74,7 @@ class TestRescaleSignal:
             eeg=RegularTimeSeries(
                 signal=data_array,
                 sampling_rate=100.0,
-                domain=Interval(0.0, 1.0),
+                domain_start=0.0,
             ),
             domain=Interval(0.0, 1.0),
         )
@@ -92,7 +92,7 @@ class TestRescaleSignal:
             eeg=RegularTimeSeries(
                 signal=data_array.copy(),
                 sampling_rate=100.0,
-                domain=Interval(0.0, 1.0),
+                domain_start=0.0,
             ),
             domain=Interval(0.0, 1.0),
         )
@@ -108,7 +108,7 @@ class TestRescaleSignal:
             eeg=RegularTimeSeries(
                 signal=data_array,
                 sampling_rate=100.0,
-                domain=Interval(0.0, 1.0),
+                domain_start=0.0,
             ),
             domain=Interval(0.0, 1.0),
         )
@@ -126,7 +126,7 @@ class TestRescaleSignal:
             eeg=RegularTimeSeries(
                 signal=data_array.copy(),
                 sampling_rate=100.0,
-                domain=Interval(0.0, 1.0),
+                domain_start=0.0,
             ),
             domain=Interval(0.0, 1.0),
         )
@@ -143,23 +143,27 @@ class TestRescaleSignal:
 
     def test_rescale_preserves_domain(self):
         data_array = np.random.randn(100, 5)
-        domain = Interval(2.5, 7.5)
+        sampling_rate = 200.0
+        domain_start = 2.5
+        expected_domain = Interval(
+            domain_start, domain_start + len(data_array) / sampling_rate
+        )
         data = Data(
             eeg=RegularTimeSeries(
                 signal=data_array,
-                sampling_rate=200.0,
-                domain=domain,
+                sampling_rate=sampling_rate,
+                domain_start=domain_start,
             ),
-            domain=domain,
+            domain=expected_domain,
         )
 
         transform = RescaleSignal(factor=3.0)
         result = transform(data)
 
-        assert result.eeg.domain.start == domain.start
-        assert result.eeg.domain.end == domain.end
-        assert result.domain.start == domain.start
-        assert result.domain.end == domain.end
+        assert result.eeg.domain.start == expected_domain.start
+        assert result.eeg.domain.end == expected_domain.end
+        assert result.domain.start == expected_domain.start
+        assert result.domain.end == expected_domain.end
 
     def test_rescale_preserves_sampling_rate(self):
         data_array = np.random.randn(100, 5)
@@ -168,7 +172,7 @@ class TestRescaleSignal:
             eeg=RegularTimeSeries(
                 signal=data_array,
                 sampling_rate=sampling_rate,
-                domain=Interval(0.0, 1.0),
+                domain_start=0.0,
             ),
             domain=Interval(0.0, 1.0),
         )
@@ -184,7 +188,7 @@ class TestRescaleSignal:
             eeg=RegularTimeSeries(
                 signal=data_array,
                 sampling_rate=100.0,
-                domain=Interval(0.0, 1.0),
+                domain_start=0.0,
             ),
             domain=Interval(0.0, 1.0),
         )
@@ -202,7 +206,7 @@ class TestRescaleSignal:
             eeg=RegularTimeSeries(
                 signal=data_array.copy(),
                 sampling_rate=100.0,
-                domain=Interval(0.0, 1.0),
+                domain_start=0.0,
             ),
             domain=Interval(0.0, 1.0),
         )
@@ -220,7 +224,7 @@ class TestRescaleSignal:
             eeg=RegularTimeSeries(
                 signal=data_array.copy(),
                 sampling_rate=100.0,
-                domain=Interval(0.0, 1.0),
+                domain_start=0.0,
             ),
             domain=Interval(0.0, 1.0),
         )
@@ -235,7 +239,7 @@ class TestRescaleSignal:
             ecg=RegularTimeSeries(
                 signal=np.array([[1.0, 2.0]]),
                 sampling_rate=100.0,
-                domain=Interval(0.0, 1.0),
+                domain_start=0.0,
             ),
             domain=Interval(0.0, 1.0),
         )
@@ -262,7 +266,7 @@ class TestRescaleSignal:
             eeg=RegularTimeSeries(
                 signal=data_array.copy(),
                 sampling_rate=100.0,
-                domain=Interval(0.0, 1.0),
+                domain_start=0.0,
             ),
             domain=Interval(0.0, 1.0),
         )
@@ -278,7 +282,7 @@ class TestRescaleSignal:
             eeg=RegularTimeSeries(
                 signal=data_array,
                 sampling_rate=100.0,
-                domain=Interval(0.0, 1.0),
+                domain_start=0.0,
             ),
             domain=Interval(0.0, 1.0),
         )
@@ -296,12 +300,12 @@ class TestRescaleSignal:
             eeg=RegularTimeSeries(
                 signal=eeg_array.copy(),
                 sampling_rate=100.0,
-                domain=Interval(0.0, 1.0),
+                domain_start=0.0,
             ),
             ecg=RegularTimeSeries(
                 signal=ecg_array.copy(),
                 sampling_rate=100.0,
-                domain=Interval(0.0, 1.0),
+                domain_start=0.0,
             ),
             domain=Interval(0.0, 1.0),
         )
