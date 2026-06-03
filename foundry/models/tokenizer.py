@@ -56,8 +56,8 @@ class EEGTokenizer(nn.Module):
         embed_dim: int,
         patch_duration: float | None = None,
         stride: float | None = None,
-        channel_fusion: Literal["add", "concat"] = "add",
-        channel_emb_dim: int | None = None,
+        channel_fusion: Literal["add", "concat"] = "concat",
+        channel_emb_dim: int | None = 64,
     ):
         super().__init__()
         self.channel_strategy = channel_strategy
@@ -124,6 +124,16 @@ class EEGTokenizer(nn.Module):
         Returns:
             dict with model input tensors including ``input_timestamps``.
         """
+        # Floating-point window boundaries can produce off-by-one T values
+        # across samples. Normalize to a fixed length so batches can collate.
+        expected_T = round(sampling_rate * sequence_length)
+        T = signal.shape[0]
+        if abs(T - expected_T) <= 2:
+            if T > expected_T:
+                signal = signal[:expected_T]
+            elif T < expected_T:
+                signal = np.pad(signal, ((0, expected_T - T), (0, 0)))
+
         result = self.channel_strategy.prepare_pretokenize(
             signal,
             channel_tokens,
@@ -154,9 +164,14 @@ class EEGTokenizer(nn.Module):
             else:
                 result["input_timestamps"] = patch_timestamps
         else:
-            # CWT produces target_time_tokens; PerTimepoint produces T tokens
-            if hasattr(self.temporal_embedding, "target_time_tokens"):
-                num_time_tokens = self.temporal_embedding.target_time_tokens
+            if hasattr(self.temporal_embedding, "target_token_rate"):
+                num_time_tokens = max(
+                    1,
+                    round(
+                        self.temporal_embedding.target_token_rate
+                        * sequence_length
+                    ),
+                )
             else:
                 num_time_tokens = signal.shape[0]
 
@@ -227,7 +242,7 @@ class EEGTokenizer(nn.Module):
             )
             tokens = self.temporal_embedding(patches)
         else:
-            if hasattr(self.temporal_embedding, "target_time_tokens"):
+            if hasattr(self.temporal_embedding, "target_token_rate"):
                 tokens = self.temporal_embedding(
                     transformed,
                     input_sampling_rate=sr,

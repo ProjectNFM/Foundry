@@ -206,14 +206,35 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-
 .eegdash_cache
 .vscode/
 /data/
 /outputs/
+/outputs
 /lightning_logs/
 /logs/
 /profiling_output/
 /runs/
+/wandb/
 runs
 wandb_exports/
+
+# Analysis outputs (generated figures and cached W&B data)
+docs/figures/*.pdf
+docs/figures/*.png
+docs/figures/*.csv
+docs/figures/data/
+docs/figures/cwt_stability/
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+docs/reports/**/main.pdf

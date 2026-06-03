@@ -1,6 +1,7 @@
 _target_: foundry.models.tokenizer.EEGTokenizer
 patch_duration: null
 embed_dim: ${model.embed_dim}
+channel_fusion: add
 channel_strategy:
   _target_: foundry.models.embeddings.SpatialProjectionStrategy
   num_channels: ${hyperparameters.num_channels}
@@ -10,6 +11,7 @@ channel_strategy:
     session_configs: ${hyperparameters.session_configs}
     num_sources: ${model.tokenizer.channel_strategy.num_sources}
     hidden_dim: ${model.embed_dim} 
+    common_layer: false
 temporal_embedding:
   _target_: foundry.models.embeddings.IdentityTemporalEmbedding
   embed_dim: ${model.embed_dim}
