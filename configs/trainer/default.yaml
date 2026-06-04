@@ -44,3 +44,4 @@ callbacks:
     _target_: foundry.training.callbacks.ParameterWatcherCallback
     param_patterns: ["*cwt*"]
     log_every_n_steps: 10
+    log_gradients: true

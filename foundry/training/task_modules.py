@@ -59,11 +59,13 @@ class BaseMultitaskModule(L.LightningModule):
         model: nn.Module,
         learning_rate: float = 1e-4,
         weight_decay: float = 0.01,
+        cwt_lr_multiplier: float = 1.0,
     ):
         super().__init__()
         self.model = model
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
+        self.cwt_lr_multiplier = cwt_lr_multiplier
         self.train_metrics = nn.ModuleDict()
         self.val_metrics = nn.ModuleDict()
 
@@ -178,12 +180,61 @@ class BaseMultitaskModule(L.LightningModule):
 
         return total_loss
 
+    def _build_param_groups(self) -> list[dict]:
+        if self.cwt_lr_multiplier == 1.0:
+            return [
+                {
+                    "params": list(self.parameters()),
+                    "lr": self.learning_rate,
+                    "weight_decay": self.weight_decay,
+                }
+            ]
+
+        cwt_params = []
+        other_params = []
+        for name, param in self.named_parameters():
+            if ".cwt." in name:
+                cwt_params.append(param)
+            else:
+                other_params.append(param)
+
+        groups = [
+            {
+                "params": other_params,
+                "lr": self.learning_rate,
+                "weight_decay": self.weight_decay,
+            },
+        ]
+        if cwt_params:
+            cwt_lr = self.learning_rate * self.cwt_lr_multiplier
+            groups.append(
+                {
+                    "params": cwt_params,
+                    "lr": cwt_lr,
+                    "weight_decay": self.weight_decay,
+                }
+            )
+            n_cwt = sum(
+                p.numel()
+                for p in cwt_params
+                if not p.__class__.__name__.startswith("Uninitialized")
+            )
+            n_other = sum(
+                p.numel()
+                for p in other_params
+                if not p.__class__.__name__.startswith("Uninitialized")
+            )
+            print(
+                f"CWT LR multiplier: {self.cwt_lr_multiplier}x "
+                f"(cwt_lr={cwt_lr:.2e}, {n_cwt} params) | "
+                f"base_lr={self.learning_rate:.2e} ({n_other} params)"
+            )
+
+        return groups
+
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.learning_rate,
-            weight_decay=self.weight_decay,
-        )
+        param_groups = self._build_param_groups()
+        optimizer = torch.optim.AdamW(param_groups)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=self.trainer.max_epochs if self.trainer else 100
         )
@@ -284,6 +335,7 @@ class RegressionModule(BaseMultitaskModule):
         model: nn.Module,
         learning_rate: float = 1e-4,
         weight_decay: float = 0.01,
+        cwt_lr_multiplier: float = 1.0,
         class_names: dict[str, list[str]] | None = None,
         class_weights: dict[str, list[float]] | None = None,
     ):
@@ -291,6 +343,7 @@ class RegressionModule(BaseMultitaskModule):
             model=model,
             learning_rate=learning_rate,
             weight_decay=weight_decay,
+            cwt_lr_multiplier=cwt_lr_multiplier,
         )
         self._initialize_task_modules()
         self.save_hyperparameters(
@@ -312,6 +365,7 @@ class ClassificationModule(BaseMultitaskModule):
         model: nn.Module,
         learning_rate: float = 1e-4,
         weight_decay: float = 0.01,
+        cwt_lr_multiplier: float = 1.0,
         class_names: dict[str, list[str]] | None = None,
         class_weights: dict[str, list[float]] | None = None,
         class_weight_smoothing: float = 1.0,
@@ -320,6 +374,7 @@ class ClassificationModule(BaseMultitaskModule):
             model=model,
             learning_rate=learning_rate,
             weight_decay=weight_decay,
+            cwt_lr_multiplier=cwt_lr_multiplier,
         )
         self._class_names = class_names or {}
 
