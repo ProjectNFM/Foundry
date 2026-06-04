@@ -179,14 +179,37 @@ def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
 def _build_model_and_data(cfg: DictConfig):
     _populate_data_driven_hyperparams(cfg)
 
-    DataModuleClass = get_class(cfg.data._target_)
-    readout_specs = DataModuleClass.get_readout_specs_for_task(
-        cfg.data.task_type
-    )
+    # Build datamodule first (without tokenizer) to compute effective specs
+    datamodule = instantiate(cfg.data, tokenizer=None)
 
-    model = instantiate(cfg.model, readout_specs=readout_specs)
-    tokenizer = model.tokenize if hasattr(model, "tokenize") else None
-    datamodule = instantiate(cfg.data, tokenizer=tokenizer)
+    # Get effective readout specs from datamodule instance (respects data.classes, etc)
+    effective_specs = datamodule.get_effective_readout_specs()
+    for readout_name, spec in effective_specs.items():
+        logger.info(
+            "Effective readout %s: dim=%d loss=%s (data.classes=%s)",
+            readout_name,
+            spec.dim,
+            type(spec.loss_fn).__name__,
+            datamodule.classes
+            if hasattr(datamodule, "classes")
+            else None,
+        )
+
+    # Build model with effective specs (pass as kwarg, don't put in OmegaConf)
+    model = instantiate(cfg.model, readout_specs=effective_specs)
+    for readout_name, spec in effective_specs.items():
+        proj = model.readout.projections[readout_name]
+        if proj.out_features != spec.dim:
+            raise RuntimeError(
+                f"Readout head {readout_name}: projection out_features="
+                f"{proj.out_features} but effective spec dim={spec.dim}. "
+                "This usually means resolve_readout_specs did not preserve "
+                "effective readout specs from the datamodule."
+            )
+
+    # Attach tokenizer if model has one
+    if hasattr(model, "tokenize"):
+        datamodule.set_tokenizer(model.tokenize)
 
     return model, datamodule
 
@@ -211,7 +234,9 @@ def _build_lightning_module(cfg: DictConfig, model, datamodule):
     return instantiate(
         cfg.module,
         model=model,
-        class_names=datamodule.get_class_names_for_task(cfg.data.task_type),
+        class_names=datamodule.get_effective_class_names_for_task(
+            cfg.data.task_type
+        ),
         class_weights=class_weights,
     )
 
@@ -296,51 +321,55 @@ def _log_config_to_wandb(trainer, cfg: DictConfig):
     )
 
 
-
 # -- Training and Testing -------------------------------------------------------
 
 
 @rank_zero_only
 def _find_best_checkpoint(checkpoint_path: str | None) -> str | None:
     """Find the best checkpoint file.
-    
+
     Args:
         checkpoint_path: Can be:
             - None: will search in default locations
             - A file path: used directly
             - A directory path: will search for best-*.ckpt in that directory
-    
+
     Returns:
         Path to best checkpoint file, or None if not found.
     """
     import glob
-    
+
     if checkpoint_path:
         checkpoint_path = Path(checkpoint_path)
-        
+
         # If it's a file, use it directly
         if checkpoint_path.is_file():
             return str(checkpoint_path)
-        
+
         # If it's a directory, search for best-*.ckpt
         if checkpoint_path.is_dir():
             best_files = sorted(
                 glob.glob(str(checkpoint_path / "best-*.ckpt")),
                 key=lambda x: Path(x).stat().st_mtime,
-                reverse=True
+                reverse=True,
             )
             if best_files:
                 logger.info("Found best checkpoint files: %s", best_files)
                 return best_files[0]  # Return most recently modified
             else:
-                logger.warning("No best-*.ckpt files found in directory: %s", checkpoint_path)
+                logger.warning(
+                    "No best-*.ckpt files found in directory: %s",
+                    checkpoint_path,
+                )
                 return None
-    
+
     return None
 
 
-def _run_training(trainer, lightning_module, datamodule, ckpt_path: str | None) -> None:
-    """Run training loop."""
+def _run_training(
+    trainer, lightning_module, datamodule, ckpt_path: str | None
+) -> None:
+    """Run training + validation loop."""
     logger.info("Starting model training...")
     trainer.fit(
         lightning_module,
@@ -352,30 +381,34 @@ def _run_training(trainer, lightning_module, datamodule, ckpt_path: str | None) 
 
 
 @rank_zero_only
-def _run_test_evaluation(trainer, lightning_module, datamodule, cfg: DictConfig, output_dir: str) -> None:
+def _run_test_evaluation(
+    trainer, lightning_module, datamodule, cfg: DictConfig, output_dir: str
+) -> None:
     """Run test evaluation on the best checkpoint (rank 0 only)."""
     eval_checkpoint = OmegaConf.select(cfg, "run.eval_checkpoint")
-    
+
     # Try to find best checkpoint from different sources
     best_ckpt = None
-    
+
     if eval_checkpoint:
         best_ckpt = _find_best_checkpoint(eval_checkpoint)
         if best_ckpt:
             logger.info("Using eval_checkpoint from config: %s", best_ckpt)
-    
+
     if not best_ckpt:
         best_ckpt = trainer.checkpoint_callback.best_model_path
         if best_ckpt:
             logger.info("Using best checkpoint from training: %s", best_ckpt)
-    
+
     if not best_ckpt:
         default_checkpoint_dir = Path(output_dir) / "checkpoints"
         if default_checkpoint_dir.exists():
             best_ckpt = _find_best_checkpoint(str(default_checkpoint_dir))
             if best_ckpt:
-                logger.info("Found best checkpoint in default directory: %s", best_ckpt)
-    
+                logger.info(
+                    "Found best checkpoint in default directory: %s", best_ckpt
+                )
+
     if not best_ckpt or not Path(best_ckpt).exists():
         logger.warning("No best checkpoint found; skipping test evaluation.")
         return
@@ -440,7 +473,9 @@ def main(cfg: DictConfig):
     )
     try:
         _run_training(trainer, lightning_module, datamodule, ckpt_path)
-        _run_test_evaluation(trainer, lightning_module, datamodule, cfg, output_dir)
+        _run_test_evaluation(
+            trainer, lightning_module, datamodule, cfg, output_dir
+        )
     finally:
         if using_wandb_logger:
             _finish_active_wandb_run()

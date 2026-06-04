@@ -1,3 +1,4 @@
+from omegaconf import OmegaConf
 from torch_brain.registry import ModalitySpec, MODALITY_REGISTRY
 
 
@@ -12,8 +13,12 @@ def resolve_readout_specs(
     Returns:
         Dictionary mapping modality names to ModalitySpec objects
     """
-    if isinstance(readout_specs, dict):
-        return readout_specs
+    # Hydra/OmegaConf merge turns dict kwargs into DictConfig. A plain
+    # ``isinstance(..., dict)`` check fails, and iterating a DictConfig yields
+    # modality name strings — which would incorrectly reload registry specs
+    # instead of effective cloned specs.
+    if OmegaConf.is_dict(readout_specs):
+        return {str(key): readout_specs[key] for key in readout_specs}
 
     resolved = {}
     for spec in readout_specs:

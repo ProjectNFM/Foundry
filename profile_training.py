@@ -60,15 +60,18 @@ def main(cfg: DictConfig):
     run_tag = _build_run_tag(cfg)
     logger.info(f"Starting profiling run: {run_tag}")
 
-    DataModuleClass = get_class(cfg.data._target_)
-    readout_specs = DataModuleClass.get_readout_specs_for_task(
-        cfg.data.task_type
-    )
+    # Build datamodule first (without tokenizer) to compute effective specs
+    datamodule = instantiate(cfg.data, tokenizer=None)
 
-    model = instantiate(cfg.model, readout_specs=readout_specs)
+    # Get effective readout specs from datamodule instance (respects data.classes, etc)
+    effective_specs = datamodule.get_effective_readout_specs()
 
-    tokenizer = model.tokenize if hasattr(model, "tokenize") else None
-    datamodule = instantiate(cfg.data, tokenizer=tokenizer)
+    # Build model with effective specs (pass as kwarg, don't put in OmegaConf)
+    model = instantiate(cfg.model, readout_specs=effective_specs)
+
+    # Attach tokenizer if model has one
+    if hasattr(model, "tokenize"):
+        datamodule.set_tokenizer(model.tokenize)
 
     eeg_module = instantiate(cfg.module, model=model)
 

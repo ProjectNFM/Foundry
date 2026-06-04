@@ -7,13 +7,14 @@ model-specific preprocessing.
 
 import logging
 from collections import Counter
-from typing import Callable, Optional, Literal
+from typing import Callable, Optional, Literal, Any
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from torch_brain.data import collate
 from torch_brain.data.sampler import RandomFixedWindowSampler
+from torch_brain.registry import ModalitySpec, MODALITY_REGISTRY
 from lightning import LightningDataModule
 from torch_brain.transforms import Compose
 
@@ -67,6 +68,32 @@ class NeuralDataModule(LightningDataModule):
                 f"Available: {list(cls.TASK_TO_READOUT.keys())}"
             )
         return cls.TASK_TO_READOUT[task_type]
+
+    def get_effective_readout_specs(self) -> dict[str, ModalitySpec]:
+        """Get readout specs adapted to this datamodule instance's config.
+
+        Default implementation returns registry specs unchanged. Subclasses can
+        override to apply effective dimension/loss transforms based on instance
+        state (e.g. data.classes filtering).
+
+        Returns:
+            Dict mapping readout names to ModalitySpec with effective dims/losses.
+        """
+        names = self.get_readout_specs_for_task(self.task_type)
+        return {name: MODALITY_REGISTRY[name] for name in names}
+
+    def get_effective_class_names_for_task(
+        self, task_type: str
+    ) -> dict[str, list[str]]:
+        """Get class names aligned with effective readout dimensions.
+
+        Default implementation returns class names from registry. Subclasses
+        can override when effective class counts differ (e.g. freq grouping).
+
+        Returns:
+            Dict mapping readout names to lists of class labels.
+        """
+        return self.get_class_names_for_task(task_type)
 
     def __init__(
         self,
@@ -123,6 +150,33 @@ class NeuralDataModule(LightningDataModule):
             **self.dataset_kwargs,
         )
 
+    def set_tokenizer(self, tokenizer: Callable) -> None:
+        """Attach or update the tokenizer and rebuild transforms.
+
+        Called after model instantiation to wire up tokenization. If dataset
+        already exists, rebuilds the transform Compose.
+
+        Args:
+            tokenizer: Tokenization function to add to transform pipeline.
+        """
+        # Extract existing transforms (exclude old tokenizer if present)
+        base_transforms = []
+        if self.transform:
+            if isinstance(self.transform, list):
+                base_transforms = self.transform
+            elif isinstance(self.transform, Compose):
+                # Compose wraps list of transforms in .transforms
+                base_transforms = list(self.transform.transforms)
+
+        # Append new tokenizer
+        new_transforms = base_transforms + [tokenizer]
+        self.transform = new_transforms
+
+        # If dataset exists, rebuild the Compose and reattach
+        if self.dataset is not None:
+            transform_compose = Compose(new_transforms)
+            self.dataset.transform = transform_compose
+
     def compute_class_weights(
         self, smoothing: float = 1.0
     ) -> dict[str, list[float]]:
@@ -139,9 +193,11 @@ class NeuralDataModule(LightningDataModule):
         macro-F1 on imbalanced datasets. A smoothing of 0.0 produces uniform
         weights.
 
+        Uses effective readout specs, respecting datamodule-level filtering
+        and class remapping (e.g. from data.classes).
+
         Must be called after :meth:`setup`.
         """
-        from torch_brain.registry import MODALITY_REGISTRY
         from foundry.data.datasets.modalities import MappedCrossEntropyLoss
 
         if self.dataset is None:
@@ -157,11 +213,18 @@ class NeuralDataModule(LightningDataModule):
 
         import foundry.data.datasets.modalities  # noqa: F401
 
-        train_intervals = self.dataset.get_sampling_intervals(split="train")
+        # Use instance method so NeuroSoft filtering is applied
+        train_intervals = self.get_sampling_intervals(split="train")
+
+        # Use effective specs with mapped classes
+        effective_specs = self.get_effective_readout_specs()
 
         class_weights: dict[str, list[float]] = {}
         for readout_name in readout_names:
-            spec = MODALITY_REGISTRY[readout_name]
+            if readout_name not in effective_specs:
+                continue
+
+            spec = effective_specs[readout_name]
             value_field = spec.value_key.split(".")[-1]
 
             counts: Counter = Counter()
@@ -174,6 +237,7 @@ class NeuralDataModule(LightningDataModule):
                     selected = intervals.select_by_mask(values == v)
                     counts[int(v)] += sum(selected.end - selected.start)
 
+            # Apply label mapping from loss_fn if present
             if isinstance(spec.loss_fn, MappedCrossEntropyLoss):
                 key_map = dict(
                     zip(
@@ -188,6 +252,7 @@ class NeuralDataModule(LightningDataModule):
                 counts = mapped_counts
 
             total = sum(counts.values())
+            # Use effective spec.dim (may differ from registry)
             num_classes = spec.dim
             weights = [
                 (total / (num_classes * max(counts.get(i, 0), 1))) ** smoothing

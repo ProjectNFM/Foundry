@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Dict
 
 import lightning as L
@@ -20,6 +21,8 @@ from torchmetrics.classification import (
     Recall,
 )
 from torchmetrics.regression import MeanAbsoluteError, MeanSquaredError, R2Score
+
+logger = logging.getLogger(__name__)
 
 
 def _create_regression_metrics(prefix: str) -> MetricCollection:
@@ -546,6 +549,16 @@ class ClassificationModule(BaseMultitaskModule):
                 cm_normalized[i] = cm[i] / row_sums[i]
 
         if class_names is None:
+            class_names = [str(i) for i in range(n_classes)]
+        elif len(class_names) != n_classes:
+            logger.warning(
+                "%s confusion matrix has %d classes but %d labels (%s); "
+                "using numeric labels for axes.",
+                task_name,
+                n_classes,
+                len(class_names),
+                class_names,
+            )
             class_names = [str(i) for i in range(n_classes)]
 
         fig, ax = plt.subplots(
