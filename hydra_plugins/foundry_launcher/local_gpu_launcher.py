@@ -23,6 +23,7 @@ Then launch with ``-m``::
 import logging
 import os
 import queue
+import shutil
 import signal
 import subprocess
 import sys
@@ -43,6 +44,8 @@ from omegaconf import DictConfig
 
 log = logging.getLogger(__name__)
 
+FREE_MEM_THRESHOLD_MIB = 1024
+
 
 class LocalGpuLauncher(Launcher):
     """Hydra launcher that runs multirun jobs in parallel across local GPUs."""
@@ -51,9 +54,11 @@ class LocalGpuLauncher(Launcher):
         self,
         gpus: Optional[List[int]] = None,
         stop_on_failure: bool = False,
+        only_free_gpus: bool = True,
     ) -> None:
         self.gpus = gpus
         self.stop_on_failure = stop_on_failure
+        self.only_free_gpus = only_free_gpus
         self.config: Optional[DictConfig] = None
         self.task_function: Optional[TaskFunction] = None
         self.hydra_context: Optional[HydraContext] = None
@@ -72,23 +77,109 @@ class LocalGpuLauncher(Launcher):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _detect_gpus() -> List[int]:
+    def _query_gpu_status() -> List[tuple[int, int]]:
+        """Return ``[(gpu_index, memory_used_mib), ...]`` for all GPUs."""
         try:
             out = subprocess.run(
-                ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
+                [
+                    "nvidia-smi",
+                    "--query-gpu=index,memory.used",
+                    "--format=csv,noheader,nounits",
+                ],
                 capture_output=True,
                 text=True,
                 check=True,
             ).stdout
-            return [
-                int(tok)
-                for tok in out.strip().splitlines()
-                if tok.strip().isdigit()
-            ]
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return [0]
+            results = []
+            for line in out.strip().splitlines():
+                parts = line.split(",")
+                if len(parts) != 2:
+                    continue
+                results.append((int(parts[0].strip()), int(parts[1].strip())))
+            return results
+        except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+            return [(0, 0)]
+
+    @classmethod
+    def _detect_free_gpus(cls) -> List[int]:
+        """Return indices of GPUs with memory usage below threshold."""
+        statuses = cls._query_gpu_status()
+        free = [idx for idx, mem in statuses if mem < FREE_MEM_THRESHOLD_MIB]
+        busy = [
+            (idx, mem) for idx, mem in statuses if mem >= FREE_MEM_THRESHOLD_MIB
+        ]
+        if busy:
+            log.info(
+                "Skipping busy GPUs: %s",
+                ", ".join(f"{idx} ({mem} MiB)" for idx, mem in busy),
+            )
+        return free
+
+    @classmethod
+    def _detect_all_gpus(cls) -> List[int]:
+        return [idx for idx, _ in cls._query_gpu_status()]
 
     # ------------------------------------------------------------------
+
+    def _resolve_gpus(self) -> List[int]:
+        if self.gpus:
+            candidates = list(self.gpus)
+        elif self.only_free_gpus:
+            candidates = self._detect_free_gpus()
+        else:
+            candidates = self._detect_all_gpus()
+
+        if not candidates:
+            raise RuntimeError(
+                "LocalGpuLauncher: no GPUs available. All GPUs are in use. "
+                "Either wait for running jobs to finish or explicitly set "
+                "hydra.launcher.gpus=[...] to target specific GPUs."
+            )
+        return candidates
+
+    def _snapshot_launch_context(self, sweep_dir: Path) -> Path:
+        """Snapshot configs and source code into the sweep directory so that
+        every subprocess -- even ones queued for later -- uses the code and
+        config as they existed at launch time.
+
+        The snapshot mirrors the project root layout (``main.py``,
+        ``foundry/``, ``hydra_plugins/``, ``configs/``) so that Hydra's
+        ``@hydra.main(config_path="configs")`` resolves correctly without
+        needing ``--config-dir``.
+
+        Returns the absolute path of the snapshot directory.
+        """
+        assert self.config is not None
+        ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
+
+        snapshot = sweep_dir / ".launch_snapshot"
+        if snapshot.exists():
+            shutil.rmtree(snapshot)
+        snapshot.mkdir()
+
+        project_root = Path(sys.argv[0]).resolve().parent
+
+        for pkg in ("foundry", "hydra_plugins"):
+            pkg_dir = project_root / pkg
+            if pkg_dir.is_dir():
+                shutil.copytree(pkg_dir, snapshot / pkg, ignore=ignore)
+
+        for py_file in project_root.glob("*.py"):
+            shutil.copy2(py_file, snapshot / py_file.name)
+
+        for src in self.config.hydra.runtime.config_sources:
+            if src.schema != "file" or not src.path:
+                continue
+            src_path = Path(src.path)
+            if not src_path.is_dir():
+                continue
+            config_dest = snapshot / src_path.relative_to(project_root)
+            shutil.copytree(src_path, config_dest, ignore=ignore)
+            break
+
+        snapshot = snapshot.resolve()
+        log.info("Launch snapshot: %s", snapshot)
+        return snapshot
 
     def launch(
         self,
@@ -105,7 +196,9 @@ class LocalGpuLauncher(Launcher):
         sweep_dir = Path(str(self.config.hydra.sweep.dir))
         sweep_dir.mkdir(parents=True, exist_ok=True)
 
-        gpus = list(self.gpus) if self.gpus else self._detect_gpus()
+        snapshot = self._snapshot_launch_context(sweep_dir)
+
+        gpus = self._resolve_gpus()
         num_jobs = len(job_overrides)
 
         log.info(
@@ -122,14 +215,19 @@ class LocalGpuLauncher(Launcher):
         proc_lock = threading.Lock()
         failure_event = threading.Event()
 
+        script = str(snapshot / Path(sys.argv[0]).name)
+
         def _run_one(idx: int, overrides: list[str]) -> int:
             gpu_id = gpu_pool.get()
             try:
                 if self.stop_on_failure and failure_event.is_set():
                     return -1
 
-                cmd = [sys.executable, sys.argv[0]] + overrides
+                cmd = [sys.executable, script] + overrides
                 env = {**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)}
+                env["PYTHONPATH"] = (
+                    str(snapshot) + os.pathsep + env.get("PYTHONPATH", "")
+                )
                 desc = " ".join(filter_overrides(overrides))
                 log.info("  #%d [GPU %d]: %s", idx, gpu_id, desc)
 
