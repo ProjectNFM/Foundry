@@ -1,5 +1,5 @@
 defaults:
-  - tokenizer: fixed_patch_linear
+  - tokenizer: spatial_session_cwt
 
 _target_: foundry.models.POYOEEGModel
 

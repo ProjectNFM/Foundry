@@ -11,8 +11,6 @@ temporal_embedding:
   embed_dim: ${eval:'${model.embed_dim} - ${model.tokenizer.channel_emb_dim}'}
   num_sources: 1
   target_token_rate: 100.0
-  # num_filters=12 parameter-matches the per-channel CWT's ~4.9k params
-  # (num_sources=1, 9 freqs, embed_dim=256).
   num_filters: 12
   kernel_size: 9
   num_conv_layers: 2
