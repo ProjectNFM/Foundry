@@ -7,85 +7,64 @@ End-to-end training framework for EEG foundation models built on top of torch_br
 ### Tokenization & Embedding
 
 **Tokenization**:
-The CPU-side process of converting a `Data` sample into a structured input dictionary for the model. Decomposes continuous recordings into discrete tokens: signal patches or segments, channel indices, timestamps, session indices, latent positions, and extracted targets.
-_Avoid_: Preprocessing, featurization, feature extraction
+The CPU-side process (running in the dataloader) that converts a raw `Data` sample into a structured input dictionary ready for the model. Tokenization crops the signal to the **context window**, decomposes the continuous recording into discrete **tokens** — signal **patches** or per-channel time slices — and assembles all supporting metadata: channel indices, timestamps, **session** indices, **latent** positions, and extracted **task** targets. This is where the boundary between data and model is drawn: everything upstream is I/O, everything downstream is computation.
+*Avoid*: Preprocessing, featurization, feature extraction
 
 **Token**:
-A discrete unit produced by Tokenization. For input signals, a token is a segment of waveform data (a Patch or per-channel time slice) paired with its timestamp and channel identity. For outputs, a token is a query position defined by a timestamp and task index.
-_Avoid_: Feature, sample, frame
+A discrete element in the model's sequence interface, always paired with a timestamp. Foundry distinguishes three families of tokens. *Input tokens* are segments of waveform data (a **patch** or per-channel time slice) combined with a timestamp and channel identity. *Latent tokens* are learned query vectors on a fixed time grid that form the **backbone**'s bottleneck — they are not derived from any input signal. *Output tokens* (decoder queries) are positions where predictions are requested, defined by a timestamp, **session** index, and **task** index.
+*Avoid*: Feature, sample, frame
+
+**Embedding**:
+A learned or fixed transform that maps a **token** (or an identifier such as a session ID or channel ID) into a dense vector in the model's embedding space. Examples include **signal embedding**, **time embedding**, session embedding, and channel embedding.
 
 **Patch**:
-A fixed-duration sub-window of signal produced by unfolding along the time axis. Each Patch becomes one input Token.
-_Avoid_: Frame, segment, chunk
+A fixed-duration sub-window of signal produced by unfolding the recording along the time axis (`torch.unfold`). Each patch becomes one input **token**. Patches tile the **context window**; their duration and stride are set via configuration (`patch_duration`, `stride`). In non-per-channel mode, one patch produces one token; in per-channel mode, one patch produces one token per channel.
+*Avoid*: Frame, segment, chunk
 
-**Channel Strategy**:
-The method by which variable channel counts across sessions are handled during Tokenization. Determines whether channels are padded to a fixed count, processed independently, or projected into a shared space.
-_Avoid_: Channel mode, input strategy
+**Spatial Embedding Strategy**:
+The strategy chosen to embed the spatial (channel) dimensions of a signal. Controls how multi-channel electrode layouts are transformed before temporal processing — options range from per-channel identity embeddings to learned spatial projections that compress variable electrode counts into a fixed number of latent sources.
+*Avoid*: Channel mode, input strategy
+
+**Temporal Embedding Strategy**:
+The strategy chosen to embed the temporal dimensions of a signal. Determines how **patches** or time slices are projected into the model's embedding space — implementations include linear projections, CNNs, MLPs, and continuous wavelet transforms.
+*Avoid*: Time encoding, positional encoding, time embedding
 
 **Signal Embedding**:
-The GPU-side learned transform that maps raw input Tokens (patch waveforms, signal segments) into dense vectors in the backbone's embedding space. Implementations include linear projections, CNNs, and continuous wavelet transforms.
-_Avoid_: Tokenizer (when meaning the embedding layer), feature extractor, encoder (when meaning this layer)
+The GPU-side learned transform that maps raw input **tokens** (patch waveforms or signal segments) into dense vectors in the **backbone**'s embedding space. This is composed of a **spatial embedding strategy** and a **temporal embedding strategy** orchestrated by the `EEGTokenizer` module. Runs on device during the forward pass, as distinct from **tokenization** which runs on CPU in the dataloader.
+*Avoid*: Tokenizer (when meaning the embedding layer), feature extractor, encoder (when meaning this layer)
 
-**Temporal Embedding**:
-The time-aware component of Signal Embedding that converts raw signal segments into dense vectors while preserving temporal structure. Encompasses both the learned signal transform (CWT, CNN, patched linear) and the continuous rotary position encoding derived from timestamps.
-_Avoid_: Positional encoding (when meaning the full layer), time encoding
+**Time Embedding**:
+A fixed (non-learned) encoding that injects timestamp information into **token** representations, enabling the **backbone**'s attention layers to reason about temporal ordering and relative distances. Currently implemented via Rotary Position Embedding (RoPE). Applied to input tokens, **latent** tokens, and output tokens alike.
 
-### Model Architecture
+### Architecture
 
 **Backbone**:
-The Perceiver-IO architecture that transforms input tokens into output representations through a latent bottleneck. Composed of an Encoder, Processor, and Decoder in sequence.
-_Avoid_: Transformer, network, architecture
-
-**Encoder**:
-Cross-attention module where latents attend to input tokens, compressing variable-length inputs into a fixed set of latent vectors.
-_Avoid_: Input layer, cross-attention block (when referring to this specific component)
-
-**Processor**:
-Self-attention stack that refines latent representations over multiple layers. Its depth is the primary capacity knob of the model.
-_Avoid_: Transformer layers, self-attention block (when referring to this specific component)
-
-**Decoder**:
-Cross-attention module where output queries attend to processed latents, producing per-query representations for task-specific readout. Not an autoregressive sequence decoder.
-_Avoid_: Output layer, generator
+The Perceiver-IO architecture (`PerceiverIOBackbone`) that transforms input **tokens** into output representations through a **latent** bottleneck. Composed of three stages in sequence: an *Encoder* (cross-attention from latents to input tokens), a *Processor* (self-attention among latents), and a *Decoder* (cross-attention from output query tokens to latents). All attention layers use **time embeddings** (RoPE) to preserve temporal structure. The backbone is agnostic to **task** semantics — it produces generic embeddings that **readout heads** map to predictions.
+*Avoid*: Transformer, network, architecture
 
 **Latent**:
-A learned query vector positioned at a regular time grid within the backbone. Latents form the fixed-size bottleneck between encoder and decoder — they are not derived from any input signal.
-_Avoid_: Query token, memory token, hidden state
+A learned query vector positioned at a regular time grid inside the **backbone**. Latents form the fixed-size bottleneck between encoder and decoder — they are not derived from any input signal. Their count is determined by the **context window** length, `latent_step`, and `num_latents_per_step`. Input **tokens** attend *into* latents during encoding; output **tokens** attend *from* latents during decoding. Note: the term "latent" also appears in the spatial projection layer (`PerceiverSpatialProjector`) to describe compressed channel sources — these are a separate concept from backbone latents.
+*Avoid*: Query token, memory token, hidden state
 
-**Readout Head**:
-A small `nn.Module` that projects backbone output embeddings to task-specific predictions. Pure forward pass — no loss, no data logic.
-_Avoid_: Output head, decoder (when meaning projection), classifier
+**Context Window**:
+The fixed temporal span of signal that the model sees for a single forward pass, set by `sequence_length` (in seconds). During training, the sampler (`RandomFixedWindowSampler`) crops random windows of this duration from longer recordings; during **tokenization**, the signal is padded or truncated to exactly this length so batches can collate. The context window length directly determines how many **patches** tile the input and how many **latent** positions span the **backbone**.
 
-**Readout Router**:
-The module that dispatches output embeddings to the correct Readout Head based on task index. Provides a single-task fast path that skips indexing entirely.
-_Avoid_: MultitaskReadout, dispatcher
-
-### Tasks & Training
+### Task & Readout
 
 **Task**:
-Any training objective — supervised (classification, regression) or self-supervised (MAE reconstruction, contrastive). The unit of composition for multitask training.
-_Avoid_: Modality (when meaning task), readout (when meaning task), objective
+Any training objective — supervised (classification, regression) or self-supervised (MAE reconstruction, contrastive). A task is the unit of composition for multitask training: it bundles a target extraction rule, a loss function, and a **readout head**. Each output **token** carries a task index that tells the **readout router** which head to dispatch to. Multiple tasks can coexist in a single training run, each producing its own predictions and losses over the same **backbone** representations.
+*Avoid*: Modality (when meaning task), readout (when meaning task), objective
 
-**Task Config**:
-A Hydra-instantiable structured configuration that wires together a Readout Head, Target Extractor, Task Loss, and metrics for one Task. The single source of truth for everything a Task needs.
-_Avoid_: ModalitySpec, readout spec, task definition
+**Readout Head**:
+A small `nn.Module` (typically a linear projection) that maps **backbone** output embeddings to **task**-specific predictions. Pure forward pass — no loss computation, no data logic. Each task has its own readout head with an output dimensionality matching the task's label space.
+*Avoid*: Output head, decoder (when meaning projection), classifier
 
-**Target Extractor**:
-A frozen dataclass callable that pulls targets (timestamps and values) from a `Data` object during Tokenization. A pure data concern — no `nn.Module`, no GPU, no embed_dim dependency.
-_Avoid_: Label loader, target transform, prepare_for_multitask_readout
+**Readout Router**:
+The module that dispatches output **token** embeddings to the correct **readout head** based on **task** index. When only a single task is active, the router provides a fast path that skips indexing entirely.
+*Avoid*: MultitaskReadout, dispatcher
 
-**Task Index**:
-An integer tensor that maps each output query to its corresponding Readout Head. Enables multiple tasks to share a single forward pass through the backbone.
-_Avoid_: Decoder index, output_decoder_index, modality ID
+### Data Concepts
 
-**Task Loss**:
-A composable loss function specific to one Task. Uniform signature: `(predictions, targets, sample_weights) → scalar`. Swappable from config without changing Python.
-_Avoid_: Loss (as a class hierarchy), criterion
-
-**SSL Strategy**:
-A Lightning Callback that modifies how the model trains for self-supervised objectives. Hooks into the training loop to alter inputs, capture intermediates, and compute auxiliary losses. The model's forward pass stays unchanged.
-_Avoid_: SSL readout, wrap_backbone, training wrapper
-
-**FoundryModule**:
-The unified LightningModule that orchestrates training for all task types. Delegates loss computation to per-task Task Losses, metric management to per-task MetricCollections, and SSL execution to SSL Strategy callbacks.
-_Avoid_: ClassificationModule, RegressionModule, training module
+**Session**:
+A distinct recording — one subject, one electrode montage, one experimental run. Each session carries a unique string ID (`data.session.id`) and its own channel layout. The model learns a per-session embedding (`session_emb`) that is added to both input and output **tokens**, allowing the **backbone** to condition on recording identity. When using session-specific spatial projectors, the session ID also selects the correct channel-to-source mapping. In the parent POYO framework, sessions decouple multi-subject training without assuming electrode correspondence across recordings.
+*Avoid*: Recording (as a synonym — session is the canonical term)
