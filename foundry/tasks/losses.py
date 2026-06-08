@@ -52,27 +52,3 @@ class MSETaskLoss(nn.Module):
         if isinstance(sample_weights, torch.Tensor):
             loss = loss * sample_weights.unsqueeze(-1)
         return loss.mean()
-
-
-class FocalTaskLoss(nn.Module):
-    """Focal loss for class-imbalanced classification."""
-
-    def __init__(self, gamma: float = 2.0, alpha: float | None = None):
-        super().__init__()
-        self.gamma = gamma
-        self.alpha = alpha
-
-    def forward(
-        self,
-        predictions: torch.Tensor,
-        targets: torch.Tensor,
-        sample_weights: torch.Tensor | float = 1.0,
-    ) -> torch.Tensor:
-        ce = F.cross_entropy(predictions, targets.long(), reduction="none")
-        pt = torch.exp(-ce)
-        focal = ((1 - pt) ** self.gamma) * ce
-        if self.alpha is not None:
-            focal = self.alpha * focal
-        if isinstance(sample_weights, torch.Tensor):
-            focal = focal * sample_weights
-        return focal.mean()
