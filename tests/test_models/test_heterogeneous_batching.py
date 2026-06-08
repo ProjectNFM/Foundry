@@ -135,7 +135,7 @@ def extract_model_inputs(batch):
             "latent_timestamps",
             "output_session_index",
             "output_timestamps",
-            "output_decoder_index",
+            "task_index",
         ]
     }
 

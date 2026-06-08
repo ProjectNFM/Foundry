@@ -108,7 +108,7 @@ class BaselineEEGModel(nn.Module):
         Returns:
             dict: {
                 "input_values" (torch.Tensor): Model input of shape (T, C),
-                "output_decoder_index" (torch.Tensor): Target output decoder indices,
+                "task_index" (torch.Tensor): Target output decoder indices,
                 "target_values" (dict[str, torch.Tensor] or similar): Multitask target values,
                 "target_weights" (dict[str, torch.Tensor] or similar): Multitask target weights,
                 "session_id" (Any): Session identifier,
@@ -185,7 +185,7 @@ class BaselineEEGModel(nn.Module):
 
         return {
             "input_values": pad2d(x),
-            "output_decoder_index": pad8(output_task_index),
+            "task_index": pad8(output_task_index),
             "target_values": chain(output_values, allow_missing_keys=True),
             "target_weights": chain(output_weights, allow_missing_keys=True),
             "session_id": data.session.id,
@@ -200,20 +200,20 @@ class BaselineEEGModel(nn.Module):
             batch: Batch dictionary from dataloader
 
         Returns:
-            Tuple of (model_inputs, target_values, target_weights, output_decoder_index)
+            Tuple of (model_inputs, target_values, target_weights, task_index)
         """
         target_values = batch.pop("target_values")
         target_weights = batch.pop("target_weights")
         batch.pop("session_id", None)
         batch.pop("absolute_start", None)
         batch.pop("eval_mask", None)
-        output_decoder_index = batch["output_decoder_index"]
+        task_index = batch["task_index"]
 
         model_inputs = {
             "input_values": batch["input_values"],
-            "output_decoder_index": output_decoder_index,
+            "task_index": task_index,
         }
-        return model_inputs, target_values, target_weights, output_decoder_index
+        return model_inputs, target_values, target_weights, task_index
 
 
 class Linear(BaselineEEGModel):
@@ -253,7 +253,7 @@ class Linear(BaselineEEGModel):
         self,
         *,
         input_values: torch.Tensor,
-        output_decoder_index: torch.Tensor,
+        task_index: torch.Tensor,
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
         """
@@ -261,7 +261,7 @@ class Linear(BaselineEEGModel):
 
         Args:
             input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
-            output_decoder_index (torch.Tensor): Task index tensor of shape (B, n_out).
+            task_index (torch.Tensor): Task index tensor of shape (B, n_out).
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
@@ -275,7 +275,7 @@ class Linear(BaselineEEGModel):
         x = x.reshape(x.size(0), -1)
 
         batch_size = x.shape[0]
-        n_out = output_decoder_index.shape[1]
+        n_out = task_index.shape[1]
 
         # Repeat (broadcast) the feature vector for each output task in the batch,
         # so its shape is (batch_size, n_out, feature_dim) as required by MultitaskReadout
@@ -283,7 +283,7 @@ class Linear(BaselineEEGModel):
 
         return self.readout(
             output_embs=x,
-            output_readout_index=output_decoder_index,
+            output_readout_index=task_index,
             unpack_output=False,
         )
 
@@ -343,7 +343,7 @@ class MLP(BaselineEEGModel):
         self,
         *,
         input_values: torch.Tensor,
-        output_decoder_index: torch.Tensor,
+        task_index: torch.Tensor,
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
         """
@@ -351,7 +351,7 @@ class MLP(BaselineEEGModel):
 
         Args:
             input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
-            output_decoder_index (torch.Tensor): Task index tensor of shape (B, n_out).
+            task_index (torch.Tensor): Task index tensor of shape (B, n_out).
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
@@ -366,12 +366,12 @@ class MLP(BaselineEEGModel):
         x = self.mlp(x)
 
         batch_size = x.shape[0]
-        n_out = output_decoder_index.shape[1]
+        n_out = task_index.shape[1]
         x = x.unsqueeze(1).expand(batch_size, n_out, -1)
 
         return self.readout(
             output_embs=x,
-            output_readout_index=output_decoder_index,
+            output_readout_index=task_index,
             unpack_output=False,
         )
 
@@ -434,7 +434,7 @@ class GRU(BaselineEEGModel):
         self,
         *,
         input_values: torch.Tensor,
-        output_decoder_index: torch.Tensor,
+        task_index: torch.Tensor,
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
         """
@@ -442,7 +442,7 @@ class GRU(BaselineEEGModel):
 
         Args:
             input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
-            output_decoder_index (torch.Tensor): Task index tensor of shape (B, n_out).
+            task_index (torch.Tensor): Task index tensor of shape (B, n_out).
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
@@ -463,12 +463,12 @@ class GRU(BaselineEEGModel):
         x = x.mean(dim=1)
 
         batch_size = x.shape[0]
-        n_out = output_decoder_index.shape[1]
+        n_out = task_index.shape[1]
         x = x.unsqueeze(1).expand(batch_size, n_out, -1)
 
         return self.readout(
             output_embs=x,
-            output_readout_index=output_decoder_index,
+            output_readout_index=task_index,
             unpack_output=False,
         )
 
@@ -519,7 +519,7 @@ class TemporalConvAvgPool(BaselineEEGModel):
         self,
         *,
         input_values: torch.Tensor,
-        output_decoder_index: torch.Tensor,
+        task_index: torch.Tensor,
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
         """
@@ -527,7 +527,7 @@ class TemporalConvAvgPool(BaselineEEGModel):
 
         Args:
             input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
-            output_decoder_index (torch.Tensor): Task index tensor of shape (B, n_out).
+            task_index (torch.Tensor): Task index tensor of shape (B, n_out).
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
@@ -540,12 +540,12 @@ class TemporalConvAvgPool(BaselineEEGModel):
         x = x.reshape(x.size(0), -1)
 
         batch_size = x.shape[0]
-        n_out = output_decoder_index.shape[1]
+        n_out = task_index.shape[1]
         x = x.unsqueeze(1).expand(batch_size, n_out, -1)
 
         return self.readout(
             output_embs=x,
-            output_readout_index=output_decoder_index,
+            output_readout_index=task_index,
             unpack_output=False,
         )
 
@@ -607,7 +607,7 @@ class ShallowConvNet(BaselineEEGModel):
         self,
         *,
         input_values: torch.Tensor,
-        output_decoder_index: torch.Tensor,
+        task_index: torch.Tensor,
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
         """
@@ -615,7 +615,7 @@ class ShallowConvNet(BaselineEEGModel):
 
         Args:
             input_values (torch.Tensor): EEG input tensor, shape (B, T, C).
-            output_decoder_index (torch.Tensor): Task index tensor (B, n_out).
+            task_index (torch.Tensor): Task index tensor (B, n_out).
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
@@ -631,12 +631,12 @@ class ShallowConvNet(BaselineEEGModel):
         x = self.flatten(x)
 
         batch_size = x.shape[0]
-        n_out = output_decoder_index.shape[1]
+        n_out = task_index.shape[1]
         x = x.unsqueeze(1).expand(batch_size, n_out, -1)
 
         return self.readout(
             output_embs=x,
-            output_readout_index=output_decoder_index,
+            output_readout_index=task_index,
             unpack_output=False,
         )
 
@@ -846,7 +846,7 @@ class EEGNetEncoder(BaselineEEGModel):
         self,
         *,
         input_values: torch.Tensor,
-        output_decoder_index: torch.Tensor,
+        task_index: torch.Tensor,
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
         """
@@ -854,7 +854,7 @@ class EEGNetEncoder(BaselineEEGModel):
 
         Args:
             input_values (torch.Tensor): EEG batch, (B, C, T), (B, T, C), or (B, 1, C, T).
-            output_decoder_index (torch.Tensor): Task index tensor (B, n_out).
+            task_index (torch.Tensor): Task index tensor (B, n_out).
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
@@ -862,12 +862,12 @@ class EEGNetEncoder(BaselineEEGModel):
         x = self.extract_features(input_values)
 
         batch_size = x.shape[0]
-        n_out = output_decoder_index.shape[1]
+        n_out = task_index.shape[1]
         x = x.view(batch_size, -1)
         x = x.unsqueeze(1).expand(batch_size, n_out, -1)
 
         return self.readout(
             output_embs=x,
-            output_readout_index=output_decoder_index,
+            output_readout_index=task_index,
             unpack_output=False,
         )

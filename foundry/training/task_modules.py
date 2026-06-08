@@ -145,13 +145,13 @@ class BaseMultitaskModule(L.LightningModule):
         return self._shared_step("val", batch)
 
     def _shared_step(self, stage: str, batch: Dict[str, Any]) -> torch.Tensor:
-        model_inputs, target_values, target_weights, output_decoder_index = (
+        model_inputs, target_values, target_weights, task_index = (
             self._unpack_batch(batch)
         )
         outputs = self.model(**model_inputs, unpack_output=False)
 
         total_loss, taskwise_loss = self._compute_multitask_loss(
-            outputs, target_values, target_weights, output_decoder_index
+            outputs, target_values, target_weights, task_index
         )
         self.log(f"{stage}/loss", total_loss, prog_bar=True)
 
@@ -285,15 +285,15 @@ class BaseMultitaskModule(L.LightningModule):
         batch.pop("absolute_start", None)
         batch.pop("eval_mask", None)
 
-        output_decoder_index = batch["output_decoder_index"]
-        return batch, target_values, target_weights, output_decoder_index
+        task_index = batch["task_index"]
+        return batch, target_values, target_weights, task_index
 
     def _compute_multitask_loss(
         self,
         outputs: Dict[str, Any],
         target_values: Dict[str, torch.Tensor],
         target_weights: Dict[str, torch.Tensor],
-        output_decoder_index: torch.Tensor,
+        task_index: torch.Tensor,
     ):
         multitask_loss = torch.tensor(
             0.0, device=self.device, dtype=torch.float32
@@ -315,9 +315,7 @@ class BaseMultitaskModule(L.LightningModule):
                 task_output, target_for_loss, weights_for_loss
             )
 
-            num_sequences = torch.any(
-                output_decoder_index == spec.id, dim=1
-            ).sum()
+            num_sequences = torch.any(task_index == spec.id, dim=1).sum()
             multitask_loss = (
                 multitask_loss + taskwise_loss[readout_id] * num_sequences
             )

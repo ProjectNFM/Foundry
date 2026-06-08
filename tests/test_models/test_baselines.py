@@ -22,7 +22,7 @@ from foundry.models import (
 
 
 def compute_multitask_loss(
-    model, outputs, target_values, target_weights, output_decoder_index
+    model, outputs, target_values, target_weights, task_index
 ):
     """Compute multitask loss for baseline models.
 
@@ -33,7 +33,7 @@ def compute_multitask_loss(
         outputs: Dict of model outputs per task
         target_values: Dict of target values per task
         target_weights: Dict of target weights per task
-        output_decoder_index: Tensor indicating which task each output belongs to
+        task_index: Tensor indicating which task each output belongs to
 
     Returns:
         Scalar loss tensor
@@ -54,7 +54,7 @@ def compute_multitask_loss(
 
         task_loss = spec.loss_fn(task_output, target, weights)
 
-        num_sequences = torch.any(output_decoder_index == spec.id, dim=1).sum()
+        num_sequences = torch.any(task_index == spec.id, dim=1).sum()
 
         loss_total = loss_total + task_loss * num_sequences
         total_sequences += num_sequences
@@ -222,7 +222,7 @@ class TestBaselineTokenize:
 
         expected_keys = {
             "input_values",
-            "output_decoder_index",
+            "task_index",
             "target_values",
             "target_weights",
             "session_id",
@@ -333,13 +333,13 @@ class TestTemporalConvAvgPool:
         batch = collate([tokens])
 
         x = batch["input_values"]
-        output_decoder_index = batch["output_decoder_index"]
+        task_index = batch["task_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = simple_model(
             input_values=x,
-            output_decoder_index=output_decoder_index,
+            task_index=task_index,
         )
 
         assert isinstance(outputs, dict)
@@ -350,7 +350,7 @@ class TestTemporalConvAvgPool:
             outputs,
             target_values,
             target_weights,
-            output_decoder_index,
+            task_index,
         )
 
         assert loss.requires_grad
@@ -373,13 +373,13 @@ class TestTemporalConvAvgPool:
         batch = collate([tokens1, tokens2])
 
         x = batch["input_values"]
-        output_decoder_index = batch["output_decoder_index"]
+        task_index = batch["task_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = simple_model(
             input_values=x,
-            output_decoder_index=output_decoder_index,
+            task_index=task_index,
         )
 
         loss = compute_multitask_loss(
@@ -387,7 +387,7 @@ class TestTemporalConvAvgPool:
             outputs,
             target_values,
             target_weights,
-            output_decoder_index,
+            task_index,
         )
 
         assert loss.requires_grad
@@ -445,13 +445,13 @@ class TestShallowConvNet:
         batch = collate([tokens])
 
         x = batch["input_values"]
-        output_decoder_index = batch["output_decoder_index"]
+        task_index = batch["task_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = shallow_model(
             input_values=x,
-            output_decoder_index=output_decoder_index,
+            task_index=task_index,
         )
 
         assert isinstance(outputs, dict)
@@ -462,7 +462,7 @@ class TestShallowConvNet:
             outputs,
             target_values,
             target_weights,
-            output_decoder_index,
+            task_index,
         )
 
         assert loss.requires_grad
@@ -485,13 +485,13 @@ class TestShallowConvNet:
         batch = collate([tokens1, tokens2])
 
         x = batch["input_values"]
-        output_decoder_index = batch["output_decoder_index"]
+        task_index = batch["task_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = shallow_model(
             input_values=x,
-            output_decoder_index=output_decoder_index,
+            task_index=task_index,
         )
 
         loss = compute_multitask_loss(
@@ -499,7 +499,7 @@ class TestShallowConvNet:
             outputs,
             target_values,
             target_weights,
-            output_decoder_index,
+            task_index,
         )
 
         assert loss.requires_grad
@@ -561,13 +561,13 @@ class TestEEGNetEncoder:
         batch = collate([tokens])
 
         x = batch["input_values"]
-        output_decoder_index = batch["output_decoder_index"]
+        task_index = batch["task_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = eegnet_model(
             input_values=x,
-            output_decoder_index=output_decoder_index,
+            task_index=task_index,
         )
 
         assert isinstance(outputs, dict)
@@ -578,7 +578,7 @@ class TestEEGNetEncoder:
             outputs,
             target_values,
             target_weights,
-            output_decoder_index,
+            task_index,
         )
 
         assert loss.requires_grad
@@ -602,13 +602,13 @@ class TestEEGNetEncoder:
         batch = collate([tokens1, tokens2])
 
         x = batch["input_values"]
-        output_decoder_index = batch["output_decoder_index"]
+        task_index = batch["task_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = eegnet_model(
             input_values=x,
-            output_decoder_index=output_decoder_index,
+            task_index=task_index,
         )
 
         loss = compute_multitask_loss(
@@ -616,7 +616,7 @@ class TestEEGNetEncoder:
             outputs,
             target_values,
             target_weights,
-            output_decoder_index,
+            task_index,
         )
 
         assert loss.requires_grad
@@ -659,13 +659,13 @@ class TestLinear:
         batch = collate([tokens])
 
         x = batch["input_values"]
-        output_decoder_index = batch["output_decoder_index"]
+        task_index = batch["task_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = linear_model(
             input_values=x,
-            output_decoder_index=output_decoder_index,
+            task_index=task_index,
         )
 
         assert isinstance(outputs, dict)
@@ -676,7 +676,7 @@ class TestLinear:
             outputs,
             target_values,
             target_weights,
-            output_decoder_index,
+            task_index,
         )
 
         assert loss.requires_grad
@@ -699,13 +699,13 @@ class TestLinear:
         batch = collate([tokens1, tokens2])
 
         x = batch["input_values"]
-        output_decoder_index = batch["output_decoder_index"]
+        task_index = batch["task_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = linear_model(
             input_values=x,
-            output_decoder_index=output_decoder_index,
+            task_index=task_index,
         )
 
         loss = compute_multitask_loss(
@@ -713,7 +713,7 @@ class TestLinear:
             outputs,
             target_values,
             target_weights,
-            output_decoder_index,
+            task_index,
         )
 
         assert loss.requires_grad
@@ -758,13 +758,13 @@ class TestMLP:
         batch = collate([tokens])
 
         x = batch["input_values"]
-        output_decoder_index = batch["output_decoder_index"]
+        task_index = batch["task_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = mlp_model(
             input_values=x,
-            output_decoder_index=output_decoder_index,
+            task_index=task_index,
         )
 
         assert isinstance(outputs, dict)
@@ -775,7 +775,7 @@ class TestMLP:
             outputs,
             target_values,
             target_weights,
-            output_decoder_index,
+            task_index,
         )
 
         assert loss.requires_grad
@@ -798,13 +798,13 @@ class TestMLP:
         batch = collate([tokens1, tokens2])
 
         x = batch["input_values"]
-        output_decoder_index = batch["output_decoder_index"]
+        task_index = batch["task_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = mlp_model(
             input_values=x,
-            output_decoder_index=output_decoder_index,
+            task_index=task_index,
         )
 
         loss = compute_multitask_loss(
@@ -812,7 +812,7 @@ class TestMLP:
             outputs,
             target_values,
             target_weights,
-            output_decoder_index,
+            task_index,
         )
 
         assert loss.requires_grad
@@ -864,13 +864,13 @@ class TestGRU:
         batch = collate([tokens])
 
         x = batch["input_values"]
-        output_decoder_index = batch["output_decoder_index"]
+        task_index = batch["task_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = gru_model(
             input_values=x,
-            output_decoder_index=output_decoder_index,
+            task_index=task_index,
         )
 
         assert isinstance(outputs, dict)
@@ -881,7 +881,7 @@ class TestGRU:
             outputs,
             target_values,
             target_weights,
-            output_decoder_index,
+            task_index,
         )
 
         assert loss.requires_grad
@@ -904,13 +904,13 @@ class TestGRU:
         batch = collate([tokens1, tokens2])
 
         x = batch["input_values"]
-        output_decoder_index = batch["output_decoder_index"]
+        task_index = batch["task_index"]
         target_values = batch["target_values"]
         target_weights = batch["target_weights"]
 
         outputs = gru_model(
             input_values=x,
-            output_decoder_index=output_decoder_index,
+            task_index=task_index,
         )
 
         loss = compute_multitask_loss(
@@ -918,7 +918,7 @@ class TestGRU:
             outputs,
             target_values,
             target_weights,
-            output_decoder_index,
+            task_index,
         )
 
         assert loss.requires_grad
@@ -946,7 +946,7 @@ class TestBaselineIntegration:
         tokens = simple_model.tokenize(data)
 
         assert "input_values" in tokens
-        assert "output_decoder_index" in tokens
+        assert "task_index" in tokens
         assert tokens["input_values"].obj.shape == (200, 4)
 
     def test_tokenize_then_forward_shallow(self, shallow_model):
@@ -955,7 +955,7 @@ class TestBaselineIntegration:
         tokens = shallow_model.tokenize(data)
 
         assert "input_values" in tokens
-        assert "output_decoder_index" in tokens
+        assert "task_index" in tokens
         assert tokens["input_values"].obj.shape == (3500, 4)
 
     def test_tokenize_then_forward_eegnet(self, eegnet_model):
@@ -964,7 +964,7 @@ class TestBaselineIntegration:
         tokens = eegnet_model.tokenize(data)
 
         assert "input_values" in tokens
-        assert "output_decoder_index" in tokens
+        assert "task_index" in tokens
         assert tokens["input_values"].obj.shape == (512, 4)
 
     def test_tokenize_then_forward_linear(self, linear_model):
@@ -973,7 +973,7 @@ class TestBaselineIntegration:
         tokens = linear_model.tokenize(data)
 
         assert "input_values" in tokens
-        assert "output_decoder_index" in tokens
+        assert "task_index" in tokens
         assert tokens["input_values"].obj.shape == (200, 4)
 
     def test_tokenize_then_forward_mlp(self, mlp_model):
@@ -982,7 +982,7 @@ class TestBaselineIntegration:
         tokens = mlp_model.tokenize(data)
 
         assert "input_values" in tokens
-        assert "output_decoder_index" in tokens
+        assert "task_index" in tokens
         assert tokens["input_values"].obj.shape == (200, 4)
 
     def test_tokenize_then_forward_gru(self, gru_model):
@@ -991,5 +991,5 @@ class TestBaselineIntegration:
         tokens = gru_model.tokenize(data)
 
         assert "input_values" in tokens
-        assert "output_decoder_index" in tokens
+        assert "task_index" in tokens
         assert tokens["input_values"].obj.shape == (200, 4)

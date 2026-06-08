@@ -1220,7 +1220,7 @@ class FoundryModule(L.LightningModule):
         batch.pop("session_id", None)
         batch.pop("absolute_start", None)
         batch.pop("eval_mask", None)
-        task_index = batch.get("task_index", batch.get("output_decoder_index"))
+        task_index = batch["task_index"]
         return batch, target_values, target_weights, task_index
 
     def _build_param_groups(self) -> list[dict]:
@@ -1789,8 +1789,8 @@ adapters until the old code is gone.
 2. **Class weight computation**: Accepts `dict[str, TaskConfig]`. Uses
   `TargetExtractor` from each config to walk sampling intervals. Computed
    class weights are injected into the loss config before model construction.
-3. **Batch key rename**: `output_decoder_index` → `task_index`. Done as a
-  separate prep PR before the main refactor (low-risk, mechanical change).
+3. **Batch key rename**: batch key is `task_index` (prep PR completed before the
+  main refactor).
 4. `**data.config` injection**: Removed. `TargetExtractor` handles target
   extraction directly — the hook that injected
    `data.config["multitask_readout"]` is unnecessary.

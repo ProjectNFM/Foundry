@@ -51,7 +51,9 @@ Consequently, `outputs[name]` becomes a 2D tensor of shape `(NumSelectedTokens, 
 In `FoundryModule._compute_task_losses`, you fetch `target = target_values.get(name)`. If `target` is provided by the dataloader as a 2D padded array of shape `(Batch, Tokens)`, passing it directly into the loss function alongside your collapsed 2D preds tensor will trigger a shape mismatch exception. Your loss layer must know exactly how to mask or align the target tensor to match the router's collapsed token-level output.
 
 ## 2. Resolving Your Open Questions
+
 ### Q1: `return_intermediates` Overhead
+
 Recommendation: Keep it gated behind a flag.
 
 Using a conditional check like `return_intermediates=bool(self._ssl_strategies)` is a clean approach. It prevents your model from building and maintaining a dictionary of tensor references during pure supervised runs, completely eliminating overhead and potential memory graph retention issues where it isn't needed.
@@ -73,6 +75,7 @@ combined_inputs = torch.cat([view1, view2], dim=0)
 This maximizes GPU parallelization, ensures your normalization layers (`BatchNorm`/`LayerNorm`) process both views consistently, and keeps the backbone execution count to exactly one pass.
 
 ### Q3: Per-Task Loss Weighting
+
 Recommendation: Yes, absolutely implement this.
 
 Multi-task learning architectures commonly suffer from gradient dominance issues, where a single regression task with large MSE values overpowers a classification task with smaller Cross-Entropy gradients. Adding a configurable loss_weight: float = 1.0 parameter to your TaskConfig provides an essential knob for balancing multi-task optimization scales.
@@ -85,6 +88,7 @@ You initialize strategy parameters (like `_decoder` or `_projector`) during the 
 In PyTorch Lightning, `LightningModule.configure_optimizers()` is called **before** `on_fit_start`. Additionally, the trainer's optimizer builder only tracks parameters returned by `self.parameters()` on the core module. Because your strategy modules are nested inside a separate callback class, the optimizer will completely miss them, and their weights will never update.
 
 **The Solution:**  
+
 1. Strategies with trainable parameters must expose them via a dedicated method (e.g., `strategy.get_trainable_parameters()`).
 2. Discover and register these parameters inside the `FoundryModule` initialization or `setup("fit")` step—not during `on_fit_start`.
 
@@ -103,8 +107,8 @@ def setup(self, stage=None):
 
 Your `_build_param_groups()` method can then safely iterate through these registered submodules to append them to your optimizer configuration.
 
-
 ## 3. Architecture Checklist for Implementation
+
 [ ] Fix TargetExtractor: Change np.empty_like to values.copy() or use a designated fill value to avoid allocating random garbage memory.
 
 [ ] Align Target Masking: Ensure that FoundryModule._compute_task_losses applies the exact same token-level mask to target values that the ReadoutRouter applies to embeddings.
