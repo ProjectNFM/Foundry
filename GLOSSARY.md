@@ -7,11 +7,11 @@ End-to-end training framework for EEG foundation models built on top of torch_br
 ### Tokenization & Embedding
 
 **Tokenization**:
-The CPU-side process (running in the dataloader) that converts a raw `Data` sample into a structured input dictionary ready for the model. Tokenization crops the signal to the **context window**, decomposes the continuous recording into discrete **tokens** — signal **patches** or per-channel time slices — and assembles all supporting metadata: channel indices, timestamps, **session** indices, **latent** positions, and extracted **task** targets.
+The CPU-side process (running in the dataloader) that converts a raw `Data` sample into a structured input dictionary ready for the model. Tokenization crops the signal to the **context window**, decomposes the continuous windowed signal into discrete **tokens**, and assembles all supporting metadata: channel indices, timestamps, **session** indices, **latent** positions, and extracted **task** targets.
 *Avoid*: Preprocessing, featurization, feature extraction
 
 **Token**:
-A discrete element in the model's sequence interface, always paired with a timestamp. Foundry distinguishes three families of tokens. *Input tokens* are segments of waveform data combined with a timestamp and channel identity. *Latent tokens* are learned query vectors on a fixed time grid that form the **backbone**'s bottleneck. They are not derived from any input signal. *Output tokens* (decoder queries) are positions where predictions are requested.
+A discrete element in any sequence model's interface, always paired with a timestamp. Foundry distinguishes three types of tokens. *Input tokens* are segments of waveform data combined with a timestamp and channel identity. *Latent tokens* are learned query vectors on a fixed time grid that form the **backbone**'s bottleneck in the case of a Perceiver-based model. They are not derived from any input signal. *Output tokens* (decoder queries) are positions where predictions are requested. 
 *Avoid*: Feature, sample, frame
 
 **Signal Embedding**:
@@ -31,8 +31,18 @@ The strategy chosen to embed the temporal dimensions of a signal. Determines how
 *Avoid*: Time encoding, positional encoding, time embedding
 
 **Time Embedding**:
-A fixed (non-learned) encoding that injects timestamp information into **token** representations, enabling the **backbone**'s attention layers to reason about temporal ordering and relative distances. Currently implemented via Rotary Position Embedding (RoPE). Applied to input tokens, **latent** tokens, and output tokens alike.
-*Avoid*: Positional encoding (when meaning the full layer), time encoding, temporal embedding
+An embedding or encoding step that injects timestamp information into **token** representations, enabling the **backbone**'s attention layers to reason about temporal ordering and relative distances. Currently implemented via Rotary Position Embedding (RoPE). Applied to input tokens, **latent** tokens, and output tokens alike.
+*Avoid*: Positional encodinestefanysuarez16 hours ago
+I would rephrase this as:
+
+Contrary to what the "embedding" name implies, this is a fixed, non-learnable encoding that injects timestamp information into token representations, enabling the backbone's attention layers to reason about temporal ordering and relative distances. Currently implemented via Rotary Position Embedding (RoPE). Applied to input tokens, latent tokens, and output tokens alike.
+
+To avoid any amiguity!
+
+milosobralnowPending
+I don't think this is quite right. RoPE is actually purposefuly called an embedding and not an encoding because it directly roatates the weight matrices for the Q and K matrices of the attention layers. I've clarified this to make it clear that, regardless whether your implementation is an encoding (like Sinusoidal Encodings if we ever use this) or an embedding then we decide to call it a Time Embedding
+
+g (when meaning the full layer), time encoding, temporal embedding
 
 ### Architecture
 
@@ -50,7 +60,7 @@ The fixed temporal span of signal that the model sees for a single forward pass,
 ### Task & Readout
 
 **Task**:
-Any training objective; supervised (classification, regression) or self-supervised (MAE reconstruction, contrastive). A task is the unit of composition for multitask training: it bundles a target extraction rule, a loss function, and a **readout head**. Each output **token** carries a task index that tells the **readout router** which head to dispatch to. Multiple tasks can coexist in a single training run, each producing its own predictions and losses over the same **backbone** representations. An example of a task is "Multiclass classification of sleep stages". Conceptually, a task is a mapping from the embedding space to a label space.
+Any training objective; supervised (classification, regression) or self-supervised (MAE reconstruction, contrastive). A task is the unit of composition for multitask training: it bundles a target extraction rule, a loss function, and a **readout head**. Each output **token** carries a task index that tells the **readout router** which head to dispatch to. Multiple tasks can coexist in a single training run, each producing its own predictions and losses over the same **backbone** representations. An example of a task is "sleep staging" which uses a task-specific readout head to train on a multiclass classification training objective. Conceptually, a task is a mapping from the embedding space to a label space.
 *Avoid*: Modality (when meaning task), readout (when meaning task), objective
 
 **Readout Head**:
