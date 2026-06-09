@@ -15,7 +15,7 @@ A discrete element in any sequence model's interface, always paired with a times
 *Avoid*: Feature, sample, frame
 
 **Signal Embedding**:
-The GPU-side learned transform that maps raw input **tokens** (patch waveforms or signal segments) into dense vectors in the **backbone**'s embedding space. This is composed of a **spatial embedding strategy** and a **temporal embedding strategy** orchestrated by the `EEGTokenizer` module. Runs on device during the forward pass, as distinct from **tokenization** which runs on CPU in the dataloader.
+The GPU-side learned transform that maps raw input **tokens** (patch waveforms or signal segments) into dense vectors in the **backbone**'s embedding space. This is composed of a **spatial embedding strategy** and a **temporal embedding strategy** orchestrated by the `EEGTokenizer` module. 
 *Avoid*: Tokenizer (when meaning the embedding layer), feature extractor, encoder (when meaning this layer)
 
 **Embedding**:
@@ -50,8 +50,12 @@ The fixed temporal span of signal that the model sees for a single forward pass,
 ### Task & Readout
 
 **Task**:
-Any training objective; supervised (classification, regression) or self-supervised (MAE reconstruction, contrastive). A task is the unit of composition for multitask training: it bundles a target extraction rule, a loss function, and a **readout head**. Each output **token** carries a task index that tells the **readout router** which head to dispatch to. Multiple tasks can coexist in a single training run, each producing its own predictions and losses over the same **backbone** representations. An example of a task is "sleep staging" which uses a task-specific readout head to train on a multiclass classification training objective. Conceptually, a task is a mapping from the embedding space to a label space.
+Any training objective; supervised (classification, regression) or self-supervised (MAE reconstruction, contrastive). A task is the unit of composition for multitask training: it bundles a target extraction rule, a loss function, and a **readout head**. Each output **token** carries a task index that tells the **readout router** which head to dispatch to. Multiple tasks can coexist in a single training run, each producing its own predictions and losses over the same **backbone** representations. An example of a task is "sleep staging" which uses a task-specific readout head to train on a multiclass classification training objective. Conceptually, a task defines a mapping from the embedding space to a target space as well as all the necessary components to train on it.
 *Avoid*: Modality (when meaning task), readout (when meaning task), objective
+
+**Target Extractor**:
+A frozen, CPU-side callable configured per **task** that runs during **tokenization** to pull supervision targets out of a raw `Data` sample. 
+*Avoid*: `prepare_targets`, target preparation, label encoder (when meaning this step)
 
 **Readout Head**:
 A small `nn.Module` (typically a linear projection) that maps **backbone** output embeddings to **task**-specific predictions. Pure forward pass — no loss computation, no data logic. Each task has its own readout head with an output dimensionality matching the task's label space.
