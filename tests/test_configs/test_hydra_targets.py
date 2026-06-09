@@ -11,7 +11,6 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 
 from foundry.data.datamodules.ajile import AjileDataModule
-from foundry.models.utils import resolve_readout_specs
 from tests.test_configs.conftest import (
     CONFIGS_ROOT,
     load_resolved_config,
@@ -94,17 +93,27 @@ def _instantiate_node(yaml_path: Path, target_path: str) -> Any:
 
     readout_specs = AjileDataModule.get_readout_specs_for_task("behavior")
 
-    if "ClassificationModule" in target or "RegressionModule" in target:
-        specs = resolve_readout_specs(
-            AjileDataModule.get_readout_specs_for_task("behavior")
+    if "FoundryModule" in target:
+        from foundry.models.readout import ReadoutRouter
+        from foundry.tasks.config import TaskConfig
+
+        task_cfg = TaskConfig.from_yaml(
+            CONFIGS_ROOT / "tasks" / "ajile_active_behavior.yaml"
         )
-        stub_model = torch.nn.Linear(4, 2)
-        stub_model.readout_specs = specs  # type: ignore[attr-defined]
-        kwargs["model"] = stub_model
-        if "ClassificationModule" in target:
-            kwargs["class_names"] = AjileDataModule.get_class_names_for_task(
-                "behavior"
-            )
+        heads = {task_cfg.name: instantiate({**task_cfg.head, "embed_dim": 4})}
+
+        class _StubFoundryModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.task_configs = {task_cfg.name: task_cfg}
+                self.router = ReadoutRouter(heads)
+
+            def forward(self, **kwargs):
+                return self.router(
+                    kwargs.get("output_embs"), kwargs.get("task_index")
+                )
+
+        kwargs["model"] = _StubFoundryModel()
     elif any(
         name in target
         for name in (

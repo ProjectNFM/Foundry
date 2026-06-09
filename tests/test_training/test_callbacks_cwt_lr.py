@@ -12,16 +12,11 @@ from lightning import Trainer
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
 
+from foundry.training import FoundryModule
 from foundry.training.callbacks import (
     EffectiveBatchSizeCallback,
     ParameterWatcherCallback,
 )
-from foundry.training.task_modules import BaseMultitaskModule
-
-
-class _CwtModule(BaseMultitaskModule):
-    def _build_task_metrics(self, task_name, spec, prefix):
-        raise NotImplementedError
 
 
 class _CwtStubModel(nn.Module):
@@ -29,7 +24,7 @@ class _CwtStubModel(nn.Module):
         super().__init__()
         self.encoder = nn.Linear(4, 4)
         self.cwt = nn.Linear(4, 2)
-        self.readout_specs = {}
+        self.task_configs = {}
 
     def forward(self, **kwargs):
         x = kwargs.get("x", kwargs.get("input"))
@@ -158,7 +153,7 @@ class TestParameterWatcherCallback:
 class TestCwtLrMultiplier:
     def test_single_group_when_multiplier_is_one(self):
         model = _CwtStubModel()
-        module = _CwtModule(model=model, cwt_lr_multiplier=1.0)
+        module = FoundryModule(model=model, cwt_lr_multiplier=1.0)
         groups = module._build_param_groups()
         assert len(groups) == 1
         assert groups[0]["lr"] == module.learning_rate
@@ -170,13 +165,13 @@ class TestCwtLrMultiplier:
                 self.other = nn.Linear(2, 2)
                 self.tokenizer = nn.Module()
                 self.tokenizer.cwt = nn.Linear(2, 2)
-                self.readout_specs = {}
+                self.task_configs = {}
 
             def forward(self, x):
                 return x
 
         named = _NamedCwt()
-        module = _CwtModule(
+        module = FoundryModule(
             model=named, learning_rate=1e-2, cwt_lr_multiplier=10.0
         )
         groups = module._build_param_groups()
@@ -193,11 +188,15 @@ class TestCwtLrMultiplier:
             load_resolved_config,
         )
 
-        for name in ("classification", "regression"):
-            cfg = load_resolved_config(CONFIGS_ROOT / "module" / f"{name}.yaml")
-            assert cfg.cwt_lr_multiplier == 1.0
-            module = instantiate(
-                cfg,
-                model=_CwtStubModel(),
-            )
-            assert module.cwt_lr_multiplier == 1.0
+        from foundry.tasks.config import TaskConfig
+
+        task_cfg = TaskConfig.from_yaml(
+            CONFIGS_ROOT / "tasks" / "neurosoft_on_vs_off.yaml"
+        )
+        stub = _CwtStubModel()
+        stub.task_configs = {task_cfg.name: task_cfg}
+
+        cfg = load_resolved_config(CONFIGS_ROOT / "module" / "default.yaml")
+        assert cfg.cwt_lr_multiplier == 1.0
+        module = instantiate(cfg, model=stub)
+        assert module.cwt_lr_multiplier == 1.0

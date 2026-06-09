@@ -1,11 +1,7 @@
 from foundry.training.callbacks import ParameterWatcherCallback
-from foundry.training.task_modules import (
-    ClassificationModule,
-    RegressionModule,
-)
+from foundry.training.module import FoundryModule
 
 __all__ = [
-    "ClassificationModule",
+    "FoundryModule",
     "ParameterWatcherCallback",
-    "RegressionModule",
 ]

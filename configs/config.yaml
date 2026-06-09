@@ -1,7 +1,7 @@
 defaults:
   - model: null
   - data: null
-  - module: classification
+  - module: default
   - logger: wandb
   - _self_
   - trainer: default
