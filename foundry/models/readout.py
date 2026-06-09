@@ -50,7 +50,7 @@ class ReadoutRouter(nn.Module):
             outputs[name] = self.heads[name](output_embs[mask])
         return outputs
 
-    def task_index_for(self, name: str) -> int:
+    def get_task_index_by_name(self, name: str) -> int:
         """Return the integer task index for ``name``.
 
         Indices follow sorted task name order (e.g. ``"alpha"`` before
