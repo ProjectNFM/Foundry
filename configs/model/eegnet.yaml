@@ -2,10 +2,10 @@ _target_: foundry.models.EEGNetEncoder
 
 # These parameters are based on the EEGNet paper: https://arxiv.org/abs/1611.07451.
 # They need to be tuned for the specific dataset.
-num_channels: 64
+num_channels: 32
 num_samples: 128
-F1: 8
-D: 2
-F2: 16
-kernel_length: 64
-dropout_rate: 0.5
+F1: 32
+D: 8
+F2: 128
+kernel_length: 512
+dropout_rate: 0.25

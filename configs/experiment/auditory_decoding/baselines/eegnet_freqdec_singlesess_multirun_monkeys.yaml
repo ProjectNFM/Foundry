@@ -1,6 +1,6 @@
 # @package _global_
 #
-# Per-recording sweep over all NeuroSoft minipig raw sessions.
+# Per-recording sweep over all NeuroSoft monkey raw sessions.
 # The sweep replaces the full `data.recording_ids` list with one session per job
 # (see `config_list_sweep_one_recording_lists`); overriding only `recording_ids.0`
 # would leave the rest of the multisession list from the data preset and break
@@ -20,11 +20,11 @@
 
 defaults:
   - override /model: eegnet
-  - override /data: neurosoft_minipigs/singlesess
+  - override /data: neurosoft_monkeys/multisess_raw
   - override /cluster: cscs
 
 model:
-  num_channels: ${get_num_ecog_channels_by_name:${data.root}/neurosoft_minipigs_2026,${data.recording_ids.0}}
+  num_channels: ${get_num_ecog_channels_by_name:${data.root}/neurosoft_monkeys_2026,${data.recording_ids.0}}
   num_samples: 1000 # sequence length * sampling rate
 
 data:
@@ -33,7 +33,7 @@ data:
 
 run:
   project: auditory_decoding
-  name: ${hydra:runtime.choices.model}_${data.recording_ids.0}_fold${hyperparameters.fold_number}
+  name: Monkey_batch_training_channel_standardized-oppar
   group: NEUROSOFT_SINGLE_SESSION
   tags:
     - neurosoft
@@ -41,15 +41,16 @@ run:
     - training
     - ${hydra:runtime.choices.model}
     - raw_data
+    - monkeys
   seed: 42
   log_level: INFO
 
 hyperparameters:
-  batch_size: 16
+  batch_size: 64
   sequence_length: 0.5
-  fold_number: ???
-  num_workers: 4
-  learning_rate: 0.015
+  fold_number: 0
+  num_workers: 16
+  learning_rate: 0.0015
   weight_decay: 0.018
 
 trainer:
@@ -59,7 +60,7 @@ trainer:
     early_stopping:
       monitor: val/loss
       mode: min
-      patience: 20
+      patience: 60
     model_checkpoint:
       monitor: val/loss
       mode: min
@@ -73,5 +74,5 @@ hydra:
   sweeper:
     max_batch_size: 1000
     params:
-      data.recording_ids: ${config_list_sweep_one_recording_lists:configs/data/neurosoft_minipigs/multisess_raw.yaml,recording_ids}
+      data.recording_ids: ${config_list_sweep_one_recording_lists:configs/data/neurosoft_monkeys/multisess_raw.yaml,recording_ids}
       hyperparameters.fold_number: choice(0)

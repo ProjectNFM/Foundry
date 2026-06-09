@@ -14,7 +14,7 @@ dependencies = [
     "hydra-submitit-launcher>=1.2.0",
     "ipykernel>=7.1.0",
     "lightning @ https://github.com/Lightning-AI/pytorch-lightning/releases/download/2.6.1/lightning-2.6.1-py3-none-any.whl",
-    "torch>=2.9.1",
+    "torch>=2.6.0",
     "torch-brain",
     "temporaldata",
     "matplotlib>=3.10.8",
@@ -31,7 +31,13 @@ notebooks = ["ipykernel", "pandas", "seaborn"]
 torch-brain = { git = "https://github.com/neuro-galaxy/torch_brain", branch = "milo/fast-sampler" }
 brainsets = { git = "https://github.com/neuro-galaxy/brainsets", branch = "mila/dev-main" }
 temporaldata = { git = "https://github.com/neuro-galaxy/temporaldata", branch = "main" }
-auditorydecoding = { git = "https://github.com/Neurosoft-Bioelectronics/auditorydecoding", branch = "milo/temp-dep-devmain" }
+auditorydecoding = { git = "https://github.com/Neurosoft-Bioelectronics/auditorydecoding", branch = "alex/monkeys" }
+
+[tool.uv]
+override-dependencies = [
+    "brainsets @ git+https://github.com/neuro-galaxy/brainsets@mila/dev-main",
+    "torch-brain @ git+https://github.com/neuro-galaxy/torch_brain@milo/fast-sampler",
+]
 
 [tool.hatch.metadata]
 allow-direct-references = true

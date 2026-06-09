@@ -440,11 +440,21 @@ class ClassificationModule(BaseMultitaskModule):
         matrix: torch.Tensor,
         task_name: str,
         class_names: list[str] | None = None,
+        all_classes: bool = False,
     ):
         import matplotlib.pyplot as plt
         import numpy as np
 
         cm = matrix.cpu().numpy()
+
+        if not all_classes:
+            present = np.where(cm.sum(axis=1) + cm.sum(axis=0) > 0)[0]
+            cm = cm[np.ix_(present, present)]
+            if class_names is not None:
+                class_names = [class_names[i] for i in present]
+            else:
+                class_names = [str(i) for i in present]
+
         n_classes = cm.shape[0]
         row_sums = cm.sum(axis=1)
         total_samples = int(cm.sum())
