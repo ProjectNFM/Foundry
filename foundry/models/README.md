@@ -58,7 +58,7 @@ flowchart LR
 2. session conditioning -> adds `session_emb(input_session_index)` to every input token
 3. latent/query setup -> latent embeddings + rotary time embeddings
 4. `PerceiverIOBackbone` -> encoder cross-attn, processor self-attn, decoder cross-attn
-5. `MultitaskReadout` -> task-specific heads chosen by `output_decoder_index`
+5. `MultitaskReadout` -> task-specific heads chosen by `task_index`
 
 ## EEGTokenizer Architecture
 
