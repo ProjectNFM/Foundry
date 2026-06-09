@@ -349,7 +349,7 @@ class ReadoutRouter(nn.Module):
             outputs[name] = self.heads[name](output_embs[mask])
         return outputs
 
-    def task_index_for(self, name: str) -> int:
+    def get_task_index_by_name(self, name: str) -> int:
         return self._name_to_idx[name]
 
     @property
@@ -1004,7 +1004,7 @@ def tokenize(self, data: Data) -> dict:
         if targets["timestamps"] is None:
             continue
 
-        idx = self.router.task_index_for(name)
+        idx = self.router.get_task_index_by_name(name)
         all_timestamps.append(targets["timestamps"])
         task_indices.append(idx)
         target_values[name] = targets["values"]
@@ -1185,7 +1185,7 @@ class FoundryModule(L.LightningModule):
             loss = self._task_losses[name](preds, target, weights)
 
             # Sequence-weighted aggregation (preserves current behavior)
-            idx = self.model.router.task_index_for(name)
+            idx = self.model.router.get_task_index_by_name(name)
             num_sequences = torch.any(task_index == idx, dim=1).sum()
             total_loss = total_loss + loss * num_sequences
             total_sequences += num_sequences
