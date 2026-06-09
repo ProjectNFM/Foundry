@@ -149,7 +149,7 @@ class POYOEEGModel(nn.Module):
         latent_timestamps: torch.Tensor,
         output_session_index: torch.Tensor,
         output_timestamps: torch.Tensor,
-        output_decoder_index: torch.Tensor,
+        task_index: torch.Tensor,
         unpack_output: bool = False,
     ) -> Dict:
         """Forward pass through the model.
@@ -166,7 +166,7 @@ class POYOEEGModel(nn.Module):
             latent_timestamps: (B, n_latent) timestamps for latent tokens.
             output_session_index: (B, n_out) session indices for outputs.
             output_timestamps: (B, n_out) timestamps for output predictions.
-            output_decoder_index: (B, n_out) task/decoder indices.
+            task_index: (B, n_out) task/decoder indices.
             unpack_output: Whether to unpack outputs by batch sample.
 
         Returns:
@@ -193,9 +193,9 @@ class POYOEEGModel(nn.Module):
         latents = self.latent_emb(latent_index)
         latent_timestamp_emb = self.rotary_emb(latent_timestamps)
 
-        local_task_index = torch.zeros_like(output_decoder_index)
+        local_task_index = torch.zeros_like(task_index)
         for global_id, local_id in self.global_to_local_task_id.items():
-            local_task_index[output_decoder_index == global_id] = local_id
+            local_task_index[task_index == global_id] = local_id
 
         output_queries = self.session_emb(output_session_index) + self.task_emb(
             local_task_index
@@ -213,7 +213,7 @@ class POYOEEGModel(nn.Module):
 
         output = self.readout(
             output_embs=output_latents,
-            output_readout_index=output_decoder_index,
+            output_readout_index=task_index,
             unpack_output=unpack_output,
         )
 
@@ -347,7 +347,7 @@ class POYOEEGModel(nn.Module):
             "latent_timestamps": latent_timestamps,
             "output_session_index": pad8(output_session_index),
             "output_timestamps": pad8(output_timestamps),
-            "output_decoder_index": pad8(output_task_index),
+            "task_index": pad8(output_task_index),
             "target_values": chain(output_values, allow_missing_keys=True),
             "target_weights": chain(output_weights, allow_missing_keys=True),
             "session_id": data.session.id,
