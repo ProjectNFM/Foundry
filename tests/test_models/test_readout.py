@@ -50,7 +50,7 @@ class TestReadoutRouterMultiTask:
 
 
 class TestReadoutRouterTaskIndices:
-    def test_task_index_for_uses_sorted_name_order(self):
+    def test_get_task_index_by_name_uses_sorted_name_order(self):
         embed_dim = 4
         heads = {
             "zebra": ReadoutHead(embed_dim=embed_dim, output_dim=1),
@@ -59,9 +59,9 @@ class TestReadoutRouterTaskIndices:
         }
         router = ReadoutRouter(heads)
 
-        assert router.task_index_for("alpha") == 0
-        assert router.task_index_for("middle") == 1
-        assert router.task_index_for("zebra") == 2
+        assert router.get_task_index_by_name("alpha") == 0
+        assert router.get_task_index_by_name("middle") == 1
+        assert router.get_task_index_by_name("zebra") == 2
         assert router.num_tasks == 3
 
 
