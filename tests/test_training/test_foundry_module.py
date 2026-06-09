@@ -68,8 +68,8 @@ def test_sequence_weighted_multitask_loss_matches_spec_id_weighting():
     module.to(torch.device("cpu"))
 
     clf_name, reg_name = clf_cfg.name, reg_cfg.name
-    clf_idx = model.router.task_index_for(clf_name)
-    reg_idx = model.router.task_index_for(reg_name)
+    clf_idx = model.router.get_task_index_by_name(clf_name)
+    reg_idx = model.router.get_task_index_by_name(reg_name)
 
     # 3 clf sequences + 1 reg sequence
     task_index = torch.tensor(
