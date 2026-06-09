@@ -1,0 +1,23 @@
+name: sleep_stage_5class
+
+head:
+  _target_: foundry.tasks.heads.ReadoutHead
+  output_dim: 5
+
+target_extractor:
+  _target_: foundry.tasks.targets.TargetExtractor
+  timestamp_key: sleep_stages.timestamps
+  value_key: sleep_stages.values
+
+loss:
+  _target_: foundry.tasks.losses.CrossEntropyTaskLoss
+
+metrics:
+  _target_: foundry.tasks.metrics.classification_metrics
+  num_classes: 5
+
+metric_summary_modes:
+  acc: max
+  f1: max
+  auroc: max
+  loss: min

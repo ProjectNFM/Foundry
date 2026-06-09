@@ -1,0 +1,25 @@
+name: motor_imagery_5class
+
+head:
+  _target_: foundry.tasks.heads.ReadoutHead
+  output_dim: 5
+
+target_extractor:
+  _target_: foundry.tasks.targets.TargetExtractor
+  timestamp_key: motor_imagery_trials.timestamps
+  value_key: motor_imagery_trials.movement_ids
+
+loss:
+  _target_: foundry.tasks.losses.CrossEntropyTaskLoss
+  label_smoothing: 0.0
+
+metrics:
+  _target_: foundry.tasks.metrics.classification_metrics
+  num_classes: 5
+
+class_names: [Rest, Left hand, Right hand, Feet, Tongue]
+metric_summary_modes:
+  acc: max
+  f1: max
+  auroc: max
+  loss: min
