@@ -1,0 +1,26 @@
+name: motor_imagery_right_feet
+
+head:
+  _target_: foundry.tasks.heads.ReadoutHead
+  output_dim: 2
+
+target_extractor:
+  _target_: foundry.tasks.targets.TargetExtractor
+  timestamp_key: motor_imagery_trials.timestamps
+  value_key: motor_imagery_trials.movement_ids
+  label_map:
+    2: 0
+    3: 1
+
+loss:
+  _target_: foundry.tasks.losses.CrossEntropyTaskLoss
+
+metrics:
+  _target_: foundry.tasks.metrics.classification_metrics
+  num_classes: 2
+
+class_names: [Right hand, Feet]
+metric_summary_modes:
+  acc: max
+  auroc: max
+  loss: min

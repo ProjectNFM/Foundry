@@ -1,3 +1,4 @@
+from foundry.tasks.config import TaskConfig
 from foundry.tasks.heads import MLPReadoutHead, ReadoutHead
 from foundry.tasks.losses import (
     CrossEntropyTaskLoss,
@@ -11,6 +12,7 @@ from foundry.tasks.metrics import (
 from foundry.tasks.targets import TargetExtractor
 
 __all__ = [
+    "TaskConfig",
     "CrossEntropyTaskLoss",
     "MLPReadoutHead",
     "MSETaskLoss",

@@ -1,5 +1,6 @@
 def test_package_reexports_public_api():
     from foundry.tasks import (
+        TaskConfig,
         CrossEntropyTaskLoss,
         MLPReadoutHead,
         MSETaskLoss,
@@ -10,6 +11,7 @@ def test_package_reexports_public_api():
         ssl_metrics,
     )
 
+    assert TaskConfig is not None
     assert TargetExtractor is not None
     assert ReadoutHead is not None
     assert CrossEntropyTaskLoss is not None
