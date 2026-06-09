@@ -1,11 +1,23 @@
+"""Readout heads for projecting backbone embeddings to task predictions."""
+
 import torch
 import torch.nn as nn
 
 
 class ReadoutHead(nn.Module):
-    """Pure projection from backbone embeddings to task predictions.
+    """Single linear projection from backbone embeddings to task predictions.
 
-    No loss, no metrics, no data logic. Just a forward pass.
+    The default readout for classification and regression tasks. Maps each
+    embedding vector to a logits or regression vector of length ``output_dim``.
+
+    Args:
+        embed_dim: Dimension of backbone output embeddings.
+        output_dim: Number of logits (classification) or target dimensions
+            (regression).
+
+    Shape:
+        - Input: ``(N, embed_dim)``
+        - Output: ``(N, output_dim)``
     """
 
     def __init__(self, embed_dim: int, output_dim: int):
@@ -18,7 +30,25 @@ class ReadoutHead(nn.Module):
 
 
 class MLPReadoutHead(nn.Module):
-    """Multi-layer projection head (for SSL projection, deeper readouts)."""
+    """Multi-layer MLP projection from embeddings to task predictions.
+
+    Use for deeper readouts or SSL projection heads where a single linear layer
+    is insufficient. Builds ``num_layers - 1`` hidden blocks
+    (linear → activation) followed by a final linear to ``output_dim``.
+
+    Args:
+        embed_dim: Dimension of backbone output embeddings.
+        output_dim: Number of logits or target dimensions.
+        hidden_dim: Width of hidden layers. Defaults to ``embed_dim``.
+        num_layers: Total number of linear layers, including the output layer.
+            ``num_layers=1`` is equivalent to :class:`ReadoutHead`.
+        activation: Nonlinearity between hidden layers. One of ``"gelu"`` or
+            ``"relu"``.
+
+    Shape:
+        - Input: ``(N, embed_dim)``
+        - Output: ``(N, output_dim)``
+    """
 
     def __init__(
         self,

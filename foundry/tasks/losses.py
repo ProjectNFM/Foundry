@@ -1,10 +1,34 @@
+"""Task loss functions for the training layer.
+
+Each loss is an ``nn.Module`` with a uniform signature::
+
+    (predictions, targets, sample_weights) -> scalar
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
 class CrossEntropyTaskLoss(nn.Module):
-    """Cross-entropy loss with optional class weights and label smoothing."""
+    """Cross-entropy loss for classification tasks.
+
+    Wraps :func:`torch.nn.functional.cross_entropy` with per-sample weighting.
+    Class weights and label smoothing are configured at construction time so they
+    can be set from YAML and serialized in checkpoints.
+
+    Args:
+        label_smoothing: Smoothing factor passed to cross-entropy. ``0.0``
+            disables smoothing.
+        class_weights: Per-class weights of length ``num_classes``. Registered
+            as a buffer when provided.
+
+    Shape:
+        - ``predictions``: ``(N, num_classes)`` unnormalized logits.
+        - ``targets``: ``(N,)`` integer class indices.
+        - ``sample_weights``: scalar or ``(N,)`` tensor; multiplied per sample
+            before the batch mean. A scalar is a no-op.
+    """
 
     def __init__(
         self,
@@ -40,7 +64,17 @@ class CrossEntropyTaskLoss(nn.Module):
 
 
 class MSETaskLoss(nn.Module):
-    """MSE loss with optional per-sample weighting."""
+    """Mean squared error loss for regression tasks.
+
+    Computes element-wise MSE between predictions and targets, optionally
+    weighting each sample before averaging over the full batch.
+
+    Shape:
+        - ``predictions``: ``(N, D)`` predicted values.
+        - ``targets``: ``(N, D)`` ground-truth values (same shape as predictions).
+        - ``sample_weights``: scalar or ``(N,)`` tensor; broadcast across
+            target dimensions when a tensor. A scalar is a no-op.
+    """
 
     def forward(
         self,
