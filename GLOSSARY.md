@@ -32,17 +32,7 @@ The strategy chosen to embed the temporal dimensions of a signal. Determines how
 
 **Time Embedding**:
 An embedding or encoding step that injects timestamp information into **token** representations, enabling the **backbone**'s attention layers to reason about temporal ordering and relative distances. Currently implemented via Rotary Position Embedding (RoPE). Applied to input tokens, **latent** tokens, and output tokens alike.
-*Avoid*: Positional encodinestefanysuarez16 hours ago
-I would rephrase this as:
-
-Contrary to what the "embedding" name implies, this is a fixed, non-learnable encoding that injects timestamp information into token representations, enabling the backbone's attention layers to reason about temporal ordering and relative distances. Currently implemented via Rotary Position Embedding (RoPE). Applied to input tokens, latent tokens, and output tokens alike.
-
-To avoid any amiguity!
-
-milosobralnowPending
-I don't think this is quite right. RoPE is actually purposefuly called an embedding and not an encoding because it directly roatates the weight matrices for the Q and K matrices of the attention layers. I've clarified this to make it clear that, regardless whether your implementation is an encoding (like Sinusoidal Encodings if we ever use this) or an embedding then we decide to call it a Time Embedding
-
-g (when meaning the full layer), time encoding, temporal embedding
+*Avoid*: Positional encoding (when meaning the full layer), time encoding, temporal embedding
 
 ### Architecture
 
