@@ -18,11 +18,11 @@ from lightning import Trainer
 from torch.utils.data import DataLoader, TensorDataset
 
 from foundry.models.embeddings.temporal.cwt import ContinuousCWTLayer
+from foundry.training import FoundryModule
 from foundry.training.callbacks import (
     EffectiveBatchSizeCallback,
     ParameterWatcherCallback,
 )
-from foundry.training.task_modules import BaseMultitaskModule
 
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available(), reason="GPU required"
@@ -39,7 +39,7 @@ class _CwtModel(nn.Module):
             num_freqs=4, min_freq=1.0, max_freq=30.0, freq_spacing="log"
         )
         self.head = nn.Linear(16, 2)
-        self.readout_specs = {}
+        self.task_configs = {}
 
     def forward(self, x=None, **kwargs):
         return self.encoder(x)
@@ -60,11 +60,6 @@ class _SimpleGpuModule(L.LightningModule):
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=1e-3)
-
-
-class _CwtTaskModule(BaseMultitaskModule):
-    def _build_task_metrics(self, task_name, spec, prefix):
-        raise NotImplementedError
 
 
 class _FakeGpuDatamodule:
@@ -207,7 +202,7 @@ class TestManualCheck3_CwtLrMultiplier:
 
     def test_separate_groups_printed_on_gpu(self, capsys):
         model = _CwtModel()
-        module = _CwtTaskModule(
+        module = FoundryModule(
             model=model,
             learning_rate=1e-4,
             cwt_lr_multiplier=10.0,
@@ -233,7 +228,7 @@ class TestManualCheck3_CwtLrMultiplier:
 
     def test_configure_optimizers_uses_separate_groups_on_gpu(self):
         model = _CwtModel()
-        module = _CwtTaskModule(
+        module = FoundryModule(
             model=model,
             learning_rate=1e-4,
             cwt_lr_multiplier=10.0,

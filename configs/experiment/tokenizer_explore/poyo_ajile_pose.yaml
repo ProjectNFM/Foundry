@@ -3,7 +3,7 @@
 defaults:
   - override /model: poyo_eeg
   - override /data: ajile/singlesess
-  - override /module: regression
+  - override /module: default
 
 model:
   zero_output_timestamps: false
