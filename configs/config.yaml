@@ -22,6 +22,10 @@ hyperparameters:
 stage:
   skip: false
 
+class_weights:
+  mode: none
+  smoothing: 0.5
+
 run:
   # Keep fresh runs independent unless resume is explicitly requested.
   # SLURM restarts still auto-resume from last.ckpt in main.py.

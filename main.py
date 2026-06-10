@@ -182,16 +182,16 @@ def _uses_task_configs(DataModuleClass) -> bool:
 def _apply_auto_class_weights(
     cfg: DictConfig, datamodule, task_configs: dict
 ) -> dict:
-    class_weights_mode = OmegaConf.select(
-        cfg, "module.class_weights", default=None
-    )
-    if class_weights_mode != "auto":
+    class_weights_cfg = OmegaConf.select(cfg, "class_weights", default=None)
+    if class_weights_cfg is None:
+        return task_configs
+
+    mode = class_weights_cfg.get("mode", None)
+    if mode != "auto":
         return task_configs
 
     datamodule.setup("fit")
-    smoothing = OmegaConf.select(
-        cfg, "module.class_weight_smoothing", default=1.0
-    )
+    smoothing = class_weights_cfg.get("smoothing", 1.0)
     weights = datamodule.compute_class_weights(smoothing=smoothing)
     for name, class_weights in weights.items():
         task_configs[name].loss["class_weights"] = class_weights
