@@ -55,21 +55,3 @@ P300_TARGET = register_modality(
     value_key="p300_trials.target",
     loss_fn=CrossEntropyLoss(),
 )
-
-NEUROSOFT_ON_VS_OFF = register_modality(
-    "neurosoft_on_vs_off",
-    dim=2,
-    type=DataType.BINARY,
-    timestamp_key="on_vs_off_trials.timestamps",
-    value_key="on_vs_off_trials.behavior_ids",
-    loss_fn=CrossEntropyLoss(),
-)
-
-NEUROSOFT_ACOUSTIC_STIM = register_modality(
-    "neurosoft_acoustic_stim",
-    dim=26,
-    type=DataType.MULTINOMIAL,
-    timestamp_key="acoustic_stim_trials.timestamps",
-    value_key="acoustic_stim_trials.behavior_ids",
-    loss_fn=CrossEntropyLoss(),
-)

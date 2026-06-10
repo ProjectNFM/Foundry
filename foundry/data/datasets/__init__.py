@@ -3,6 +3,7 @@ from .korczowski_brain_invaders_2014a import KorczowskiBrainInvaders2014a
 from .peterson_brunton_pose_trajectory_2022 import (
     PetersonBruntonPoseTrajectory2022,
 )
+from .neurosoft import NeurosoftMinipigs2026, NeurosoftMonkeys2026
 from .mixins import ModalityMixin, TaskMixin, combine_modalities
 from . import modalities
 
@@ -10,6 +11,8 @@ __all__ = [
     "SchalkWolpawPhysionet2009",
     "KorczowskiBrainInvaders2014a",
     "PetersonBruntonPoseTrajectory2022",
+    "NeurosoftMinipigs2026",
+    "NeurosoftMonkeys2026",
     "ModalityMixin",
     "TaskMixin",
     "combine_modalities",

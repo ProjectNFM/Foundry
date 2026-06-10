@@ -16,7 +16,7 @@ metrics:
   _target_: foundry.tasks.metrics.classification_metrics
   num_classes: 2
 
-class_names: [off, on]
+class_names: ["off", "on"]
 metric_summary_modes:
   acc: max
   auroc: max

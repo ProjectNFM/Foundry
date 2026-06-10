@@ -20,7 +20,6 @@ from tests.test_configs.conftest import (
 _SKIP_PREFIXES = (
     "hydra/",
     "experiment/",
-    "data/neurosoft_minipigs/",
 )
 
 _SKIP_TARGET_PATHS = {
@@ -92,7 +91,7 @@ def _instantiate_node(yaml_path: Path, target_path: str) -> Any:
     target = node.get("_target_", "")
 
     task_configs = AjileDataModule.get_tasks_for_experiment("behavior")
-    readout_specs = ["neurosoft_on_vs_off"]
+    readout_specs = ["p300_target"]
 
     if "FoundryModule" in target:
         from foundry.models.readout import ReadoutRouter
@@ -129,10 +128,13 @@ def _instantiate_node(yaml_path: Path, target_path: str) -> Any:
                 "POYO root requires composed tokenizer; see dedicated test"
             )
         kwargs["readout_specs"] = readout_specs
-    elif "AjileDataModule" in target or "PhysionetDataModule" in target:
+    elif (
+        "AjileDataModule" in target
+        or "PhysionetDataModule" in target
+        or "NeurosoftMinipigs2026DataModule" in target
+        or "NeurosoftMonkeys2026DataModule" in target
+    ):
         kwargs["tokenizer"] = None
-    elif "NeurosoftMinipigs2026DataModule" in target:
-        pytest.skip("requires neurosoft runtime data layout")
 
     return instantiate(node, **kwargs)
 
@@ -172,7 +174,7 @@ def test_standalone_model_config_instantiates(config_name: str):
     if config_name == "poyo_eeg":
         pytest.skip("covered by test_poyo_eeg_with_tokenizer_configs")
     yaml_path = CONFIGS_ROOT / "model" / f"{config_name}.yaml"
-    readout_specs = ["neurosoft_on_vs_off"]
+    readout_specs = ["p300_target"]
     model = instantiate(
         _strip_non_constructor_keys(load_resolved_config(yaml_path)),
         readout_specs=readout_specs,

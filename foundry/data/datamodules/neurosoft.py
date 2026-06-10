@@ -1,14 +1,12 @@
-from auditorydecoding import (
-    NeurosoftDataset,
+from typing import Optional, Callable, Literal, Type
+
+from foundry.data.datamodules.base import NeuralDataModule
+from foundry.data.datasets.neurosoft import (
     NeurosoftMinipigs2026,
     NeurosoftMonkeys2026,
 )
-from auditorydecoding.data.neurosoft_pipeline import (
-    ON_VS_OFF_TO_ID,
-    STIM_FREQUENCY_TO_ID,
-)
-from foundry.data.datamodules.base import NeuralDataModule
-from typing import Optional, Callable, Literal, Type
+from foundry.tasks.class_weights import compute_class_weights_for_tasks
+from foundry.tasks.config import TaskConfig
 
 
 class NeurosoftDataModule(NeuralDataModule):
@@ -17,17 +15,29 @@ class NeurosoftDataModule(NeuralDataModule):
         "acoustic_stim": ["neurosoft_acoustic_stim"],
     }
 
-    READOUT_CLASS_NAMES: dict[str, list[str]] = {
-        "on_vs_off": list(ON_VS_OFF_TO_ID.keys()),
-        "acoustic_stim": [
-            k
-            for k, _ in sorted(STIM_FREQUENCY_TO_ID.items(), key=lambda x: x[1])
-        ],
-    }
+    @classmethod
+    def get_tasks_for_experiment(cls, task_type: str) -> dict[str, TaskConfig]:
+        task_names = cls.TASK_TO_READOUT[task_type]
+        return NeurosoftMinipigs2026.get_tasks(task_names)
+
+    def compute_class_weights(
+        self, smoothing: float = 1.0
+    ) -> dict[str, list[float]]:
+        if self.dataset is None:
+            raise RuntimeError("Call setup() before compute_class_weights()")
+        if self.task_type is None:
+            raise ValueError(
+                "task_type must be set to compute class weights automatically"
+            )
+
+        task_configs = self.get_tasks_for_experiment(self.task_type)
+        return compute_class_weights_for_tasks(
+            task_configs, self.dataset, split="train", smoothing=smoothing
+        )
 
     def __init__(
         self,
-        dataset_class: Type[NeurosoftDataset],
+        dataset_class: Type[NeurosoftMinipigs2026] | Type[NeurosoftMonkeys2026],
         root: str,
         batch_size: int = 32,
         num_workers: int = 0,
