@@ -27,6 +27,10 @@ class _NeurosoftTaskMixin(TaskMixin):
     """Shared task registration and recording hook for Neurosoft datasets."""
 
     AVAILABLE_TASKS = _NEUROSOFT_TASKS
+    TASK_TO_READOUT = {
+        "on_vs_off": ["neurosoft_on_vs_off"],
+        "acoustic_stim": ["neurosoft_acoustic_stim"],
+    }
 
     def get_recording_hook(self, data: Data):
         # Skip auditorydecoding's multitask_readout hook; targets come from TaskConfig.
@@ -38,6 +42,12 @@ class NeurosoftMinipigs2026(
 ):
     """Foundry wrapper for Neurosoft minipig data with task-config registration."""
 
+    def __init__(self, *, fold=0, **kwargs):
+        super().__init__(fold_num=fold, **kwargs)
+
 
 class NeurosoftMonkeys2026(_NeurosoftTaskMixin, _AuditoryNeurosoftMonkeys2026):
     """Foundry wrapper for Neurosoft monkey data with task-config registration."""
+
+    def __init__(self, *, fold=0, **kwargs):
+        super().__init__(fold_num=fold, **kwargs)

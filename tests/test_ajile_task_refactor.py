@@ -14,8 +14,6 @@ from torch_brain.data import (
     RegularTimeSeries,
 )
 
-from foundry.data.datamodules.ajile import AjileDataModule
-from foundry.data.datasets.mixins import TaskMixin
 from foundry.data.datasets.peterson_brunton_pose_trajectory_2022 import (
     PetersonBruntonPoseTrajectory2022,
 )
@@ -40,7 +38,7 @@ class MockSession:
 
 
 def _make_ajile_task_configs(task_type: str = "behavior"):
-    return AjileDataModule.get_tasks_for_experiment(task_type)
+    return PetersonBruntonPoseTrajectory2022.get_tasks_for_experiment(task_type)
 
 
 def _make_poyo_model(task_configs: dict[str, TaskConfig]) -> POYOEEGModel:
@@ -69,7 +67,9 @@ def _make_poyo_model(task_configs: dict[str, TaskConfig]) -> POYOEEGModel:
     )
 
 
-def test_dataset_uses_task_mixin_not_modality_mixin():
+def test_dataset_uses_task_mixin():
+    from foundry.data.datasets.mixins import TaskMixin
+
     assert issubclass(PetersonBruntonPoseTrajectory2022, TaskMixin)
     assert (
         "ajile_active_behavior"
@@ -249,4 +249,4 @@ def test_get_tasks_for_experiment_raises_when_tasks_unavailable(monkeypatch):
         {},
     )
     with pytest.raises(ValueError, match="Unknown task"):
-        AjileDataModule.get_tasks_for_experiment("behavior")
+        PetersonBruntonPoseTrajectory2022.get_tasks_for_experiment("behavior")

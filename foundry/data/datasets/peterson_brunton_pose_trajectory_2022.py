@@ -71,7 +71,7 @@ class _BasePetersonBrunton(MultiChannelDatasetMixin, Dataset):
         root: Optional[str] = None,
         recording_ids: Optional[list[str]] = None,
         transform: Optional[Callable] = None,
-        fold_number: int = 0,
+        fold: int = 0,
         split_type: PetersonBruntonSplitType = "intrasession",
         task_type: PetersonBruntonTaskType = "behavior",
         dirname: str = "peterson_brunton_pose_trajectory_2022",
@@ -84,10 +84,10 @@ class _BasePetersonBrunton(MultiChannelDatasetMixin, Dataset):
                 "root must be provided (path to brainsets processed dir)"
             )
 
-        if not (0 <= fold_number < N_FOLDS):
+        if not (0 <= fold < N_FOLDS):
             raise ValueError(
-                f"fold_number must be an integer between 0 and "
-                f"{N_FOLDS - 1}, got {fold_number}"
+                f"fold must be an integer between 0 and "
+                f"{N_FOLDS - 1}, got {fold}"
             )
         if split_type not in VALID_SPLIT_TYPES:
             raise ValueError(
@@ -107,7 +107,7 @@ class _BasePetersonBrunton(MultiChannelDatasetMixin, Dataset):
             namespace_attributes=["session.id", "subject.id", "channels.id"],
             **kwargs,
         )
-        self.fold_number = fold_number
+        self.fold = fold
         self.split_type = split_type
         self.task_type = task_type
         self.multichannel_dataset_mixin_uniquify_channel_ids_with_session = (
@@ -139,11 +139,11 @@ class _BasePetersonBrunton(MultiChannelDatasetMixin, Dataset):
         self, split: Literal["train", "valid", "test"]
     ) -> dict:
         if self.task_type == "active_vs_inactive":
-            key = f"splits.active_vs_inactive_fold_{self.fold_number}_{split}"
+            key = f"splits.active_vs_inactive_fold_{self.fold}_{split}"
         elif self.task_type == "pose_estimation":
-            key = f"splits.pose_estimation_fold_{self.fold_number}_{split}"
+            key = f"splits.pose_estimation_fold_{self.fold}_{split}"
         elif self.task_type == "behavior":
-            key = f"splits.all_active_behavior_fold_{self.fold_number}_{split}"
+            key = f"splits.all_active_behavior_fold_{self.fold}_{split}"
         else:
             raise ValueError(f"Invalid task_type '{self.task_type}'.")
 
@@ -165,13 +165,9 @@ class _BasePetersonBrunton(MultiChannelDatasetMixin, Dataset):
         self, split: Literal["train", "valid", "test"]
     ) -> dict:
         if self.split_type == "intersubject":
-            assignment_key = (
-                f"splits.intersubject_fold_{self.fold_number}_assignment"
-            )
+            assignment_key = f"splits.intersubject_fold_{self.fold}_assignment"
         else:
-            assignment_key = (
-                f"splits.intersession_fold_{self.fold_number}_assignment"
-            )
+            assignment_key = f"splits.intersession_fold_{self.fold}_assignment"
 
         result = {}
         for rid in self.recording_ids:
@@ -209,3 +205,16 @@ class PetersonBruntonPoseTrajectory2022(TaskMixin, _BasePetersonBrunton):
     """Foundry wrapper for AJILE with task-config registration."""
 
     AVAILABLE_TASKS = _load_ajile_tasks()
+    TASK_TO_READOUT = {
+        "active_vs_inactive": ["ajile_inactive_active"],
+        "behavior": ["ajile_active_behavior"],
+        "pose_estimation": ["ajile_pose_estimation"],
+    }
+
+    @classmethod
+    def get_required_transforms(cls, task_type):
+        if task_type == "pose_estimation":
+            from foundry.data.transforms import PreparePoseTrajectories
+
+            return [PreparePoseTrajectories()]
+        return []

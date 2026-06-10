@@ -6,16 +6,43 @@ model-specific preprocessing.
 """
 
 import logging
-from typing import Callable, Optional, Literal
+from typing import Callable, Literal, Optional
 
 import torch
+from hydra.utils import get_class
+from omegaconf import DictConfig, OmegaConf, open_dict
 from torch.utils.data import DataLoader
 from torch_brain.batching import collate
 from torch_brain.samplers import RandomFixedWindowSampler
 from lightning import LightningDataModule
 from torch_brain.transforms import Compose
 
+from foundry.tasks.class_weights import compute_class_weights_for_tasks
+
 logger = logging.getLogger(__name__)
+
+
+def normalize_data_config(data_cfg: DictConfig) -> None:
+    """Merge top-level dataset params into ``dataset_kwargs`` (in-place).
+
+    Experiment configs override ``data.split_type`` / ``data.task_type`` at
+    the top level while base data configs may leave mandatory placeholders
+    inside ``dataset_kwargs``. Hydra's recursive ``instantiate`` fails on
+    those placeholders, so resolve them here before instantiation.
+    """
+    merges = ("task_type", "split_type", "fold", "recording_ids")
+    if "dataset_kwargs" not in data_cfg:
+        OmegaConf.update(data_cfg, "dataset_kwargs", {}, force_add=True)
+
+    with open_dict(data_cfg):
+        with open_dict(data_cfg.dataset_kwargs):
+            for key in merges:
+                if key in data_cfg and not OmegaConf.is_missing(data_cfg, key):
+                    data_cfg.dataset_kwargs[key] = data_cfg[key]
+
+            for key in list(data_cfg.dataset_kwargs.keys()):
+                if OmegaConf.is_missing(data_cfg.dataset_kwargs, key):
+                    del data_cfg.dataset_kwargs[key]
 
 
 class NeuralDataModule(LightningDataModule):
@@ -25,9 +52,6 @@ class NeuralDataModule(LightningDataModule):
     that has `get_sampling_intervals()` and optionally `get_channel_ids()` and
     `get_recording_ids()` methods. Model-specific preprocessing (tokenization)
     is applied as a transform, making the datamodule reusable.
-
-    Subclasses should define ``TASK_TO_READOUT`` to map their task_type values
-    to the corresponding task config names.
 
     Usage:
         dm = NeuralDataModule(
@@ -40,8 +64,6 @@ class NeuralDataModule(LightningDataModule):
         )
         trainer.fit(module, dm)
     """
-
-    TASK_TO_READOUT: dict[str, list[str]] = {}
 
     def __init__(
         self,
@@ -56,8 +78,13 @@ class NeuralDataModule(LightningDataModule):
         seed: int = 42,
         dataset_kwargs: Optional[dict] = None,
         task_type: Optional[str] = None,
+        split_type: Optional[str] = None,
+        fold: Optional[int] = None,
+        recording_ids: Optional[list[str]] = None,
     ):
         super().__init__()
+        if isinstance(dataset_class, str):
+            dataset_class = get_class(dataset_class)
         self.dataset_class = dataset_class
         self.root = root
         self.batch_size = batch_size
@@ -65,8 +92,18 @@ class NeuralDataModule(LightningDataModule):
         self.pin_memory = pin_memory
         self.sequence_length = sequence_length
         self.seed = seed
-        self.dataset_kwargs = dataset_kwargs or {}
-        self.task_type = task_type
+        self.dataset_kwargs = dict(dataset_kwargs or {})
+
+        for key, val in (
+            ("task_type", task_type),
+            ("split_type", split_type),
+            ("fold", fold),
+            ("recording_ids", recording_ids),
+        ):
+            if val is not None:
+                self.dataset_kwargs[key] = val
+
+        self.task_type = self.dataset_kwargs.get("task_type")
 
         # Build transform pipeline
         transform_list = transforms or []
@@ -85,18 +122,45 @@ class NeuralDataModule(LightningDataModule):
         if self.dataset is not None:
             return
 
-        # Build transform
-        if self.transform:
-            transform = Compose(self.transform)
-        else:
-            transform = None
+        transform_list = list(self.transform) if self.transform else []
+        if self.task_type is not None and hasattr(
+            self.dataset_class, "get_required_transforms"
+        ):
+            required = self.dataset_class.get_required_transforms(
+                self.task_type
+            )
+            transform_list = list(required) + transform_list
 
-        # Instantiate dataset
+        transform = Compose(transform_list) if transform_list else None
+
         self.dataset = self.dataset_class(
             root=self.root,
             transform=transform,
             **self.dataset_kwargs,
         )
+
+    def compute_class_weights(
+        self, smoothing: float = 1.0
+    ) -> dict[str, list[float]]:
+        if self.dataset is None:
+            raise RuntimeError("Call setup() before compute_class_weights()")
+        if self.task_type is None:
+            raise ValueError(
+                "task_type must be set to compute class weights automatically"
+            )
+
+        task_configs = self.dataset_class.get_tasks_for_experiment(
+            self.task_type
+        )
+        return compute_class_weights_for_tasks(
+            task_configs, self.dataset, split="train", smoothing=smoothing
+        )
+
+    def get_recording_ids(self) -> list[str]:
+        return sorted(self.dataset.recording_ids)
+
+    def get_channel_ids(self) -> list[str]:
+        return sorted(self.dataset.get_channel_ids())
 
     def _create_dataloader(
         self, split: Literal["train", "valid", "test"]

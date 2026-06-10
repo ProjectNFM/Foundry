@@ -28,6 +28,8 @@ from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from torch_brain.datasets import NestedDataset
+
+from foundry.data.datamodules.base import normalize_data_config
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
@@ -219,6 +221,7 @@ def stage_data(
     cfg_copy = OmegaConf.to_container(data_cfg, resolve=True)
     cfg_copy["root"] = str(source_root)
     cfg_as_dictconfig = OmegaConf.create(cfg_copy)
+    normalize_data_config(cfg_as_dictconfig)
 
     datamodule = instantiate(cfg_as_dictconfig, tokenizer=None)
     datamodule.dataset_kwargs["keep_files_open"] = False

@@ -9,8 +9,6 @@ import pytest
 import torch
 from torch_brain.data import Data, Interval, RegularTimeSeries
 
-from foundry.data.datamodules.neurosoft import NeurosoftMinipigs2026DataModule
-from foundry.data.datasets.mixins import TaskMixin
 from foundry.data.datasets.neurosoft import NeurosoftMinipigs2026
 from foundry.models import POYOEEGModel, EEGTokenizer, FixedChannelStrategy
 from foundry.models.embeddings.temporal import PatchLinearEmbedding
@@ -33,7 +31,7 @@ class MockSession:
 
 
 def _make_neurosoft_task_configs(task_type: str = "on_vs_off"):
-    return NeurosoftMinipigs2026DataModule.get_tasks_for_experiment(task_type)
+    return NeurosoftMinipigs2026.get_tasks_for_experiment(task_type)
 
 
 def _make_poyo_model(task_configs: dict[str, TaskConfig]) -> POYOEEGModel:
@@ -63,15 +61,17 @@ def _make_poyo_model(task_configs: dict[str, TaskConfig]) -> POYOEEGModel:
 
 
 def test_dataset_uses_task_mixin():
+    from foundry.data.datasets.mixins import TaskMixin
+
     assert issubclass(NeurosoftMinipigs2026, TaskMixin)
     assert "neurosoft_on_vs_off" in NeurosoftMinipigs2026.AVAILABLE_TASKS
     assert "neurosoft_acoustic_stim" in NeurosoftMinipigs2026.AVAILABLE_TASKS
 
 
-def test_datamodule_has_no_readout_class_names():
-    assert not hasattr(
-        NeurosoftMinipigs2026DataModule, "READOUT_CLASS_NAMES"
-    ) or (NeurosoftMinipigs2026DataModule.READOUT_CLASS_NAMES == {})
+def test_dataset_has_no_readout_class_names():
+    assert not hasattr(NeurosoftMinipigs2026, "READOUT_CLASS_NAMES") or (
+        NeurosoftMinipigs2026.READOUT_CLASS_NAMES == {}
+    )
 
 
 @pytest.mark.parametrize(

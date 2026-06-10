@@ -10,7 +10,9 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 
-from foundry.data.datamodules.ajile import AjileDataModule
+from foundry.data.datasets.peterson_brunton_pose_trajectory_2022 import (
+    PetersonBruntonPoseTrajectory2022,
+)
 from tests.test_configs.conftest import (
     CONFIGS_ROOT,
     load_resolved_config,
@@ -90,7 +92,9 @@ def _instantiate_node(yaml_path: Path, target_path: str) -> Any:
     kwargs: dict[str, Any] = {}
     target = node.get("_target_", "")
 
-    task_configs = AjileDataModule.get_tasks_for_experiment("behavior")
+    task_configs = PetersonBruntonPoseTrajectory2022.get_tasks_for_experiment(
+        "behavior"
+    )
 
     if "FoundryModule" in target:
         from foundry.models.readout import ReadoutRouter
@@ -133,11 +137,7 @@ def _instantiate_node(yaml_path: Path, target_path: str) -> Any:
                 CONFIGS_ROOT / "tasks" / "ajile_inactive_active.yaml"
             )
         }
-    elif (
-        "AjileDataModule" in target
-        or "NeurosoftMinipigs2026DataModule" in target
-        or "NeurosoftMonkeys2026DataModule" in target
-    ):
+    elif "NeuralDataModule" in target:
         kwargs["tokenizer"] = None
 
     recursive = "task_configs" not in kwargs
