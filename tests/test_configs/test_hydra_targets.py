@@ -91,21 +91,19 @@ def _instantiate_node(yaml_path: Path, target_path: str) -> Any:
     kwargs: dict[str, Any] = {}
     target = node.get("_target_", "")
 
-    readout_specs = AjileDataModule.get_readout_specs_for_task("behavior")
+    task_configs = AjileDataModule.get_tasks_for_experiment("behavior")
+    readout_specs = ["neurosoft_on_vs_off"]
 
     if "FoundryModule" in target:
         from foundry.models.readout import ReadoutRouter
-        from foundry.tasks.config import TaskConfig
 
-        task_cfg = TaskConfig.from_yaml(
-            CONFIGS_ROOT / "tasks" / "ajile_active_behavior.yaml"
-        )
+        task_cfg = next(iter(task_configs.values()))
         heads = {task_cfg.name: instantiate({**task_cfg.head, "embed_dim": 4})}
 
         class _StubFoundryModel(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.task_configs = {task_cfg.name: task_cfg}
+                self.task_configs = task_configs
                 self.router = ReadoutRouter(heads)
 
             def forward(self, **kwargs):
@@ -174,7 +172,7 @@ def test_standalone_model_config_instantiates(config_name: str):
     if config_name == "poyo_eeg":
         pytest.skip("covered by test_poyo_eeg_with_tokenizer_configs")
     yaml_path = CONFIGS_ROOT / "model" / f"{config_name}.yaml"
-    readout_specs = AjileDataModule.get_readout_specs_for_task("behavior")
+    readout_specs = ["neurosoft_on_vs_off"]
     model = instantiate(
         _strip_non_constructor_keys(load_resolved_config(yaml_path)),
         readout_specs=readout_specs,

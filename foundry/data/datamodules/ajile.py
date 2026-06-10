@@ -1,13 +1,16 @@
+from typing import Callable, Optional
+
 from brainsets.datasets import (
-    PetersonBruntonPoseTrajectory2022,
-    AJILE_ACTIVE_BEHAVIOR_LABELS,
-    AJILE_ACTIVE_VS_INACTIVE_LABELS,
     PetersonBruntonSplitType,
     PetersonBruntonTaskType,
 )
 from foundry.data.datamodules.base import NeuralDataModule
+from foundry.data.datasets.peterson_brunton_pose_trajectory_2022 import (
+    PetersonBruntonPoseTrajectory2022,
+)
 from foundry.data.transforms import PreparePoseTrajectories
-from typing import Optional, Callable
+from foundry.tasks.class_weights import compute_class_weights_for_tasks
+from foundry.tasks.config import TaskConfig
 
 
 class AjileDataModule(NeuralDataModule):
@@ -17,10 +20,25 @@ class AjileDataModule(NeuralDataModule):
         "pose_estimation": ["ajile_pose_estimation"],
     }
 
-    READOUT_CLASS_NAMES: dict[str, list[str]] = {
-        "ajile_inactive_active": list(AJILE_ACTIVE_VS_INACTIVE_LABELS),
-        "ajile_active_behavior": list(AJILE_ACTIVE_BEHAVIOR_LABELS),
-    }
+    @classmethod
+    def get_tasks_for_experiment(cls, task_type: str) -> dict[str, TaskConfig]:
+        task_names = cls.TASK_TO_READOUT[task_type]
+        return PetersonBruntonPoseTrajectory2022.get_tasks(task_names)
+
+    def compute_class_weights(
+        self, smoothing: float = 1.0
+    ) -> dict[str, list[float]]:
+        if self.dataset is None:
+            raise RuntimeError("Call setup() before compute_class_weights()")
+        if self.task_type is None:
+            raise ValueError(
+                "task_type must be set to compute class weights automatically"
+            )
+
+        task_configs = self.get_tasks_for_experiment(self.task_type)
+        return compute_class_weights_for_tasks(
+            task_configs, self.dataset, split="train", smoothing=smoothing
+        )
 
     def __init__(
         self,

@@ -86,20 +86,4 @@ class PreparePoseTrajectories:
             values=pose_values,
             domain=pose.domain,
         )
-
-        if not hasattr(data, "config") or data.config is None:
-            data.config = {}
-
-        existing_readouts = data.config.get("multitask_readout")
-        if existing_readouts is None:
-            data.config["multitask_readout"] = [{"readout_id": self.readout_id}]
-            return data
-
-        if not any(
-            readout.get("readout_id") == self.readout_id
-            for readout in existing_readouts
-            if isinstance(readout, dict)
-        ):
-            existing_readouts.append({"readout_id": self.readout_id})
-
         return data
