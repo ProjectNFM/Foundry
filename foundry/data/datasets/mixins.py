@@ -5,6 +5,8 @@ from temporaldata import Data
 
 from torch_brain.utils import np_string_prefix
 
+from foundry.tasks.config import TaskConfig
+
 if TYPE_CHECKING:
     from torch_brain.registry import ModalitySpec
 
@@ -41,6 +43,26 @@ class EEGDatasetMixin:
     def get_recording_ids(self) -> list[str]:
         """Return a sorted list of all recording IDs in the dataset."""
         return np.sort(np.array(self.recording_ids)).tolist()
+
+
+class TaskMixin:
+    """Mixin for datasets that declare which tasks they support."""
+
+    AVAILABLE_TASKS: dict[str, TaskConfig] = {}
+
+    @classmethod
+    def get_task(cls, name: str) -> TaskConfig:
+        if name not in cls.AVAILABLE_TASKS:
+            raise ValueError(
+                f"Unknown task '{name}'. Available: {list(cls.AVAILABLE_TASKS)}"
+            )
+        return cls.AVAILABLE_TASKS[name]
+
+    @classmethod
+    def get_tasks(cls, names: list[str] | None = None) -> dict[str, TaskConfig]:
+        if names is None:
+            return dict(cls.AVAILABLE_TASKS)
+        return {n: cls.get_task(n) for n in names}
 
 
 class ModalityMixin:

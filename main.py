@@ -175,44 +175,56 @@ def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
         )
 
 
-def _build_model_and_data(cfg: DictConfig):
-    _populate_data_driven_hyperparams(cfg)
+def _uses_task_configs(DataModuleClass) -> bool:
+    return hasattr(DataModuleClass, "get_tasks_for_experiment")
 
-    DataModuleClass = get_class(cfg.data._target_)
-    readout_specs = DataModuleClass.get_readout_specs_for_task(
-        cfg.data.task_type
+
+def _apply_auto_class_weights(
+    cfg: DictConfig, datamodule, task_configs: dict
+) -> dict:
+    class_weights_mode = OmegaConf.select(
+        cfg, "module.class_weights", default=None
     )
-
-    model = instantiate(cfg.model, readout_specs=readout_specs)
-    tokenizer = model.tokenize if hasattr(model, "tokenize") else None
-    datamodule = instantiate(cfg.data, tokenizer=tokenizer)
-
-    return model, datamodule
-
-
-def _compute_class_weights(cfg: DictConfig, datamodule):
-    if cfg.module.class_weights != "auto":
-        return None
+    if class_weights_mode != "auto":
+        return task_configs
 
     datamodule.setup("fit")
     smoothing = OmegaConf.select(
         cfg, "module.class_weight_smoothing", default=1.0
     )
-    return datamodule.compute_class_weights(smoothing=smoothing)
+    weights = datamodule.compute_class_weights(smoothing=smoothing)
+    for name, class_weights in weights.items():
+        task_configs[name].loss["class_weights"] = class_weights
+    return task_configs
+
+
+def _build_model_and_data(cfg: DictConfig):
+    _populate_data_driven_hyperparams(cfg)
+
+    DataModuleClass = get_class(cfg.data._target_)
+
+    if _uses_task_configs(DataModuleClass):
+        task_configs = DataModuleClass.get_tasks_for_experiment(
+            cfg.data.task_type
+        )
+        datamodule = instantiate(cfg.data, tokenizer=None)
+        task_configs = _apply_auto_class_weights(cfg, datamodule, task_configs)
+        model = instantiate(cfg.model, task_configs=task_configs)
+        tokenizer = model.tokenize if hasattr(model, "tokenize") else None
+        datamodule = instantiate(cfg.data, tokenizer=tokenizer)
+    else:
+        readout_specs = DataModuleClass.get_readout_specs_for_task(
+            cfg.data.task_type
+        )
+        model = instantiate(cfg.model, readout_specs=readout_specs)
+        tokenizer = model.tokenize if hasattr(model, "tokenize") else None
+        datamodule = instantiate(cfg.data, tokenizer=tokenizer)
+
+    return model, datamodule
 
 
 def _build_lightning_module(cfg: DictConfig, model, datamodule):
-    class_weights = _compute_class_weights(cfg, datamodule)
-
-    if cfg.module.class_weights in (None, "none"):
-        OmegaConf.update(cfg, "module.class_weights", None)
-
-    return instantiate(
-        cfg.module,
-        model=model,
-        class_names=datamodule.get_class_names_for_task(cfg.data.task_type),
-        class_weights=class_weights,
-    )
+    return instantiate(cfg.module, model=model)
 
 
 def _build_trainer(cfg: DictConfig):

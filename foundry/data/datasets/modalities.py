@@ -65,33 +65,6 @@ P300_TARGET = register_modality(
     loss_fn=CrossEntropyLoss(),
 )
 
-MOTOR_IMAGERY_5CLASS = register_modality(
-    "motor_imagery_5class",
-    dim=5,
-    type=DataType.MULTINOMIAL,
-    timestamp_key="motor_imagery_trials.timestamps",
-    value_key="motor_imagery_trials.movement_ids",
-    loss_fn=CrossEntropyLoss(),
-)
-
-MOTOR_IMAGERY_LEFT_RIGHT = register_modality(
-    "motor_imagery_left_right",
-    dim=2,
-    type=DataType.BINARY,
-    timestamp_key="motor_imagery_trials.timestamps",
-    value_key="motor_imagery_trials.movement_ids",
-    loss_fn=MappedCrossEntropyLoss({1: 0, 2: 1}),
-)
-
-MOTOR_IMAGERY_RIGHT_FEET = register_modality(
-    "motor_imagery_right_feet",
-    dim=2,
-    type=DataType.BINARY,
-    timestamp_key="motor_imagery_trials.timestamps",
-    value_key="motor_imagery_trials.movement_ids",
-    loss_fn=MappedCrossEntropyLoss({2: 0, 3: 1}),
-)
-
 if ACTIVE_VS_INACTIVE_LABELS:
     AJILE_INACTIVE_ACTIVE = register_modality(
         "ajile_inactive_active",

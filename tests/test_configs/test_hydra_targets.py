@@ -211,10 +211,19 @@ def test_poyo_eeg_with_tokenizer_configs(tokenizer_name: str):
     poyo_cfg = _strip_non_constructor_keys(
         load_resolved_config(CONFIGS_ROOT / "model" / "poyo_eeg.yaml")
     )
-    readout_specs = AjileDataModule.get_readout_specs_for_task("behavior")
-    model = instantiate(
-        poyo_cfg,
+    from foundry.models.poyo_eeg import POYOEEGModel
+    from foundry.tasks.config import TaskConfig
+
+    task_configs = {
+        "ajile_active_behavior": TaskConfig.from_yaml(
+            CONFIGS_ROOT / "tasks" / "ajile_active_behavior.yaml"
+        )
+    }
+    poyo_kwargs = OmegaConf.to_container(poyo_cfg, resolve=True)
+    poyo_kwargs.pop("_target_", None)
+    model = POYOEEGModel(
         tokenizer=tokenizer,
-        readout_specs=readout_specs,
+        task_configs=task_configs,
+        **poyo_kwargs,
     )
     assert model is not None

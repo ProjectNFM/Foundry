@@ -1,10 +1,11 @@
 from typing import Callable, Optional, Literal
 
-
 from foundry.data.datasets.schalk_wolpaw_physionet_2009 import (
     SchalkWolpawPhysionet2009,
 )
 from foundry.data.datamodules.base import NeuralDataModule
+from foundry.tasks.class_weights import compute_class_weights_for_tasks
+from foundry.tasks.config import TaskConfig
 
 
 class PhysionetDataModule(NeuralDataModule):
@@ -21,18 +22,25 @@ class PhysionetDataModule(NeuralDataModule):
         "RightHandFeetImagery": ["motor_imagery_right_feet"],
     }
 
-    # TODO: Add the actual class names for these
-    READOUT_CLASS_NAMES: dict[str, list[str]] = {
-        "motor_imagery_5class": [
-            "Rest",
-            "Left hand",
-            "Right hand",
-            "Feet",
-            "Tongue",
-        ],
-        "motor_imagery_left_right": ["Left hand", "Right hand"],
-        "motor_imagery_right_feet": ["Right hand", "Feet"],
-    }
+    @classmethod
+    def get_tasks_for_experiment(cls, task_type: str) -> dict[str, TaskConfig]:
+        task_names = cls.TASK_TO_READOUT[task_type]
+        return SchalkWolpawPhysionet2009.get_tasks(task_names)
+
+    def compute_class_weights(
+        self, smoothing: float = 1.0
+    ) -> dict[str, list[float]]:
+        if self.dataset is None:
+            raise RuntimeError("Call setup() before compute_class_weights()")
+        if self.task_type is None:
+            raise ValueError(
+                "task_type must be set to compute class weights automatically"
+            )
+
+        task_configs = self.get_tasks_for_experiment(self.task_type)
+        return compute_class_weights_for_tasks(
+            task_configs, self.dataset, split="train", smoothing=smoothing
+        )
 
     def __init__(
         self,

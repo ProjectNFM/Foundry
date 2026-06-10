@@ -3,19 +3,23 @@ import numpy as np
 from pathlib import Path
 
 from torch_brain.dataset import Dataset
-from .mixins import EEGDatasetMixin, ModalityMixin
-from .modalities import (
-    MOTOR_IMAGERY_5CLASS,
-    MOTOR_IMAGERY_LEFT_RIGHT,
-    MOTOR_IMAGERY_RIGHT_FEET,
-)
+from foundry.tasks.config import TaskConfig
+from .mixins import EEGDatasetMixin, TaskMixin
+
+_TASKS_DIR = Path(__file__).resolve().parents[3] / "configs" / "tasks"
 
 
-class SchalkWolpawPhysionet2009(ModalityMixin, EEGDatasetMixin, Dataset):
-    MODALITIES = {
-        "motor_imagery_5class": MOTOR_IMAGERY_5CLASS,
-        "motor_imagery_left_right": MOTOR_IMAGERY_LEFT_RIGHT,
-        "motor_imagery_right_feet": MOTOR_IMAGERY_RIGHT_FEET,
+class SchalkWolpawPhysionet2009(TaskMixin, EEGDatasetMixin, Dataset):
+    AVAILABLE_TASKS = {
+        "motor_imagery_5class": TaskConfig.from_yaml(
+            _TASKS_DIR / "motor_imagery_5class.yaml"
+        ),
+        "motor_imagery_left_right": TaskConfig.from_yaml(
+            _TASKS_DIR / "motor_imagery_left_right.yaml"
+        ),
+        "motor_imagery_right_feet": TaskConfig.from_yaml(
+            _TASKS_DIR / "motor_imagery_right_feet.yaml"
+        ),
     }
     """PhysioNet Motor Imagery Dataset (Schalk & Wolpaw, 2009).
 

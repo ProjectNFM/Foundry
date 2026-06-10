@@ -2,14 +2,13 @@ import numpy as np
 import pytest
 from temporaldata import Data, Interval, RegularTimeSeries
 from torch_brain.data import collate
-from torch_brain.registry import register_modality, DataType, MODALITY_REGISTRY
-from torch_brain.nn.loss import CrossEntropyLoss
 
 from foundry.models import (
     POYOEEGModel,
     EEGTokenizer,
     FixedChannelStrategy,
 )
+from foundry.tasks.config import TaskConfig
 from foundry.models.embeddings.temporal import (
     PatchCNNEmbedding as CNNEmbedding,
     PatchLinearEmbedding as LinearEmbedding,
@@ -43,20 +42,33 @@ class MockSession:
 
 
 @pytest.fixture(scope="module")
-def readout_specs():
-    if "test_task1" not in MODALITY_REGISTRY:
-        register_modality(
-            "test_task1",
-            dim=2,
-            type=DataType.BINARY,
-            timestamp_key="test_task.timestamps",
-            value_key="test_task.values",
-            loss_fn=CrossEntropyLoss(),
+def task_configs():
+    return {
+        "test_task1": TaskConfig.from_dict(
+            {
+                "name": "test_task1",
+                "head": {
+                    "_target_": "foundry.tasks.heads.ReadoutHead",
+                    "output_dim": 2,
+                },
+                "target_extractor": {
+                    "_target_": "foundry.tasks.targets.TargetExtractor",
+                    "timestamp_key": "test_task.timestamps",
+                    "value_key": "test_task.values",
+                },
+                "loss": {
+                    "_target_": "foundry.tasks.losses.CrossEntropyTaskLoss",
+                },
+                "metrics": {
+                    "_target_": "foundry.tasks.metrics.classification_metrics",
+                    "num_classes": 2,
+                },
+            }
         )
-    return {"test_task1": MODALITY_REGISTRY["test_task1"]}
+    }
 
 
-def _make_model(embed_dim, readout_specs, temporal_embedding):
+def _make_model(embed_dim, task_configs, temporal_embedding):
     tokenizer = EEGTokenizer(
         channel_strategy=FixedChannelStrategy(num_channels=NUM_CHANNELS),
         temporal_embedding=temporal_embedding,
@@ -67,7 +79,7 @@ def _make_model(embed_dim, readout_specs, temporal_embedding):
     )
     return POYOEEGModel(
         tokenizer=tokenizer,
-        readout_specs=readout_specs,
+        task_configs=task_configs,
         embed_dim=embed_dim,
         sequence_length=SEQUENCE_LENGTH,
         latent_step=0.5,
@@ -76,10 +88,10 @@ def _make_model(embed_dim, readout_specs, temporal_embedding):
 
 
 @pytest.fixture
-def model_with_linear(readout_specs, embed_dim):
+def model_with_linear(task_configs, embed_dim):
     return _make_model(
         embed_dim,
-        readout_specs,
+        task_configs,
         LinearEmbedding(
             embed_dim=embed_dim,
             num_input_channels=NUM_CHANNELS,
@@ -89,10 +101,10 @@ def model_with_linear(readout_specs, embed_dim):
 
 
 @pytest.fixture
-def model_with_cnn(readout_specs, embed_dim):
+def model_with_cnn(task_configs, embed_dim):
     return _make_model(
         embed_dim,
-        readout_specs,
+        task_configs,
         CNNEmbedding(
             embed_dim=embed_dim,
             num_input_channels=NUM_CHANNELS,
@@ -104,10 +116,10 @@ def model_with_cnn(readout_specs, embed_dim):
 
 
 @pytest.fixture
-def model_with_mlp(readout_specs, embed_dim):
+def model_with_mlp(task_configs, embed_dim):
     return _make_model(
         embed_dim,
-        readout_specs,
+        task_configs,
         MLPEmbedding(
             embed_dim=embed_dim,
             num_input_channels=NUM_CHANNELS,
@@ -164,8 +176,6 @@ def create_data_sample(num_channels, session_id="session1"):
         values = np.array([0])
 
     data.test_task = TestTask()
-
-    data.config = {"multitask_readout": [{"readout_id": "test_task1"}]}
 
     return data
 
