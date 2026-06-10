@@ -211,7 +211,16 @@ def _build_model_and_data(cfg: DictConfig):
     task_configs = DataModuleClass.get_tasks_for_experiment(cfg.data.task_type)
     datamodule = instantiate(cfg.data, tokenizer=None)
     task_configs = _apply_auto_class_weights(cfg, datamodule, task_configs)
-    model = instantiate(cfg.model, task_configs=task_configs)
+
+    # Build the model outside Hydra's recursive instantiate to avoid eager
+    # instantiation of _target_ dicts inside task configs (heads, losses, etc.).
+    ModelClass = get_class(cfg.model._target_)
+    model_kwargs = {
+        k: instantiate(v) if OmegaConf.is_config(v) else v
+        for k, v in cfg.model.items()
+        if k != "_target_"
+    }
+    model = ModelClass(task_configs=task_configs, **model_kwargs)
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)
 
