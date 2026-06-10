@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from hydra.utils import instantiate
-from temporaldata import Data
+from torch_brain.data import Data
 from torch_brain.batching import chain, collate, pad8, track_batch
 from torch_brain.nn import (
     Embedding,

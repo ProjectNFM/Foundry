@@ -4,7 +4,7 @@ import logging
 from typing import Sequence
 
 import numpy as np
-from temporaldata import Data, IrregularTimeSeries
+from torch_brain.data import Data, IrregularTimeSeries
 
 logger = logging.getLogger(__name__)
 

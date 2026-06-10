@@ -27,7 +27,7 @@ from pathlib import Path
 from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
-from torch_brain.dataset import NestedDataset
+from torch_brain.datasets import NestedDataset
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)

@@ -1,6 +1,6 @@
 from typing import Callable, Optional
 
-from brainsets.datasets import (
+from foundry.data.datasets.peterson_brunton_pose_trajectory_2022 import (
     PetersonBruntonSplitType,
     PetersonBruntonTaskType,
 )

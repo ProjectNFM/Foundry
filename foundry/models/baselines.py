@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from hydra.utils import instantiate
-from temporaldata import Data
+from torch_brain.data import Data
 from torch_brain.batching import chain, collate, pad8, pad2d, track_batch
 from typing import Dict, Any
 
@@ -168,7 +168,7 @@ class BaselineEEGModel(nn.Module):
         Converts a TemporalData EEG/ECoG sample to model-ready tensors and multitask readout targets.
 
         Args:
-            data (temporaldata.Data): Input data structure containing an "eeg" or "ecog" field
+            data (torch_brain.data.Data): Input data structure containing an "eeg" or "ecog" field
                 along with "channels" and task-specific label fields.
 
         Returns:

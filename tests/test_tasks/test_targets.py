@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 import numpy as np
-from temporaldata import Data
+from torch_brain.data import Data
 
 from foundry.tasks.targets import TargetExtractor
 

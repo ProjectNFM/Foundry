@@ -1,5 +1,5 @@
 import numpy as np
-from temporaldata import Data
+from torch_brain.data import Data
 
 from torch_brain.utils import np_string_prefix
 
@@ -8,7 +8,7 @@ from foundry.tasks.config import TaskConfig
 
 class EEGDatasetMixin:
     """
-    Mixin class for :class:`torch_brain.dataset.Dataset` subclasses containing EEG data.
+    Mixin class for :class:`torch_brain.datasets.Dataset` subclasses containing EEG data.
 
     Provides:
         - ``get_channel_ids()`` for retrieving IDs of all included channels.

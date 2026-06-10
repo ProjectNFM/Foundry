@@ -7,7 +7,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
-from temporaldata import Data, Interval, IrregularTimeSeries, RegularTimeSeries
+from torch_brain.data import (
+    Data,
+    Interval,
+    IrregularTimeSeries,
+    RegularTimeSeries,
+)
 
 from foundry.data.datamodules.ajile import AjileDataModule
 from foundry.data.datasets.mixins import TaskMixin

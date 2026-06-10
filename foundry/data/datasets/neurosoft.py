@@ -5,7 +5,7 @@ from auditorydecoding import (
     NeurosoftMinipigs2026 as _AuditoryNeurosoftMinipigs2026,
     NeurosoftMonkeys2026 as _AuditoryNeurosoftMonkeys2026,
 )
-from temporaldata import Data
+from torch_brain.data import Data
 
 from foundry.tasks.config import TaskConfig
 

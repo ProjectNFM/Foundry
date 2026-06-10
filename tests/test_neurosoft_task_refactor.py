@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
-from temporaldata import Data, Interval, RegularTimeSeries
+from torch_brain.data import Data, Interval, RegularTimeSeries
 
 from foundry.data.datamodules.neurosoft import NeurosoftMinipigs2026DataModule
 from foundry.data.datasets.mixins import TaskMixin
