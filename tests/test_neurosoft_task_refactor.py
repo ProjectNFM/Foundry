@@ -62,16 +62,10 @@ def _make_poyo_model(task_configs: dict[str, TaskConfig]) -> POYOEEGModel:
     )
 
 
-def test_dataset_uses_task_mixin_not_modality_mixin():
-    from foundry.data.datasets.mixins import ModalityMixin
-    from torch_brain.registry import MODALITY_REGISTRY
-
+def test_dataset_uses_task_mixin():
     assert issubclass(NeurosoftMinipigs2026, TaskMixin)
-    assert not issubclass(NeurosoftMinipigs2026, ModalityMixin)
     assert "neurosoft_on_vs_off" in NeurosoftMinipigs2026.AVAILABLE_TASKS
     assert "neurosoft_acoustic_stim" in NeurosoftMinipigs2026.AVAILABLE_TASKS
-    assert "neurosoft_on_vs_off" not in MODALITY_REGISTRY
-    assert "neurosoft_acoustic_stim" not in MODALITY_REGISTRY
 
 
 def test_datamodule_has_no_readout_class_names():
@@ -230,7 +224,7 @@ def test_tokenize_extracts_acoustic_stim_labels():
 
 
 def test_foundry_module_training_step_binary():
-    from torch_brain.data import collate
+    from torch_brain.batching import collate
 
     task_configs = _make_neurosoft_task_configs("on_vs_off")
     model = _make_poyo_model(task_configs)
@@ -250,7 +244,7 @@ def test_foundry_module_training_step_binary():
 
 
 def test_foundry_module_training_step_multiclass():
-    from torch_brain.data import collate
+    from torch_brain.batching import collate
 
     task_configs = _make_neurosoft_task_configs("acoustic_stim")
     model = _make_poyo_model(task_configs)

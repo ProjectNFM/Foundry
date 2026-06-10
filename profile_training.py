@@ -61,16 +61,12 @@ def main(cfg: DictConfig):
     logger.info(f"Starting profiling run: {run_tag}")
 
     DataModuleClass = get_class(cfg.data._target_)
-    if hasattr(DataModuleClass, "get_tasks_for_experiment"):
-        task_configs = DataModuleClass.get_tasks_for_experiment(
-            cfg.data.task_type
+    if not hasattr(DataModuleClass, "get_tasks_for_experiment"):
+        raise ValueError(
+            f"{DataModuleClass.__name__} must implement get_tasks_for_experiment"
         )
-        model = instantiate(cfg.model, task_configs=task_configs)
-    else:
-        readout_specs = DataModuleClass.get_readout_specs_for_task(
-            cfg.data.task_type
-        )
-        model = instantiate(cfg.model, readout_specs=readout_specs)
+    task_configs = DataModuleClass.get_tasks_for_experiment(cfg.data.task_type)
+    model = instantiate(cfg.model, task_configs=task_configs)
 
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)

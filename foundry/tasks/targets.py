@@ -23,9 +23,9 @@ class TargetExtractor:
 
     Args:
         timestamp_key: Dot-separated path to the timestamp array for each
-            target (e.g. ``"motor_imagery_trials.timestamps"``).
+            target (e.g. ``"active_behavior_trials.timestamps"``).
         value_key: Dot-separated path to the target values array (e.g.
-            ``"motor_imagery_trials.movement_ids"`` or
+            ``"active_behavior_trials.behavior_id"`` or
             ``"pose_trajectories.values"``).
         label_map: Optional mapping from raw label values to training indices.
             Applied before targets reach the loss or metrics. Use to collapse

@@ -6,14 +6,12 @@ model-specific preprocessing.
 """
 
 import logging
-from collections import Counter
 from typing import Callable, Optional, Literal
 
-import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from torch_brain.data import collate
-from torch_brain.data.sampler import RandomFixedWindowSampler
+from torch_brain.batching import collate
+from torch_brain.samplers import RandomFixedWindowSampler
 from lightning import LightningDataModule
 from torch_brain.transforms import Compose
 
@@ -29,7 +27,7 @@ class NeuralDataModule(LightningDataModule):
     is applied as a transform, making the datamodule reusable.
 
     Subclasses should define ``TASK_TO_READOUT`` to map their task_type values
-    to the corresponding readout spec names used by the model.
+    to the corresponding task config names.
 
     Usage:
         dm = NeuralDataModule(
@@ -44,29 +42,6 @@ class NeuralDataModule(LightningDataModule):
     """
 
     TASK_TO_READOUT: dict[str, list[str]] = {}
-    READOUT_CLASS_NAMES: dict[str, list[str]] = {}
-
-    @classmethod
-    def get_class_names_for_task(cls, task_type: str) -> dict[str, list[str]]:
-        readout_names = cls.get_readout_specs_for_task(task_type)
-        return {
-            name: cls.READOUT_CLASS_NAMES[name]
-            for name in readout_names
-            if name in cls.READOUT_CLASS_NAMES
-        }
-
-    @classmethod
-    def get_readout_specs_for_task(cls, task_type: str) -> list[str]:
-        if not cls.TASK_TO_READOUT:
-            raise ValueError(
-                f"{cls.__name__} does not define a TASK_TO_READOUT mapping"
-            )
-        if task_type not in cls.TASK_TO_READOUT:
-            raise ValueError(
-                f"Unknown task_type '{task_type}' for {cls.__name__}. "
-                f"Available: {list(cls.TASK_TO_READOUT.keys())}"
-            )
-        return cls.TASK_TO_READOUT[task_type]
 
     def __init__(
         self,
@@ -122,87 +97,6 @@ class NeuralDataModule(LightningDataModule):
             transform=transform,
             **self.dataset_kwargs,
         )
-
-    def compute_class_weights(
-        self, smoothing: float = 1.0
-    ) -> dict[str, list[float]]:
-        """Compute inverse-frequency class weights from the training split.
-
-        Scans training intervals to count label occurrences per readout, then
-        returns weights proportional to ``total / (num_classes * class_count)``
-        (the same formula used by scikit-learn's ``compute_class_weight``),
-        raised to the power of ``smoothing``.
-
-        A smoothing of 1.0 gives standard inverse-frequency weights. Values
-        below 1 (e.g. 0.5 for sqrt-inverse-frequency) dampen the correction
-        and reduce over-prediction of minority classes, which often improves
-        macro-F1 on imbalanced datasets. A smoothing of 0.0 produces uniform
-        weights.
-
-        Must be called after :meth:`setup`.
-        """
-        from torch_brain.registry import MODALITY_REGISTRY
-        from foundry.data.datasets.modalities import MappedCrossEntropyLoss
-
-        if self.dataset is None:
-            raise RuntimeError("Call setup() before compute_class_weights()")
-        if self.task_type is None:
-            raise ValueError(
-                "task_type must be set to compute class weights automatically"
-            )
-
-        readout_names = self.TASK_TO_READOUT.get(self.task_type, [])
-        if not readout_names:
-            return {}
-
-        import foundry.data.datasets.modalities  # noqa: F401
-
-        train_intervals = self.dataset.get_sampling_intervals(split="train")
-
-        class_weights: dict[str, list[float]] = {}
-        for readout_name in readout_names:
-            spec = MODALITY_REGISTRY[readout_name]
-            value_field = spec.value_key.split(".")[-1]
-
-            counts: Counter = Counter()
-            for rid, intervals in train_intervals.items():
-                if not hasattr(intervals, value_field):
-                    continue
-                values = getattr(intervals, value_field)
-                unique_labels = np.unique(values)
-                for v in unique_labels:
-                    selected = intervals.select_by_mask(values == v)
-                    counts[int(v)] += sum(selected.end - selected.start)
-
-            if isinstance(spec.loss_fn, MappedCrossEntropyLoss):
-                key_map = dict(
-                    zip(
-                        spec.loss_fn._keys.tolist(),
-                        spec.loss_fn._values.tolist(),
-                    )
-                )
-                mapped_counts: Counter = Counter()
-                for label, count in counts.items():
-                    if label in key_map:
-                        mapped_counts[key_map[label]] += count
-                counts = mapped_counts
-
-            total = sum(counts.values())
-            num_classes = spec.dim
-            weights = [
-                (total / (num_classes * max(counts.get(i, 0), 1))) ** smoothing
-                for i in range(num_classes)
-            ]
-            class_weights[readout_name] = weights
-            logger.info(
-                "Class weights for %s (smoothing=%.2f): %s (counts: %s)",
-                readout_name,
-                smoothing,
-                [f"{w:.3f}" for w in weights],
-                dict(sorted(counts.items())),
-            )
-
-        return class_weights
 
     def _create_dataloader(
         self, split: Literal["train", "valid", "test"]

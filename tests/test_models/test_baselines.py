@@ -6,10 +6,9 @@ Tests Linear, MLP, GRU, TemporalConvAvgPool, ShallowConvNet, and EEGNetEncoder m
 import numpy as np
 import pytest
 import torch
+from hydra.utils import instantiate
 from temporaldata import Data, Interval, RegularTimeSeries
-from torch_brain.data import collate
-from torch_brain.registry import register_modality, DataType, MODALITY_REGISTRY
-from torch_brain.nn.loss import CrossEntropyLoss
+from torch_brain.batching import collate
 
 from foundry.models import (
     TemporalConvAvgPool,
@@ -19,6 +18,7 @@ from foundry.models import (
     ShallowConvNet,
     EEGNetEncoder,
 )
+from foundry.tasks.config import TaskConfig
 
 
 def compute_multitask_loss(
@@ -27,34 +27,25 @@ def compute_multitask_loss(
     """Compute multitask loss for baseline models.
 
     Simplified version of the logic from foundry/training/module.py.
-
-    Args:
-        model: The baseline model with readout_specs
-        outputs: Dict of model outputs per task
-        target_values: Dict of target values per task
-        target_weights: Dict of target weights per task
-        task_index: Tensor indicating which task each output belongs to
-
-    Returns:
-        Scalar loss tensor
     """
     loss_total = torch.tensor(0.0, dtype=torch.float32)
     total_sequences = 0
 
-    for readout_id, task_output in outputs.items():
-        if readout_id not in target_values:
+    for task_name, task_output in outputs.items():
+        if task_name not in target_values:
             continue
 
-        target = target_values[readout_id]
+        target = target_values[task_name]
         if target.numel() == 0:
             continue
 
-        spec = model.readout_specs[readout_id]
-        weights = target_weights.get(readout_id, 1.0)
+        cfg = model.task_configs[task_name]
+        weights = target_weights.get(task_name, 1.0)
+        loss_fn = instantiate(cfg.loss)
+        task_loss = loss_fn(task_output, target, weights)
 
-        task_loss = spec.loss_fn(task_output, target, weights)
-
-        num_sequences = torch.any(task_index == spec.id, dim=1).sum()
+        idx = model.router.get_task_index_by_name(task_name) + 1
+        num_sequences = torch.any(task_index == idx, dim=1).sum()
 
         loss_total = loss_total + task_loss * num_sequences
         total_sequences += num_sequences
@@ -78,18 +69,32 @@ class MockSession:
 
 
 @pytest.fixture(scope="module")
-def readout_specs():
-    """Register and return test readout specs."""
-    if "test_baseline_task" not in MODALITY_REGISTRY:
-        register_modality(
-            "test_baseline_task",
-            dim=2,
-            type=DataType.BINARY,
-            timestamp_key="test_baseline_task.timestamps",
-            value_key="test_baseline_task.values",
-            loss_fn=CrossEntropyLoss(),
+def task_configs():
+    """Task configs for baseline model tests."""
+    return {
+        "test_baseline_task": TaskConfig.from_dict(
+            {
+                "name": "test_baseline_task",
+                "head": {
+                    "_target_": "foundry.tasks.heads.ReadoutHead",
+                    "output_dim": 2,
+                },
+                "target_extractor": {
+                    "_target_": "foundry.tasks.targets.TargetExtractor",
+                    "timestamp_key": "test_baseline_task.timestamps",
+                    "value_key": "test_baseline_task.values",
+                },
+                "loss": {
+                    "_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"
+                },
+                "metrics": {
+                    "_target_": "foundry.tasks.metrics.classification_metrics",
+                    "num_classes": 2,
+                },
+                "class_names": ["class0", "class1"],
+            }
         )
-    return {"test_baseline_task": MODALITY_REGISTRY["test_baseline_task"]}
+    }
 
 
 def create_baseline_data_sample(
@@ -127,22 +132,15 @@ def create_baseline_data_sample(
         values = np.array([0])
 
     data.test_baseline_task = TestTask()
-    data.config = {
-        "multitask_readout": [
-            {
-                "readout_id": "test_baseline_task",
-            }
-        ]
-    }
 
     return data
 
 
 @pytest.fixture
-def simple_model(readout_specs):
+def simple_model(task_configs):
     """Create SimpleClassifier instance."""
     return TemporalConvAvgPool(
-        readout_specs=readout_specs,
+        task_configs=task_configs,
         num_channels=4,
         num_filters=32,
         kernel_size=64,
@@ -150,10 +148,10 @@ def simple_model(readout_specs):
 
 
 @pytest.fixture
-def shallow_model(readout_specs):
+def shallow_model(task_configs):
     """Create ShallowConvNet instance."""
     return ShallowConvNet(
-        readout_specs=readout_specs,
+        task_configs=task_configs,
         num_channels=4,
         num_samples=3500,
         F1=40,
@@ -161,30 +159,30 @@ def shallow_model(readout_specs):
 
 
 @pytest.fixture
-def eegnet_model(readout_specs):
+def eegnet_model(task_configs):
     """Create EEGNetEncoder instance."""
     return EEGNetEncoder(
-        readout_specs=readout_specs,
+        task_configs=task_configs,
         num_channels=4,
         num_samples=512,
     )
 
 
 @pytest.fixture
-def linear_model(readout_specs):
+def linear_model(task_configs):
     """Create Linear instance."""
     return Linear(
-        readout_specs=readout_specs,
+        task_configs=task_configs,
         num_channels=4,
         num_samples=200,
     )
 
 
 @pytest.fixture
-def mlp_model(readout_specs):
+def mlp_model(task_configs):
     """Create MLP instance."""
     return MLP(
-        readout_specs=readout_specs,
+        task_configs=task_configs,
         num_channels=4,
         num_samples=200,
         hidden_dims=[64, 32],
@@ -193,10 +191,10 @@ def mlp_model(readout_specs):
 
 
 @pytest.fixture
-def gru_model(readout_specs):
+def gru_model(task_configs):
     """Create GRU instance."""
     return GRU(
-        readout_specs=readout_specs,
+        task_configs=task_configs,
         num_channels=4,
         num_samples=200,
         input_proj_dim=64,
@@ -227,7 +225,6 @@ class TestBaselineTokenize:
             "target_weights",
             "session_id",
             "absolute_start",
-            "eval_mask",
         }
         assert set(tokens.keys()) == expected_keys
 
@@ -257,17 +254,12 @@ class TestBaselineTokenize:
         ):
             simple_model.tokenize(data)
 
-    def test_tokenize_respects_multitask_config(self, simple_model):
-        """Test that tokenize respects multitask_readout config."""
+    def test_tokenize_extracts_configured_task_targets(self, simple_model):
+        """Test that tokenize extracts targets from configured task configs."""
         data = create_baseline_data_sample()
-
-        data.config["multitask_readout"] = [
-            {"readout_id": "test_baseline_task"}
-        ]
-
         tokens = simple_model.tokenize(data)
 
-        assert tokens["target_values"] is not None
+        assert "test_baseline_task" in tokens["target_values"].obj
 
     def test_tokenize_filters_eeg_channels(self, simple_model):
         """Test that tokenize filters for EEG channels only."""
@@ -293,9 +285,6 @@ class TestBaselineTokenize:
             values = np.array([0])
 
         data.test_baseline_task = TestTask()
-        data.config = {
-            "multitask_readout": [{"readout_id": "test_baseline_task"}]
-        }
 
         tokens = simple_model.tokenize(data)
 
@@ -310,17 +299,17 @@ class TestBaselineTokenize:
 class TestTemporalConvAvgPool:
     """Test TemporalConvAvgPool model."""
 
-    def test_init(self, readout_specs):
+    def test_init(self, task_configs):
         """Test TemporalConvAvgPool initialization."""
         model = TemporalConvAvgPool(
-            readout_specs=readout_specs,
+            task_configs=task_configs,
             num_channels=4,
             num_filters=32,
             kernel_size=64,
         )
 
         assert model.num_channels == 4
-        assert hasattr(model, "readout")
+        assert hasattr(model, "router")
         assert hasattr(model, "conv")
         assert hasattr(model, "bn")
         assert hasattr(model, "act")
@@ -409,34 +398,34 @@ class TestTemporalConvAvgPool:
 class TestShallowConvNet:
     """Test ShallowConvNet model."""
 
-    def test_init(self, readout_specs):
+    def test_init(self, task_configs):
         """Test ShallowConvNet initialization."""
         model = ShallowConvNet(
-            readout_specs=readout_specs,
+            task_configs=task_configs,
             num_channels=4,
             num_samples=175,
             F1=40,
         )
 
         assert model.num_channels == 4
-        assert hasattr(model, "readout")
+        assert hasattr(model, "router")
         assert hasattr(model, "conv1")
         assert hasattr(model, "conv2")
         assert hasattr(model, "flatten")
         assert hasattr(model, "act")
 
-    def test_init_computes_correct_output_dim(self, readout_specs):
+    def test_init_computes_correct_output_dim(self, task_configs):
         """Test that output dim is correctly computed as F1 * (num_samples // 35)."""
         model = ShallowConvNet(
-            readout_specs=readout_specs,
+            task_configs=task_configs,
             num_channels=4,
             num_samples=175,
             F1=40,
         )
 
         expected_out_dim = 40 * (175 // 35)
-        for proj in model.readout.projections.values():
-            assert proj.in_features == expected_out_dim
+        for head in model.router.heads.values():
+            assert head.projection.in_features == expected_out_dim
 
     def test_forward_backward_pass(self, shallow_model):
         """Test tokenize -> collate -> forward -> backward end-to-end."""
@@ -521,16 +510,16 @@ class TestShallowConvNet:
 class TestEEGNetEncoder:
     """Test EEGNetEncoder model."""
 
-    def test_init(self, readout_specs):
+    def test_init(self, task_configs):
         """Test EEGNetEncoder initialization."""
         model = EEGNetEncoder(
-            readout_specs=readout_specs,
+            task_configs=task_configs,
             num_channels=4,
             num_samples=128,
         )
 
         assert model.num_channels == 4
-        assert hasattr(model, "readout")
+        assert hasattr(model, "router")
         assert hasattr(model, "block1")
         assert hasattr(model, "block2")
 
@@ -638,19 +627,19 @@ class TestEEGNetEncoder:
 class TestLinear:
     """Test Linear model."""
 
-    def test_init(self, readout_specs):
+    def test_init(self, task_configs):
         """Test Linear initialization."""
         model = Linear(
-            readout_specs=readout_specs,
+            task_configs=task_configs,
             num_channels=4,
             num_samples=200,
         )
 
         assert model.num_channels == 4
         assert model.num_samples == 200
-        assert hasattr(model, "readout")
-        for proj in model.readout.projections.values():
-            assert proj.in_features == 4 * 200
+        assert hasattr(model, "router")
+        for head in model.router.heads.values():
+            assert head.projection.in_features == 4 * 200
 
     def test_forward_backward_pass(self, linear_model):
         """Test tokenize -> collate -> forward -> backward end-to-end."""
@@ -735,10 +724,10 @@ class TestLinear:
 class TestMLP:
     """Test MLP model."""
 
-    def test_init(self, readout_specs):
+    def test_init(self, task_configs):
         """Test MLP initialization."""
         model = MLP(
-            readout_specs=readout_specs,
+            task_configs=task_configs,
             num_channels=4,
             num_samples=200,
             hidden_dims=[64, 32],
@@ -746,7 +735,7 @@ class TestMLP:
 
         assert model.num_channels == 4
         assert model.num_samples == 200
-        assert hasattr(model, "readout")
+        assert hasattr(model, "router")
         assert hasattr(model, "mlp")
         first_linear = model.mlp[0]
         assert first_linear.in_features == 4 * 200
@@ -834,10 +823,10 @@ class TestMLP:
 class TestGRU:
     """Test GRU model."""
 
-    def test_init(self, readout_specs):
+    def test_init(self, task_configs):
         """Test GRU initialization."""
         model = GRU(
-            readout_specs=readout_specs,
+            task_configs=task_configs,
             num_channels=4,
             num_samples=200,
             input_proj_dim=64,
@@ -848,14 +837,14 @@ class TestGRU:
 
         assert model.num_channels == 4
         assert model.num_samples == 200
-        assert hasattr(model, "readout")
+        assert hasattr(model, "router")
         assert hasattr(model, "input_norm")
         assert hasattr(model, "input_proj")
         assert hasattr(model, "gru")
 
         # Bidirectional GRU doubles readout input dimension.
-        for proj in model.readout.projections.values():
-            assert proj.in_features == 64
+        for head in model.router.heads.values():
+            assert head.projection.in_features == 64
 
     def test_forward_backward_pass(self, gru_model):
         """Test tokenize -> collate -> forward -> backward end-to-end."""

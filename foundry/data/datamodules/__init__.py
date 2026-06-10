@@ -1,5 +1,4 @@
 from .base import NeuralDataModule
-from .physionet import PhysionetDataModule
 from .neurosoft import NeurosoftMinipigs2026DataModule
 from .neurosoft import NeurosoftMonkeys2026DataModule
 
@@ -10,7 +9,6 @@ except ImportError:
 
 __all__ = [
     "NeuralDataModule",
-    "PhysionetDataModule",
     "NeurosoftMinipigs2026DataModule",
     "NeurosoftMonkeys2026DataModule",
 ]

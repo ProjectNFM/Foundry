@@ -28,7 +28,7 @@ dev = ["pre-commit>=4.5.1", "pytest>=8.0.0", "ruff>=0.14.14"]
 notebook = ["ipykernel>=7.2.0", "seaborn>=0.13.2"]
 
 [tool.uv.sources]
-torch-brain = { git = "https://github.com/neuro-galaxy/torch_brain", branch = "milo/fast-sampler" }
+torch-brain = { git = "https://github.com/neuro-galaxy/torch_brain", branch = "main-pre-merge" }
 brainsets = { git = "https://github.com/neuro-galaxy/brainsets", branch = "milo/ajile" }
 temporaldata = { git = "https://github.com/neuro-galaxy/temporaldata", branch = "main" }
 auditorydecoding = { git = "https://github.com/Neurosoft-Bioelectronics/auditorydecoding", branch = "main" }
@@ -38,7 +38,7 @@ allow-direct-references = true
 
 [tool.uv]
 override-dependencies = [
-    "torch-brain @ git+https://github.com/neuro-galaxy/torch_brain.git@milo/fast-sampler",
+    "torch-brain @ git+https://github.com/neuro-galaxy/torch_brain.git@main-pre-merge",
     "brainsets @ git+https://github.com/neuro-galaxy/brainsets.git@milo/ajile",
 ]
 

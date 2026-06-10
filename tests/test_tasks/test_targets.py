@@ -9,40 +9,40 @@ from foundry.tasks.targets import TargetExtractor
 @dataclass
 class _Trials:
     timestamps: np.ndarray
-    movement_ids: np.ndarray
+    behavior_id: np.ndarray
 
 
-def _make_trials_data(movement_ids: np.ndarray) -> Data:
-    timestamps = np.arange(len(movement_ids), dtype=np.float64) * 0.1
+def _make_trials_data(behavior_ids: np.ndarray) -> Data:
+    timestamps = np.arange(len(behavior_ids), dtype=np.float64) * 0.1
     return Data(
-        motor_imagery_trials=_Trials(
+        active_behavior_trials=_Trials(
             timestamps=timestamps,
-            movement_ids=movement_ids,
+            behavior_id=behavior_ids,
         )
     )
 
 
 class TestTargetExtractor:
     def test_extracts_nested_timestamps_and_values(self):
-        movement_ids = np.array([0, 1, 2], dtype=np.int64)
-        data = _make_trials_data(movement_ids)
+        behavior_ids = np.array([0, 1, 2], dtype=np.int64)
+        data = _make_trials_data(behavior_ids)
 
         extractor = TargetExtractor(
-            timestamp_key="motor_imagery_trials.timestamps",
-            value_key="motor_imagery_trials.movement_ids",
+            timestamp_key="active_behavior_trials.timestamps",
+            value_key="active_behavior_trials.behavior_id",
         )
         result = extractor(data)
 
         assert np.array_equal(result["timestamps"], np.array([0.0, 0.1, 0.2]))
-        assert np.array_equal(result["values"], movement_ids)
+        assert np.array_equal(result["values"], behavior_ids)
 
     def test_label_map_remaps_known_values(self):
-        movement_ids = np.array([1, 2, 1, 2], dtype=np.int64)
-        data = _make_trials_data(movement_ids)
+        behavior_ids = np.array([1, 2, 1, 2], dtype=np.int64)
+        data = _make_trials_data(behavior_ids)
 
         extractor = TargetExtractor(
-            timestamp_key="motor_imagery_trials.timestamps",
-            value_key="motor_imagery_trials.movement_ids",
+            timestamp_key="active_behavior_trials.timestamps",
+            value_key="active_behavior_trials.behavior_id",
             label_map={1: 0, 2: 1},
         )
         result = extractor(data)
@@ -54,13 +54,13 @@ class TestTargetExtractor:
         data = Data(
             pose_trajectories=_Trials(
                 timestamps=np.array([0.0, 1.0]),
-                movement_ids=values,
+                behavior_id=values,
             )
         )
 
         extractor = TargetExtractor(
             timestamp_key="pose_trajectories.timestamps",
-            value_key="pose_trajectories.movement_ids",
+            value_key="pose_trajectories.behavior_id",
         )
         result = extractor(data)
 

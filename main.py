@@ -203,22 +203,17 @@ def _build_model_and_data(cfg: DictConfig):
 
     DataModuleClass = get_class(cfg.data._target_)
 
-    if _uses_task_configs(DataModuleClass):
-        task_configs = DataModuleClass.get_tasks_for_experiment(
-            cfg.data.task_type
+    if not _uses_task_configs(DataModuleClass):
+        raise ValueError(
+            f"{DataModuleClass.__name__} must implement get_tasks_for_experiment"
         )
-        datamodule = instantiate(cfg.data, tokenizer=None)
-        task_configs = _apply_auto_class_weights(cfg, datamodule, task_configs)
-        model = instantiate(cfg.model, task_configs=task_configs)
-        tokenizer = model.tokenize if hasattr(model, "tokenize") else None
-        datamodule = instantiate(cfg.data, tokenizer=tokenizer)
-    else:
-        readout_specs = DataModuleClass.get_readout_specs_for_task(
-            cfg.data.task_type
-        )
-        model = instantiate(cfg.model, readout_specs=readout_specs)
-        tokenizer = model.tokenize if hasattr(model, "tokenize") else None
-        datamodule = instantiate(cfg.data, tokenizer=tokenizer)
+
+    task_configs = DataModuleClass.get_tasks_for_experiment(cfg.data.task_type)
+    datamodule = instantiate(cfg.data, tokenizer=None)
+    task_configs = _apply_auto_class_weights(cfg, datamodule, task_configs)
+    model = instantiate(cfg.model, task_configs=task_configs)
+    tokenizer = model.tokenize if hasattr(model, "tokenize") else None
+    datamodule = instantiate(cfg.data, tokenizer=tokenizer)
 
     return model, datamodule
 

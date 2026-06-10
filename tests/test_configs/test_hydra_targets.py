@@ -91,7 +91,6 @@ def _instantiate_node(yaml_path: Path, target_path: str) -> Any:
     target = node.get("_target_", "")
 
     task_configs = AjileDataModule.get_tasks_for_experiment("behavior")
-    readout_specs = ["p300_target"]
 
     if "FoundryModule" in target:
         from foundry.models.readout import ReadoutRouter
@@ -127,16 +126,22 @@ def _instantiate_node(yaml_path: Path, target_path: str) -> Any:
             pytest.skip(
                 "POYO root requires composed tokenizer; see dedicated test"
             )
-        kwargs["readout_specs"] = readout_specs
+        from foundry.tasks.config import TaskConfig
+
+        kwargs["task_configs"] = {
+            "ajile_inactive_active": TaskConfig.from_yaml(
+                CONFIGS_ROOT / "tasks" / "ajile_inactive_active.yaml"
+            )
+        }
     elif (
         "AjileDataModule" in target
-        or "PhysionetDataModule" in target
         or "NeurosoftMinipigs2026DataModule" in target
         or "NeurosoftMonkeys2026DataModule" in target
     ):
         kwargs["tokenizer"] = None
 
-    return instantiate(node, **kwargs)
+    recursive = "task_configs" not in kwargs
+    return instantiate(node, **kwargs, _recursive_=recursive)
 
 
 _TARGET_CASES = _collect_target_cases()
@@ -174,10 +179,17 @@ def test_standalone_model_config_instantiates(config_name: str):
     if config_name == "poyo_eeg":
         pytest.skip("covered by test_poyo_eeg_with_tokenizer_configs")
     yaml_path = CONFIGS_ROOT / "model" / f"{config_name}.yaml"
-    readout_specs = ["p300_target"]
+    from foundry.tasks.config import TaskConfig
+
+    task_configs = {
+        "ajile_inactive_active": TaskConfig.from_yaml(
+            CONFIGS_ROOT / "tasks" / "ajile_inactive_active.yaml"
+        )
+    }
     model = instantiate(
         _strip_non_constructor_keys(load_resolved_config(yaml_path)),
-        readout_specs=readout_specs,
+        task_configs=task_configs,
+        _recursive_=False,
     )
     assert model is not None
 

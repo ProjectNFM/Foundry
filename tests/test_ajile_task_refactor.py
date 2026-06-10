@@ -199,7 +199,7 @@ def test_tokenize_uses_target_extractor_for_pose_values():
 
 
 def test_foundry_module_training_step_classification():
-    from torch_brain.data import collate
+    from torch_brain.batching import collate
 
     task_configs = _make_ajile_task_configs("behavior")
     model = _make_poyo_model(task_configs)
@@ -219,7 +219,7 @@ def test_foundry_module_training_step_classification():
 
 
 def test_foundry_module_training_step_regression():
-    from torch_brain.data import collate
+    from torch_brain.batching import collate
 
     task_configs = _make_ajile_task_configs("pose_estimation")
     model = _make_poyo_model(task_configs)

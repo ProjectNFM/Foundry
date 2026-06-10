@@ -62,32 +62,32 @@ def _task_yaml_paths() -> list[Path]:
 
 
 class TestTaskYamlConfigs:
-    def test_motor_imagery_5class_yaml_loads_and_matches_modality(self):
+    def test_ajile_active_behavior_yaml_loads_and_matches_modality(self):
         cfg = TaskConfig.from_yaml(
-            TASKS_CONFIG_DIR / "motor_imagery_5class.yaml"
+            TASKS_CONFIG_DIR / "ajile_active_behavior.yaml"
         )
 
-        assert cfg.name == "motor_imagery_5class"
+        assert cfg.name == "ajile_active_behavior"
         assert cfg.output_dim == 5
         assert cfg.kind == "multiclass"
         assert (
             cfg.target_extractor["timestamp_key"]
-            == "motor_imagery_trials.timestamps"
+            == "active_behavior_trials.timestamps"
         )
         assert (
             cfg.target_extractor["value_key"]
-            == "motor_imagery_trials.movement_ids"
+            == "active_behavior_trials.behavior_id"
         )
         assert cfg.class_names == [
-            "Rest",
-            "Left hand",
-            "Right hand",
-            "Feet",
-            "Tongue",
+            "Eat",
+            "Talk",
+            "TV",
+            "Computer/Phone",
+            "Other Activity",
         ]
 
     def test_yaml_loss_params_can_be_overridden(self):
-        base = OmegaConf.load(TASKS_CONFIG_DIR / "motor_imagery_5class.yaml")
+        base = OmegaConf.load(TASKS_CONFIG_DIR / "ajile_active_behavior.yaml")
         merged = OmegaConf.merge(
             base,
             OmegaConf.create({"loss": {"label_smoothing": 0.2}}),
@@ -135,24 +135,6 @@ class TestTaskYamlConfigs:
 
 
 EXPECTED_TASK_SPECS = {
-    "motor_imagery_5class": {
-        "output_dim": 5,
-        "kind": "multiclass",
-        "timestamp_key": "motor_imagery_trials.timestamps",
-        "value_key": "motor_imagery_trials.movement_ids",
-    },
-    "motor_imagery_left_right": {
-        "output_dim": 2,
-        "kind": "binary",
-        "timestamp_key": "motor_imagery_trials.timestamps",
-        "value_key": "motor_imagery_trials.movement_ids",
-    },
-    "motor_imagery_right_feet": {
-        "output_dim": 2,
-        "kind": "binary",
-        "timestamp_key": "motor_imagery_trials.timestamps",
-        "value_key": "motor_imagery_trials.movement_ids",
-    },
     "ajile_pose_estimation": {
         "output_dim": 18,
         "kind": "continuous",

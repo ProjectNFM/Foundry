@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 from temporaldata import Data, Interval, RegularTimeSeries
-from torch_brain.data import collate
+from torch_brain.batching import collate
 
 from foundry.models import (
     POYOEEGModel,

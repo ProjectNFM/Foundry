@@ -30,11 +30,11 @@ class NeuralModel(Protocol):
         ...
 
     @property
-    def readout_specs(self) -> Dict[str, Any]:
+    def task_configs(self) -> Dict[str, Any]:
         """Task specifications for multitask learning.
 
         Returns:
-            Dictionary mapping task names to ModalitySpec objects.
+            Dictionary mapping task names to TaskConfig objects.
         """
         ...
 
