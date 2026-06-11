@@ -736,6 +736,7 @@ class EEGNetEncoder(BaselineEEGModel):
         F2: int = 16,
         kernel_length: int = 64,
         dropout_rate: float = 0.5,
+        **kwargs,
     ):
         super().__init__(
             num_channels=num_channels,
