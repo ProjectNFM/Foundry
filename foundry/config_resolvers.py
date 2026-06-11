@@ -9,6 +9,7 @@ SLURM jobs where buffered output is lost on crash.
 """
 
 import glob as _glob
+import itertools
 import os
 import sys
 import traceback
@@ -169,6 +170,45 @@ def _config_list_sweep_one_recording_lists(config_path: str, key: str) -> str:
     return "choice(" + ",".join(_bracket_list(v) for v in values) + ")"
 
 
+def _bracket_string_list(items: List[str] | tuple[str, ...]) -> str:
+    """Hydra list literal for a sequence of string values."""
+    return "[" + ",".join(
+        "'" + str(item).replace("'", "\\'") + "'" for item in items
+    ) + "]"
+
+
+def _sweep_binary_class_pair_lists(values: List[str] | tuple[str, ...]) -> str:
+    """Hydra ``choice()`` string with all unordered 2-class lists from *values*."""
+    if len(values) < 2:
+        raise ValueError(
+            "Need at least two class labels to build binary-class sweep pairs"
+        )
+
+    pairs = list(itertools.combinations((str(value) for value in values), 2))
+    return "choice(" + ",".join(_bracket_string_list(pair) for pair in pairs) + ")"
+
+
+def _config_list_sweep_binary_class_pairs(config_path: str, key: str) -> str:
+    """Hydra ``choice()`` string with all binary class pairs from a YAML list key."""
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    cfg = OmegaConf.load(config_path)
+    values = OmegaConf.select(cfg, key)
+    if values is None:
+        raise KeyError(f"Key '{key}' not found in config file: {config_path}")
+
+    if OmegaConf.is_config(values):
+        values = OmegaConf.to_container(values, resolve=True)
+
+    if not isinstance(values, (list, tuple)):
+        raise TypeError(
+            f"Expected '{key}' in {config_path} to be a list/tuple, got {type(values)}"
+        )
+
+    return _sweep_binary_class_pair_lists(tuple(str(value) for value in values))
+
+
 def _count_ecog_channels(h5_path: str) -> int:
     """Count ECoG-like channels in an HDF5 recording file."""
     import h5py
@@ -259,6 +299,7 @@ def register_resolvers() -> None:
         "sweep_choices": _sweep_choices,
         "config_list_sweep_choices": _config_list_sweep_choices,
         "config_list_sweep_one_recording_lists": _config_list_sweep_one_recording_lists,
+        "config_list_sweep_binary_class_pairs": _config_list_sweep_binary_class_pairs,
         "get_num_ecog_channels_by_name": _get_num_ecog_channels_by_name,
     }
     for name, fn in _resolvers.items():
