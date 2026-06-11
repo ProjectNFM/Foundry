@@ -4,7 +4,9 @@ Verifies that effective readout specs correctly adapt to datamodule config
 (e.g., data.classes frequency filtering in NeuroSoft).
 """
 
+import numpy as np
 import pytest
+from temporaldata import Interval
 from torch_brain.registry import MODALITY_REGISTRY
 
 from foundry.data.datamodules.neurosoft import (
@@ -286,3 +288,87 @@ class TestNeurosoftEffectiveSpecs:
         assert "neurosoft_acoustic_stim" in names
         # Band names unchanged
         assert names["neurosoft_acoustic_stim"] == ["low", "medium", "high"]
+
+
+class _MockNeurosoftDataset:
+    def __init__(self, recording_ids, intervals_by_rid):
+        self.recording_ids = recording_ids
+        self._intervals_by_rid = intervals_by_rid
+
+    def get_sampling_intervals(self, split):
+        del split
+        return self._intervals_by_rid
+
+
+class TestValidateBinaryClassCoverage:
+    """Tests for early binary-class frequency coverage validation."""
+
+    def _make_dm(self, classes, intervals_by_rid):
+        dm = NeurosoftDataModule(
+            dataset_class=None,
+            root="/tmp",
+            task_type="acoustic_stim",
+            classes=classes,
+            freq_grouping=None,
+        )
+        dm.dataset = _MockNeurosoftDataset(
+            recording_ids=list(intervals_by_rid.keys()),
+            intervals_by_rid=intervals_by_rid,
+        )
+        return dm
+
+    def test_passes_when_both_frequencies_present(self):
+        intervals = {
+            "rec-a": Interval(
+                start=np.array([0.0, 1.0]),
+                end=np.array([0.5, 1.5]),
+                behavior_labels=np.array(["stim_500Hz", "stim_800Hz"]),
+            )
+        }
+        dm = self._make_dm(["stim_500Hz", "stim_800Hz"], intervals)
+        dm.validate_binary_class_coverage()
+
+    def test_raises_when_one_frequency_missing(self):
+        intervals = {
+            "rec-a": Interval(
+                start=np.array([0.0]),
+                end=np.array([0.5]),
+                behavior_labels=np.array(["stim_500Hz"]),
+            )
+        }
+        dm = self._make_dm(["stim_500Hz", "stim_800Hz"], intervals)
+        with pytest.raises(ValueError, match="missing \\['stim_800Hz'\\]"):
+            dm.validate_binary_class_coverage()
+
+    def test_raises_when_no_trials_for_either_class(self):
+        intervals = {
+            "rec-a": Interval(
+                start=np.array([]),
+                end=np.array([]),
+                behavior_labels=np.array([], dtype="U"),
+            )
+        }
+        dm = self._make_dm(["stim_500Hz", "stim_800Hz"], intervals)
+        with pytest.raises(ValueError, match="missing"):
+            dm.validate_binary_class_coverage()
+
+    def test_skips_non_binary_runs(self):
+        intervals = {
+            "rec-a": Interval(
+                start=np.array([0.0]),
+                end=np.array([0.5]),
+                behavior_labels=np.array(["stim_500Hz"]),
+            )
+        }
+        dm = self._make_dm(["stim_500Hz", "stim_800Hz", "stim_1000Hz"], intervals)
+        dm.validate_binary_class_coverage()
+
+    def test_skips_when_classes_not_set(self):
+        dm = NeurosoftDataModule(
+            dataset_class=None,
+            root="/tmp",
+            task_type="acoustic_stim",
+            classes=None,
+        )
+        dm.dataset = _MockNeurosoftDataset(recording_ids=[], intervals_by_rid={})
+        dm.validate_binary_class_coverage()
