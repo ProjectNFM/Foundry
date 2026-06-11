@@ -20,11 +20,11 @@ run:
   log_level: INFO
 
 class_weights:
-  mode: auto
+  mode: null
   smoothing: 0.1
 
 hyperparameters:
-  batch_size: 64
+  batch_size: 128
   sequence_length: 30.0
   patch_duration: 0.1
   sampling_rate: 100
@@ -36,6 +36,7 @@ hyperparameters:
 trainer:
   max_epochs: 1000
   precision: bf16-mixed
+  devices: 1
   callbacks:
     early_stopping:
       monitor: val/sleep_stage_5class_f1

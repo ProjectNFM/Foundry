@@ -49,7 +49,7 @@ class TargetExtractor:
         values = data.get_nested_attribute(self.value_key)
 
         if self.label_map is not None:
-            mapped = np.empty_like(values)
+            mapped = values.copy()
             for src, dst in self.label_map.items():
                 mapped[values == src] = dst
             values = mapped
