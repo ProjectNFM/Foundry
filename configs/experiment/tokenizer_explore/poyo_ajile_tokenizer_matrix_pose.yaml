@@ -17,7 +17,7 @@
 defaults:
   - override /model: poyo_eeg
   - override /data: ajile/multisess
-  - override /module: regression
+  - override /module: default
   - override /hydra/launcher: local_gpu
 
 _matrix:

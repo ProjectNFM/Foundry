@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from temporaldata import Data, Interval, RegularTimeSeries
+from torch_brain.data import Data, Interval, RegularTimeSeries
 
 from foundry.data.transforms import RescaleSignal
 

@@ -74,7 +74,7 @@ def get_sampling_rate(dataset) -> float:
     :meth:`~foundry.models.poyo_eeg.POYOEEGModel.tokenize`.
 
     Args:
-        dataset: A :class:`torch_brain.dataset.Dataset` instance with at
+        dataset: A :class:`torch_brain.datasets.Dataset` instance with at
             least one recording containing an ``eeg``, ``ecog``, or ``seeg``
             field.
 
@@ -100,7 +100,7 @@ def get_channel_counts(dataset) -> dict[str, int]:
     maximum channel count across those recordings is kept.
 
     Args:
-        dataset: A :class:`torch_brain.dataset.Dataset` instance.
+        dataset: A :class:`torch_brain.datasets.Dataset` instance.
 
     Returns:
         Mapping of ``session.id`` strings to channel counts.
@@ -123,7 +123,7 @@ def get_max_channels(dataset) -> int:
     signals are padded to a common size.
 
     Args:
-        dataset: A :class:`torch_brain.dataset.Dataset` instance.
+        dataset: A :class:`torch_brain.datasets.Dataset` instance.
 
     Returns:
         Maximum number of neural channels in any session.
@@ -135,7 +135,7 @@ def get_min_channels(dataset) -> int:
     """Minimum channel count across all sessions in the dataset.
 
     Args:
-        dataset: A :class:`torch_brain.dataset.Dataset` instance.
+        dataset: A :class:`torch_brain.datasets.Dataset` instance.
 
     Returns:
         Minimum number of neural channels in any session.
@@ -160,7 +160,7 @@ def get_session_configs(dataset) -> dict[str, int]:
         )
 
     Args:
-        dataset: A :class:`torch_brain.dataset.Dataset` instance.
+        dataset: A :class:`torch_brain.datasets.Dataset` instance.
 
     Returns:
         Mapping of session ID strings to their channel counts.

@@ -34,8 +34,14 @@ def load_resolved_config(yaml_path: Path) -> DictConfig:
     file_cfg = OmegaConf.load(yaml_path)
     data_defaults = OmegaConf.create(
         {
+            "dataset_class": (
+                "foundry.data.datasets.PetersonBruntonPoseTrajectory2022"
+            ),
             "split_type": "intersession",
             "task_type": "behavior",
+            "dataset_kwargs": {
+                "fold": 0,
+            },
         }
     )
     merged = OmegaConf.merge(instantiation_context(), data_defaults, file_cfg)

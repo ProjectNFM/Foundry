@@ -1,7 +1,7 @@
 defaults:
   - model: null
   - data: null
-  - module: classification
+  - module: default
   - logger: wandb
   - _self_
   - trainer: default
@@ -21,6 +21,10 @@ hyperparameters:
 
 stage:
   skip: false
+
+class_weights:
+  mode: none
+  smoothing: 0.5
 
 run:
   # Keep fresh runs independent unless resume is explicitly requested.

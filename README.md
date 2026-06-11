@@ -72,7 +72,6 @@ configs/
 ├── data/                    # Data configuration by dataset group
 │   ├── ajile/
 │   ├── neurosoft_minipigs/
-│   ├── physionet/
 │   └── ...
 ├── model/                   # Model configuration
 ├── module/                  # Training loop configuration

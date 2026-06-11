@@ -1,4 +1,6 @@
-_target_: foundry.data.datamodules.AjileDataModule
+_target_: foundry.data.datamodules.NeuralDataModule
+
+dataset_class: foundry.data.datasets.PetersonBruntonPoseTrajectory2022
 
 root: ./data/processed/
 batch_size: ${hyperparameters.batch_size}
@@ -9,5 +11,6 @@ seed: 42
 
 split_type: intersession
 task_type: ???
-fold_number: ${hyperparameters.fold_number}
 
+dataset_kwargs:
+  fold: ${hyperparameters.fold_number}

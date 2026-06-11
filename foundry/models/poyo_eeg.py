@@ -3,21 +3,21 @@ from typing import Dict, Optional
 import numpy as np
 import torch
 import torch.nn as nn
-from temporaldata import Data
-from torch_brain.data import chain, pad8
+from hydra.utils import instantiate
+from torch_brain.data import Data
+from torch_brain.batching import chain, collate, pad8, track_batch
 from torch_brain.nn import (
     Embedding,
     InfiniteVocabEmbedding,
-    MultitaskReadout,
     RotaryTimeEmbedding,
-    prepare_for_multitask_readout,
 )
-from torch_brain.registry import ModalitySpec
 from torch_brain.utils import create_linspace_latent_tokens
 
 from foundry.models.backbones import PerceiverIOBackbone
+from foundry.models.readout import ReadoutRouter
 from foundry.models.tokenizer import EEGTokenizer
-from foundry.models.utils import resolve_readout_specs
+from foundry.tasks.config import TaskConfig
+from foundry.tasks.targets import TargetExtractor
 
 
 class POYOEEGModel(nn.Module):
@@ -30,9 +30,7 @@ class POYOEEGModel(nn.Module):
     Args:
         tokenizer: Composable tokenizer handling channel strategy,
             optional GPU patching, and temporal embedding.
-        readout_specs: List/dict of task specifications for multitask readout.
-            Can be ModalitySpec objects or string names that resolve from
-            the registry.
+        task_configs: Mapping from task name to :class:`~foundry.tasks.config.TaskConfig`.
         embed_dim: Embedding dimension (must match components).
         sequence_length: Length of sequences in seconds.
         latent_step: Time step between latent tokens in seconds.
@@ -59,7 +57,7 @@ class POYOEEGModel(nn.Module):
     def __init__(
         self,
         tokenizer: EEGTokenizer,
-        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
+        task_configs: dict[str, TaskConfig],
         embed_dim: int,
         sequence_length: float,
         latent_step: float = 0.1,
@@ -84,6 +82,7 @@ class POYOEEGModel(nn.Module):
         self.latent_step = latent_step
         self.num_latents_per_step = num_latents_per_step
         self.zero_output_timestamps = zero_output_timestamps
+        self._task_configs = task_configs
         self._latent_index, self._latent_timestamps = (
             create_linspace_latent_tokens(
                 0,
@@ -93,10 +92,11 @@ class POYOEEGModel(nn.Module):
             )
         )
 
-        self._readout_specs = resolve_readout_specs(readout_specs)
-        self.global_to_local_task_id = {
-            spec.id: idx for idx, spec in enumerate(self.readout_specs.values())
+        heads = {
+            name: instantiate({**cfg.head, "embed_dim": embed_dim})
+            for name, cfg in task_configs.items()
         }
+        self.router = ReadoutRouter(heads)
 
         self.backbone = PerceiverIOBackbone(
             embed_dim=embed_dim,
@@ -116,7 +116,7 @@ class POYOEEGModel(nn.Module):
             self.embed_dim, init_scale=emb_init_scale
         )
         self.task_emb = Embedding(
-            len(self.readout_specs), self.embed_dim, init_scale=emb_init_scale
+            self.router.num_tasks, self.embed_dim, init_scale=emb_init_scale
         )
         self.latent_emb = Embedding(
             num_latents_per_step, self.embed_dim, init_scale=emb_init_scale
@@ -126,11 +126,6 @@ class POYOEEGModel(nn.Module):
             rotate_dim=dim_head // 2,
             t_min=t_min,
             t_max=t_max,
-        )
-
-        self.readout = MultitaskReadout(
-            dim=self.embed_dim,
-            readout_specs=self.readout_specs,
         )
 
     def forward(
@@ -149,7 +144,7 @@ class POYOEEGModel(nn.Module):
         latent_timestamps: torch.Tensor,
         output_session_index: torch.Tensor,
         output_timestamps: torch.Tensor,
-        output_decoder_index: torch.Tensor,
+        task_index: torch.Tensor,
         unpack_output: bool = False,
     ) -> Dict:
         """Forward pass through the model.
@@ -166,12 +161,13 @@ class POYOEEGModel(nn.Module):
             latent_timestamps: (B, n_latent) timestamps for latent tokens.
             output_session_index: (B, n_out) session indices for outputs.
             output_timestamps: (B, n_out) timestamps for output predictions.
-            output_decoder_index: (B, n_out) task/decoder indices.
+            task_index: (B, n_out) task/decoder indices.
             unpack_output: Whether to unpack outputs by batch sample.
 
         Returns:
             Dictionary of task-specific outputs.
         """
+        del unpack_output
         self._validate_vocab_initialization()
 
         inputs = self.tokenizer(
@@ -193,12 +189,9 @@ class POYOEEGModel(nn.Module):
         latents = self.latent_emb(latent_index)
         latent_timestamp_emb = self.rotary_emb(latent_timestamps)
 
-        local_task_index = torch.zeros_like(output_decoder_index)
-        for global_id, local_id in self.global_to_local_task_id.items():
-            local_task_index[output_decoder_index == global_id] = local_id
-
+        task_ids = (task_index - 1).clamp(min=0)
         output_queries = self.session_emb(output_session_index) + self.task_emb(
-            local_task_index
+            task_ids
         )
         output_timestamp_emb = self.rotary_emb(output_timestamps)
 
@@ -211,17 +204,17 @@ class POYOEEGModel(nn.Module):
             output_timestamp_emb=output_timestamp_emb,
         )
 
-        output = self.readout(
-            output_embs=output_latents,
-            output_readout_index=output_decoder_index,
-            unpack_output=unpack_output,
+        batch_size, n_out, dim = output_latents.shape
+        flat_embs = output_latents.reshape(batch_size * n_out, dim)
+        flat_task_index = task_index.reshape(batch_size * n_out)
+        valid = flat_task_index > 0
+        return self.router(
+            flat_embs[valid], (flat_task_index[valid] - 1).long()
         )
 
-        return output
-
     @property
-    def readout_specs(self) -> dict[str, ModalitySpec]:
-        return self._readout_specs
+    def task_configs(self) -> dict[str, TaskConfig]:
+        return self._task_configs
 
     def _resolve_signal_source(self, data: Data):
         """Find the signal source and default modality type from the data.
@@ -252,40 +245,72 @@ class POYOEEGModel(nn.Module):
             )
         return 1.0 / float(np.median(valid_deltas))
 
+    def _extract_targets(self, data: Data):
+        all_timestamps = []
+        task_indices = []
+        target_values = {}
+        target_weights = {}
+
+        for name in self.router._task_names:
+            cfg = self._task_configs[name]
+            ext_kwargs = dict(cfg.target_extractor)
+            ext_kwargs.pop("_target_", None)
+            extractor = TargetExtractor(**ext_kwargs)
+
+            targets = extractor(data)
+            timestamps = targets["timestamps"]
+            if timestamps is None or len(timestamps) == 0:
+                continue
+
+            idx = self.router.get_task_index_by_name(name)
+            all_timestamps.append(timestamps)
+            task_indices.append(idx)
+            target_values[name] = targets["values"]
+            target_weights[name] = np.ones_like(timestamps, dtype=np.float32)
+
+        if not all_timestamps:
+            raise ValueError(
+                "No targets extracted from data for configured tasks"
+            )
+
+        if len(all_timestamps) == 1:
+            output_timestamps = torch.as_tensor(all_timestamps[0])
+            output_task_index = torch.full(
+                (len(output_timestamps),),
+                task_indices[0] + 1,
+                dtype=torch.long,
+            )
+        else:
+            output_timestamps, batch = collate(
+                [
+                    (chain(all_timestamps[i]), track_batch(all_timestamps[i]))
+                    for i in range(len(all_timestamps))
+                ]
+            )
+            output_task_index = torch.tensor(task_indices)[batch] + 1
+
+        return (
+            output_timestamps,
+            target_values,
+            output_task_index,
+            target_weights,
+        )
+
     def tokenize(self, data: Data) -> dict:
         """Tokenize the input data.
 
         Delegates signal preparation to the :class:`EEGTokenizer` which
         handles channel strategy, optional GPU patching, and temporal
-        embedding concerns.
+        embedding concerns. Target extraction uses :class:`TargetExtractor`
+        instances from the configured task configs.
 
         Args:
             data: TemporalData object containing raw EEG/ECoG/sEEG signal.
-                  If ``data.config["multitask_readout"]`` is set by the
-                  dataset, it will be intersected with the model's
-                  ``readout_specs`` to use only supported modalities.
 
         Returns:
             dict with model_inputs, target_values, target_weights, and
             metadata.
         """
-        if not hasattr(data, "config") or data.config is None:
-            data.config = {}
-
-        if "multitask_readout" not in data.config:
-            data.config["multitask_readout"] = [
-                {"readout_id": spec_id} for spec_id in self.readout_specs.keys()
-            ]
-        else:
-            available = [
-                cfg["readout_id"] for cfg in data.config["multitask_readout"]
-            ]
-            data.config["multitask_readout"] = [
-                {"readout_id": name}
-                for name in available
-                if name in self.readout_specs
-            ]
-
         signal_source, default_type = self._resolve_signal_source(data)
 
         modality_field = (
@@ -327,11 +352,7 @@ class POYOEEGModel(nn.Module):
             output_values,
             output_task_index,
             output_weights,
-            output_eval_mask,
-        ) = prepare_for_multitask_readout(
-            data,
-            self.readout_specs,
-        )
+        ) = self._extract_targets(data)
         if self.zero_output_timestamps:
             output_timestamps = torch.zeros_like(output_timestamps)
 
@@ -347,12 +368,11 @@ class POYOEEGModel(nn.Module):
             "latent_timestamps": latent_timestamps,
             "output_session_index": pad8(output_session_index),
             "output_timestamps": pad8(output_timestamps),
-            "output_decoder_index": pad8(output_task_index),
+            "task_index": pad8(output_task_index),
             "target_values": chain(output_values, allow_missing_keys=True),
             "target_weights": chain(output_weights, allow_missing_keys=True),
             "session_id": data.session.id,
             "absolute_start": data.absolute_start,
-            "eval_mask": chain(output_eval_mask, allow_missing_keys=True),
         }
 
     def initialize_vocabs(self, vocab_info: dict):
