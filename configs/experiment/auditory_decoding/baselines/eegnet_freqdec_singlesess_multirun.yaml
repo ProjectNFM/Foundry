@@ -30,16 +30,29 @@ model:
 data:
   split_type: intrasession-causal
   task_type: acoustic_stim
+  freq_grouping: null
+  classes:
+  - "stim_500Hz"
+  - "stim_800Hz"
+  - "stim_1000Hz"
+  - "stim_2000Hz"
+  - "stim_5000Hz"
+  - "stim_8000Hz"
+  # - "stim_10000Hz"
+  # - "stim_wn"
+  # - "stim_20000Hz"
+
 
 run:
   project: auditory_decoding
   name: ${hydra:runtime.choices.model}_${data.recording_ids.0}_fold${hyperparameters.fold_number}
-  group: NEUROSOFT_MINIPIGS_SINGLE_SESSION
+  group: NEUROSOFT_MINIPIGS_SINGLE_SESSION_FREQ_SUBSET
   tags:
     - neurosoft
     - baselines
     - ${hydra:runtime.choices.model}
     - raw_data
+    - 6class
   seed: 42
   log_level: INFO
 
