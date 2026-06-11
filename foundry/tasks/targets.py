@@ -1,4 +1,4 @@
-"""Target extraction from ``temporaldata`` samples during tokenization.
+"""Target extraction from ``torch_brain.data`` samples during tokenization.
 
 These callables live in the **data layer**: they read CPU-side ``Data`` objects
 and return numpy arrays for timestamps and target values.
@@ -11,7 +11,7 @@ happen here so downstream loss functions and metrics see prepared targets only.
 from dataclasses import dataclass
 
 import numpy as np
-from temporaldata import Data
+from torch_brain.data import Data
 
 
 @dataclass(frozen=True)
@@ -19,13 +19,13 @@ class TargetExtractor:
     """Extract per-sample target timestamps and values from a ``Data`` object.
 
     A frozen, serializable data transform invoked during tokenization. Keys use
-    dot notation to reach nested fields on :class:`temporaldata.Data` containers.
+    dot notation to reach nested fields on :class:`torch_brain.data.Data` containers.
 
     Args:
         timestamp_key: Dot-separated path to the timestamp array for each
-            target (e.g. ``"motor_imagery_trials.timestamps"``).
+            target (e.g. ``"active_behavior_trials.timestamps"``).
         value_key: Dot-separated path to the target values array (e.g.
-            ``"motor_imagery_trials.movement_ids"`` or
+            ``"active_behavior_trials.behavior_id"`` or
             ``"pose_trajectories.values"``).
         label_map: Optional mapping from raw label values to training indices.
             Applied before targets reach the loss or metrics. Use to collapse

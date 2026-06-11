@@ -267,7 +267,7 @@ class FoundryModule(L.LightningModule):
             loss = self._task_losses[name](preds, target, weights)
             taskwise_loss[name] = loss
 
-            idx = self.model.router.get_task_index_by_name(name)
+            idx = self.model.router.get_task_index_by_name(name) + 1
             num_sequences = torch.any(task_index == idx, dim=1).sum()
             multitask_loss = multitask_loss + loss * num_sequences
             total_sequences += num_sequences

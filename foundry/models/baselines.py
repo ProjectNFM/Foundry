@@ -8,13 +8,14 @@ simple and are widely used on standard EEG classification tasks.
 import numpy as np
 import torch
 import torch.nn as nn
-from torch_brain.data import chain, pad8, pad2d
-from torch_brain.nn import MultitaskReadout, prepare_for_multitask_readout
-from torch_brain.registry import ModalitySpec
-from temporaldata import Data
+from hydra.utils import instantiate
+from torch_brain.data import Data
+from torch_brain.batching import chain, collate, pad8, pad2d, track_batch
 from typing import Dict, Any
 
-from foundry.models.utils import resolve_readout_specs
+from foundry.models.readout import ReadoutRouter
+from foundry.tasks.config import TaskConfig
+from foundry.tasks.targets import TargetExtractor
 
 
 class BaselineEEGModel(nn.Module):
@@ -27,13 +28,13 @@ class BaselineEEGModel(nn.Module):
     def __init__(
         self,
         num_channels: int,
-        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
+        task_configs: dict[str, TaskConfig],
         num_samples: int | None = None,
     ):
         """
         Args:
             num_channels (int): Number of EEG channels.
-            readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s) for multitask head.
+            task_configs: Mapping from task name to :class:`~foundry.tasks.config.TaskConfig`.
             num_samples (int | None, optional): Number of time samples per input window. Subclasses that require
                 a fixed window length (e.g., for shape checks or flattened readout dimensions) should pass this value.
                 Subclasses with adaptive pooling (e.g., TemporalConvAvgPool) may leave it as None. Default: None.
@@ -41,11 +42,77 @@ class BaselineEEGModel(nn.Module):
         super().__init__()
         self.num_channels = num_channels
         self.num_samples = num_samples
-        self._readout_specs = resolve_readout_specs(readout_specs)
+        self._task_configs = task_configs
 
     @property
-    def readout_specs(self) -> dict[str, ModalitySpec]:
-        return self._readout_specs
+    def task_configs(self) -> dict[str, TaskConfig]:
+        return self._task_configs
+
+    def _build_router(self, embed_dim: int) -> ReadoutRouter:
+        heads = {
+            name: instantiate({**cfg.head, "embed_dim": embed_dim})
+            for name, cfg in self._task_configs.items()
+        }
+        return ReadoutRouter(heads)
+
+    def _extract_targets(self, data: Data):
+        all_timestamps = []
+        task_indices = []
+        target_values = {}
+        target_weights = {}
+        name_to_idx = {
+            n: i for i, n in enumerate(sorted(self._task_configs.keys()))
+        }
+
+        for name in sorted(self._task_configs.keys()):
+            cfg = self._task_configs[name]
+            ext_kwargs = dict(cfg.target_extractor)
+            ext_kwargs.pop("_target_", None)
+            extractor = TargetExtractor(**ext_kwargs)
+
+            targets = extractor(data)
+            timestamps = targets["timestamps"]
+            if timestamps is None or len(timestamps) == 0:
+                continue
+
+            idx = name_to_idx[name]
+            all_timestamps.append(timestamps)
+            task_indices.append(idx)
+            target_values[name] = targets["values"]
+            target_weights[name] = np.ones_like(timestamps, dtype=np.float32)
+
+        if not all_timestamps:
+            raise ValueError(
+                "No targets extracted from data for configured tasks"
+            )
+
+        if len(all_timestamps) == 1:
+            output_task_index = torch.full(
+                (len(all_timestamps[0]),),
+                task_indices[0] + 1,
+                dtype=torch.long,
+            )
+        else:
+            _, batch = collate(
+                [
+                    (chain(all_timestamps[i]), track_batch(all_timestamps[i]))
+                    for i in range(len(all_timestamps))
+                ]
+            )
+            output_task_index = torch.tensor(task_indices)[batch] + 1
+
+        return target_values, output_task_index, target_weights
+
+    def _route_readout(
+        self, x: torch.Tensor, task_index: torch.Tensor
+    ) -> Dict[str, torch.Tensor]:
+        batch_size, n_out, dim = x.shape
+        flat_embs = x.reshape(batch_size * n_out, dim)
+        flat_task_index = task_index.reshape(batch_size * n_out)
+        valid = flat_task_index > 0
+        return self.router(
+            flat_embs[valid], (flat_task_index[valid] - 1).long()
+        )
 
     def _normalize_input_shape(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -101,9 +168,8 @@ class BaselineEEGModel(nn.Module):
         Converts a TemporalData EEG/ECoG sample to model-ready tensors and multitask readout targets.
 
         Args:
-            data (temporaldata.Data): Input data structure containing an "eeg" or "ecog" field,
-                along with "channels" and "config".
-                If data.config["multitask_readout"] is present, it is intersected with model-supported modalities.
+            data (torch_brain.data.Data): Input data structure containing an "eeg" or "ecog" field
+                along with "channels" and task-specific label fields.
 
         Returns:
             dict: {
@@ -113,7 +179,6 @@ class BaselineEEGModel(nn.Module):
                 "target_weights" (dict[str, torch.Tensor] or similar): Multitask target weights,
                 "session_id" (Any): Session identifier,
                 "absolute_start" (Any): Absolute segment start time,
-                "eval_mask" (dict[str, torch.Tensor] or similar): Mask for which outputs should be evaluated,
             }
 
         Note:
@@ -122,23 +187,6 @@ class BaselineEEGModel(nn.Module):
             is handled by the forward model methods, not at tokenization time.
 
         """
-        if not hasattr(data, "config") or data.config is None:
-            data.config = {}
-
-        if "multitask_readout" not in data.config:
-            data.config["multitask_readout"] = [
-                {"readout_id": spec_id} for spec_id in self.readout_specs.keys()
-            ]
-        else:
-            available = [
-                cfg["readout_id"] for cfg in data.config["multitask_readout"]
-            ]
-            data.config["multitask_readout"] = [
-                {"readout_id": name}
-                for name in available
-                if name in self.readout_specs
-            ]
-
         has_eeg = hasattr(data, "eeg") and data.eeg is not None
         has_ecog = hasattr(data, "ecog") and data.ecog is not None
         has_seeg = hasattr(data, "seeg") and data.seeg is not None
@@ -172,15 +220,8 @@ class BaselineEEGModel(nn.Module):
         signal = np.asarray(signal, dtype=np.float32)
         x = torch.from_numpy(signal[:, modality_mask])
 
-        (
-            output_timestamps,
-            output_values,
-            output_task_index,
-            output_weights,
-            output_eval_mask,
-        ) = prepare_for_multitask_readout(
-            data,
-            self.readout_specs,
+        output_values, output_task_index, output_weights = (
+            self._extract_targets(data)
         )
 
         return {
@@ -190,7 +231,6 @@ class BaselineEEGModel(nn.Module):
             "target_weights": chain(output_weights, allow_missing_keys=True),
             "session_id": data.session.id,
             "absolute_start": float(data.absolute_start),
-            "eval_mask": chain(output_eval_mask, allow_missing_keys=True),
         }
 
     def unpack_batch(self, batch: Dict[str, Any]) -> tuple:
@@ -227,27 +267,24 @@ class Linear(BaselineEEGModel):
 
     def __init__(
         self,
-        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
+        task_configs: dict[str, TaskConfig],
         num_channels: int = 64,
         num_samples: int = 128,
     ):
         """
         Args:
-            readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s).
+            task_configs: Mapping from task name to TaskConfig. Readout specification(s).
             num_channels (int, optional): Number of EEG channels. Default: 64.
             num_samples (int, optional): Number of time samples per input window. Default: 128.
         """
         super().__init__(
             num_channels=num_channels,
             num_samples=num_samples,
-            readout_specs=readout_specs,
+            task_configs=task_configs,
         )
 
         out_dim = num_channels * num_samples
-        self.readout = MultitaskReadout(
-            dim=out_dim,
-            readout_specs=self._readout_specs,
-        )
+        self.router = self._build_router(out_dim)
 
     def forward(
         self,
@@ -278,14 +315,10 @@ class Linear(BaselineEEGModel):
         n_out = task_index.shape[1]
 
         # Repeat (broadcast) the feature vector for each output task in the batch,
-        # so its shape is (batch_size, n_out, feature_dim) as required by MultitaskReadout
+        # so its shape is (batch_size, n_out, feature_dim) for per-output routing
         x = x.unsqueeze(1).expand(batch_size, n_out, -1)
 
-        return self.readout(
-            output_embs=x,
-            output_readout_index=task_index,
-            unpack_output=False,
-        )
+        return self._route_readout(x, task_index)
 
 
 class MLP(BaselineEEGModel):
@@ -300,7 +333,7 @@ class MLP(BaselineEEGModel):
 
     def __init__(
         self,
-        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
+        task_configs: dict[str, TaskConfig],
         num_channels: int = 64,
         num_samples: int = 128,
         hidden_dims: list[int] | None = None,
@@ -308,7 +341,7 @@ class MLP(BaselineEEGModel):
     ):
         """
         Args:
-            readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s).
+            task_configs: Mapping from task name to TaskConfig. Readout specification(s).
             num_channels (int, optional): Number of EEG channels. Default: 64.
             num_samples (int, optional): Number of time samples per input window. Default: 128.
             hidden_dims (list[int], optional): Hidden layer dimensions. Default: [128, 64].
@@ -317,7 +350,7 @@ class MLP(BaselineEEGModel):
         super().__init__(
             num_channels=num_channels,
             num_samples=num_samples,
-            readout_specs=readout_specs,
+            task_configs=task_configs,
         )
 
         if hidden_dims is None:
@@ -334,10 +367,7 @@ class MLP(BaselineEEGModel):
         self.mlp = nn.Sequential(*layers)
         out_dim = in_dim
 
-        self.readout = MultitaskReadout(
-            dim=out_dim,
-            readout_specs=self._readout_specs,
-        )
+        self.router = self._build_router(out_dim)
 
     def forward(
         self,
@@ -369,11 +399,7 @@ class MLP(BaselineEEGModel):
         n_out = task_index.shape[1]
         x = x.unsqueeze(1).expand(batch_size, n_out, -1)
 
-        return self.readout(
-            output_embs=x,
-            output_readout_index=task_index,
-            unpack_output=False,
-        )
+        return self._route_readout(x, task_index)
 
 
 class GRU(BaselineEEGModel):
@@ -387,7 +413,7 @@ class GRU(BaselineEEGModel):
 
     def __init__(
         self,
-        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
+        task_configs: dict[str, TaskConfig],
         num_channels: int = 64,
         num_samples: int = 128,
         input_proj_dim: int = 128,
@@ -398,7 +424,7 @@ class GRU(BaselineEEGModel):
     ):
         """
         Args:
-            readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s).
+            task_configs: Mapping from task name to TaskConfig. Readout specification(s).
             num_channels (int, optional): Number of EEG channels. Default: 64.
             num_samples (int, optional): Number of time samples per input window. Default: 128.
             input_proj_dim (int, optional): Per-timestep channel projection dimension. Default: 128.
@@ -410,7 +436,7 @@ class GRU(BaselineEEGModel):
         super().__init__(
             num_channels=num_channels,
             num_samples=num_samples,
-            readout_specs=readout_specs,
+            task_configs=task_configs,
         )
 
         self.input_norm = nn.LayerNorm(num_channels)
@@ -425,10 +451,7 @@ class GRU(BaselineEEGModel):
         )
 
         out_dim = hidden_size * (2 if bidirectional else 1)
-        self.readout = MultitaskReadout(
-            dim=out_dim,
-            readout_specs=self._readout_specs,
-        )
+        self.router = self._build_router(out_dim)
 
     def forward(
         self,
@@ -466,11 +489,7 @@ class GRU(BaselineEEGModel):
         n_out = task_index.shape[1]
         x = x.unsqueeze(1).expand(batch_size, n_out, -1)
 
-        return self.readout(
-            output_embs=x,
-            output_readout_index=task_index,
-            unpack_output=False,
-        )
+        return self._route_readout(x, task_index)
 
 
 class TemporalConvAvgPool(BaselineEEGModel):
@@ -484,7 +503,7 @@ class TemporalConvAvgPool(BaselineEEGModel):
 
     def __init__(
         self,
-        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
+        task_configs: dict[str, TaskConfig],
         num_channels: int = 64,
         num_filters: int = 32,
         kernel_size: int = 64,
@@ -492,7 +511,7 @@ class TemporalConvAvgPool(BaselineEEGModel):
     ):
         """
         Args:
-            readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s).
+            task_configs: Mapping from task name to TaskConfig. Readout specification(s).
             num_channels (int, optional): Number of EEG channels. Default: 64.
             num_filters (int, optional): Number of convolutional filters. Default: 32.
             kernel_size (int, optional): Temporal kernel size for Conv1d. Default: 64.
@@ -500,7 +519,7 @@ class TemporalConvAvgPool(BaselineEEGModel):
         """
         super().__init__(
             num_channels=num_channels,
-            readout_specs=readout_specs,
+            task_configs=task_configs,
         )
 
         self.conv = nn.Conv1d(
@@ -510,10 +529,7 @@ class TemporalConvAvgPool(BaselineEEGModel):
         self.act = nn.ReLU()
         self.pool = nn.AdaptiveAvgPool1d(1)
 
-        self.readout = MultitaskReadout(
-            dim=num_filters,
-            readout_specs=self._readout_specs,
-        )
+        self.router = self._build_router(num_filters)
 
     def forward(
         self,
@@ -543,11 +559,7 @@ class TemporalConvAvgPool(BaselineEEGModel):
         n_out = task_index.shape[1]
         x = x.unsqueeze(1).expand(batch_size, n_out, -1)
 
-        return self.readout(
-            output_embs=x,
-            output_readout_index=task_index,
-            unpack_output=False,
-        )
+        return self._route_readout(x, task_index)
 
 
 class ShallowConvNet(BaselineEEGModel):
@@ -561,7 +573,7 @@ class ShallowConvNet(BaselineEEGModel):
 
     def __init__(
         self,
-        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
+        task_configs: dict[str, TaskConfig],
         num_channels: int = 64,
         num_samples: int = 128,
         dropout_rate: float = 0.5,
@@ -570,7 +582,7 @@ class ShallowConvNet(BaselineEEGModel):
     ):
         """
         Args:
-            readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s).
+            task_configs: Mapping from task name to TaskConfig. Readout specification(s).
             num_channels (int, optional): Number of EEG channels. Default: 64.
             num_samples (int, optional): Number of samples (length of EEG input). Default: 128.
             dropout_rate (float, optional): Dropout rate after pooling. Default: 0.5.
@@ -580,7 +592,7 @@ class ShallowConvNet(BaselineEEGModel):
         super().__init__(
             num_channels=num_channels,
             num_samples=num_samples,
-            readout_specs=readout_specs,
+            task_configs=task_configs,
         )
 
         # Temporal convolution
@@ -598,10 +610,7 @@ class ShallowConvNet(BaselineEEGModel):
         self.flatten = nn.Flatten()
 
         out_dim = F1 * (num_samples // 35)
-        self.readout = MultitaskReadout(
-            dim=out_dim,
-            readout_specs=self._readout_specs,
-        )
+        self.router = self._build_router(out_dim)
 
     def forward(
         self,
@@ -634,11 +643,7 @@ class ShallowConvNet(BaselineEEGModel):
         n_out = task_index.shape[1]
         x = x.unsqueeze(1).expand(batch_size, n_out, -1)
 
-        return self.readout(
-            output_embs=x,
-            output_readout_index=task_index,
-            unpack_output=False,
-        )
+        return self._route_readout(x, task_index)
 
 
 class SeparableConv2d(nn.Module):
@@ -707,11 +712,11 @@ class EEGNetEncoder(BaselineEEGModel):
     EEGNet: Compact Convolutional Neural Network for EEG-based BCIs.
 
     Reference: Lawhern et al., J. Neural Eng. 2018 (https://arxiv.org/abs/1611.08024).
-    Designed to generalize across BCI tasks (P300, ERD/ERS, MRCP) while maintaining
+    Designed to generalize across BCI tasks (ERD/ERS, MRCP) while maintaining
     efficiency and strong performance.
 
     Args:
-        readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s).
+        task_configs: Mapping from task name to TaskConfig.
         num_channels (int, optional): Number of EEG electrodes/channels. Default: 64.
         num_samples (int, optional): Number of samples in an EEG trial/window. Default: 128.
         F1 (int, optional): Temporal filter count ("bandpass" filters). Default: 8.
@@ -723,7 +728,7 @@ class EEGNetEncoder(BaselineEEGModel):
 
     def __init__(
         self,
-        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
+        task_configs: dict[str, TaskConfig],
         num_channels: int = 64,
         num_samples: int = 128,
         F1: int = 8,
@@ -731,11 +736,12 @@ class EEGNetEncoder(BaselineEEGModel):
         F2: int = 16,
         kernel_length: int = 64,
         dropout_rate: float = 0.5,
+        **kwargs,
     ):
         super().__init__(
             num_channels=num_channels,
             num_samples=num_samples,
-            readout_specs=readout_specs,
+            task_configs=task_configs,
         )
 
         # ----------------------------------------------------------------------
@@ -796,11 +802,7 @@ class EEGNetEncoder(BaselineEEGModel):
             num_channels, num_samples
         )  # CHECK: out_dim == F2
 
-        # MultitaskReadout replaces the final classifier
-        self.readout = MultitaskReadout(
-            dim=out_dim,
-            readout_specs=self._readout_specs,
-        )
+        self.router = self._build_router(out_dim)
 
     def _calculate_out_dim(self, channels, samples):
         """Dynamically calculate the flattened output dimension.
@@ -866,8 +868,4 @@ class EEGNetEncoder(BaselineEEGModel):
         x = x.view(batch_size, -1)
         x = x.unsqueeze(1).expand(batch_size, n_out, -1)
 
-        return self.readout(
-            output_embs=x,
-            output_readout_index=task_index,
-            unpack_output=False,
-        )
+        return self._route_readout(x, task_index)

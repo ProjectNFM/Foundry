@@ -10,7 +10,9 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 
-from foundry.data.datamodules.ajile import AjileDataModule
+from foundry.data.datasets.peterson_brunton_pose_trajectory_2022 import (
+    PetersonBruntonPoseTrajectory2022,
+)
 from tests.test_configs.conftest import (
     CONFIGS_ROOT,
     load_resolved_config,
@@ -20,7 +22,6 @@ from tests.test_configs.conftest import (
 _SKIP_PREFIXES = (
     "hydra/",
     "experiment/",
-    "data/neurosoft_minipigs/",
 )
 
 _SKIP_TARGET_PATHS = {
@@ -91,21 +92,20 @@ def _instantiate_node(yaml_path: Path, target_path: str) -> Any:
     kwargs: dict[str, Any] = {}
     target = node.get("_target_", "")
 
-    readout_specs = AjileDataModule.get_readout_specs_for_task("behavior")
+    task_configs = PetersonBruntonPoseTrajectory2022.get_tasks_for_experiment(
+        "behavior"
+    )
 
     if "FoundryModule" in target:
         from foundry.models.readout import ReadoutRouter
-        from foundry.tasks.config import TaskConfig
 
-        task_cfg = TaskConfig.from_yaml(
-            CONFIGS_ROOT / "tasks" / "ajile_active_behavior.yaml"
-        )
+        task_cfg = next(iter(task_configs.values()))
         heads = {task_cfg.name: instantiate({**task_cfg.head, "embed_dim": 4})}
 
         class _StubFoundryModel(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.task_configs = {task_cfg.name: task_cfg}
+                self.task_configs = task_configs
                 self.router = ReadoutRouter(heads)
 
             def forward(self, **kwargs):
@@ -130,13 +130,18 @@ def _instantiate_node(yaml_path: Path, target_path: str) -> Any:
             pytest.skip(
                 "POYO root requires composed tokenizer; see dedicated test"
             )
-        kwargs["readout_specs"] = readout_specs
-    elif "AjileDataModule" in target or "PhysionetDataModule" in target:
-        kwargs["tokenizer"] = None
-    elif "NeurosoftMinipigs2026DataModule" in target:
-        pytest.skip("requires neurosoft runtime data layout")
+        from foundry.tasks.config import TaskConfig
 
-    return instantiate(node, **kwargs)
+        kwargs["task_configs"] = {
+            "ajile_inactive_active": TaskConfig.from_yaml(
+                CONFIGS_ROOT / "tasks" / "ajile_inactive_active.yaml"
+            )
+        }
+    elif "NeuralDataModule" in target:
+        kwargs["tokenizer"] = None
+
+    recursive = "task_configs" not in kwargs
+    return instantiate(node, **kwargs, _recursive_=recursive)
 
 
 _TARGET_CASES = _collect_target_cases()
@@ -174,10 +179,17 @@ def test_standalone_model_config_instantiates(config_name: str):
     if config_name == "poyo_eeg":
         pytest.skip("covered by test_poyo_eeg_with_tokenizer_configs")
     yaml_path = CONFIGS_ROOT / "model" / f"{config_name}.yaml"
-    readout_specs = AjileDataModule.get_readout_specs_for_task("behavior")
+    from foundry.tasks.config import TaskConfig
+
+    task_configs = {
+        "ajile_inactive_active": TaskConfig.from_yaml(
+            CONFIGS_ROOT / "tasks" / "ajile_inactive_active.yaml"
+        )
+    }
     model = instantiate(
         _strip_non_constructor_keys(load_resolved_config(yaml_path)),
-        readout_specs=readout_specs,
+        task_configs=task_configs,
+        _recursive_=False,
     )
     assert model is not None
 
@@ -211,10 +223,19 @@ def test_poyo_eeg_with_tokenizer_configs(tokenizer_name: str):
     poyo_cfg = _strip_non_constructor_keys(
         load_resolved_config(CONFIGS_ROOT / "model" / "poyo_eeg.yaml")
     )
-    readout_specs = AjileDataModule.get_readout_specs_for_task("behavior")
-    model = instantiate(
-        poyo_cfg,
+    from foundry.models.poyo_eeg import POYOEEGModel
+    from foundry.tasks.config import TaskConfig
+
+    task_configs = {
+        "ajile_active_behavior": TaskConfig.from_yaml(
+            CONFIGS_ROOT / "tasks" / "ajile_active_behavior.yaml"
+        )
+    }
+    poyo_kwargs = OmegaConf.to_container(poyo_cfg, resolve=True)
+    poyo_kwargs.pop("_target_", None)
+    model = POYOEEGModel(
         tokenizer=tokenizer,
-        readout_specs=readout_specs,
+        task_configs=task_configs,
+        **poyo_kwargs,
     )
     assert model is not None

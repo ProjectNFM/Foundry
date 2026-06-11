@@ -7,7 +7,7 @@ with neural data from any source (EEG, iEEG, fMRI, PET, etc.).
 from typing import Protocol, Any, Dict, runtime_checkable
 
 import torch
-from temporaldata import Data
+from torch_brain.data import Data
 
 
 class NeuralModel(Protocol):
@@ -30,11 +30,11 @@ class NeuralModel(Protocol):
         ...
 
     @property
-    def readout_specs(self) -> Dict[str, Any]:
+    def task_configs(self) -> Dict[str, Any]:
         """Task specifications for multitask learning.
 
         Returns:
-            Dictionary mapping task names to ModalitySpec objects.
+            Dictionary mapping task names to TaskConfig objects.
         """
         ...
 
@@ -50,7 +50,7 @@ class Tokenizable(Protocol):
         """Tokenize a temporal data sample.
 
         Args:
-            data: A temporaldata.Data object containing the raw signal and metadata.
+            data: A torch_brain.data.Data object containing the raw signal and metadata.
 
         Returns:
             Dictionary with tokenized outputs (e.g., input_values, target_labels, weights).
