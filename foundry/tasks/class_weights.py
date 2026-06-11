@@ -7,6 +7,7 @@ from collections import Counter
 
 import numpy as np
 
+from foundry.tasks.classification_mapping import ClassificationMapping
 from foundry.tasks.config import TaskConfig
 from foundry.tasks.targets import TargetExtractor
 
@@ -17,6 +18,7 @@ def _count_labels_for_task(
     dataset,
     split: str,
     extractor: TargetExtractor,
+    mapping: ClassificationMapping | None = None,
 ) -> Counter:
     value_field = extractor.value_key.split(".")[-1]
     train_intervals = dataset.get_sampling_intervals(split=split)
@@ -27,6 +29,17 @@ def _count_labels_for_task(
             continue
 
         values = getattr(intervals, value_field)
+
+        if mapping is not None:
+            for raw_id, mapped_id in mapping.raw_to_mapped.items():
+                if mapped_id is None:
+                    continue
+                label_mask = values == raw_id
+                if not np.any(label_mask):
+                    continue
+                selected = intervals.select_by_mask(label_mask)
+                counts[int(mapped_id)] += sum(selected.end - selected.start)
+            continue
 
         if extractor.label_map is not None:
             for src, dst in extractor.label_map.items():
@@ -75,7 +88,9 @@ def compute_class_weights_for_tasks(
         ext_kwargs.pop("_target_", None)
         extractor = TargetExtractor(**ext_kwargs)
 
-        counts = _count_labels_for_task(dataset, split, extractor)
+        counts = _count_labels_for_task(
+            dataset, split, extractor, mapping=cfg.classification_mapping
+        )
         task_weights = _inverse_frequency_weights(
             counts, cfg.output_dim, smoothing
         )

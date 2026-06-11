@@ -120,7 +120,10 @@ class TestTaskYamlConfigs:
         cfg = TaskConfig.from_yaml(yaml_path)
         embed_dim = 64
 
-        head = instantiate({**cfg.head, "embed_dim": embed_dim})
+        head_kwargs = {**cfg.head, "embed_dim": embed_dim}
+        if "output_dim" not in head_kwargs:
+            head_kwargs["output_dim"] = cfg.output_dim
+        head = instantiate(head_kwargs)
         assert head.output_dim == cfg.output_dim
 
         extractor = instantiate(cfg.target_extractor)

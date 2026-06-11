@@ -1,3 +1,7 @@
+from foundry.tasks.classification_mapping import (
+    ClassificationMapping,
+    filter_intervals_by_mapping,
+)
 from foundry.tasks.config import TaskConfig
 from foundry.tasks.heads import MLPReadoutHead, ReadoutHead
 from foundry.tasks.losses import (
@@ -12,6 +16,7 @@ from foundry.tasks.metrics import (
 from foundry.tasks.targets import TargetExtractor
 
 __all__ = [
+    "ClassificationMapping",
     "TaskConfig",
     "CrossEntropyTaskLoss",
     "MLPReadoutHead",
@@ -19,6 +24,7 @@ __all__ = [
     "ReadoutHead",
     "TargetExtractor",
     "classification_metrics",
+    "filter_intervals_by_mapping",
     "regression_metrics",
     "ssl_metrics",
 ]

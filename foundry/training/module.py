@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict
 
 import lightning as L
@@ -10,6 +11,9 @@ import torch.nn as nn
 from hydra.utils import instantiate
 
 from foundry.tasks.config import TaskConfig
+from foundry.training.confusion_matrix import ConfusionMatrixTracker
+
+logger = logging.getLogger(__name__)
 
 
 class FoundryModule(L.LightningModule):
@@ -38,6 +42,7 @@ class FoundryModule(L.LightningModule):
         self._task_losses = nn.ModuleDict()
         self.train_metrics = nn.ModuleDict()
         self.val_metrics = nn.ModuleDict()
+        self._val_confusion_trackers: dict[str, ConfusionMatrixTracker] = {}
 
         for name, cfg in model.task_configs.items():
             self._task_losses[name] = instantiate(cfg.loss)
@@ -48,6 +53,15 @@ class FoundryModule(L.LightningModule):
                     prefix=f"train/{name}_"
                 )
                 self.val_metrics[name] = metrics.clone(prefix=f"val/{name}_")
+
+            if (
+                cfg.kind in ("binary", "multiclass")
+                and cfg.classification_mapping is not None
+            ):
+                self._val_confusion_trackers[name] = ConfusionMatrixTracker(
+                    num_classes=cfg.output_dim,
+                    class_names=cfg.get_class_names(),
+                )
 
     def _metric_summary_mode(
         self, task_name: str, metric_name: str, cfg: Any
@@ -128,6 +142,15 @@ class FoundryModule(L.LightningModule):
                     on_epoch=True,
                 )
 
+            if stage == "val" and name in self._val_confusion_trackers:
+                if cfg.kind == "multiclass":
+                    pred_classes = preds.argmax(dim=-1)
+                elif cfg.kind == "binary":
+                    pred_classes = (preds[:, 1] > preds[:, 0]).long()
+                else:
+                    continue
+                self._val_confusion_trackers[name].update(pred_classes, target)
+
         return total_loss
 
     def _build_param_groups(self) -> list[dict]:
@@ -196,6 +219,69 @@ class FoundryModule(L.LightningModule):
                 "frequency": 1,
             },
         }
+
+    def on_validation_epoch_end(self) -> None:
+        self._log_confusion_matrices()
+        for tracker in self._val_confusion_trackers.values():
+            tracker.reset()
+
+    def _log_confusion_matrices(self) -> None:
+        """Log confusion matrices for all classification tasks with mappings."""
+        for name, tracker in self._val_confusion_trackers.items():
+            counts, normalized = tracker.compute()
+            if counts.sum() == 0:
+                continue
+
+            payload = {
+                f"val/{name}_confusion_counts": counts.tolist(),
+                f"val/{name}_confusion_normalized": normalized.tolist(),
+                f"val/{name}_confusion_class_names": tracker.class_names,
+            }
+
+            if self.logger is not None:
+                self.logger.log_metrics(payload, step=self.current_epoch)
+
+            self._log_wandb_confusion(name, counts, tracker.class_names)
+
+    def _log_wandb_confusion(
+        self,
+        task_name: str,
+        counts: torch.Tensor,
+        class_names: list[str],
+    ) -> None:
+        """Log W&B-native confusion matrix visualization if available."""
+        from lightning.pytorch.loggers import WandbLogger
+
+        if not isinstance(self.logger, WandbLogger):
+            return
+
+        try:
+            import wandb
+
+            num_classes = len(class_names)
+            y_true = []
+            y_pred = []
+            for i in range(num_classes):
+                for j in range(num_classes):
+                    count = int(counts[i, j])
+                    y_true.extend([i] * count)
+                    y_pred.extend([j] * count)
+
+            self.logger.experiment.log(
+                {
+                    f"val/{task_name}_confusion_matrix": wandb.plot.confusion_matrix(
+                        probs=None,
+                        y_true=y_true,
+                        preds=y_pred,
+                        class_names=class_names,
+                        title=f"{task_name} Confusion Matrix (epoch {self.current_epoch})",
+                    ),
+                },
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to log W&B confusion matrix for %s: %s", task_name, e
+            )
 
     def on_fit_start(self):
         self._configure_wandb_metric_summaries()

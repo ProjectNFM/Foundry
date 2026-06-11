@@ -8,10 +8,16 @@ and invoked during dataset tokenization. Label remapping and dtype normalization
 happen here so downstream loss functions and metrics see prepared targets only.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 from torch_brain.data import Data
+
+if TYPE_CHECKING:
+    from foundry.tasks.classification_mapping import ClassificationMapping
 
 
 @dataclass(frozen=True)
@@ -27,9 +33,10 @@ class TargetExtractor:
         value_key: Dot-separated path to the target values array (e.g.
             ``"active_behavior_trials.behavior_id"`` or
             ``"pose_trajectories.values"``).
-        label_map: Optional mapping from raw label values to training indices.
-            Applied before targets reach the loss or metrics. Use to collapse
-            classes (e.g. ``{1: 0, 2: 1}`` for left/right from a 5-class task).
+        label_map: Optional legacy mapping from raw label values to training
+            indices. Deprecated when classification_mapping is set.
+        classification_mapping: Optional unified classification mapping.
+            Takes precedence over label_map when set.
 
     Returns:
         A dict with:
@@ -43,12 +50,15 @@ class TargetExtractor:
     timestamp_key: str
     value_key: str
     label_map: dict[int, int] | None = None
+    classification_mapping: ClassificationMapping | None = None
 
     def __call__(self, data: Data) -> dict:
         timestamps = data.get_nested_attribute(self.timestamp_key)
         values = data.get_nested_attribute(self.value_key)
 
-        if self.label_map is not None:
+        if self.classification_mapping is not None:
+            values = self.classification_mapping.apply(values)
+        elif self.label_map is not None:
             mapped = values.copy()
             for src, dst in self.label_map.items():
                 mapped[values == src] = dst
