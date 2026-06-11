@@ -1,0 +1,111 @@
+# @package _global_
+#
+# Binary-classification sweep: every unordered frequency pair × every recording.
+# `freq_universe` defines the label pool; the sweeper replaces `data.classes` with
+# each 2-class pair (see `config_list_sweep_binary_class_pairs`). Recording ids are
+# swept one session per job (see `config_list_sweep_one_recording_lists`).
+#
+# Execution policy:
+# - Default is truly sequential because `hydra.sweeper.max_batch_size: 1`.
+# - Override parallelism from CLI with `hydra.sweeper.max_batch_size=<N>`.
+#
+# Launcher usage:
+# - Local sequential (default launcher, no parallelism):
+#   uv run python main.py experiment=auditory_decoding/baselines/eegnet_freqdec_binary_class -m
+# - SLURM (one job per sweep point):
+#   uv run python main.py experiment=auditory_decoding/baselines/eegnet_freqdec_binary_class hydra/launcher=slurm_default -m
+# - SLURM packed (example 4 tasks per node):
+#   uv run python main.py experiment=auditory_decoding/baselines/eegnet_freqdec_binary_class hydra/launcher=slurm_default hydra.launcher.tasks_per_node=4 -m
+
+defaults:
+  - override /model: eegnet
+  - override /data: neurosoft_minipigs/multisess_raw
+  - override /cluster: cscs
+
+model:
+  num_channels: ${get_num_ecog_channels_by_name:${data.root}/neurosoft_minipigs_2026,${data.recording_ids.0}}
+  num_samples: 1000 # sequence length * sampling rate
+
+# Full frequency pool for binary-class pairs (C(n, 2) combos in hydra.sweeper.params).
+freq_universe:
+  - "stim_100Hz"
+  - "stim_200Hz"
+  - "stim_300Hz"
+  - "stim_400Hz"
+  - "stim_500Hz"
+  - "stim_650Hz"
+  - "stim_800Hz"
+  - "stim_1000Hz"
+  - "stim_1500Hz"
+  - "stim_2000Hz"
+  - "stim_3000Hz"
+  - "stim_4000Hz"
+  - "stim_5000Hz"
+  - "stim_7700Hz"
+  - "stim_8000Hz"
+  - "stim_9500Hz"
+  - "stim_10000Hz"
+  - "stim_12000Hz"
+  - "stim_13000Hz"
+  - "stim_15000Hz"
+  - "stim_16000Hz"
+  - "stim_18000Hz"
+  - "stim_20000Hz"
+  - "stim_30000Hz"
+  - "stim_40000Hz"
+  - "stim_wn"
+
+data:
+  split_type: intrasession-causal
+  task_type: acoustic_stim
+  freq_grouping: null
+  classes:
+    - ${freq_universe.0}
+    - ${freq_universe.1}
+
+run:
+  project: auditory_decoding
+  name: ${hydra:runtime.choices.model}_${data.recording_ids.0}_fold${hyperparameters.fold_number}
+  group: NEUROSOFT_MINIPIGS_SINGLE_SESSION_BIN_CLASS
+  tags:
+    - neurosoft
+    - baselines
+    - ${hydra:runtime.choices.model}
+    - raw_data
+    - binary_class
+    - ${data.classes.0}
+    - ${data.classes.1}
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 16
+  sequence_length: 0.5
+  fold_number: 0
+  num_workers: 4
+  learning_rate: 0.015
+  weight_decay: 0.018
+
+trainer:
+  max_epochs: 1000
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/loss
+      mode: min
+      patience: 20
+    model_checkpoint:
+      monitor: val/loss
+      mode: min
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_loss_{val/loss:.4f}"
+
+stage:
+  skip: true
+
+hydra:
+  sweeper:
+    max_batch_size: 1000
+    params:
+      data.recording_ids: ${config_list_sweep_one_recording_lists:configs/data/neurosoft_minipigs/multisess_raw.yaml,recording_ids}
+      data.classes: ${config_list_sweep_binary_class_pairs:configs/experiment/auditory_decoding/baselines/eegnet_freqdec_binary_class.yaml,freq_universe}

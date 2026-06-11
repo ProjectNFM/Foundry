@@ -102,6 +102,25 @@ def _finish_active_wandb_run() -> None:
     wandb.finish()
 
 
+def _validate_binary_class_coverage_if_needed(cfg: DictConfig) -> None:
+    """Abort before training when a binary acoustic_stim pair is missing in data."""
+    classes = OmegaConf.select(cfg, "data.classes", default=None)
+    task_type = OmegaConf.select(cfg, "data.task_type", default=None)
+    if task_type != "acoustic_stim" or not classes or len(classes) != 2:
+        return
+
+    datamodule = instantiate(cfg.data, tokenizer=None)
+    datamodule.setup("fit")
+    validate = getattr(datamodule, "validate_binary_class_coverage", None)
+    if validate is not None:
+        validate()
+        logger.info(
+            "Binary class coverage OK for recording_ids=%s classes=%s",
+            OmegaConf.select(cfg, "data.recording_ids", default=None),
+            list(classes),
+        )
+
+
 def _stage_data_if_needed(cfg: DictConfig) -> None:
     slurm_tmpdir = os.environ.get("SLURM_TMPDIR")
     if not slurm_tmpdir:
@@ -461,6 +480,7 @@ def main(cfg: DictConfig):
     output_dir, checkpoint_dir = _configure_output_paths(cfg)
     _configure_wandb(cfg, output_dir)
     _stage_data_if_needed(cfg)
+    _validate_binary_class_coverage_if_needed(cfg)
 
     model, datamodule = _build_model_and_data(cfg)
     lightning_module = _build_lightning_module(cfg, model, datamodule)

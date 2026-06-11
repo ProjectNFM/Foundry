@@ -43,6 +43,18 @@ FREQ_GROUPINGS = {
         "stim_5000Hz": "high",
         "stim_8000Hz": "high",
     },
+    "2band_rnd_a": {
+        "stim_500Hz": "class1",
+        "stim_800Hz": "class2",
+        "stim_5000Hz": "class1",
+        "stim_8000Hz": "class2",
+    },
+    "2band_rnd_b": {
+        "stim_500Hz": "class1",
+        "stim_800Hz": "class2",
+        "stim_5000Hz": "class2",
+        "stim_8000Hz": "class1",
+    },
 }
 
 # Default grouping (3-band) - used when explicitly requested or as a fallback
@@ -320,6 +332,54 @@ class NeurosoftDataModule(NeuralDataModule):
 
     def get_channel_ids(self) -> list[str]:
         return sorted(self.dataset.get_channel_ids())
+
+    def validate_binary_class_coverage(
+        self,
+        split: Literal["train", "valid", "test"] = "train",
+    ) -> None:
+        """Fail fast when a binary acoustic_stim run lacks required frequencies.
+
+        For ``acoustic_stim`` with exactly two entries in ``data.classes``, each
+        recording must contain trials for both stimulation frequencies in the
+        given split (after class filtering). Raises :class:`ValueError` otherwise.
+        """
+        if self.task_type != "acoustic_stim":
+            return
+        if self.classes is None or len(self.classes) != 2:
+            return
+        if self.dataset is None:
+            raise RuntimeError(
+                "Call setup() before validate_binary_class_coverage()"
+            )
+
+        required = set(self.classes)
+        sampling_intervals = self.get_sampling_intervals(split)
+        failures: list[tuple[str, list[str]]] = []
+
+        for rid in self.dataset.recording_ids:
+            intervals = sampling_intervals.get(rid)
+            if intervals is None or len(intervals) == 0:
+                failures.append((rid, sorted(required)))
+                continue
+
+            if not hasattr(intervals, "behavior_labels"):
+                failures.append((rid, sorted(required)))
+                continue
+
+            present = set(np.unique(intervals.behavior_labels).tolist())
+            missing = sorted(required - present)
+            if missing:
+                failures.append((rid, missing))
+
+        if failures:
+            lines = [
+                "Binary classification requires both stimulation frequencies "
+                f"in the '{split}' split, but some recordings are missing "
+                f"trials (data.classes={list(self.classes)}):"
+            ]
+            for rid, missing in failures:
+                lines.append(f"  - {rid}: missing {missing}")
+            raise ValueError("\n".join(lines))
 
     def get_sampling_intervals(
         self, split: Literal["train", "valid", "test"]
