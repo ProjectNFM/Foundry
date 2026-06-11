@@ -6,8 +6,11 @@ head:
 
 target_extractor:
   _target_: foundry.tasks.targets.TargetExtractor
-  timestamp_key: sleep_stages.timestamps
-  value_key: sleep_stages.values
+  timestamp_key: stages.timestamps
+  value_key: stages.values
+  label_map:
+    4: 3
+    5: 4
 
 loss:
   _target_: foundry.tasks.losses.CrossEntropyTaskLoss

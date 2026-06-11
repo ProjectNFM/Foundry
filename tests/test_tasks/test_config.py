@@ -156,8 +156,8 @@ EXPECTED_TASK_SPECS = {
     "sleep_stage_5class": {
         "output_dim": 5,
         "kind": "multiclass",
-        "timestamp_key": "sleep_stages.timestamps",
-        "value_key": "sleep_stages.values",
+        "timestamp_key": "stages.timestamps",
+        "value_key": "stages.values",
     },
     "neurosoft_on_vs_off": {
         "output_dim": 2,
