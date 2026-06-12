@@ -13,18 +13,18 @@ data:
   task_type: sleep_stage
 
 run:
-  name: kemp_sleep_poyo_singlesess
+  name: kemp_sleep_poyo_singlesess_test
   group: SLEEP_STAGING
   tags: [sleep_staging, poyo, cwt, kemp, singlesess]
   seed: 42
   log_level: INFO
 
 class_weights:
-  mode: auto
-  smoothing: 0.1
+  mode: null
+  smoothing: 0.5
 
 hyperparameters:
-  batch_size: 32
+  batch_size: 64
   sequence_length: 30.0
   patch_duration: 0.1
   sampling_rate: 100

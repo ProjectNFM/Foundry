@@ -86,39 +86,93 @@ class ConfusionMatrixTracker:
         self._all_preds.clear()
         self._all_targets.clear()
 
-    def log_wandb(self, experiment, task_name: str, epoch: int) -> None:
-        """Log W&B-native confusion matrix visualization from accumulated counts.
+    def log_wandb(
+        self,
+        experiment,
+        task_name: str,
+        epoch: int,
+        counts: torch.Tensor,
+        normalized: torch.Tensor,
+    ) -> None:
+        """Log confusion matrix as a W&B image so the media panel gets a step slider.
 
-        Reconstructs per-sample y_true/y_pred lists from the counts matrix
-        so ``wandb.plot.confusion_matrix`` can render its interactive chart.
+        Rendering a matplotlib heatmap and logging it as ``wandb.Image``
+        gives an automatic epoch slider in the W&B UI.
         """
-        counts, normalized = self.compute()
         if counts.sum() == 0:
             return
 
         try:
             import wandb
 
-            y_true: list[int] = []
-            y_pred: list[int] = []
-            for i in range(self.num_classes):
-                for j in range(self.num_classes):
-                    count = int(counts[i, j])
-                    y_true.extend([i] * count)
-                    y_pred.extend([j] * count)
-
+            fig = self._render_confusion_figure(
+                counts, normalized, task_name, epoch
+            )
             experiment.log(
-                {
-                    f"val/{task_name}_confusion_matrix": wandb.plot.confusion_matrix(
-                        probs=None,
-                        y_true=y_true,
-                        preds=y_pred,
-                        class_names=self.class_names,
-                        title=f"{task_name} Confusion Matrix (epoch {epoch})",
-                    ),
-                },
+                {f"val/{task_name}_confusion_matrix": wandb.Image(fig)},
             )
-        except Exception as e:
+            fig.clear()
+        except Exception:
             logger.warning(
-                "Failed to log W&B confusion matrix for %s: %s", task_name, e
+                "Failed to log W&B confusion matrix for %s",
+                task_name,
+                exc_info=True,
             )
+
+    def _render_confusion_figure(
+        self,
+        counts: torch.Tensor,
+        normalized: torch.Tensor,
+        task_name: str,
+        epoch: int,
+    ):
+        """Render a matplotlib heatmap with counts, percentages, and per-class totals.
+
+        Uses the OOP Figure API so no display/backend is required.
+        """
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
+
+        counts_np = counts.numpy()
+        norm_np = normalized.numpy()
+        n = self.num_classes
+        row_sums = counts_np.sum(axis=1)
+        total_samples = int(counts_np.sum())
+
+        fig = Figure(figsize=(max(6, n + 2), max(6, n + 2)))
+        FigureCanvasAgg(fig)
+        ax = fig.add_subplot(111)
+
+        im = ax.imshow(norm_np, vmin=0, vmax=1, cmap="Blues")
+
+        for i in range(n):
+            for j in range(n):
+                count = int(counts_np[i, j])
+                pct = norm_np[i, j] * 100
+                color = "white" if norm_np[i, j] > 0.5 else "black"
+                ax.text(
+                    j,
+                    i,
+                    f"{count}\n{pct:.1f}%",
+                    ha="center",
+                    va="center",
+                    color=color,
+                    fontsize=10,
+                )
+
+        y_labels = [
+            f"{name} (n={int(row_sums[i])})"
+            for i, name in enumerate(self.class_names)
+        ]
+
+        ax.set_xticks(range(n))
+        ax.set_yticks(range(n))
+        ax.set_xticklabels(self.class_names, rotation=45, ha="right")
+        ax.set_yticklabels(y_labels)
+        ax.set_xlabel("Predicted")
+        ax.set_ylabel("True")
+        ax.set_title(f"{task_name} (N={total_samples})")
+
+        fig.colorbar(im, ax=ax, label="Row-normalized ratio", shrink=0.8)
+        fig.tight_layout()
+        return fig

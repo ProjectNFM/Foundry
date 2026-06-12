@@ -118,26 +118,49 @@ class TestConfusionMatrixTracker:
         tracker = ConfusionMatrixTracker(num_classes=3)
         assert tracker.class_names == ["class_0", "class_1", "class_2"]
 
-    def test_log_wandb_reconstructs_y_true_y_pred(self):
+    def test_log_wandb_logs_image(self):
         tracker = ConfusionMatrixTracker(num_classes=2, class_names=["A", "B"])
         tracker.update(torch.tensor([0, 1, 1]), torch.tensor([0, 0, 1]))
+        counts, normalized = tracker.compute()
 
         experiment = MagicMock()
         mock_wandb = MagicMock()
-        mock_wandb.plot.confusion_matrix.return_value = "chart"
+        mock_wandb.Image.return_value = "img"
         with patch.dict("sys.modules", {"wandb": mock_wandb}):
-            tracker.log_wandb(experiment, "task", epoch=3)
+            tracker.log_wandb(
+                experiment,
+                "task",
+                epoch=3,
+                counts=counts,
+                normalized=normalized,
+            )
 
-        experiment.log.assert_called_once()
-        mock_wandb.plot.confusion_matrix.assert_called_once()
-        call_kwargs = mock_wandb.plot.confusion_matrix.call_args
-        assert call_kwargs[1]["class_names"] == ["A", "B"]
-        assert call_kwargs[1]["title"] == "task Confusion Matrix (epoch 3)"
+        mock_wandb.Image.assert_called_once()
+        experiment.log.assert_called_once_with(
+            {"val/task_confusion_matrix": "img"},
+        )
 
-    def test_log_wandb_skips_empty_tracker(self):
+    def test_render_confusion_figure_returns_matplotlib_figure(self):
+        from matplotlib.figure import Figure
+
+        tracker = ConfusionMatrixTracker(
+            num_classes=3, class_names=["W", "N2", "R"]
+        )
+        tracker.update(torch.tensor([0, 1, 2]), torch.tensor([0, 1, 2]))
+        counts, normalized = tracker.compute()
+
+        fig = tracker._render_confusion_figure(counts, normalized, "sleep", 5)
+        assert isinstance(fig, Figure)
+        assert "sleep" in fig.axes[0].get_title()
+        fig.clear()
+
+    def test_log_wandb_skips_empty_counts(self):
         tracker = ConfusionMatrixTracker(num_classes=2)
+        counts, normalized = tracker.compute()
         experiment = MagicMock()
-        tracker.log_wandb(experiment, "task", epoch=0)
+        tracker.log_wandb(
+            experiment, "task", epoch=0, counts=counts, normalized=normalized
+        )
         experiment.log.assert_not_called()
 
 

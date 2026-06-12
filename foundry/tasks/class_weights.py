@@ -13,6 +13,49 @@ from foundry.tasks.targets import TargetExtractor
 logger = logging.getLogger(__name__)
 
 
+def _resolve_intervals_and_values(
+    dataset, rid, split_intervals, extractor, value_field: str
+):
+    """Resolve label values from split intervals, falling back to the recording.
+
+    The split intervals returned by ``get_sampling_intervals`` may not carry the
+    expected value field when a dataset transform renames it (e.g.
+    ``PrepareSleepStages`` maps raw ``id`` → ``values``). In that case, fetch the
+    parent label attribute from the recording and filter it by the split time
+    windows.
+
+    Returns ``(intervals, values)`` where both are aligned, or ``(None, None)``
+    if labels cannot be resolved.
+    """
+    if hasattr(split_intervals, value_field):
+        return split_intervals, np.asarray(
+            getattr(split_intervals, value_field)
+        )
+
+    parts = extractor.value_key.split(".")
+    if len(parts) < 2:
+        return None, None
+
+    parent_path = ".".join(parts[:-1])
+    try:
+        rec = dataset.get_recording(rid)
+        label_intervals = rec.get_nested_attribute(parent_path)
+    except (AttributeError, KeyError):
+        return None, None
+
+    if hasattr(label_intervals, "select_by_interval"):
+        label_intervals = label_intervals.select_by_interval(split_intervals)
+
+    if hasattr(label_intervals, value_field):
+        return label_intervals, np.asarray(
+            getattr(label_intervals, value_field)
+        )
+    if hasattr(label_intervals, "id"):
+        return label_intervals, np.asarray(getattr(label_intervals, "id"))
+
+    return None, None
+
+
 def _count_labels_for_task(
     dataset,
     split: str,
@@ -22,11 +65,12 @@ def _count_labels_for_task(
     train_intervals = dataset.get_sampling_intervals(split=split)
     counts: Counter = Counter()
 
-    for _rid, intervals in train_intervals.items():
-        if not hasattr(intervals, value_field):
+    for _rid, split_intervals in train_intervals.items():
+        intervals, values = _resolve_intervals_and_values(
+            dataset, _rid, split_intervals, extractor, value_field
+        )
+        if values is None:
             continue
-
-        values = getattr(intervals, value_field)
 
         if extractor.classification_mapping is not None:
             mapping = extractor.classification_mapping

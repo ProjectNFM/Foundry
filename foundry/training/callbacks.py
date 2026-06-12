@@ -52,7 +52,13 @@ class ConfusionMatrixCallback(L.Callback):
                 trainer.logger.log_metrics(payload, step=trainer.current_epoch)
 
             if wandb_experiment is not None:
-                tracker.log_wandb(wandb_experiment, name, trainer.current_epoch)
+                tracker.log_wandb(
+                    wandb_experiment,
+                    name,
+                    trainer.current_epoch,
+                    counts,
+                    normalized,
+                )
 
             tracker.reset()
 
