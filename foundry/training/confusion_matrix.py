@@ -110,6 +110,7 @@ class ConfusionMatrixTracker:
             )
             experiment.log(
                 {f"val/{task_name}_confusion_matrix": wandb.Image(fig)},
+                commit=False,
             )
             fig.clear()
         except Exception:

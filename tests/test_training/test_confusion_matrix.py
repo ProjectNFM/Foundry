@@ -138,6 +138,7 @@ class TestConfusionMatrixTracker:
         mock_wandb.Image.assert_called_once()
         experiment.log.assert_called_once_with(
             {"val/task_confusion_matrix": "img"},
+            commit=False,
         )
 
     def test_render_confusion_figure_returns_matplotlib_figure(self):
