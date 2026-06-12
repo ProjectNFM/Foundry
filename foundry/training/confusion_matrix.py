@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 import torch
+
+logger = logging.getLogger(__name__)
 
 
 def compute_confusion_matrix(
@@ -81,3 +85,40 @@ class ConfusionMatrixTracker:
         """Clear accumulated state for next epoch."""
         self._all_preds.clear()
         self._all_targets.clear()
+
+    def log_wandb(self, experiment, task_name: str, epoch: int) -> None:
+        """Log W&B-native confusion matrix visualization from accumulated counts.
+
+        Reconstructs per-sample y_true/y_pred lists from the counts matrix
+        so ``wandb.plot.confusion_matrix`` can render its interactive chart.
+        """
+        counts, normalized = self.compute()
+        if counts.sum() == 0:
+            return
+
+        try:
+            import wandb
+
+            y_true: list[int] = []
+            y_pred: list[int] = []
+            for i in range(self.num_classes):
+                for j in range(self.num_classes):
+                    count = int(counts[i, j])
+                    y_true.extend([i] * count)
+                    y_pred.extend([j] * count)
+
+            experiment.log(
+                {
+                    f"val/{task_name}_confusion_matrix": wandb.plot.confusion_matrix(
+                        probs=None,
+                        y_true=y_true,
+                        preds=y_pred,
+                        class_names=self.class_names,
+                        title=f"{task_name} Confusion Matrix (epoch {epoch})",
+                    ),
+                },
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to log W&B confusion matrix for %s: %s", task_name, e
+            )

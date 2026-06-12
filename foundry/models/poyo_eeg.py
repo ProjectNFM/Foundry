@@ -212,17 +212,28 @@ class POYOEEGModel(nn.Module):
         return self._task_configs
 
     def _resolve_signal_source(self, data: Data):
-        """Find the signal source and default modality type from the data.
+        """Find the signal source, default modality type, and sampling rate.
 
         Returns:
-            Tuple of (signal_source, default_type) where signal_source is the
-            time series object and default_type is the uppercase modality name
-            used when channels.type is absent.
+            Tuple of (signal_source, default_type, sampling_rate) where
+            signal_source is the time series object, default_type is the
+            uppercase modality name used when channels.type is absent, and
+            sampling_rate is resolved from the signal source or inferred from
+            timestamps.
         """
         for modality in ["eeg", "ecog", "seeg"]:
             signal = getattr(data, modality, None)
             if signal is not None:
-                return signal, modality.upper()
+                if (
+                    hasattr(signal, "sampling_rate")
+                    and signal.sampling_rate is not None
+                ):
+                    sampling_rate = float(signal.sampling_rate)
+                else:
+                    sampling_rate = self._infer_sampling_rate_from_timestamps(
+                        signal.timestamps
+                    )
+                return signal, modality.upper(), sampling_rate
 
         raise ValueError("Data must have an 'eeg', 'ecog', or 'seeg' field")
 
@@ -258,7 +269,9 @@ class POYOEEGModel(nn.Module):
             dict with model_inputs, target_values, target_weights, and
             metadata.
         """
-        signal_source, default_type = self._resolve_signal_source(data)
+        signal_source, default_type, sampling_rate = (
+            self._resolve_signal_source(data)
+        )
 
         modality_field = (
             data.channels.type.astype(str)
@@ -272,15 +285,6 @@ class POYOEEGModel(nn.Module):
         channel_ids = data.channels.id[modality_mask].astype(str)
         channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
 
-        if (
-            hasattr(signal_source, "sampling_rate")
-            and signal_source.sampling_rate is not None
-        ):
-            sampling_rate = float(signal_source.sampling_rate)
-        else:
-            sampling_rate = self._infer_sampling_rate_from_timestamps(
-                signal_source.timestamps
-            )
         signal = signal_source.signal[:, modality_mask]
         non_finite = ~np.isfinite(signal)
         if non_finite.any():

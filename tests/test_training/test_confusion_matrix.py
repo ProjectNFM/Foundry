@@ -1,4 +1,4 @@
-"""Tests for confusion matrix logging in FoundryModule."""
+"""Tests for confusion matrix tracking, logging, and the ConfusionMatrixCallback."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from hydra.utils import instantiate
 from foundry.models.readout import ReadoutRouter
 from foundry.tasks.classification_mapping import ClassificationMapping
 from foundry.tasks.config import TaskConfig
+from foundry.training.callbacks import ConfusionMatrixCallback
 from foundry.training.confusion_matrix import (
     ConfusionMatrixTracker,
     compute_confusion_matrix,
@@ -117,9 +118,107 @@ class TestConfusionMatrixTracker:
         tracker = ConfusionMatrixTracker(num_classes=3)
         assert tracker.class_names == ["class_0", "class_1", "class_2"]
 
+    def test_log_wandb_reconstructs_y_true_y_pred(self):
+        tracker = ConfusionMatrixTracker(num_classes=2, class_names=["A", "B"])
+        tracker.update(torch.tensor([0, 1, 1]), torch.tensor([0, 0, 1]))
+
+        experiment = MagicMock()
+        mock_wandb = MagicMock()
+        mock_wandb.plot.confusion_matrix.return_value = "chart"
+        with patch.dict("sys.modules", {"wandb": mock_wandb}):
+            tracker.log_wandb(experiment, "task", epoch=3)
+
+        experiment.log.assert_called_once()
+        mock_wandb.plot.confusion_matrix.assert_called_once()
+        call_kwargs = mock_wandb.plot.confusion_matrix.call_args
+        assert call_kwargs[1]["class_names"] == ["A", "B"]
+        assert call_kwargs[1]["title"] == "task Confusion Matrix (epoch 3)"
+
+    def test_log_wandb_skips_empty_tracker(self):
+        tracker = ConfusionMatrixTracker(num_classes=2)
+        experiment = MagicMock()
+        tracker.log_wandb(experiment, "task", epoch=0)
+        experiment.log.assert_not_called()
+
+
+class TestConfusionMatrixCallback:
+    """ConfusionMatrixCallback logs and resets trackers at epoch end."""
+
+    def _make_module_with_mapping(self):
+        from foundry.training import FoundryModule
+
+        cfg = TaskConfig(
+            name="test_clf",
+            head={
+                "_target_": "foundry.tasks.heads.ReadoutHead",
+                "output_dim": 3,
+            },
+            target_extractor={"timestamp_key": "t", "value_key": "v"},
+            loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
+            metrics={
+                "_target_": "foundry.tasks.metrics.classification_metrics",
+                "num_classes": 3,
+            },
+            metric_summary_modes={"acc": "max"},
+            classification_mapping=ClassificationMapping(
+                raw_to_mapped={0: 0, 1: 1, 2: 2},
+                names={0: "Wake", 1: "N2", 2: "REM"},
+            ),
+        )
+        model = _StubTaskModel({cfg.name: cfg})
+        module = FoundryModule(model=model)
+        return module, cfg
+
+    def test_callback_logs_confusion_matrices_and_resets(self):
+        module, cfg = self._make_module_with_mapping()
+        mock_logger = MagicMock()
+
+        tracker = module._val_confusion_trackers[cfg.name]
+        tracker.update(torch.tensor([0, 1, 2]), torch.tensor([0, 1, 2]))
+
+        trainer = MagicMock()
+        trainer.logger = mock_logger
+        trainer.current_epoch = 0
+
+        callback = ConfusionMatrixCallback()
+        callback.on_validation_epoch_end(trainer, module)
+
+        mock_logger.log_metrics.assert_called()
+        logged = {}
+        for c in mock_logger.log_metrics.call_args_list:
+            logged.update(c[0][0] if c[0] else c[1].get("metrics", {}))
+        assert f"val/{cfg.name}_confusion_counts" in logged
+        assert f"val/{cfg.name}_confusion_normalized" in logged
+        assert f"val/{cfg.name}_confusion_class_names" in logged
+
+        counts, _ = tracker.compute()
+        assert counts.sum() == 0, "tracker should be reset after logging"
+
+    def test_callback_skips_empty_trackers(self):
+        module, cfg = self._make_module_with_mapping()
+        mock_logger = MagicMock()
+
+        trainer = MagicMock()
+        trainer.logger = mock_logger
+        trainer.current_epoch = 0
+
+        callback = ConfusionMatrixCallback()
+        callback.on_validation_epoch_end(trainer, module)
+
+        mock_logger.log_metrics.assert_not_called()
+
+    def test_callback_works_without_trackers(self):
+        pl_module = MagicMock(spec=[])
+        trainer = MagicMock()
+
+        callback = ConfusionMatrixCallback()
+        callback.on_validation_epoch_end(trainer, pl_module)
+
+        trainer.logger.log_metrics.assert_not_called()
+
 
 class TestFoundryModuleConfusionMatrixIntegration:
-    """FoundryModule logs confusion matrices at validation epoch end."""
+    """FoundryModule creates and updates trackers for classification tasks."""
 
     def _make_module_with_mapping(self):
         from foundry.training import FoundryModule
@@ -166,28 +265,3 @@ class TestFoundryModuleConfusionMatrixIntegration:
         module, cfg = self._make_module_with_mapping()
         tracker = module._val_confusion_trackers[cfg.name]
         assert tracker.class_names == ["Wake", "N2", "REM"]
-
-    def test_log_confusion_matrices_produces_numeric_payload(self):
-        module, cfg = self._make_module_with_mapping()
-        mock_logger = MagicMock()
-
-        tracker = module._val_confusion_trackers[cfg.name]
-        tracker.update(torch.tensor([0, 1, 2]), torch.tensor([0, 1, 2]))
-
-        with patch.object(
-            type(module),
-            "logger",
-            new_callable=lambda: property(lambda self: mock_logger),
-        ):
-            with patch.object(
-                type(module),
-                "current_epoch",
-                new_callable=lambda: property(lambda self: 0),
-            ):
-                module._log_confusion_matrices()
-
-        mock_logger.log_metrics.assert_called()
-        logged = {}
-        for c in mock_logger.log_metrics.call_args_list:
-            logged.update(c[0][0] if c[0] else c[1].get("metrics", {}))
-        assert f"val/{cfg.name}_confusion_counts" in logged
