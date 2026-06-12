@@ -2,6 +2,7 @@ defaults:
   - model: null
   - data: null
   - module: default
+  - cluster: default
   - logger: wandb
   - _self_
   - trainer: default

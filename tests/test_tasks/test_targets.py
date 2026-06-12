@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import unittest
 
 import numpy as np
 from torch_brain.data import Data
@@ -22,7 +23,7 @@ def _make_trials_data(behavior_ids: np.ndarray) -> Data:
     )
 
 
-class TestTargetExtractor:
+class TestTargetExtractor(unittest.TestCase):
     def test_extracts_nested_timestamps_and_values(self):
         behavior_ids = np.array([0, 1, 2], dtype=np.int64)
         data = _make_trials_data(behavior_ids)
@@ -66,3 +67,37 @@ class TestTargetExtractor:
 
         assert result["values"].dtype == np.float32
         assert np.allclose(result["values"], values.astype(np.float32))
+
+    def test_label_map_handles_unmapped_values_safely(self):
+        """label_map with unmapped values raises clear error."""
+        # Data has IDs 0, 1, 2, 3 but mapping only covers 0, 1
+        behavior_ids = np.array([0, 1, 2, 3], dtype=np.int64)
+        data = _make_trials_data(behavior_ids)
+
+        extractor = TargetExtractor(
+            timestamp_key="active_behavior_trials.timestamps",
+            value_key="active_behavior_trials.behavior_id",
+            label_map={0: 0, 1: 1},  # Incomplete mapping
+        )
+
+        # Should raise ValueError for unmapped IDs 2, 3
+        with self.assertRaises(ValueError) as context:
+            extractor(data)
+
+        error_msg = str(context.exception)
+        assert "unmapped" in error_msg.lower()
+        assert "2" in error_msg or "3" in error_msg
+
+    def test_label_map_complete_mapping_works(self):
+        """label_map with all labels mapped works correctly."""
+        behavior_ids = np.array([2, 3, 2], dtype=np.int64)
+        data = _make_trials_data(behavior_ids)
+
+        extractor = TargetExtractor(
+            timestamp_key="active_behavior_trials.timestamps",
+            value_key="active_behavior_trials.behavior_id",
+            label_map={2: 0, 3: 1},
+        )
+        result = extractor(data)
+
+        assert np.array_equal(result["values"], np.array([0, 1, 0]))

@@ -225,9 +225,24 @@ def _build_model_and_data(cfg: DictConfig):
             f"{DatasetClass.__name__} must implement get_tasks_for_experiment"
         )
 
-    task_configs = DatasetClass.get_tasks_for_experiment(task_type)
+    # Build datamodule first (without tokenizer) to get effective task configs
     normalize_data_config(cfg.data)
     datamodule = instantiate(cfg.data, tokenizer=None)
+
+    # Get effective task configs (adapted for class filtering if configured)
+    task_configs = datamodule.get_effective_task_configs()
+
+    # Log adaptation results
+    for name, cfg_item in task_configs.items():
+        logger.info(
+            "Task '%s': output_dim=%d, kind=%s, class_names=%s",
+            name,
+            cfg_item.output_dim,
+            cfg_item.kind,
+            cfg_item.class_names,
+        )
+
+    # Apply auto class weights (uses effective dim)
     task_configs = _apply_auto_class_weights(cfg, datamodule, task_configs)
 
     # Build the model outside Hydra's recursive instantiate to avoid eager
@@ -239,6 +254,18 @@ def _build_model_and_data(cfg: DictConfig):
         if k != "_target_"
     }
     model = ModelClass(task_configs=task_configs, **model_kwargs)
+
+    # Sanity check: readout head dimensions match effective task configs
+    for name, task_cfg in task_configs.items():
+        head = model.router.heads[name]
+        if head.output_dim != task_cfg.output_dim:
+            raise RuntimeError(
+                f"Task '{name}': head output_dim={head.output_dim} but "
+                f"effective task config output_dim={task_cfg.output_dim}. "
+                "This indicates a mismatch in the adaptation pipeline."
+            )
+
+    # Attach tokenizer to datamodule
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     normalize_data_config(cfg.data)
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)
