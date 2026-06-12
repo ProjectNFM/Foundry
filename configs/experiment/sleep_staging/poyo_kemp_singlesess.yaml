@@ -32,7 +32,7 @@ hyperparameters:
   num_workers: 4
   num_channels: 2
   session_configs: null
-  learning_rate: 1e-4
+  learning_rate: 1e-5
   weight_decay: 0.01
 
 trainer:
