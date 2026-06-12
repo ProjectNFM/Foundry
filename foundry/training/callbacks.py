@@ -164,13 +164,10 @@ class VocabInitializerCallback(L.Callback):
             ("get_recording_ids", "session_ids"),
             ("get_channel_ids", "channel_ids"),
         ]:
-            try:
-                if hasattr(datamodule, method_name):
-                    vocab_info[key] = getattr(datamodule, method_name)()
-                elif dataset is not None and hasattr(dataset, method_name):
-                    vocab_info[key] = getattr(dataset, method_name)()
-            except (AttributeError, NotImplementedError):
-                pass
+            if hasattr(datamodule, method_name):
+                vocab_info[key] = getattr(datamodule, method_name)()
+            elif dataset is not None and hasattr(dataset, method_name):
+                vocab_info[key] = getattr(dataset, method_name)()
 
         model.initialize_vocabs(vocab_info)
 

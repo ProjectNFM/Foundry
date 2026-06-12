@@ -36,10 +36,9 @@ class TargetExtractor:
         value_key: Dot-separated path to the target values array (e.g.
             ``"active_behavior_trials.behavior_id"`` or
             ``"pose_trajectories.values"``).
-        label_map: Optional legacy mapping from raw label values to training
-            indices. Deprecated when classification_mapping is set.
         classification_mapping: Optional unified classification mapping.
-            Takes precedence over label_map when set.
+            When set, raw labels are remapped via
+            :meth:`ClassificationMapping.apply`.
 
     Returns:
         A dict with:
@@ -52,7 +51,6 @@ class TargetExtractor:
 
     timestamp_key: str
     value_key: str
-    label_map: dict[int, int] | None = None
     classification_mapping: ClassificationMapping | None = None
 
     def __call__(self, data: Data) -> dict:
@@ -61,11 +59,6 @@ class TargetExtractor:
 
         if self.classification_mapping is not None:
             values = self.classification_mapping.apply(values)
-        elif self.label_map is not None:
-            mapped = values.copy()
-            for src, dst in self.label_map.items():
-                mapped[values == src] = dst
-            values = mapped
 
         if values.dtype == np.float64:
             values = values.astype(np.float32)
@@ -106,11 +99,7 @@ def extract_multitask_targets(
 
     for name in sorted_names:
         cfg = task_configs[name]
-        ext_kwargs = dict(cfg.target_extractor)
-        ext_kwargs.pop("_target_", None)
-        if cfg.classification_mapping is not None:
-            ext_kwargs["classification_mapping"] = cfg.classification_mapping
-        extractor = TargetExtractor(**ext_kwargs)
+        extractor = cfg.build_extractor()
 
         targets = extractor(data)
         timestamps = targets["timestamps"]

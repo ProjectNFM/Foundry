@@ -62,3 +62,8 @@ class TestKempDatasetWrapper:
         )
 
         assert ds.fold_number == 0
+
+    def test_get_channel_ids_empty_when_no_recordings(self, tmp_path):
+        ds = KempSleepEDF2013(root=str(tmp_path), recording_ids=[])
+
+        assert ds.get_channel_ids() == []

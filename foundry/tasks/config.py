@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from omegaconf import DictConfig, OmegaConf
 
 from foundry.tasks.classification_mapping import ClassificationMapping
+
+if TYPE_CHECKING:
+    from foundry.tasks.targets import TargetExtractor
 
 
 @dataclass
@@ -47,6 +50,21 @@ class TaskConfig:
             return self.classification_mapping.class_names
         return self.class_names
 
+    def build_extractor(self) -> TargetExtractor:
+        """Build a fully-wired :class:`TargetExtractor` for this task.
+
+        Strips the Hydra ``_target_`` key from the stored extractor dict and
+        injects ``classification_mapping`` when present, so callers never need
+        to perform this wiring themselves.
+        """
+        from foundry.tasks.targets import TargetExtractor
+
+        kwargs = dict(self.target_extractor)
+        kwargs.pop("_target_", None)
+        if self.classification_mapping is not None:
+            kwargs["classification_mapping"] = self.classification_mapping
+        return TargetExtractor(**kwargs)
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TaskConfig:
         metrics = data.get("metrics")
@@ -60,12 +78,6 @@ class TaskConfig:
         )
 
         target_extractor = dict(data["target_extractor"])
-        if mapping is not None and "label_map" in target_extractor:
-            raise ValueError(
-                f"Task '{data['name']}': label_map in target_extractor is "
-                f"deprecated when classification_mapping is set. Remove "
-                f"label_map and use classification_mapping.raw_to_mapped instead."
-            )
 
         return cls(
             name=data["name"],

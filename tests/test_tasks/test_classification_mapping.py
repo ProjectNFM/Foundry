@@ -219,24 +219,6 @@ class TestTaskConfigWithMapping:
         with pytest.raises(ValueError, match="contiguous"):
             TaskConfig.from_dict(data)
 
-    def test_label_map_and_mapping_coexist_raises(self):
-        data = {
-            "name": "conflict",
-            "head": {"_target_": "foundry.tasks.heads.ReadoutHead"},
-            "target_extractor": {
-                "_target_": "foundry.tasks.targets.TargetExtractor",
-                "timestamp_key": "t",
-                "value_key": "v",
-                "label_map": {4: 3},
-            },
-            "loss": {"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
-            "classification_mapping": {
-                "raw_to_mapped": {0: 0, 1: 1, 2: 2, 3: 2, 4: None},
-            },
-        }
-        with pytest.raises(ValueError, match="label_map.*deprecated"):
-            TaskConfig.from_dict(data)
-
     def test_head_output_dim_with_mapping_warns_if_mismatch(self):
         """When mapping is set, head output_dim should not also be specified."""
         data = {

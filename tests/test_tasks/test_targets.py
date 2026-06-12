@@ -36,19 +36,6 @@ class TestTargetExtractor:
         assert np.array_equal(result["timestamps"], np.array([0.0, 0.1, 0.2]))
         assert np.array_equal(result["values"], behavior_ids)
 
-    def test_label_map_remaps_known_values(self):
-        behavior_ids = np.array([1, 2, 1, 2], dtype=np.int64)
-        data = _make_trials_data(behavior_ids)
-
-        extractor = TargetExtractor(
-            timestamp_key="active_behavior_trials.timestamps",
-            value_key="active_behavior_trials.behavior_id",
-            label_map={1: 0, 2: 1},
-        )
-        result = extractor(data)
-
-        assert np.array_equal(result["values"], np.array([0, 1, 0, 1]))
-
     def test_float64_values_converted_to_float32(self):
         values = np.array([1.5, 2.5], dtype=np.float64)
         data = Data(
