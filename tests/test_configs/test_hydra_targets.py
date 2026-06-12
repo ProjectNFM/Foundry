@@ -100,7 +100,15 @@ def _instantiate_node(yaml_path: Path, target_path: str) -> Any:
         from foundry.models.readout import ReadoutRouter
 
         task_cfg = next(iter(task_configs.values()))
-        heads = {task_cfg.name: instantiate({**task_cfg.head, "embed_dim": 4})}
+        heads = {
+            task_cfg.name: instantiate(
+                {
+                    **task_cfg.head,
+                    "embed_dim": 4,
+                    "output_dim": task_cfg.output_dim,
+                }
+            )
+        }
 
         class _StubFoundryModel(torch.nn.Module):
             def __init__(self) -> None:

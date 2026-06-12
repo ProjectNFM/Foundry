@@ -50,7 +50,13 @@ class BaselineEEGModel(nn.Module):
 
     def _build_router(self, embed_dim: int) -> ReadoutRouter:
         heads = {
-            name: instantiate({**cfg.head, "embed_dim": embed_dim})
+            name: instantiate(
+                {
+                    **cfg.head,
+                    "embed_dim": embed_dim,
+                    "output_dim": cfg.output_dim,
+                }
+            )
             for name, cfg in self._task_configs.items()
         }
         return ReadoutRouter(heads)
@@ -68,6 +74,10 @@ class BaselineEEGModel(nn.Module):
             cfg = self._task_configs[name]
             ext_kwargs = dict(cfg.target_extractor)
             ext_kwargs.pop("_target_", None)
+            if cfg.classification_mapping is not None:
+                ext_kwargs["classification_mapping"] = (
+                    cfg.classification_mapping
+                )
             extractor = TargetExtractor(**ext_kwargs)
 
             targets = extractor(data)

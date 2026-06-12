@@ -93,7 +93,13 @@ class POYOEEGModel(nn.Module):
         )
 
         heads = {
-            name: instantiate({**cfg.head, "embed_dim": embed_dim})
+            name: instantiate(
+                {
+                    **cfg.head,
+                    "embed_dim": embed_dim,
+                    "output_dim": cfg.output_dim,
+                }
+            )
             for name, cfg in task_configs.items()
         }
         self.router = ReadoutRouter(heads)
@@ -255,6 +261,10 @@ class POYOEEGModel(nn.Module):
             cfg = self._task_configs[name]
             ext_kwargs = dict(cfg.target_extractor)
             ext_kwargs.pop("_target_", None)
+            if cfg.classification_mapping is not None:
+                ext_kwargs["classification_mapping"] = (
+                    cfg.classification_mapping
+                )
             extractor = TargetExtractor(**ext_kwargs)
 
             targets = extractor(data)
@@ -325,9 +335,15 @@ class POYOEEGModel(nn.Module):
         channel_ids = data.channels.id[modality_mask].astype(str)
         channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
 
-        sampling_rate = self._infer_sampling_rate_from_timestamps(
-            signal_source.timestamps
-        )
+        if (
+            hasattr(signal_source, "sampling_rate")
+            and signal_source.sampling_rate is not None
+        ):
+            sampling_rate = float(signal_source.sampling_rate)
+        else:
+            sampling_rate = self._infer_sampling_rate_from_timestamps(
+                signal_source.timestamps
+            )
         signal = signal_source.signal[:, modality_mask]
         non_finite = ~np.isfinite(signal)
         if non_finite.any():

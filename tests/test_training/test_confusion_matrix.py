@@ -26,7 +26,13 @@ class _StubTaskModel(nn.Module):
         super().__init__()
         self.task_configs = task_configs
         heads = {
-            name: instantiate({**cfg.head, "embed_dim": embed_dim})
+            name: instantiate(
+                {
+                    **cfg.head,
+                    "embed_dim": embed_dim,
+                    "output_dim": cfg.output_dim,
+                }
+            )
             for name, cfg in task_configs.items()
         }
         self.router = ReadoutRouter(heads)

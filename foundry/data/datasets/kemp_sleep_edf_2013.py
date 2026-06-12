@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 from pathlib import Path
 
 from torch_brain.datasets import KempSleepEDF2013 as _TorchBrainKempSleepEDF2013
@@ -47,6 +48,13 @@ class KempSleepEDF2013(TaskMixin, _TorchBrainKempSleepEDF2013):
             fold_type=split_type,
             **kwargs,
         )
+
+    def get_channel_ids(self) -> list[str]:
+        all_ids: set[str] = set()
+        for rec_id in self.recording_ids:
+            rec = self.get_recording(rec_id, "")
+            all_ids.update(str(c) for c in np.asarray(rec.channels.id))
+        return sorted(all_ids)
 
     @classmethod
     def get_required_transforms(cls, task_type: str) -> list:
