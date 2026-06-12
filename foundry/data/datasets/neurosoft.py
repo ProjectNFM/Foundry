@@ -67,16 +67,18 @@ FREQ_GROUP_ORDER = {
 
 def format_acoustic_stim_display_names(names):
     """Strip stim_ prefix from frequency names for display in confusion matrices.
-    
+
     Args:
         names: List of frequency strings (e.g., ["stim_500Hz", "stim_800Hz"])
                or band names (e.g., ["low", "medium", "high"])
-    
+
     Returns:
         List with stim_ prefix removed from frequency names, band names unchanged
         (e.g., ["500Hz", "800Hz"] or ["low", "medium", "high"])
     """
-    return [n.removeprefix("stim_") if n.startswith("stim_") else n for n in names]
+    return [
+        n.removeprefix("stim_") if n.startswith("stim_") else n for n in names
+    ]
 
 
 class _NeurosoftTaskMixin(TaskMixin):

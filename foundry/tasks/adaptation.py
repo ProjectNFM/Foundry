@@ -91,7 +91,9 @@ def _build_label_mapping(
     if class_grouping is None:
         # Raw subset mode: dense remap raw_id -> 0..N-1, sorted by ID
         selected_freqs_sorted = sorted(classes, key=lambda c: vocabulary[c])
-        mapping = {vocabulary[c]: i for i, c in enumerate(selected_freqs_sorted)}
+        mapping = {
+            vocabulary[c]: i for i, c in enumerate(selected_freqs_sorted)
+        }
         return mapping, selected_freqs_sorted
 
     # Resolve grouping dict

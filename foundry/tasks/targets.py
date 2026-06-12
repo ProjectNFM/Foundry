@@ -57,7 +57,7 @@ class TargetExtractor:
                 if np.any(mask):
                     mapped[mask] = dst
                     any_mapped = True
-            
+
             if any_mapped:
                 # Check for unmapped values (sentinel -1)
                 unmapped_mask = mapped == -1

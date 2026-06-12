@@ -213,7 +213,9 @@ class NeuralDataModule(LightningDataModule):
         Raises:
             ValueError: If class filtering is configured but adaptation fails.
         """
-        base_configs = self.dataset_class.get_tasks_for_experiment(self.task_type)
+        base_configs = self.dataset_class.get_tasks_for_experiment(
+            self.task_type
+        )
 
         if self.classes is None:
             return base_configs
@@ -238,9 +240,7 @@ class NeuralDataModule(LightningDataModule):
             base_configs, schemas, self.classes, self.class_grouping
         )
 
-    def _filter_intervals_by_classes(
-        self, intervals: dict, split: str
-    ) -> dict:
+    def _filter_intervals_by_classes(self, intervals: dict, split: str) -> dict:
         """Filter sampling intervals by class membership.
 
         Args:
@@ -250,7 +250,9 @@ class NeuralDataModule(LightningDataModule):
         Returns:
             Dict of filtered intervals.
         """
-        task_configs = self.dataset_class.get_tasks_for_experiment(self.task_type)
+        task_configs = self.dataset_class.get_tasks_for_experiment(
+            self.task_type
+        )
         schemas = {
             name: self.dataset_class.get_task_class_schema(name)
             for name in task_configs
