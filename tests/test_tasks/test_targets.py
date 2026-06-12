@@ -83,7 +83,7 @@ class TestTargetExtractor(unittest.TestCase):
         # Should raise ValueError for unmapped IDs 2, 3
         with self.assertRaises(ValueError) as context:
             extractor(data)
-        
+
         error_msg = str(context.exception)
         assert "unmapped" in error_msg.lower()
         assert "2" in error_msg or "3" in error_msg

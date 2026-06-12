@@ -7,8 +7,8 @@ from temporaldata import Interval
 
 from foundry.tasks.adaptation import (
     TaskClassSchema,
-    build_label_mapping,
-    adapt_task_config,
+    _build_label_mapping,
+    _adapt_task_config,
     adapt_task_configs,
     filter_sampling_intervals,
 )
@@ -28,23 +28,23 @@ from foundry.data.datasets.peterson_brunton_pose_trajectory_2022 import (
 
 
 # ============================================================================
-# Unit tests for build_label_mapping
+# Unit tests for _build_label_mapping
 # ============================================================================
 
 
 class TestBuildLabelMapping:
-    """Tests for build_label_mapping function."""
+    """Tests for _build_label_mapping function."""
 
     def test_none_classes_returns_empty(self):
         """No adaptation when classes is None."""
-        label_map, names = build_label_mapping(None, {"a": 0, "b": 1})
+        label_map, names = _build_label_mapping(None, {"a": 0, "b": 1})
         assert label_map == {}
         assert names == []
 
     def test_subset_mode_dense_remap(self):
         """Raw subset mode: dense remap sorted by raw ID."""
         vocab = {"stim_500Hz": 4, "stim_1000Hz": 7, "stim_5000Hz": 14}
-        label_map, names = build_label_mapping(
+        label_map, names = _build_label_mapping(
             ["stim_500Hz", "stim_1000Hz", "stim_5000Hz"], vocab
         )
         # Sorted by raw ID: 4, 7, 14 → remapped to 0, 1, 2
@@ -54,7 +54,7 @@ class TestBuildLabelMapping:
     def test_subset_mode_with_custom_order(self):
         """Subset mode respects raw ID ordering."""
         vocab = {"a": 10, "b": 5, "c": 15}
-        label_map, names = build_label_mapping(["a", "b", "c"], vocab)
+        label_map, names = _build_label_mapping(["a", "b", "c"], vocab)
         # Should be sorted by raw ID: 5, 10, 15 → "b", "a", "c"
         assert label_map == {5: 0, 10: 1, 15: 2}
         assert names == ["b", "a", "c"]
@@ -63,8 +63,11 @@ class TestBuildLabelMapping:
         """Grouping mode: collapse selected classes into groups."""
         vocab = {"a": 1, "b": 2, "c": 3, "d": 4}
         grouping = {"a": "group1", "b": "group1", "c": "group2"}
-        label_map, names = build_label_mapping(
-            ["a", "b", "c"], vocab, grouping, group_order={"group1": 0, "group2": 1}
+        label_map, names = _build_label_mapping(
+            ["a", "b", "c"],
+            vocab,
+            grouping,
+            group_order={"group1": 0, "group2": 1},
         )
         # raw 1 -> group1 -> idx 0, raw 2 -> group1 -> idx 0, raw 3 -> group2 -> idx 1
         assert label_map == {1: 0, 2: 0, 3: 1}
@@ -79,7 +82,7 @@ class TestBuildLabelMapping:
             "high_freq": "high",
         }
         group_order = {"high": 0, "low": 1}
-        label_map, names = build_label_mapping(
+        label_map, names = _build_label_mapping(
             ["low_freq", "med_freq", "high_freq"],
             vocab,
             grouping,
@@ -93,20 +96,22 @@ class TestBuildLabelMapping:
         """Without group_order, groups sorted alphabetically."""
         vocab = {"a": 1, "b": 2, "c": 3, "d": 4}
         grouping = {"a": "zebra", "b": "apple", "c": "zebra"}
-        label_map, names = build_label_mapping(
+        label_map, names = _build_label_mapping(
             ["a", "b", "c"], vocab, grouping
         )
         # Sorted alphabetically: apple, zebra
         assert names == ["apple", "zebra"]
-        assert label_map == {1: 1, 2: 0, 3: 1}  # a->zebra->1, b->apple->0, c->zebra->1
+        assert label_map == {
+            1: 1,
+            2: 0,
+            3: 1,
+        }  # a->zebra->1, b->apple->0, c->zebra->1
 
     def test_preset_resolution(self):
         """String preset resolves via grouping_presets."""
         vocab = {"a": 1, "b": 2, "c": 3}
-        presets = {
-            "my_preset": {"a": "group1", "b": "group1", "c": "group2"}
-        }
-        label_map, names = build_label_mapping(
+        presets = {"my_preset": {"a": "group1", "b": "group1", "c": "group2"}}
+        label_map, names = _build_label_mapping(
             ["a", "b", "c"],
             vocab,
             class_grouping="my_preset",
@@ -118,7 +123,7 @@ class TestBuildLabelMapping:
         """Invalid class name in classes raises clear error."""
         vocab = {"valid_a": 0, "valid_b": 1}
         with pytest.raises(ValueError) as exc_info:
-            build_label_mapping(["valid_a", "invalid_c"], vocab)
+            _build_label_mapping(["valid_a", "invalid_c"], vocab)
         assert "Invalid class names" in str(exc_info.value)
         assert "invalid_c" in str(exc_info.value)
         assert "Valid options" in str(exc_info.value)
@@ -127,7 +132,7 @@ class TestBuildLabelMapping:
         """Unknown preset name raises clear error."""
         vocab = {"a": 0}
         with pytest.raises(ValueError) as exc_info:
-            build_label_mapping(
+            _build_label_mapping(
                 ["a"],
                 vocab,
                 class_grouping="nonexistent_preset",
@@ -141,24 +146,27 @@ class TestBuildLabelMapping:
         vocab = {"a": 1, "b": 2}
         grouping = {"c": "group1"}  # c not in vocab
         with pytest.raises(ValueError) as exc_info:
-            build_label_mapping(["a", "b"], vocab, grouping)
+            _build_label_mapping(["a", "b"], vocab, grouping)
         assert "No valid class mappings" in str(exc_info.value)
 
 
 # ============================================================================
-# Unit tests for adapt_task_config
+# Unit tests for _adapt_task_config
 # ============================================================================
 
 
 class TestAdaptTaskConfig:
-    """Tests for adapt_task_config function."""
+    """Tests for _adapt_task_config function."""
 
     @pytest.fixture
     def base_task_config(self):
         """Create a simple base task config."""
         return TaskConfig(
             name="test_task",
-            head={"_target_": "foundry.tasks.heads.ReadoutHead", "output_dim": 5},
+            head={
+                "_target_": "foundry.tasks.heads.ReadoutHead",
+                "output_dim": 5,
+            },
             target_extractor={
                 "_target_": "foundry.tasks.targets.TargetExtractor",
                 "timestamp_key": "ts",
@@ -173,38 +181,40 @@ class TestAdaptTaskConfig:
         )
 
     def test_updates_output_dim(self, base_task_config):
-        """adapt_task_config updates head output_dim."""
-        adapted = adapt_task_config(
+        """_adapt_task_config updates head output_dim."""
+        adapted = _adapt_task_config(
             base_task_config, label_map={}, effective_names=["x", "y", "z"]
         )
         assert adapted.head["output_dim"] == 3
 
     def test_updates_metrics_num_classes(self, base_task_config):
-        """adapt_task_config updates metrics.num_classes."""
-        adapted = adapt_task_config(
+        """_adapt_task_config updates metrics.num_classes."""
+        adapted = _adapt_task_config(
             base_task_config, label_map={}, effective_names=["x", "y"]
         )
         assert adapted.metrics["num_classes"] == 2
 
     def test_updates_label_map(self, base_task_config):
-        """adapt_task_config sets target_extractor.label_map."""
+        """_adapt_task_config sets target_extractor.label_map."""
         label_map = {1: 0, 2: 1, 3: 2}
-        adapted = adapt_task_config(
-            base_task_config, label_map=label_map, effective_names=["x", "y", "z"]
+        adapted = _adapt_task_config(
+            base_task_config,
+            label_map=label_map,
+            effective_names=["x", "y", "z"],
         )
         assert adapted.target_extractor["label_map"] == label_map
 
     def test_updates_class_names(self, base_task_config):
-        """adapt_task_config sets class_names."""
-        adapted = adapt_task_config(
+        """_adapt_task_config sets class_names."""
+        adapted = _adapt_task_config(
             base_task_config, label_map={}, effective_names=["new_a", "new_b"]
         )
         assert adapted.class_names == ["new_a", "new_b"]
 
     def test_applies_display_formatter(self, base_task_config):
-        """adapt_task_config applies display_formatter if provided."""
+        """_adapt_task_config applies display_formatter if provided."""
         formatter = lambda names: [n.upper() for n in names]
-        adapted = adapt_task_config(
+        adapted = _adapt_task_config(
             base_task_config,
             label_map={},
             effective_names=["foo", "bar"],
@@ -213,7 +223,7 @@ class TestAdaptTaskConfig:
         assert adapted.class_names == ["FOO", "BAR"]
 
     def test_skips_metrics_when_none(self):
-        """adapt_task_config handles configs with no metrics."""
+        """_adapt_task_config handles configs with no metrics."""
         cfg = TaskConfig(
             name="regression",
             head={"_target_": "test.head", "output_dim": 18},
@@ -221,14 +231,14 @@ class TestAdaptTaskConfig:
             loss={"_target_": "test.loss"},
             metrics=None,
         )
-        adapted = adapt_task_config(cfg, label_map={}, effective_names=["x"])
+        adapted = _adapt_task_config(cfg, label_map={}, effective_names=["x"])
         assert adapted.metrics is None
         assert adapted.head["output_dim"] == 1
 
     def test_does_not_mutate_base_config(self, base_task_config):
-        """adapt_task_config deep-copies to avoid mutating base."""
+        """_adapt_task_config deep-copies to avoid mutating base."""
         original_dim = base_task_config.head["output_dim"]
-        adapt_task_config(
+        _adapt_task_config(
             base_task_config, label_map={}, effective_names=["x"]
         )
         assert base_task_config.head["output_dim"] == original_dim
@@ -267,7 +277,9 @@ class TestAdaptTaskConfigs:
             ),
         }
         schema = TaskClassSchema(
-            vocabulary={"a": 0}, interval_filter_field="f", interval_filter_mode="ids"
+            vocabulary={"a": 0},
+            interval_filter_field="f",
+            interval_filter_mode="ids",
         )
         schemas = {"regression": schema}
         result = adapt_task_configs(task_configs, schemas, ["a"], None)
@@ -291,7 +303,7 @@ class TestFilterSamplingIntervals:
         ivl = Interval(
             start=start,
             end=end,
-            _data={"behavior_labels": behavior_labels},
+            behavior_labels=behavior_labels,
         )
 
         schema = TaskClassSchema(
@@ -313,7 +325,7 @@ class TestFilterSamplingIntervals:
         ivl = Interval(
             start=start,
             end=end,
-            _data={"behavior_id": behavior_ids},
+            behavior_id=behavior_ids,
         )
 
         schema = TaskClassSchema(
@@ -332,7 +344,11 @@ class TestFilterSamplingIntervals:
         behavior_labels = np.array(["a", "a"])
         start = np.array([0.0, 1.0])
         end = np.array([0.5, 1.5])
-        ivl = Interval(start=start, end=end, _data={"behavior_labels": behavior_labels})
+        ivl = Interval(
+            start=start,
+            end=end,
+            behavior_labels=behavior_labels,
+        )
 
         schema = TaskClassSchema(
             vocabulary={"a": 1, "b": 2},
@@ -362,7 +378,7 @@ class TestNeuroSoftEffectiveConfigs:
         ]
 
         # Select 2 frequencies
-        adapted = adapt_task_config(
+        adapted = _adapt_task_config(
             task_config,
             label_map={4: 0, 14: 1},  # Arbitrary mapping for 2 classes
             effective_names=["stim_500Hz", "stim_5000Hz"],
@@ -379,11 +395,19 @@ class TestNeuroSoftEffectiveConfigs:
         ]
 
         # Select 6 frequencies for 3-band grouping
-        frequencies = ["stim_500Hz", "stim_800Hz", "stim_1000Hz", "stim_2000Hz",
-                       "stim_5000Hz", "stim_8000Hz"]
-        label_map, effective_names = build_label_mapping(
+        frequencies = [
+            "stim_500Hz",
+            "stim_800Hz",
+            "stim_1000Hz",
+            "stim_2000Hz",
+            "stim_5000Hz",
+            "stim_8000Hz",
+        ]
+        label_map, effective_names = _build_label_mapping(
             frequencies,
-            schema.vocabulary,
+            NeurosoftMinipigs2026.TASK_CLASS_SCHEMAS[
+                "neurosoft_acoustic_stim"
+            ].vocabulary,
             class_grouping="3band",
             grouping_presets=FREQ_GROUPINGS,
             group_order=FREQ_GROUP_ORDER,
@@ -409,7 +433,7 @@ class TestAjileEffectiveConfigs:
         ]
 
         # Select 2 behaviors
-        label_map, effective_names = build_label_mapping(
+        label_map, effective_names = _build_label_mapping(
             ["Eat", "Talk"],
             ACTIVE_BEHAVIOR_TO_ID,
         )
@@ -420,7 +444,7 @@ class TestAjileEffectiveConfigs:
 
     def test_inactive_active_subset(self):
         """Ajile inactive_active with class filtering."""
-        label_map, effective_names = build_label_mapping(
+        label_map, effective_names = _build_label_mapping(
             ["Active"],
             ACTIVE_VS_INACTIVE_TO_ID,
         )
@@ -438,7 +462,7 @@ class TestAjileEffectiveConfigs:
             "Computer/Phone": "Passive",
             "Other Activity": "Active",
         }
-        label_map, effective_names = build_label_mapping(
+        label_map, effective_names = _build_label_mapping(
             ["Eat", "Talk", "TV", "Computer/Phone", "Other Activity"],
             ACTIVE_BEHAVIOR_TO_ID,
             class_grouping=custom_grouping,
