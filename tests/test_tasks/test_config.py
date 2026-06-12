@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from hydra.utils import instantiate
@@ -120,7 +121,10 @@ class TestTaskYamlConfigs:
         cfg = TaskConfig.from_yaml(yaml_path)
         embed_dim = 64
 
-        head = instantiate({**cfg.head, "embed_dim": embed_dim})
+        head_kwargs = {**cfg.head, "embed_dim": embed_dim}
+        if "output_dim" not in head_kwargs:
+            head_kwargs["output_dim"] = cfg.output_dim
+        head = instantiate(head_kwargs)
         assert head.output_dim == cfg.output_dim
 
         extractor = instantiate(cfg.target_extractor)
@@ -132,6 +136,89 @@ class TestTaskYamlConfigs:
         if cfg.metrics is not None:
             metrics = instantiate(cfg.metrics)
             assert metrics is not None
+
+
+def _make_task_data(**overrides: Any) -> dict[str, Any]:
+    """Minimal valid task data dict, with optional overrides."""
+    base: dict[str, Any] = {
+        "name": "test_task",
+        "head": {"_target_": "foundry.tasks.heads.ReadoutHead"},
+        "target_extractor": {
+            "_target_": "foundry.tasks.targets.TargetExtractor",
+            "timestamp_key": "t",
+            "value_key": "v",
+        },
+        "loss": {"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
+    }
+    base.update(overrides)
+    return base
+
+
+class TestFromDictMetricsNumClasses:
+    """Auto-injection and validation of metrics.num_classes from mapping."""
+
+    def test_num_classes_injected_when_mapping_present(self):
+        data = _make_task_data(
+            classification_mapping={
+                "raw_to_mapped": {0: 0, 1: 1, 2: 2},
+            },
+            metrics={
+                "_target_": "foundry.tasks.metrics.classification_metrics",
+            },
+        )
+        cfg = TaskConfig.from_dict(data)
+
+        assert cfg.metrics["num_classes"] == 3
+
+    def test_num_classes_injected_overwrites_matching_value(self):
+        data = _make_task_data(
+            classification_mapping={
+                "raw_to_mapped": {0: 0, 1: 1, 2: 2},
+            },
+            metrics={
+                "_target_": "foundry.tasks.metrics.classification_metrics",
+                "num_classes": 3,
+            },
+        )
+        cfg = TaskConfig.from_dict(data)
+
+        assert cfg.metrics["num_classes"] == 3
+
+    def test_raises_on_conflicting_num_classes(self):
+        data = _make_task_data(
+            classification_mapping={
+                "raw_to_mapped": {0: 0, 1: 1, 2: 2},
+            },
+            metrics={
+                "_target_": "foundry.tasks.metrics.classification_metrics",
+                "num_classes": 7,
+            },
+        )
+        with pytest.raises(
+            ValueError, match=r"metrics\.num_classes \(7\).*conflicts"
+        ):
+            TaskConfig.from_dict(data)
+
+    def test_no_mapping_leaves_metrics_unchanged(self):
+        data = _make_task_data(
+            metrics={
+                "_target_": "foundry.tasks.metrics.classification_metrics",
+                "num_classes": 5,
+            },
+        )
+        cfg = TaskConfig.from_dict(data)
+
+        assert cfg.metrics["num_classes"] == 5
+
+    def test_no_metrics_with_mapping_leaves_metrics_none(self):
+        data = _make_task_data(
+            classification_mapping={
+                "raw_to_mapped": {0: 0, 1: 1},
+            },
+        )
+        cfg = TaskConfig.from_dict(data)
+
+        assert cfg.metrics is None
 
 
 EXPECTED_TASK_SPECS = {
@@ -156,8 +243,8 @@ EXPECTED_TASK_SPECS = {
     "sleep_stage_5class": {
         "output_dim": 5,
         "kind": "multiclass",
-        "timestamp_key": "sleep_stages.timestamps",
-        "value_key": "sleep_stages.values",
+        "timestamp_key": "stages.timestamps",
+        "value_key": "stages.values",
     },
     "neurosoft_on_vs_off": {
         "output_dim": 2,

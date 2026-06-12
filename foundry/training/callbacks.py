@@ -11,8 +11,64 @@ import torch
 from lightning import Trainer
 
 from foundry.core import VocabManager
+from foundry.training.confusion_matrix import ConfusionMatrixTracker
 
 log = logging.getLogger(__name__)
+
+
+class ConfusionMatrixCallback(L.Callback):
+    """Log confusion matrices for classification tasks at validation epoch end.
+
+    Reads ``pl_module._val_confusion_trackers`` (populated by
+    :class:`~foundry.training.module.FoundryModule` during validation steps)
+    and handles all logging — generic metric payloads plus W&B-native
+    interactive visualizations.
+    """
+
+    def on_validation_epoch_end(
+        self, trainer: Trainer, pl_module: L.LightningModule
+    ) -> None:
+        trackers: dict[str, ConfusionMatrixTracker] = getattr(
+            pl_module, "_val_confusion_trackers", {}
+        )
+        if not trackers:
+            return
+
+        wandb_experiment = self._get_wandb_experiment(trainer)
+
+        for name, tracker in trackers.items():
+            counts, normalized = tracker.compute()
+            if counts.sum() == 0:
+                tracker.reset()
+                continue
+
+            payload = {
+                f"val/{name}_confusion_counts": counts.tolist(),
+                f"val/{name}_confusion_normalized": normalized.tolist(),
+                f"val/{name}_confusion_class_names": tracker.class_names,
+            }
+
+            if trainer.logger is not None:
+                trainer.logger.log_metrics(payload, step=trainer.current_epoch)
+
+            if wandb_experiment is not None:
+                tracker.log_wandb(
+                    wandb_experiment,
+                    name,
+                    trainer.current_epoch,
+                    counts,
+                    normalized,
+                )
+
+            tracker.reset()
+
+    @staticmethod
+    def _get_wandb_experiment(trainer: Trainer):
+        from lightning.pytorch.loggers import WandbLogger
+
+        if isinstance(trainer.logger, WandbLogger):
+            return trainer.logger.experiment
+        return None
 
 
 class EffectiveBatchSizeCallback(L.Callback):

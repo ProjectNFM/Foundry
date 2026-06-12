@@ -1,0 +1,50 @@
+# @package _global_
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: kemp_sleep_edf/allsess
+  - override /model/tokenizer: per_channel_cwt
+
+model:
+  zero_output_timestamps: true
+
+data:
+  split_type: intrasession
+  task_type: sleep_stage
+
+run:
+  name: kemp_sleep_poyo_allsess
+  group: SLEEP_STAGING
+  tags: [sleep_staging, poyo, cwt, kemp, allsess]
+  seed: 42
+  log_level: INFO
+
+class_weights:
+  mode: auto
+  smoothing: 0.1
+
+hyperparameters:
+  batch_size: 32
+  sequence_length: 30.0
+  patch_duration: 0.1
+  sampling_rate: 100
+  fold_number: 0
+  num_workers: 8
+  num_channels: 2
+  session_configs: null
+  learning_rate: 1e-4
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 1000
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/sleep_stage_5class_f1
+      mode: max
+      patience: 20
+    model_checkpoint:
+      monitor: val/sleep_stage_5class_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/sleep_stage_5class_f1:.4f}"
