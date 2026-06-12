@@ -1,7 +1,38 @@
 """Readout router for dispatching backbone embeddings to task heads."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import torch
 import torch.nn as nn
+from hydra.utils import instantiate
+
+if TYPE_CHECKING:
+    from foundry.tasks.config import TaskConfig
+
+
+def build_readout_router(
+    task_configs: dict[str, TaskConfig],
+    embed_dim: int,
+) -> ReadoutRouter:
+    """Build a :class:`ReadoutRouter` from Hydra task configs.
+
+    Each task config's ``head`` dict is instantiated with ``embed_dim`` and
+    ``output_dim`` injected.  The resulting heads are wrapped in a
+    :class:`ReadoutRouter` whose task ordering follows sorted task names.
+    """
+    heads = {
+        name: instantiate(
+            {
+                **cfg.head,
+                "embed_dim": embed_dim,
+                "output_dim": cfg.output_dim,
+            }
+        )
+        for name, cfg in task_configs.items()
+    }
+    return ReadoutRouter(heads)
 
 
 class ReadoutRouter(nn.Module):

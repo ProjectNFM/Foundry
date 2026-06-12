@@ -8,14 +8,13 @@ simple and are widely used on standard EEG classification tasks.
 import numpy as np
 import torch
 import torch.nn as nn
-from hydra.utils import instantiate
 from torch_brain.data import Data
-from torch_brain.batching import chain, collate, pad8, pad2d, track_batch
+from torch_brain.batching import chain, pad8, pad2d
 from typing import Dict, Any
 
-from foundry.models.readout import ReadoutRouter
+from foundry.models.readout import ReadoutRouter, build_readout_router
 from foundry.tasks.config import TaskConfig
-from foundry.tasks.targets import TargetExtractor
+from foundry.tasks.targets import extract_multitask_targets
 
 
 class BaselineEEGModel(nn.Module):
@@ -42,75 +41,19 @@ class BaselineEEGModel(nn.Module):
         super().__init__()
         self.num_channels = num_channels
         self.num_samples = num_samples
-        self._task_configs = task_configs
+        self._task_configs = TaskConfig.normalize_task_configs(task_configs)
 
     @property
     def task_configs(self) -> dict[str, TaskConfig]:
         return self._task_configs
 
     def _build_router(self, embed_dim: int) -> ReadoutRouter:
-        heads = {
-            name: instantiate(
-                {
-                    **cfg.head,
-                    "embed_dim": embed_dim,
-                    "output_dim": cfg.output_dim,
-                }
-            )
-            for name, cfg in self._task_configs.items()
-        }
-        return ReadoutRouter(heads)
+        return build_readout_router(self._task_configs, embed_dim)
 
     def _extract_targets(self, data: Data):
-        all_timestamps = []
-        task_indices = []
-        target_values = {}
-        target_weights = {}
-        name_to_idx = {
-            n: i for i, n in enumerate(sorted(self._task_configs.keys()))
-        }
-
-        for name in sorted(self._task_configs.keys()):
-            cfg = self._task_configs[name]
-            ext_kwargs = dict(cfg.target_extractor)
-            ext_kwargs.pop("_target_", None)
-            if cfg.classification_mapping is not None:
-                ext_kwargs["classification_mapping"] = (
-                    cfg.classification_mapping
-                )
-            extractor = TargetExtractor(**ext_kwargs)
-
-            targets = extractor(data)
-            timestamps = targets["timestamps"]
-            if timestamps is None or len(timestamps) == 0:
-                continue
-
-            idx = name_to_idx[name]
-            all_timestamps.append(timestamps)
-            task_indices.append(idx)
-            target_values[name] = targets["values"]
-            target_weights[name] = np.ones_like(timestamps, dtype=np.float32)
-
-        if not all_timestamps:
-            raise ValueError(
-                "No targets extracted from data for configured tasks"
-            )
-
-        if len(all_timestamps) == 1:
-            output_task_index = torch.full(
-                (len(all_timestamps[0]),),
-                task_indices[0] + 1,
-                dtype=torch.long,
-            )
-        else:
-            _, batch = collate(
-                [
-                    (chain(all_timestamps[i]), track_batch(all_timestamps[i]))
-                    for i in range(len(all_timestamps))
-                ]
-            )
-            output_task_index = torch.tensor(task_indices)[batch] + 1
-
+        output_timestamps, target_values, output_task_index, target_weights = (
+            extract_multitask_targets(self._task_configs, data)
+        )
         return target_values, output_task_index, target_weights
 
     def _route_readout(

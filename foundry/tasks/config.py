@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from foundry.tasks.classification_mapping import ClassificationMapping
 
@@ -83,3 +83,28 @@ class TaskConfig:
         data = OmegaConf.to_container(OmegaConf.load(path), resolve=True)
         assert isinstance(data, dict)
         return cls.from_dict(data)
+
+    @staticmethod
+    def normalize_task_configs(
+        task_configs: dict[str, Any],
+    ) -> dict[str, TaskConfig]:
+        """Ensure all values are proper ``TaskConfig`` instances.
+
+        Hydra's ``instantiate`` may wrap dataclass kwargs as OmegaConf
+        structured configs, which strips ``@property`` attributes like
+        ``output_dim``.  This helper converts any such wrappers back to
+        real Python objects.
+        """
+        out: dict[str, TaskConfig] = {}
+        for k, v in task_configs.items():
+            if isinstance(v, TaskConfig):
+                out[k] = v
+            elif isinstance(v, DictConfig):
+                out[k] = TaskConfig.from_dict(
+                    OmegaConf.to_container(v, resolve=True)
+                )
+            elif isinstance(v, dict):
+                out[k] = TaskConfig.from_dict(v)
+            else:
+                out[k] = v
+        return out

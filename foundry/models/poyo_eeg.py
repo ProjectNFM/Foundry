@@ -3,9 +3,8 @@ from typing import Dict, Optional
 import numpy as np
 import torch
 import torch.nn as nn
-from hydra.utils import instantiate
 from torch_brain.data import Data
-from torch_brain.batching import chain, collate, pad8, track_batch
+from torch_brain.batching import chain, pad8
 from torch_brain.nn import (
     Embedding,
     InfiniteVocabEmbedding,
@@ -14,10 +13,10 @@ from torch_brain.nn import (
 from torch_brain.utils import create_linspace_latent_tokens
 
 from foundry.models.backbones import PerceiverIOBackbone
-from foundry.models.readout import ReadoutRouter
+from foundry.models.readout import build_readout_router
 from foundry.models.tokenizer import EEGTokenizer
 from foundry.tasks.config import TaskConfig
-from foundry.tasks.targets import TargetExtractor
+from foundry.tasks.targets import extract_multitask_targets
 
 
 class POYOEEGModel(nn.Module):
@@ -82,7 +81,7 @@ class POYOEEGModel(nn.Module):
         self.latent_step = latent_step
         self.num_latents_per_step = num_latents_per_step
         self.zero_output_timestamps = zero_output_timestamps
-        self._task_configs = task_configs
+        self._task_configs = TaskConfig.normalize_task_configs(task_configs)
         self._latent_index, self._latent_timestamps = (
             create_linspace_latent_tokens(
                 0,
@@ -92,17 +91,7 @@ class POYOEEGModel(nn.Module):
             )
         )
 
-        heads = {
-            name: instantiate(
-                {
-                    **cfg.head,
-                    "embed_dim": embed_dim,
-                    "output_dim": cfg.output_dim,
-                }
-            )
-            for name, cfg in task_configs.items()
-        }
-        self.router = ReadoutRouter(heads)
+        self.router = build_readout_router(task_configs, embed_dim)
 
         self.backbone = PerceiverIOBackbone(
             embed_dim=embed_dim,
@@ -252,59 +241,7 @@ class POYOEEGModel(nn.Module):
         return 1.0 / float(np.median(valid_deltas))
 
     def _extract_targets(self, data: Data):
-        all_timestamps = []
-        task_indices = []
-        target_values = {}
-        target_weights = {}
-
-        for name in self.router._task_names:
-            cfg = self._task_configs[name]
-            ext_kwargs = dict(cfg.target_extractor)
-            ext_kwargs.pop("_target_", None)
-            if cfg.classification_mapping is not None:
-                ext_kwargs["classification_mapping"] = (
-                    cfg.classification_mapping
-                )
-            extractor = TargetExtractor(**ext_kwargs)
-
-            targets = extractor(data)
-            timestamps = targets["timestamps"]
-            if timestamps is None or len(timestamps) == 0:
-                continue
-
-            idx = self.router.get_task_index_by_name(name)
-            all_timestamps.append(timestamps)
-            task_indices.append(idx)
-            target_values[name] = targets["values"]
-            target_weights[name] = np.ones_like(timestamps, dtype=np.float32)
-
-        if not all_timestamps:
-            raise ValueError(
-                "No targets extracted from data for configured tasks"
-            )
-
-        if len(all_timestamps) == 1:
-            output_timestamps = torch.as_tensor(all_timestamps[0])
-            output_task_index = torch.full(
-                (len(output_timestamps),),
-                task_indices[0] + 1,
-                dtype=torch.long,
-            )
-        else:
-            output_timestamps, batch = collate(
-                [
-                    (chain(all_timestamps[i]), track_batch(all_timestamps[i]))
-                    for i in range(len(all_timestamps))
-                ]
-            )
-            output_task_index = torch.tensor(task_indices)[batch] + 1
-
-        return (
-            output_timestamps,
-            target_values,
-            output_task_index,
-            target_weights,
-        )
+        return extract_multitask_targets(self._task_configs, data)
 
     def tokenize(self, data: Data) -> dict:
         """Tokenize the input data.

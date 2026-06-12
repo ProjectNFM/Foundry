@@ -13,7 +13,7 @@ from foundry.tasks.metrics import (
     regression_metrics,
     ssl_metrics,
 )
-from foundry.tasks.targets import TargetExtractor
+from foundry.tasks.targets import TargetExtractor, extract_multitask_targets
 
 __all__ = [
     "ClassificationMapping",
@@ -23,6 +23,7 @@ __all__ = [
     "MSETaskLoss",
     "ReadoutHead",
     "TargetExtractor",
+    "extract_multitask_targets",
     "classification_metrics",
     "filter_intervals_by_mapping",
     "regression_metrics",
