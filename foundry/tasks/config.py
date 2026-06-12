@@ -77,6 +77,21 @@ class TaskConfig:
             else None
         )
 
+        if mapping is not None and metrics is not None:
+            metrics = dict(metrics)
+            declared = metrics.get("num_classes")
+            derived = mapping.num_classes
+            if declared is not None and declared != derived:
+                raise ValueError(
+                    f"metrics.num_classes ({declared}) conflicts with "
+                    f"classification_mapping.num_classes ({derived}). "
+                    f"Remove metrics.num_classes and let it be derived "
+                    f"automatically, or fix the classification_mapping."
+                )
+            metrics["num_classes"] = derived
+        elif metrics is not None:
+            metrics = dict(metrics)
+
         target_extractor = dict(data["target_extractor"])
 
         return cls(
@@ -84,7 +99,7 @@ class TaskConfig:
             head=dict(data["head"]),
             target_extractor=target_extractor,
             loss=dict(data["loss"]),
-            metrics=dict(metrics) if metrics is not None else None,
+            metrics=metrics,
             class_names=list(class_names) if class_names is not None else None,
             metric_summary_modes=dict(data.get("metric_summary_modes") or {}),
             classification_mapping=mapping,

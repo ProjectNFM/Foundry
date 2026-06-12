@@ -28,7 +28,6 @@ loss:
 
 metrics:
   _target_: foundry.tasks.metrics.classification_metrics
-  num_classes: 5
 
 metric_summary_modes:
   acc: max
