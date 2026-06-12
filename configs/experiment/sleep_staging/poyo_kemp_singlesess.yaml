@@ -21,7 +21,7 @@ run:
 
 class_weights:
   mode: null
-  smoothing: 0.5
+  smoothing: 0.1
 
 hyperparameters:
   batch_size: 64
