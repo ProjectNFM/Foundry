@@ -89,7 +89,7 @@ class POYOEEGModel(nn.Module):
             )
         )
 
-        self.router = build_readout_router(task_configs, embed_dim)
+        self.router = build_readout_router(self._task_configs, embed_dim)
 
         self.backbone = PerceiverIOBackbone(
             embed_dim=embed_dim,
