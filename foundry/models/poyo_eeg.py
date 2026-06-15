@@ -10,8 +10,6 @@ from torch_brain.nn import (
     InfiniteVocabEmbedding,
     RotaryTimeEmbedding,
 )
-from torch_brain.utils import create_linspace_latent_tokens
-
 from foundry.models.backbones import PerceiverIOBackbone
 from foundry.models.readout import build_readout_router
 from foundry.models.tokenizer import EEGTokenizer
@@ -361,3 +359,35 @@ class POYOEEGModel(nn.Module):
                 "Session vocabulary has not been initialized, please use "
                 "`model.session_emb.initialize_vocab(session_ids)`"
             )
+
+
+def create_linspace_latent_tokens(
+    start: float, end: float, step: float, num_latents_per_step: int
+):
+    """Create a sequence of evenly-spaced latent tokens.
+
+    Each token is defined by a latent index and a timestamp.  Timestamps are
+    placed at the centre of each step-sized bin between ``start`` and ``end``.
+    Within every bin the group of ``num_latents_per_step`` latent indices is
+    repeated.
+
+    Args:
+        start: Start time of the sequence.
+        end: End time of the sequence.
+        step: Time step between successive groups of latent tokens.
+        num_latents_per_step: Number of latent tokens sharing each timestamp.
+
+    Returns:
+        Tuple of ``(latent_index, latent_timestamps)`` where both are 1-D
+        ``np.ndarray`` of length ``num_steps * num_latents_per_step``.
+    """
+    sequence_len = end - start
+    latent_timestamps = np.arange(0, sequence_len, step) + step / 2 + start
+    latent_index = np.arange(num_latents_per_step, dtype=np.int64)
+
+    T = len(latent_timestamps)
+    U = len(latent_index)
+
+    latent_timestamps = np.repeat(latent_timestamps, U)  # (T,) -> (T*U,)
+    latent_index = np.tile(latent_index, T)  # (U,) -> (T*U,)
+    return latent_index, latent_timestamps
