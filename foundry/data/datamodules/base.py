@@ -177,8 +177,6 @@ class NeuralDataModule(LightningDataModule):
         for name, cfg in self._task_configs.items():
             if cfg.classification_mapping is None:
                 continue
-            if not cfg.classification_mapping.removed_raw_ids:
-                continue
             value_field = cfg.target_extractor["value_key"].split(".")[-1]
             sampling_intervals = {
                 rid: filter_intervals_by_mapping(

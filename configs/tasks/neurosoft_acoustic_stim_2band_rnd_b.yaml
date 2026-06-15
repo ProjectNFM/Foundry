@@ -1,36 +1,12 @@
 name: neurosoft_acoustic_stim_2band_rnd_b
 
 classification_mapping:
-  raw_to_mapped:
-    0: null
-    1: null
-    2: null
-    3: null
-    4: 0
-    5: null
-    6: 1
-    7: null
-    8: null
-    9: null
-    10: null
-    11: null
-    12: null
-    13: null
-    14: 1
-    15: null
-    16: 0
-    17: null
-    18: null
-    19: null
-    20: null
-    21: null
-    22: null
-    23: null
-    24: null
-    25: null
-  names:
-    0: class1
-    1: class2
+  mapping:
+    stim_500Hz: class1
+    stim_800Hz: class2
+    stim_5000Hz: class2
+    stim_8000Hz: class1
+  order: [class1, class2]
 
 head:
   _target_: foundry.tasks.heads.ReadoutHead
@@ -38,7 +14,7 @@ head:
 target_extractor:
   _target_: foundry.tasks.targets.TargetExtractor
   timestamp_key: acoustic_stim_trials.timestamps
-  value_key: acoustic_stim_trials.behavior_ids
+  value_key: acoustic_stim_trials.behavior_labels
 
 loss:
   _target_: foundry.tasks.losses.CrossEntropyTaskLoss

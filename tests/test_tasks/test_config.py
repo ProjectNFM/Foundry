@@ -160,7 +160,7 @@ class TestFromDictMetricsNumClasses:
     def test_num_classes_injected_when_mapping_present(self):
         data = _make_task_data(
             classification_mapping={
-                "raw_to_mapped": {0: 0, 1: 1, 2: 2},
+                "mapping": {0: "A", 1: "B", 2: "C"},
             },
             metrics={
                 "_target_": "foundry.tasks.metrics.classification_metrics",
@@ -173,7 +173,7 @@ class TestFromDictMetricsNumClasses:
     def test_num_classes_injected_overwrites_matching_value(self):
         data = _make_task_data(
             classification_mapping={
-                "raw_to_mapped": {0: 0, 1: 1, 2: 2},
+                "mapping": {0: "A", 1: "B", 2: "C"},
             },
             metrics={
                 "_target_": "foundry.tasks.metrics.classification_metrics",
@@ -187,7 +187,7 @@ class TestFromDictMetricsNumClasses:
     def test_raises_on_conflicting_num_classes(self):
         data = _make_task_data(
             classification_mapping={
-                "raw_to_mapped": {0: 0, 1: 1, 2: 2},
+                "mapping": {0: "A", 1: "B", 2: "C"},
             },
             metrics={
                 "_target_": "foundry.tasks.metrics.classification_metrics",
@@ -213,7 +213,7 @@ class TestFromDictMetricsNumClasses:
     def test_no_metrics_with_mapping_leaves_metrics_none(self):
         data = _make_task_data(
             classification_mapping={
-                "raw_to_mapped": {0: 0, 1: 1},
+                "mapping": {0: "A", 1: "B"},
             },
         )
         cfg = TaskConfig.from_dict(data)
@@ -244,7 +244,7 @@ EXPECTED_TASK_SPECS = {
         "output_dim": 5,
         "kind": "multiclass",
         "timestamp_key": "stages.start",
-        "value_key": "stages.id",
+        "value_key": "stages.names",
     },
     "neurosoft_on_vs_off": {
         "output_dim": 2,
@@ -262,24 +262,24 @@ EXPECTED_TASK_SPECS = {
         "output_dim": 2,
         "kind": "binary",
         "timestamp_key": "acoustic_stim_trials.timestamps",
-        "value_key": "acoustic_stim_trials.behavior_ids",
+        "value_key": "acoustic_stim_trials.behavior_labels",
     },
     "neurosoft_acoustic_stim_2band_rnd_a": {
         "output_dim": 2,
         "kind": "binary",
         "timestamp_key": "acoustic_stim_trials.timestamps",
-        "value_key": "acoustic_stim_trials.behavior_ids",
+        "value_key": "acoustic_stim_trials.behavior_labels",
     },
     "neurosoft_acoustic_stim_2band_rnd_b": {
         "output_dim": 2,
         "kind": "binary",
         "timestamp_key": "acoustic_stim_trials.timestamps",
-        "value_key": "acoustic_stim_trials.behavior_ids",
+        "value_key": "acoustic_stim_trials.behavior_labels",
     },
     "neurosoft_acoustic_stim_3band": {
         "output_dim": 3,
         "kind": "multiclass",
         "timestamp_key": "acoustic_stim_trials.timestamps",
-        "value_key": "acoustic_stim_trials.behavior_ids",
+        "value_key": "acoustic_stim_trials.behavior_labels",
     },
 }

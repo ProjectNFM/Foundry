@@ -185,8 +185,7 @@ class TestConfusionMatrixCallback:
             },
             metric_summary_modes={"acc": "max"},
             classification_mapping=ClassificationMapping(
-                raw_to_mapped={0: 0, 1: 1, 2: 2},
-                names={0: "Wake", 1: "N2", 2: "REM"},
+                mapping={0: "Wake", 1: "N2", 2: "REM"},
             ),
         )
         model = _StubTaskModel({cfg.name: cfg})
@@ -261,8 +260,7 @@ class TestFoundryModuleConfusionMatrixIntegration:
             },
             metric_summary_modes={"acc": "max"},
             classification_mapping=ClassificationMapping(
-                raw_to_mapped={0: 0, 1: 1, 2: 2},
-                names={0: "Wake", 1: "N2", 2: "REM"},
+                mapping={0: "Wake", 1: "N2", 2: "REM"},
             ),
         )
         model = _StubTaskModel({cfg.name: cfg})

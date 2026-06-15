@@ -1,20 +1,14 @@
 name: sleep_stage_5class
 
 classification_mapping:
-  raw_to_mapped:
-    0: 0
-    1: 1
-    2: 2
-    3: 3
-    4: 3
-    5: 4
-    6: null
-  names:
-    0: Wake
-    1: N1
-    2: N2
-    3: N3
-    4: REM
+  mapping:
+    Sleep stage W: Wake
+    Sleep stage 1: N1
+    Sleep stage 2: N2
+    Sleep stage 3: N3
+    Sleep stage 4: N3
+    Sleep stage R: REM
+  order: [Wake, N1, N2, N3, REM]
 
 head:
   _target_: foundry.tasks.heads.ReadoutHead
@@ -22,7 +16,7 @@ head:
 target_extractor:
   _target_: foundry.tasks.targets.TargetExtractor
   timestamp_key: stages.start
-  value_key: stages.id
+  value_key: stages.names
 
 loss:
   _target_: foundry.tasks.losses.CrossEntropyTaskLoss

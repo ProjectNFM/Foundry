@@ -1,7 +1,7 @@
 """Unified classification task mapping contract.
 
-Provides a single source of truth for raw-to-mapped label relationships,
-class removal, derived class counts, and display names.
+Provides a single source of truth for input-label-to-class relationships,
+implicit filtering, derived class counts, and display names.
 """
 
 from __future__ import annotations
@@ -14,149 +14,124 @@ import numpy as np
 
 @dataclass(frozen=True)
 class ClassificationMapping:
-    """Full-enumeration classification label mapping.
+    """User-friendly classification label mapping.
 
-    Every raw label ID that can appear in the data must be declared in
-    ``raw_to_mapped``. Mapped IDs must form a contiguous range 0..N-1.
-    Raw IDs mapped to ``None`` are removed from training supervision.
+    Maps input labels (int or str) to output class names. Labels not listed
+    are implicitly filtered out. Class IDs are auto-assigned from the order
+    of first appearance of unique output names, or from an explicit ``order``.
 
     Args:
-        raw_to_mapped: Complete mapping from every possible raw label ID
-            to either a contiguous mapped ID (int) or None for removal.
-        names: Optional mapping from mapped ID to human-readable display
-            name. Missing entries fall back to ``class_<id>``.
+        mapping: Input label to output class name. All keys must be the same
+            type (all int or all str).
+        order: Optional explicit ordering of output class names for ID
+            assignment. Must contain exactly the unique values from mapping.
     """
 
-    raw_to_mapped: dict[int, int | None]
-    names: dict[int, str] | None = None
+    mapping: dict[int | str, str]
+    order: list[str] | None = None
 
-    # Cached derived values (computed in __post_init__)
-    _num_classes: int = field(init=False, repr=False, compare=False)
-    _kept_raw_ids: frozenset[int] = field(init=False, repr=False, compare=False)
-    _removed_raw_ids: frozenset[int] = field(
+    _input_to_id: dict[int | str, int] = field(
         init=False, repr=False, compare=False
     )
+    _id_to_name: list[str] = field(init=False, repr=False, compare=False)
+    _kept_inputs: frozenset[int | str] = field(
+        init=False, repr=False, compare=False
+    )
+    _num_classes: int = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self._validate()
-        mapped_ids = {v for v in self.raw_to_mapped.values() if v is not None}
-        object.__setattr__(self, "_num_classes", len(mapped_ids))
-        object.__setattr__(
-            self,
-            "_kept_raw_ids",
-            frozenset(
-                k for k, v in self.raw_to_mapped.items() if v is not None
-            ),
-        )
-        object.__setattr__(
-            self,
-            "_removed_raw_ids",
-            frozenset(k for k, v in self.raw_to_mapped.items() if v is None),
-        )
+
+        if self.order is not None:
+            ordered_names = list(self.order)
+        else:
+            seen: list[str] = []
+            for name in self.mapping.values():
+                if name not in seen:
+                    seen.append(name)
+            ordered_names = seen
+
+        name_to_id = {name: i for i, name in enumerate(ordered_names)}
+        input_to_id = {k: name_to_id[v] for k, v in self.mapping.items()}
+
+        object.__setattr__(self, "_id_to_name", ordered_names)
+        object.__setattr__(self, "_input_to_id", input_to_id)
+        object.__setattr__(self, "_kept_inputs", frozenset(self.mapping.keys()))
+        object.__setattr__(self, "_num_classes", len(ordered_names))
 
     def _validate(self) -> None:
-        mapped_ids = {v for v in self.raw_to_mapped.values() if v is not None}
-
-        if not mapped_ids:
+        if not self.mapping:
             raise ValueError(
-                "ClassificationMapping must retain at least one mapped class "
-                "(all values are None or raw_to_mapped is empty)."
+                "ClassificationMapping must have at least one entry in mapping."
             )
 
-        for mid in mapped_ids:
-            if mid < 0:
+        key_types = {type(k) for k in self.mapping.keys()}
+        if len(key_types) > 1:
+            raise ValueError(
+                f"All mapping keys must be the same type (all int or all str), "
+                f"got mixed types: {key_types}."
+            )
+
+        unique_values = set(self.mapping.values())
+
+        if self.order is not None:
+            if len(self.order) != len(set(self.order)):
+                raise ValueError("order must not contain duplicate entries.")
+            order_set = set(self.order)
+            if order_set != unique_values:
                 raise ValueError(
-                    f"Mapped IDs must be non-negative integers, got {mid}."
+                    f"order must contain exactly the unique output class names "
+                    f"from mapping. Expected {sorted(unique_values)}, "
+                    f"got {sorted(self.order)}."
                 )
-
-        expected = set(range(len(mapped_ids)))
-        if mapped_ids != expected:
-            raise ValueError(
-                f"Mapped IDs must be contiguous integers 0..{len(mapped_ids) - 1}, "
-                f"got {sorted(mapped_ids)}."
-            )
-
-        reachable = set()
-        for raw_id, mapped_id in self.raw_to_mapped.items():
-            if mapped_id is not None:
-                reachable.add(mapped_id)
-
-        unreachable = expected - reachable
-        if unreachable:
-            raise ValueError(
-                f"Every mapped ID must be reachable from at least one raw ID. "
-                f"Unreachable: {sorted(unreachable)}."
-            )
 
     @property
     def num_classes(self) -> int:
         return self._num_classes
 
     @property
-    def kept_raw_ids(self) -> set[int]:
-        return set(self._kept_raw_ids)
-
-    @property
-    def removed_raw_ids(self) -> set[int]:
-        return set(self._removed_raw_ids)
-
-    @property
     def class_names(self) -> list[str]:
-        """Ordered list of display names for mapped classes 0..N-1."""
-        result = []
-        for i in range(self._num_classes):
-            if self.names and i in self.names:
-                result.append(self.names[i])
-            else:
-                result.append(f"class_{i}")
-        return result
+        """Ordered list of output class names (index = class ID)."""
+        return list(self._id_to_name)
+
+    @property
+    def kept_inputs(self) -> frozenset[int | str]:
+        """Set of input labels that are in the mapping."""
+        return self._kept_inputs
 
     def apply(self, raw_values: np.ndarray) -> np.ndarray:
-        """Map raw label array to canonical mapped labels.
+        """Map input label array to class IDs.
 
-        Removed classes get mapped to -1. Undeclared raw IDs raise immediately.
+        Labels not in the mapping get -1 (defense-in-depth; they should
+        already be filtered by the sampler).
 
         Args:
-            raw_values: Integer array of raw label IDs.
+            raw_values: Array of input labels (int or str).
 
         Returns:
-            Integer array of mapped label IDs (same dtype as input).
-
-        Raises:
-            ValueError: If any value in raw_values is not declared in raw_to_mapped.
+            Int64 array of mapped class IDs.
         """
-        declared = set(self.raw_to_mapped.keys())
-        unique_raw = set(raw_values.flat)
-        undeclared = unique_raw - declared
-        if undeclared:
-            raise ValueError(
-                f"Encountered undeclared raw label IDs: {sorted(undeclared)}. "
-                f"All raw IDs must be enumerated in classification_mapping.raw_to_mapped."
-            )
-
-        result = np.empty_like(raw_values)
-        for raw_id, mapped_id in self.raw_to_mapped.items():
-            mask = raw_values == raw_id
-            if mask.any():
-                result[mask] = mapped_id if mapped_id is not None else -1
-
+        result = np.full(len(raw_values), -1, dtype=np.int64)
+        for input_label, class_id in self._input_to_id.items():
+            mask = raw_values == input_label
+            result[mask] = class_id
         return result
 
     def kept_mask(self, raw_values: np.ndarray) -> np.ndarray:
-        """Boolean mask where True indicates a kept (non-removed) label."""
-        kept = self._kept_raw_ids
+        """Boolean mask where True indicates a label present in the mapping."""
         mask = np.zeros(len(raw_values), dtype=bool)
-        for raw_id in kept:
-            mask |= raw_values == raw_id
+        for input_label in self._kept_inputs:
+            mask |= raw_values == input_label
         return mask
 
     def filter_and_remap(
         self, values: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Filter removed labels and remap kept ones in one atomic operation.
+        """Filter unlisted labels and remap kept ones in one operation.
 
         Returns:
-            (mapped_values, keep_mask) where mapped_values has length == keep_mask.sum().
+            (mapped_values, keep_mask) where mapped_values has
+            length == keep_mask.sum().
         """
         keep = self.kept_mask(values)
         mapped = self.apply(values[keep])
@@ -166,19 +141,29 @@ class ClassificationMapping:
     def from_dict(cls, data: dict[str, Any]) -> ClassificationMapping:
         """Construct from a parsed YAML/dict representation.
 
-        Accepts raw_to_mapped with string or int keys (YAML often produces strings).
+        Handles YAML's tendency to produce string keys for numeric values.
         """
-        raw_to_mapped_raw = data["raw_to_mapped"]
-        raw_to_mapped: dict[int, int | None] = {}
-        for k, v in raw_to_mapped_raw.items():
-            raw_to_mapped[int(k)] = int(v) if v is not None else None
+        mapping_raw = data["mapping"]
+        mapping: dict[int | str, str] = {}
 
-        names_raw = data.get("names")
-        names: dict[int, str] | None = None
-        if names_raw is not None:
-            names = {int(k): str(v) for k, v in names_raw.items()}
+        for k, v in mapping_raw.items():
+            key: int | str
+            if isinstance(k, int):
+                key = k
+            elif isinstance(k, str):
+                try:
+                    key = int(k)
+                except ValueError:
+                    key = k
+            else:
+                key = k
+            mapping[key] = str(v)
 
-        return cls(raw_to_mapped=raw_to_mapped, names=names)
+        order = data.get("order")
+        if order is not None:
+            order = list(order)
+
+        return cls(mapping=mapping, order=order)
 
 
 def filter_intervals_by_mapping(
@@ -186,7 +171,7 @@ def filter_intervals_by_mapping(
     mapping: ClassificationMapping,
     value_field: str,
 ):
-    """Filter intervals to retain only those with kept (non-removed) labels.
+    """Filter intervals to retain only those with labels in the mapping.
 
     If the intervals object doesn't have the value_field attribute,
     returns intervals unchanged (e.g. for regression tasks or plain domains).
@@ -195,7 +180,7 @@ def filter_intervals_by_mapping(
         intervals: An Interval-like object with start/end arrays and optionally
             a label array accessible via value_field.
         mapping: The classification mapping defining which labels are kept.
-        value_field: Name of the attribute on intervals containing raw label IDs.
+        value_field: Name of the attribute on intervals containing label values.
 
     Returns:
         Filtered intervals containing only entries with retained labels.
