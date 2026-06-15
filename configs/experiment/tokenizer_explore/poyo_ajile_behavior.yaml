@@ -29,7 +29,7 @@ hyperparameters:
   patch_duration: 0.1
   fold_number: 0
   num_workers: 8
-  learning_rate: 0.0012
+  learning_rate: 3e-4
   weight_decay: 0.09
   sampling_rate: 500
   num_channels: null
