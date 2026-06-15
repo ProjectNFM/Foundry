@@ -223,9 +223,8 @@ def _build_model_and_data(cfg: DictConfig):
 
     task_configs = _load_task_configs(cfg)
     normalize_data_config(cfg.data)
-    datamodule = instantiate(
-        cfg.data, tokenizer=None, task_configs=task_configs
-    )
+    datamodule = instantiate(cfg.data, tokenizer=None)
+    datamodule._task_configs = task_configs
     task_configs = _apply_auto_class_weights(cfg, datamodule, task_configs)
 
     ModelClass = get_class(cfg.model._target_)
@@ -237,9 +236,8 @@ def _build_model_and_data(cfg: DictConfig):
     model = ModelClass(task_configs=task_configs, **model_kwargs)
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     normalize_data_config(cfg.data)
-    datamodule = instantiate(
-        cfg.data, tokenizer=tokenizer, task_configs=task_configs
-    )
+    datamodule = instantiate(cfg.data, tokenizer=tokenizer)
+    datamodule._task_configs = task_configs
 
     return model, datamodule
 
