@@ -31,6 +31,7 @@ class TaskConfig:
     class_names: list[str] | None = None
     metric_summary_modes: dict[str, str] = field(default_factory=dict)
     classification_mapping: ClassificationMapping | None = None
+    _extractor: Any = field(init=False, default=None, repr=False, compare=False)
 
     @property
     def output_dim(self) -> int:
@@ -50,20 +51,23 @@ class TaskConfig:
             return self.classification_mapping.class_names
         return self.class_names
 
-    def build_extractor(self) -> TargetExtractor:
-        """Build a fully-wired :class:`TargetExtractor` for this task.
+    @property
+    def extractor(self) -> TargetExtractor:
+        """Fully-wired extractor instance. Mapping is injected automatically.
 
-        Strips the Hydra ``_target_`` key from the stored extractor dict and
-        injects ``classification_mapping`` when present, so callers never need
-        to perform this wiring themselves.
+        Uses ``_target_`` from the YAML spec for polymorphism (so you can swap
+        in a different TargetExtractor subclass), but consumers never need to
+        worry about manually injecting the classification_mapping.
         """
-        from foundry.tasks.targets import TargetExtractor
+        if self._extractor is None:
+            from foundry.tasks.targets import TargetExtractor
 
-        kwargs = dict(self.target_extractor)
-        kwargs.pop("_target_", None)
-        if self.classification_mapping is not None:
-            kwargs["classification_mapping"] = self.classification_mapping
-        return TargetExtractor(**kwargs)
+            kwargs = dict(self.target_extractor)
+            kwargs.pop("_target_", None)
+            if self.classification_mapping is not None:
+                kwargs["classification_mapping"] = self.classification_mapping
+            object.__setattr__(self, "_extractor", TargetExtractor(**kwargs))
+        return self._extractor
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TaskConfig:

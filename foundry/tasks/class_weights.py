@@ -74,11 +74,10 @@ def _count_labels_for_task(
 
         if extractor.classification_mapping is not None:
             mapping = extractor.classification_mapping
-            keep = mapping.kept_mask(values)
+            mapped, keep = mapping.filter_and_remap(values)
             if not np.any(keep):
                 continue
             selected = intervals.select_by_mask(keep)
-            mapped = mapping.apply(values[keep])
             for label in np.unique(mapped):
                 label_mask = mapped == label
                 durations = (
@@ -121,7 +120,7 @@ def compute_class_weights_for_tasks(
         if cfg.kind not in ("binary", "multiclass"):
             continue
 
-        extractor = cfg.build_extractor()
+        extractor = cfg.extractor
 
         counts = _count_labels_for_task(dataset, split, extractor)
         task_weights = _inverse_frequency_weights(

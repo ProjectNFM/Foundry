@@ -99,9 +99,8 @@ def extract_multitask_targets(
 
     for name in sorted_names:
         cfg = task_configs[name]
-        extractor = cfg.build_extractor()
 
-        targets = extractor(data)
+        targets = cfg.extractor(data)
         timestamps = targets["timestamps"]
         if timestamps is None or len(timestamps) == 0:
             continue

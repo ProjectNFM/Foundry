@@ -62,9 +62,18 @@ class ConfusionMatrixTracker:
         self._all_targets: list[torch.Tensor] = []
 
     def update(self, preds: torch.Tensor, targets: torch.Tensor) -> None:
-        """Accumulate a batch of predictions and targets."""
-        self._all_preds.append(preds.detach().cpu())
-        self._all_targets.append(targets.detach().cpu())
+        """Accumulate a batch of predictions and targets.
+
+        Out-of-bounds or negative targets are dropped with a warning.
+        """
+        valid = (targets >= 0) & (targets < self.num_classes)
+        if not valid.all():
+            n_invalid = (~valid).sum().item()
+            logger.warning(
+                "ConfusionMatrixTracker: %d invalid targets dropped", n_invalid
+            )
+        self._all_preds.append(preds[valid].detach().cpu())
+        self._all_targets.append(targets[valid].detach().cpu())
 
     def compute(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute confusion matrix from all accumulated batches."""

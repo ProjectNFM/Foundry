@@ -172,8 +172,8 @@ class TestPrepareSleepStages:
 
         np.testing.assert_array_equal(result.stages.values, [0, 3, 5])
 
-    def test_excludes_unknown_stage_id_6(self):
-        """Stage ID 6 (?) is excluded from both timestamps and values."""
+    def test_preserves_all_stages_including_unknown(self):
+        """Transform is structural only — does NOT filter unknown stages."""
         data = _make_stages_data(
             ids=[0, 6, 2],
             starts=[0.0, 30.0, 60.0],
@@ -182,12 +182,12 @@ class TestPrepareSleepStages:
 
         result = PrepareSleepStages()(data)
 
-        assert 6 not in result.stages.values
-        assert len(result.stages.timestamps) == 2
-        assert len(result.stages.values) == 2
+        np.testing.assert_array_equal(result.stages.values, [0, 6, 2])
+        assert len(result.stages.timestamps) == 3
+        assert len(result.stages.values) == 3
 
-    def test_excludes_multiple_unknown_stages(self):
-        """All unknown-stage epochs are excluded."""
+    def test_preserves_all_ids_without_filtering(self):
+        """All stage IDs pass through; filtering is the mapping's job."""
         data = _make_stages_data(
             ids=[0, 6, 1, 6, 2],
             starts=[0.0, 30.0, 60.0, 90.0, 120.0],
@@ -196,11 +196,11 @@ class TestPrepareSleepStages:
 
         result = PrepareSleepStages()(data)
 
-        assert 6 not in result.stages.values
-        assert len(result.stages.timestamps) == 3
+        np.testing.assert_array_equal(result.stages.values, [0, 6, 1, 6, 2])
+        assert len(result.stages.timestamps) == 5
 
-    def test_preserves_known_stages_around_unknown(self):
-        """Timestamps and values for non-unknown stages are correct after filtering."""
+    def test_start_end_arrays_preserved(self):
+        """Start and end arrays are passed through unchanged."""
         data = _make_stages_data(
             ids=[3, 6, 4, 5],
             starts=[0.0, 30.0, 60.0, 90.0],
@@ -209,10 +209,12 @@ class TestPrepareSleepStages:
 
         result = PrepareSleepStages()(data)
 
-        np.testing.assert_array_equal(result.stages.values, [3, 4, 5])
+        np.testing.assert_array_equal(result.stages.values, [3, 6, 4, 5])
         np.testing.assert_allclose(
-            result.stages.timestamps, [15.0, 75.0, 105.0]
+            result.stages.timestamps, [15.0, 45.0, 75.0, 105.0]
         )
+        np.testing.assert_allclose(result.stages.start, [0.0, 30.0, 60.0, 90.0])
+        np.testing.assert_allclose(result.stages.end, [30.0, 60.0, 90.0, 120.0])
 
     def test_handles_variable_length_intervals(self):
         """Stage intervals of different durations (coalesced epochs) are handled."""

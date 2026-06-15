@@ -354,6 +354,265 @@ class TestTargetExtractorWithMapping:
             extractor(data)
 
 
+class TestFilterAndRemap:
+    """Tests for the atomic filter_and_remap() method."""
+
+    def test_basic_filter_and_remap(self):
+        mapping = ClassificationMapping(
+            raw_to_mapped={0: 0, 1: 1, 2: None, 3: 1}
+        )
+        values = np.array([0, 1, 2, 3, 2, 0], dtype=np.int64)
+        mapped, keep = mapping.filter_and_remap(values)
+
+        np.testing.assert_array_equal(
+            keep, [True, True, False, True, False, True]
+        )
+        np.testing.assert_array_equal(mapped, [0, 1, 1, 0])
+
+    def test_no_removals_keeps_all(self):
+        mapping = ClassificationMapping(raw_to_mapped={0: 0, 1: 1, 2: 2})
+        values = np.array([0, 1, 2], dtype=np.int64)
+        mapped, keep = mapping.filter_and_remap(values)
+
+        assert keep.all()
+        np.testing.assert_array_equal(mapped, [0, 1, 2])
+
+    def test_all_removed_gives_empty(self):
+        mapping = ClassificationMapping(raw_to_mapped={0: None, 1: None, 2: 0})
+        values = np.array([0, 1, 0], dtype=np.int64)
+        mapped, keep = mapping.filter_and_remap(values)
+
+        assert not keep.any()
+        assert len(mapped) == 0
+
+    def test_many_to_one_remap(self):
+        mapping = ClassificationMapping(
+            raw_to_mapped={0: 0, 1: 0, 2: 1, 3: None}
+        )
+        values = np.array([0, 1, 2, 3], dtype=np.int64)
+        mapped, keep = mapping.filter_and_remap(values)
+
+        np.testing.assert_array_equal(keep, [True, True, True, False])
+        np.testing.assert_array_equal(mapped, [0, 0, 1])
+
+
+class TestExtractorProperty:
+    """TaskConfig.extractor caches a fully-wired TargetExtractor."""
+
+    def test_extractor_returns_target_extractor_instance(self):
+        from foundry.tasks.targets import TargetExtractor
+
+        cfg = TaskConfig(
+            name="test",
+            head={"_target_": "foundry.tasks.heads.ReadoutHead"},
+            target_extractor={
+                "_target_": "foundry.tasks.targets.TargetExtractor",
+                "timestamp_key": "t",
+                "value_key": "v",
+            },
+            loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
+        )
+        assert isinstance(cfg.extractor, TargetExtractor)
+        assert cfg.extractor.timestamp_key == "t"
+        assert cfg.extractor.value_key == "v"
+
+    def test_extractor_injects_classification_mapping(self):
+        mapping = ClassificationMapping(raw_to_mapped={0: 0, 1: 1})
+        cfg = TaskConfig(
+            name="test",
+            head={"_target_": "foundry.tasks.heads.ReadoutHead"},
+            target_extractor={
+                "_target_": "foundry.tasks.targets.TargetExtractor",
+                "timestamp_key": "t",
+                "value_key": "v",
+            },
+            loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
+            classification_mapping=mapping,
+        )
+        assert cfg.extractor.classification_mapping is mapping
+
+    def test_extractor_is_cached(self):
+        cfg = TaskConfig(
+            name="test",
+            head={"_target_": "foundry.tasks.heads.ReadoutHead"},
+            target_extractor={
+                "_target_": "foundry.tasks.targets.TargetExtractor",
+                "timestamp_key": "t",
+                "value_key": "v",
+            },
+            loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
+        )
+        ext1 = cfg.extractor
+        ext2 = cfg.extractor
+        assert ext1 is ext2
+
+    def test_extractor_without_mapping_has_none(self):
+        cfg = TaskConfig(
+            name="test",
+            head={"_target_": "foundry.tasks.heads.ReadoutHead"},
+            target_extractor={
+                "_target_": "foundry.tasks.targets.TargetExtractor",
+                "timestamp_key": "t",
+                "value_key": "v",
+            },
+            loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
+        )
+        assert cfg.extractor.classification_mapping is None
+
+
+class TestIgnoreIndex:
+    """CrossEntropyTaskLoss handles ignore_index correctly."""
+
+    def test_ignore_index_excludes_negative_targets(self):
+        import torch
+
+        from foundry.tasks.losses import CrossEntropyTaskLoss
+
+        loss_fn = CrossEntropyTaskLoss(ignore_index=-1)
+        predictions = torch.randn(5, 3)
+        targets = torch.tensor([0, 1, -1, 2, -1])
+
+        loss = loss_fn(predictions, targets)
+        assert loss.isfinite()
+        assert loss > 0
+
+    def test_ignore_index_all_ignored_returns_zero(self):
+        import torch
+
+        from foundry.tasks.losses import CrossEntropyTaskLoss
+
+        loss_fn = CrossEntropyTaskLoss(ignore_index=-1)
+        predictions = torch.randn(3, 3)
+        targets = torch.tensor([-1, -1, -1])
+
+        loss = loss_fn(predictions, targets)
+        assert loss.item() == 0.0
+
+    def test_no_ignored_matches_standard_ce(self):
+        import torch
+        import torch.nn.functional as F
+
+        from foundry.tasks.losses import CrossEntropyTaskLoss
+
+        torch.manual_seed(42)
+        predictions = torch.randn(8, 5)
+        targets = torch.randint(0, 5, (8,))
+
+        loss_fn = CrossEntropyTaskLoss(ignore_index=-1)
+        expected = F.cross_entropy(predictions, targets)
+        assert torch.allclose(loss_fn(predictions, targets), expected)
+
+
+class TestValidateTaskMappings:
+    """Startup validation catches mapping/data mismatches."""
+
+    def test_passes_when_all_labels_declared(self):
+        from foundry.tasks.validation import validate_task_mappings
+
+        mapping = ClassificationMapping(raw_to_mapped={0: 0, 1: 1, 2: None})
+        cfg = TaskConfig(
+            name="test",
+            head={"_target_": "foundry.tasks.heads.ReadoutHead"},
+            target_extractor={
+                "_target_": "foundry.tasks.targets.TargetExtractor",
+                "timestamp_key": "stages.timestamps",
+                "value_key": "stages.values",
+            },
+            loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
+            classification_mapping=mapping,
+        )
+
+        class _MockRec:
+            def get_nested_attribute(self, key):
+                return np.array([0, 1, 2, 0, 1])
+
+        class _MockDataset:
+            recording_ids = ["rec1"]
+
+            def get_recording(self, rid):
+                return _MockRec()
+
+        validate_task_mappings({"test": cfg}, _MockDataset())
+
+    def test_raises_on_undeclared_label(self):
+        from foundry.tasks.validation import validate_task_mappings
+
+        mapping = ClassificationMapping(raw_to_mapped={0: 0, 1: 1})
+        cfg = TaskConfig(
+            name="test",
+            head={"_target_": "foundry.tasks.heads.ReadoutHead"},
+            target_extractor={
+                "_target_": "foundry.tasks.targets.TargetExtractor",
+                "timestamp_key": "stages.timestamps",
+                "value_key": "stages.values",
+            },
+            loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
+            classification_mapping=mapping,
+        )
+
+        class _MockRec:
+            def get_nested_attribute(self, key):
+                return np.array([0, 1, 5])  # 5 not declared
+
+        class _MockDataset:
+            recording_ids = ["rec1"]
+
+            def get_recording(self, rid):
+                return _MockRec()
+
+        with pytest.raises(ValueError, match="raw label IDs"):
+            validate_task_mappings({"test": cfg}, _MockDataset())
+
+    def test_skips_tasks_without_mapping(self):
+        from foundry.tasks.validation import validate_task_mappings
+
+        cfg = TaskConfig(
+            name="test",
+            head={"_target_": "foundry.tasks.heads.ReadoutHead"},
+            target_extractor={
+                "_target_": "foundry.tasks.targets.TargetExtractor",
+                "timestamp_key": "t",
+                "value_key": "v",
+            },
+            loss={"_target_": "foundry.tasks.losses.MSETaskLoss"},
+        )
+
+        class _MockDataset:
+            recording_ids = ["rec1"]
+
+        validate_task_mappings({"test": cfg}, _MockDataset())
+
+
+class TestConfusionMatrixBoundsCheck:
+    """ConfusionMatrixTracker drops out-of-bounds targets."""
+
+    def test_drops_negative_targets(self):
+        import torch
+
+        from foundry.training.confusion_matrix import ConfusionMatrixTracker
+
+        tracker = ConfusionMatrixTracker(num_classes=3)
+        preds = torch.tensor([0, 1, 2, 0])
+        targets = torch.tensor([0, -1, 2, -1])
+
+        tracker.update(preds, targets)
+        counts, _ = tracker.compute()
+        assert counts.sum() == 2  # only valid targets counted
+
+    def test_drops_targets_above_num_classes(self):
+        import torch
+
+        from foundry.training.confusion_matrix import ConfusionMatrixTracker
+
+        tracker = ConfusionMatrixTracker(num_classes=3)
+        preds = torch.tensor([0, 1, 2, 0])
+        targets = torch.tensor([0, 1, 5, 3])
+
+        tracker.update(preds, targets)
+        counts, _ = tracker.compute()
+        assert counts.sum() == 2  # only targets 0, 1 are valid
+
+
 class TestClassWeightsWithMapping:
     """Class weight computation uses classification_mapping when present."""
 

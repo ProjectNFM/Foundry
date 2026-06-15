@@ -150,6 +150,18 @@ class ClassificationMapping:
             mask |= raw_values == raw_id
         return mask
 
+    def filter_and_remap(
+        self, values: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Filter removed labels and remap kept ones in one atomic operation.
+
+        Returns:
+            (mapped_values, keep_mask) where mapped_values has length == keep_mask.sum().
+        """
+        keep = self.kept_mask(values)
+        mapped = self.apply(values[keep])
+        return mapped, keep
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ClassificationMapping:
         """Construct from a parsed YAML/dict representation.

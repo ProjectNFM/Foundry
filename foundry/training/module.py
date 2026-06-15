@@ -128,6 +128,14 @@ class FoundryModule(L.LightningModule):
             if name in taskwise_loss:
                 self.log(f"{stage}/{name}_loss", taskwise_loss[name])
 
+            # Defense-in-depth: mask any invalid targets that leaked through
+            valid_mask = target >= 0
+            if not valid_mask.all():
+                preds = preds[valid_mask]
+                target = target[valid_mask]
+                if target.numel() == 0:
+                    continue
+
             if name in metrics:
                 metric_preds, metric_target = self._prepare_for_metrics(
                     cfg, preds, target

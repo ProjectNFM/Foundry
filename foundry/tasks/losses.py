@@ -22,6 +22,9 @@ class CrossEntropyTaskLoss(nn.Module):
             disables smoothing.
         class_weights: Per-class weights of length ``num_classes``. Registered
             as a buffer when provided.
+        ignore_index: Target value that should be ignored in loss computation.
+            Defaults to ``-1`` as a safety net for unmapped labels that leak
+            through upstream filtering.
 
     Shape:
         - ``predictions``: ``(N, num_classes)`` unnormalized logits.
@@ -34,9 +37,11 @@ class CrossEntropyTaskLoss(nn.Module):
         self,
         label_smoothing: float = 0.0,
         class_weights: list[float] | None = None,
+        ignore_index: int = -1,
     ):
         super().__init__()
         self.label_smoothing = label_smoothing
+        self.ignore_index = ignore_index
         if class_weights is not None:
             self.register_buffer(
                 "class_weights",
@@ -56,11 +61,13 @@ class CrossEntropyTaskLoss(nn.Module):
             targets.long(),
             weight=self.class_weights,
             label_smoothing=self.label_smoothing,
+            ignore_index=self.ignore_index,
             reduction="none",
         )
+        valid = targets != self.ignore_index
         if isinstance(sample_weights, torch.Tensor):
             loss = loss * sample_weights
-        return loss.mean()
+        return loss[valid].mean() if valid.any() else loss.sum() * 0.0
 
 
 class MSETaskLoss(nn.Module):
