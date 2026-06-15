@@ -21,8 +21,8 @@ head:
 
 target_extractor:
   _target_: foundry.tasks.targets.TargetExtractor
-  timestamp_key: stages.timestamps
-  value_key: stages.values
+  timestamp_key: stages.start
+  value_key: stages.id
 
 loss:
   _target_: foundry.tasks.losses.CrossEntropyTaskLoss

@@ -19,10 +19,8 @@ def _resolve_intervals_and_values(
     """Resolve label values from split intervals, falling back to the recording.
 
     The split intervals returned by ``get_sampling_intervals`` may not carry the
-    expected value field when a dataset transform renames it (e.g.
-    ``PrepareSleepStages`` maps raw ``id`` → ``values``). In that case, fetch the
-    parent label attribute from the recording and filter it by the split time
-    windows.
+    expected value field directly. In that case, fetch the parent label attribute
+    from the recording and filter it by the split time windows.
 
     Returns ``(intervals, values)`` where both are aligned, or ``(None, None)``
     if labels cannot be resolved.

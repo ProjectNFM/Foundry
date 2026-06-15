@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from foundry.data.datasets import KempSleepEDF2013
-from foundry.data.transforms import SelectEEGChannels, PrepareSleepStages
+from foundry.data.transforms import SelectEEGChannels
 from foundry.tasks.config import TaskConfig
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -21,12 +21,11 @@ class TestKempDatasetWrapper:
         assert cfg.kind == "multiclass"
         assert cfg.output_dim == 5
 
-    def test_get_required_transforms_returns_select_then_prepare(self):
+    def test_get_required_transforms_returns_select_eeg(self):
         transforms = KempSleepEDF2013.get_required_transforms("sleep_stage")
 
-        assert len(transforms) == 2
+        assert len(transforms) == 1
         assert isinstance(transforms[0], SelectEEGChannels)
-        assert isinstance(transforms[1], PrepareSleepStages)
 
     def test_get_required_transforms_empty_for_unknown_task(self):
         transforms = KempSleepEDF2013.get_required_transforms("other_task")

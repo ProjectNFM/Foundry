@@ -1,4 +1,4 @@
-"""Tests for SelectEEGChannels and PrepareSleepStages transforms."""
+"""Tests for SelectEEGChannels transform."""
 
 from __future__ import annotations
 
@@ -7,19 +7,10 @@ import pytest
 from torch_brain.data import Data, Interval, RegularTimeSeries
 from torch_brain.data.arraydict import ArrayDict
 
-from foundry.data.transforms import SelectEEGChannels, PrepareSleepStages
+from foundry.data.transforms import SelectEEGChannels
 
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
-
-
-class _Stages:
-    """Minimal stage annotation with the same interface as torch_brain LazyInterval."""
-
-    def __init__(self, ids, starts, ends):
-        self.id = np.array(ids, dtype=np.int64)
-        self.start = np.array(starts, dtype=np.float64)
-        self.end = np.array(ends, dtype=np.float64)
 
 
 def _make_channel_data(channel_ids, channel_types, n_samples=50):
@@ -37,12 +28,6 @@ def _make_channel_data(channel_ids, channel_types, n_samples=50):
         id=np.array(channel_ids),
         type=np.array(channel_types),
     )
-    return data
-
-
-def _make_stages_data(ids, starts, ends):
-    data = Data(domain=Interval(0.0, 200.0))
-    data.stages = _Stages(ids, starts, ends)
     return data
 
 
@@ -142,89 +127,3 @@ class TestSelectEEGChannels:
 
         with pytest.raises(ValueError, match="No EEG channels"):
             SelectEEGChannels()(data)
-
-
-# ─── PrepareSleepStages ──────────────────────────────────────────────────────
-
-
-class TestPrepareSleepStages:
-    def test_materializes_midpoint_timestamps(self):
-        """Midpoints = (start + end) / 2 for each stage interval."""
-        data = _make_stages_data(
-            ids=[0, 1, 2],
-            starts=[0.0, 30.0, 60.0],
-            ends=[30.0, 60.0, 90.0],
-        )
-
-        result = PrepareSleepStages()(data)
-
-        np.testing.assert_allclose(result.stages.timestamps, [15.0, 45.0, 75.0])
-
-    def test_materializes_stage_ids_as_values(self):
-        """Stage IDs are preserved as values on the output."""
-        data = _make_stages_data(
-            ids=[0, 3, 5],
-            starts=[0.0, 30.0, 60.0],
-            ends=[30.0, 60.0, 90.0],
-        )
-
-        result = PrepareSleepStages()(data)
-
-        np.testing.assert_array_equal(result.stages.values, [0, 3, 5])
-
-    def test_preserves_all_stages_including_unknown(self):
-        """Transform is structural only — does NOT filter unknown stages."""
-        data = _make_stages_data(
-            ids=[0, 6, 2],
-            starts=[0.0, 30.0, 60.0],
-            ends=[30.0, 60.0, 90.0],
-        )
-
-        result = PrepareSleepStages()(data)
-
-        np.testing.assert_array_equal(result.stages.values, [0, 6, 2])
-        assert len(result.stages.timestamps) == 3
-        assert len(result.stages.values) == 3
-
-    def test_preserves_all_ids_without_filtering(self):
-        """All stage IDs pass through; filtering is the mapping's job."""
-        data = _make_stages_data(
-            ids=[0, 6, 1, 6, 2],
-            starts=[0.0, 30.0, 60.0, 90.0, 120.0],
-            ends=[30.0, 60.0, 90.0, 120.0, 150.0],
-        )
-
-        result = PrepareSleepStages()(data)
-
-        np.testing.assert_array_equal(result.stages.values, [0, 6, 1, 6, 2])
-        assert len(result.stages.timestamps) == 5
-
-    def test_start_end_arrays_preserved(self):
-        """Start and end arrays are passed through unchanged."""
-        data = _make_stages_data(
-            ids=[3, 6, 4, 5],
-            starts=[0.0, 30.0, 60.0, 90.0],
-            ends=[30.0, 60.0, 90.0, 120.0],
-        )
-
-        result = PrepareSleepStages()(data)
-
-        np.testing.assert_array_equal(result.stages.values, [3, 6, 4, 5])
-        np.testing.assert_allclose(
-            result.stages.timestamps, [15.0, 45.0, 75.0, 105.0]
-        )
-        np.testing.assert_allclose(result.stages.start, [0.0, 30.0, 60.0, 90.0])
-        np.testing.assert_allclose(result.stages.end, [30.0, 60.0, 90.0, 120.0])
-
-    def test_handles_variable_length_intervals(self):
-        """Stage intervals of different durations (coalesced epochs) are handled."""
-        data = _make_stages_data(
-            ids=[0, 1],
-            starts=[0.0, 30630.0],
-            ends=[30630.0, 30750.0],
-        )
-
-        result = PrepareSleepStages()(data)
-
-        np.testing.assert_allclose(result.stages.timestamps, [15315.0, 30690.0])
-        np.testing.assert_array_equal(result.stages.values, [0, 1])

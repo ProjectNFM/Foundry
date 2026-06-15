@@ -174,8 +174,8 @@ class TestTaskConfigWithMapping:
             "head": {"_target_": "foundry.tasks.heads.ReadoutHead"},
             "target_extractor": {
                 "_target_": "foundry.tasks.targets.TargetExtractor",
-                "timestamp_key": "stages.timestamps",
-                "value_key": "stages.values",
+                "timestamp_key": "stages.start",
+                "value_key": "stages.id",
             },
             "loss": {"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
             "classification_mapping": {
@@ -303,13 +303,13 @@ class TestTargetExtractorWithMapping:
 
         @dataclass
         class _Stages:
-            timestamps: np.ndarray
-            values: np.ndarray
+            start: np.ndarray
+            id: np.ndarray
 
         data = Data(
             stages=_Stages(
-                timestamps=np.array([0.0, 1.0, 2.0, 3.0]),
-                values=np.array([0, 1, 4, 5], dtype=np.int64),
+                start=np.array([0.0, 1.0, 2.0, 3.0]),
+                id=np.array([0, 1, 4, 5], dtype=np.int64),
             )
         )
 
@@ -317,8 +317,8 @@ class TestTargetExtractorWithMapping:
             raw_to_mapped={0: 0, 1: 1, 2: 2, 3: 3, 4: 3, 5: 4}
         )
         extractor = TargetExtractor(
-            timestamp_key="stages.timestamps",
-            value_key="stages.values",
+            timestamp_key="stages.start",
+            value_key="stages.id",
             classification_mapping=mapping,
         )
         result = extractor(data)
@@ -334,20 +334,20 @@ class TestTargetExtractorWithMapping:
 
         @dataclass
         class _Stages:
-            timestamps: np.ndarray
-            values: np.ndarray
+            start: np.ndarray
+            id: np.ndarray
 
         data = Data(
             stages=_Stages(
-                timestamps=np.array([0.0, 1.0]),
-                values=np.array([0, 99], dtype=np.int64),
+                start=np.array([0.0, 1.0]),
+                id=np.array([0, 99], dtype=np.int64),
             )
         )
 
         mapping = ClassificationMapping(raw_to_mapped={0: 0, 1: 1})
         extractor = TargetExtractor(
-            timestamp_key="stages.timestamps",
-            value_key="stages.values",
+            timestamp_key="stages.start",
+            value_key="stages.id",
             classification_mapping=mapping,
         )
         with pytest.raises(ValueError, match="undeclared raw"):
@@ -515,8 +515,8 @@ class TestValidateTaskMappings:
             head={"_target_": "foundry.tasks.heads.ReadoutHead"},
             target_extractor={
                 "_target_": "foundry.tasks.targets.TargetExtractor",
-                "timestamp_key": "stages.timestamps",
-                "value_key": "stages.values",
+                "timestamp_key": "stages.start",
+                "value_key": "stages.id",
             },
             loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
             classification_mapping=mapping,
@@ -543,8 +543,8 @@ class TestValidateTaskMappings:
             head={"_target_": "foundry.tasks.heads.ReadoutHead"},
             target_extractor={
                 "_target_": "foundry.tasks.targets.TargetExtractor",
-                "timestamp_key": "stages.timestamps",
-                "value_key": "stages.values",
+                "timestamp_key": "stages.start",
+                "value_key": "stages.id",
             },
             loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
             classification_mapping=mapping,

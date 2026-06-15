@@ -41,10 +41,7 @@ class KempSleepEDF2013(_TorchBrainKempSleepEDF2013):
     @classmethod
     def get_required_transforms(cls, task_type: str) -> list:
         if task_type == "sleep_stage":
-            from foundry.data.transforms import (
-                SelectEEGChannels,
-                PrepareSleepStages,
-            )
+            from foundry.data.transforms import SelectEEGChannels
 
-            return [SelectEEGChannels(), PrepareSleepStages()]
+            return [SelectEEGChannels()]
         return []
