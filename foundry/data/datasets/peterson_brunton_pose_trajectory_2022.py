@@ -8,6 +8,7 @@ from torch_brain.data import Interval
 from torch_brain.datasets import Dataset, MultiChannelDatasetMixin
 
 from foundry.tasks.config import TaskConfig
+from foundry.tasks.adaptation import TaskClassSchema
 
 from .mixins import TaskMixin
 
@@ -209,6 +210,25 @@ class PetersonBruntonPoseTrajectory2022(TaskMixin, _BasePetersonBrunton):
         "active_vs_inactive": ["ajile_inactive_active"],
         "behavior": ["ajile_active_behavior"],
         "pose_estimation": ["ajile_pose_estimation"],
+    }
+    TASK_CLASS_SCHEMAS = {
+        "ajile_active_behavior": TaskClassSchema(
+            vocabulary=ACTIVE_BEHAVIOR_TO_ID,
+            interval_filter_field="behavior_id",
+            interval_filter_mode="ids",
+            grouping_presets=None,
+            group_order=None,
+            display_name_formatter=None,
+        ),
+        "ajile_inactive_active": TaskClassSchema(
+            vocabulary=ACTIVE_VS_INACTIVE_TO_ID,
+            interval_filter_field="behavior_id",
+            interval_filter_mode="ids",
+            grouping_presets=None,
+            group_order=None,
+            display_name_formatter=None,
+        ),
+        # pose_estimation: no schema (regression task)
     }
 
     @classmethod

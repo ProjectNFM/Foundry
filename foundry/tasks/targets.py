@@ -49,10 +49,33 @@ class TargetExtractor:
         values = data.get_nested_attribute(self.value_key)
 
         if self.label_map is not None:
-            mapped = np.empty_like(values)
+            # Initialize mapped array with -1 sentinel to catch unmapped values
+            mapped = np.full_like(values, -1, dtype=np.int64)
+            any_mapped = False
             for src, dst in self.label_map.items():
-                mapped[values == src] = dst
-            values = mapped
+                mask = values == src
+                if np.any(mask):
+                    mapped[mask] = dst
+                    any_mapped = True
+
+            if any_mapped:
+                # Check for unmapped values (sentinel -1)
+                unmapped_mask = mapped == -1
+                if np.any(unmapped_mask):
+                    unmapped_ids = np.unique(values[unmapped_mask])
+                    raise ValueError(
+                        f"Found {np.sum(unmapped_mask)} samples with unmapped label IDs: "
+                        f"{unmapped_ids}. Label mapping is incomplete. "
+                        f"Configured mapping: {self.label_map}"
+                    )
+                values = mapped.astype(values.dtype)
+            else:
+                # No labels matched - raise error rather than silently using -1
+                found_ids = np.unique(values)
+                raise ValueError(
+                    f"No labels found in data matching label_map keys. "
+                    f"Data contains: {found_ids}, Label map: {self.label_map}"
+                )
 
         if values.dtype == np.float64:
             values = values.astype(np.float32)
