@@ -4,6 +4,9 @@ defaults:
   - override /model: eegnet
   - override /data: kemp_sleep_edf/singlesess
 
+task_configs:
+  - sleep_stage_5class
+
 model:
   num_channels: 2
   num_samples: 3000

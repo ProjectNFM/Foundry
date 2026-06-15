@@ -5,6 +5,9 @@ defaults:
   - override /data: kemp_sleep_edf/singlesess
   - override /model/tokenizer: per_channel_cwt
 
+task_configs:
+  - sleep_stage_5class
+
 model:
   zero_output_timestamps: true
 

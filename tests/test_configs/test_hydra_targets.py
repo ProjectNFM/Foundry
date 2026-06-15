@@ -10,9 +10,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 
-from foundry.data.datasets.peterson_brunton_pose_trajectory_2022 import (
-    PetersonBruntonPoseTrajectory2022,
-)
+from foundry.tasks.config import TaskConfig
 from tests.test_configs.conftest import (
     CONFIGS_ROOT,
     load_resolved_config,
@@ -92,9 +90,11 @@ def _instantiate_node(yaml_path: Path, target_path: str) -> Any:
     kwargs: dict[str, Any] = {}
     target = node.get("_target_", "")
 
-    task_configs = PetersonBruntonPoseTrajectory2022.get_tasks_for_experiment(
-        "behavior"
-    )
+    task_configs = {
+        "ajile_active_behavior": TaskConfig.from_yaml(
+            CONFIGS_ROOT / "tasks" / "ajile_active_behavior.yaml"
+        )
+    }
 
     if "FoundryModule" in target:
         from foundry.models.readout import ReadoutRouter
@@ -138,8 +138,6 @@ def _instantiate_node(yaml_path: Path, target_path: str) -> Any:
             pytest.skip(
                 "POYO root requires composed tokenizer; see dedicated test"
             )
-        from foundry.tasks.config import TaskConfig
-
         kwargs["task_configs"] = {
             "ajile_inactive_active": TaskConfig.from_yaml(
                 CONFIGS_ROOT / "tasks" / "ajile_inactive_active.yaml"

@@ -155,16 +155,13 @@ class NeuralDataModule(LightningDataModule):
     ) -> dict[str, list[float]]:
         if self.dataset is None:
             raise RuntimeError("Call setup() before compute_class_weights()")
-        if self.task_type is None:
+        if not self._task_configs:
             raise ValueError(
-                "task_type must be set to compute class weights automatically"
+                "task_configs must be provided to compute class weights"
             )
 
-        task_configs = self.dataset_class.get_tasks_for_experiment(
-            self.task_type
-        )
         return compute_class_weights_for_tasks(
-            task_configs, self.dataset, split="train", smoothing=smoothing
+            self._task_configs, self.dataset, split="train", smoothing=smoothing
         )
 
     def get_recording_ids(self) -> list[str]:

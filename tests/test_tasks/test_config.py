@@ -258,4 +258,28 @@ EXPECTED_TASK_SPECS = {
         "timestamp_key": "acoustic_stim_trials.timestamps",
         "value_key": "acoustic_stim_trials.behavior_ids",
     },
+    "neurosoft_acoustic_stim_2band": {
+        "output_dim": 2,
+        "kind": "binary",
+        "timestamp_key": "acoustic_stim_trials.timestamps",
+        "value_key": "acoustic_stim_trials.behavior_ids",
+    },
+    "neurosoft_acoustic_stim_2band_rnd_a": {
+        "output_dim": 2,
+        "kind": "binary",
+        "timestamp_key": "acoustic_stim_trials.timestamps",
+        "value_key": "acoustic_stim_trials.behavior_ids",
+    },
+    "neurosoft_acoustic_stim_2band_rnd_b": {
+        "output_dim": 2,
+        "kind": "binary",
+        "timestamp_key": "acoustic_stim_trials.timestamps",
+        "value_key": "acoustic_stim_trials.behavior_ids",
+    },
+    "neurosoft_acoustic_stim_3band": {
+        "output_dim": 3,
+        "kind": "multiclass",
+        "timestamp_key": "acoustic_stim_trials.timestamps",
+        "value_key": "acoustic_stim_trials.behavior_ids",
+    },
 }

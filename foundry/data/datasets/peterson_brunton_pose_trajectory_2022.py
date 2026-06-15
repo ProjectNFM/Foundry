@@ -7,10 +7,6 @@ import numpy as np
 from torch_brain.data import Interval
 from torch_brain.datasets import Dataset, MultiChannelDatasetMixin
 
-from foundry.tasks.config import TaskConfig
-
-from .mixins import TaskMixin
-
 logger = logging.getLogger(__name__)
 
 ACTIVE_BEHAVIOR_LABELS = [
@@ -42,8 +38,6 @@ PetersonBruntonTaskType = Literal[
 VALID_SPLIT_TYPES = get_args(PetersonBruntonSplitType)
 VALID_TASK_TYPES = get_args(PetersonBruntonTaskType)
 N_FOLDS = 3
-
-_TASKS_DIR = Path(__file__).resolve().parents[3] / "configs" / "tasks"
 
 
 def _empty_interval() -> Interval:
@@ -187,29 +181,8 @@ class _BasePetersonBrunton(MultiChannelDatasetMixin, Dataset):
         return result
 
 
-def _load_ajile_tasks() -> dict[str, TaskConfig]:
-    return {
-        "ajile_active_behavior": TaskConfig.from_yaml(
-            _TASKS_DIR / "ajile_active_behavior.yaml"
-        ),
-        "ajile_inactive_active": TaskConfig.from_yaml(
-            _TASKS_DIR / "ajile_inactive_active.yaml"
-        ),
-        "ajile_pose_estimation": TaskConfig.from_yaml(
-            _TASKS_DIR / "ajile_pose_estimation.yaml"
-        ),
-    }
-
-
-class PetersonBruntonPoseTrajectory2022(TaskMixin, _BasePetersonBrunton):
-    """Foundry wrapper for AJILE with task-config registration."""
-
-    AVAILABLE_TASKS = _load_ajile_tasks()
-    TASK_TO_READOUT = {
-        "active_vs_inactive": ["ajile_inactive_active"],
-        "behavior": ["ajile_active_behavior"],
-        "pose_estimation": ["ajile_pose_estimation"],
-    }
+class PetersonBruntonPoseTrajectory2022(_BasePetersonBrunton):
+    """Foundry wrapper for AJILE."""
 
     @classmethod
     def get_required_transforms(cls, task_type):

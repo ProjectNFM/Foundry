@@ -10,7 +10,7 @@ This document examines the flaws in how `ClassificationMapping` is currently wir
 ┌──────────────────────────────────────────────────────────────────────────────────┐
 │                           STARTUP (main.py)                                       │
 │                                                                                  │
-│  DatasetClass.get_tasks_for_experiment(task_type)                                │
+│  _load_task_configs(cfg)                                                         │
 │       └──► TaskConfig (with classification_mapping from YAML)                    │
 │                │                                                                 │
 │                ├──► _apply_auto_class_weights() → class_weights.py               │
@@ -165,9 +165,7 @@ If `t = -1`, this indexes `counts[-1, p]` — the **last row** of the matrix —
 
 ### Flaw 8: The Datamodule Doesn't Know Its Own Task Configs
 
-`NeuralDataModule` receives `task_type` and can resolve dataset-level task configs at weight-computation time via `dataset_class.get_tasks_for_experiment()`. But it does this **only for class weights** — it doesn't use the mapping information for interval filtering in `_create_dataloader()`.
-
-The task configs (with their mappings) are threaded through `main.py` → model → tokenizer, but the datamodule is left unaware. This creates an asymmetry: the model side knows what labels are valid, but the sampling side doesn't.
+**Status: Fixed.** `NeuralDataModule` now receives `task_configs` directly from `main.py` and uses them for both class weight computation (`compute_class_weights`) and interval filtering (`_filter_intervals`). The `TaskMixin` and `get_tasks_for_experiment` indirection have been removed — task configs are loaded directly from YAML by `main.py._load_task_configs()`.
 
 ---
 

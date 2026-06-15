@@ -184,15 +184,19 @@ def _resolve_dataset_class(cfg: DictConfig):
     return dataset_class
 
 
-def _resolve_task_type(cfg: DictConfig) -> str:
-    task_type = OmegaConf.select(cfg, "data.dataset_kwargs.task_type")
-    if task_type is None:
-        task_type = OmegaConf.select(cfg, "data.task_type")
-    return task_type
+_TASKS_DIR = Path(__file__).resolve().parent / "configs" / "tasks"
 
 
-def _uses_task_configs(DatasetClass) -> bool:
-    return hasattr(DatasetClass, "get_tasks_for_experiment")
+def _load_task_configs(cfg: DictConfig) -> dict:
+    from foundry.tasks.config import TaskConfig
+
+    names = OmegaConf.to_container(cfg.task_configs, resolve=True)
+    configs = {}
+    for name in names:
+        path = _TASKS_DIR / f"{name}.yaml"
+        tc = TaskConfig.from_yaml(path)
+        configs[tc.name] = tc
+    return configs
 
 
 def _apply_auto_class_weights(
@@ -217,23 +221,13 @@ def _apply_auto_class_weights(
 def _build_model_and_data(cfg: DictConfig):
     _populate_data_driven_hyperparams(cfg)
 
-    DatasetClass = _resolve_dataset_class(cfg)
-    task_type = _resolve_task_type(cfg)
-
-    if not _uses_task_configs(DatasetClass):
-        raise ValueError(
-            f"{DatasetClass.__name__} must implement get_tasks_for_experiment"
-        )
-
-    task_configs = DatasetClass.get_tasks_for_experiment(task_type)
+    task_configs = _load_task_configs(cfg)
     normalize_data_config(cfg.data)
     datamodule = instantiate(
         cfg.data, tokenizer=None, task_configs=task_configs
     )
     task_configs = _apply_auto_class_weights(cfg, datamodule, task_configs)
 
-    # Build the model outside Hydra's recursive instantiate to avoid eager
-    # instantiation of _target_ dicts inside task configs (heads, losses, etc.).
     ModelClass = get_class(cfg.model._target_)
     model_kwargs = {
         k: instantiate(v) if OmegaConf.is_config(v) else v

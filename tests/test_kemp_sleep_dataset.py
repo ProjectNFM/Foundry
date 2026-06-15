@@ -2,30 +2,22 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 
 from foundry.data.datasets import KempSleepEDF2013
-from foundry.data.datasets.mixins import TaskMixin
 from foundry.data.transforms import SelectEEGChannels, PrepareSleepStages
 from foundry.tasks.config import TaskConfig
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+TASKS_DIR = REPO_ROOT / "configs" / "tasks"
+
 
 class TestKempDatasetWrapper:
-    def test_uses_task_mixin(self):
-        assert issubclass(KempSleepEDF2013, TaskMixin)
-
-    def test_sleep_stage_5class_in_available_tasks(self):
-        assert "sleep_stage_5class" in KempSleepEDF2013.AVAILABLE_TASKS
-
-    def test_sleep_stage_maps_to_sleep_stage_5class(self):
-        task_configs = KempSleepEDF2013.get_tasks_for_experiment("sleep_stage")
-
-        assert set(task_configs.keys()) == {"sleep_stage_5class"}
-
-    def test_sleep_stage_task_config_is_multiclass_five(self):
-        task_configs = KempSleepEDF2013.get_tasks_for_experiment("sleep_stage")
-        cfg = task_configs["sleep_stage_5class"]
+    def test_sleep_stage_5class_task_config_loads(self):
+        cfg = TaskConfig.from_yaml(TASKS_DIR / "sleep_stage_5class.yaml")
 
         assert isinstance(cfg, TaskConfig)
+        assert cfg.name == "sleep_stage_5class"
         assert cfg.kind == "multiclass"
         assert cfg.output_dim == 5
 

@@ -4,12 +4,14 @@ defaults:
   - override /model: poyo_eeg
   - override /data: neurosoft_minipigs/singlesess
 
+task_configs:
+  - neurosoft_on_vs_off
+
 model:
   zero_output_timestamps: true
 
 data:
   split_type: intrasession-causal
-  task_type: on_vs_off
 
 run:
   name: neurosoft_minipigs_2026_poyo_eeg_classifier

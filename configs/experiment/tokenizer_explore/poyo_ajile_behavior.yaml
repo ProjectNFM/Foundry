@@ -6,6 +6,9 @@ defaults:
   - override /model/tokenizer: spatial_session_cwt
   - override /hydra/launcher: slurm_default
 
+task_configs:
+  - ajile_active_behavior
+
 model:
   zero_output_timestamps: true
 

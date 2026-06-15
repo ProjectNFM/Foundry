@@ -10,7 +10,6 @@ sequence_length: ${hyperparameters.sequence_length}
 seed: 42
 
 split_type: ???
-task_type: ???
 
 dataset_kwargs:
   fold: ${hyperparameters.fold_number}

@@ -5,6 +5,9 @@ defaults:
   - override /data: ajile/allsess
   - override /model/tokenizer: spatial_session_cwt
 
+task_configs:
+  - ajile_active_behavior
+
 model:
   zero_output_timestamps: true
 
