@@ -340,7 +340,7 @@ class POYOEEGModel(nn.Module):
             len(output_timestamps), input_session_index
         )
 
-        return {
+        output = {
             **pretokenized,
             "input_timestamps": input_timestamps,
             "input_session_index": input_session_index,
@@ -355,6 +355,9 @@ class POYOEEGModel(nn.Module):
             "absolute_start": data.absolute_start,
             "eval_mask": chain(output_eval_mask, allow_missing_keys=True),
         }
+        if hasattr(data, "source_id"):
+            output["source_id"] = data.source_id
+        return output
 
     def initialize_vocabs(self, vocab_info: dict):
         """Initialize vocabularies from dataset information.

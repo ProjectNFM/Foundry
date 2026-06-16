@@ -183,7 +183,7 @@ class BaselineEEGModel(nn.Module):
             self.readout_specs,
         )
 
-        return {
+        output = {
             "input_values": pad2d(x),
             "output_decoder_index": pad8(output_task_index),
             "target_values": chain(output_values, allow_missing_keys=True),
@@ -192,6 +192,9 @@ class BaselineEEGModel(nn.Module):
             "absolute_start": float(data.absolute_start),
             "eval_mask": chain(output_eval_mask, allow_missing_keys=True),
         }
+        if hasattr(data, "source_id"):
+            output["source_id"] = data.source_id
+        return output
 
     def unpack_batch(self, batch: Dict[str, Any]) -> tuple:
         """Extract model inputs and targets from batch.

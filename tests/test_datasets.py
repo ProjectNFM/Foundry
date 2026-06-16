@@ -13,10 +13,12 @@ from foundry.data.datasets import (
 from foundry.data.datasets.mixins import EEGDatasetMixin
 from foundry.data.datamodules.neurosoft import (
     AddNeurosoftLogFrequencyTargets,
+    AddNeurosoftSourceId,
     LOGFREQ_NORMALIZE_MEAN,
     LOGFREQ_NORMALIZE_STD,
     NeurosoftDataModule,
     NeurosoftMinipigs2026DataModule,
+    NeurosoftMonkeys2026DataModule,
     NeurosoftMinipigsMonkeys2026,
     filter_acoustic_stim_tone_intervals,
 )
@@ -122,6 +124,30 @@ class TestNeurosoftMinipigsMonkeys2026:
 
 
 class TestNeurosoftLogFrequencyRegression:
+    def test_single_species_datamodules_add_source_id_transform(self):
+        minipigs = NeurosoftMinipigs2026DataModule(
+            root="/tmp/data",
+            task_type="acoustic_stim",
+            split_type="intrasession-causal",
+        )
+        monkeys = NeurosoftMonkeys2026DataModule(
+            root="/tmp/data",
+            task_type="acoustic_stim",
+            split_type="intrasession-causal",
+        )
+
+        assert isinstance(minipigs.transform[0], AddNeurosoftSourceId)
+        assert minipigs.transform[0].source_id == "minipigs"
+        assert isinstance(monkeys.transform[0], AddNeurosoftSourceId)
+        assert monkeys.transform[0].source_id == "monkeys"
+
+    def test_source_id_transform_attaches_source_id_to_data(self):
+        data = Data(domain=Interval(0.0, 1.0))
+
+        transformed = AddNeurosoftSourceId("minipigs")(data)
+
+        assert transformed.source_id == "minipigs"
+
     def test_logfreq_modality_is_registered(self):
         spec = MODALITY_REGISTRY["neurosoft_acoustic_stim_logfreq"]
 
@@ -149,7 +175,10 @@ class TestNeurosoftLogFrequencyRegression:
         assert datamodule.task_type == "acoustic_stim_logfreq"
         assert datamodule.dataset_kwargs["task_type"] == "acoustic_stim"
         assert isinstance(
-            datamodule.transform[0], AddNeurosoftLogFrequencyTargets
+            datamodule.transform[0], AddNeurosoftSourceId
+        )
+        assert isinstance(
+            datamodule.transform[1], AddNeurosoftLogFrequencyTargets
         )
 
     def test_logfreq_transform_filters_white_noise_and_adds_targets(self):

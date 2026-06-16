@@ -1,6 +1,7 @@
 _target_: lightning.pytorch.loggers.WandbLogger
 name: ${run.name}
-project: foundry
+project: foundry-pingsheng
+entity: neurosoft-bioelectronics
 save_dir: ${oc.env:SCRATCH,./outputs}
 offline: false
 log_model: false

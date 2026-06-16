@@ -18,6 +18,17 @@ from foundry.data.datamodules.base import NeuralDataModule
 LOGFREQ_TASK = "acoustic_stim_logfreq"
 
 
+class AddNeurosoftSourceId:
+    """Attach the Neurosoft source label to each sample before tokenization."""
+
+    def __init__(self, source_id: str):
+        self.source_id = source_id
+
+    def __call__(self, data):
+        data.source_id = self.source_id
+        return data
+
+
 def _neurosoft_dataset_task_type(task_type: Optional[str]) -> Optional[str]:
     if task_type == LOGFREQ_TASK:
         return "acoustic_stim"
@@ -138,6 +149,19 @@ def _prepend_logfreq_transform(
     return [AddNeurosoftLogFrequencyTargets(), *(transforms or [])]
 
 
+def _prepend_neurosoft_transforms(
+    transforms: Optional[list[Callable]],
+    task_type: Optional[str],
+    source_id: Optional[str] = None,
+) -> Optional[list[Callable]]:
+    transform_list = list(transforms or [])
+    if task_type == LOGFREQ_TASK:
+        transform_list.insert(0, AddNeurosoftLogFrequencyTargets())
+    if source_id is not None:
+        transform_list.insert(0, AddNeurosoftSourceId(source_id))
+    return transform_list or None
+
+
 class NeurosoftMinipigsMonkeys2026:
     """Combined Neurosoft minipig + monkey dataset with namespaced ids."""
 
@@ -192,7 +216,7 @@ class NeurosoftMinipigsMonkeys2026:
         source, inner_recording_id = self._split_recording_id(
             index.recording_id
         )
-        return self.datasets[source][
+        sample = self.datasets[source][
             DatasetIndex(
                 inner_recording_id,
                 index.start,
@@ -200,6 +224,9 @@ class NeurosoftMinipigsMonkeys2026:
                 _namespace=source,
             )
         ]
+        if isinstance(sample, dict):
+            sample["source_id"] = source
+        return sample
 
     def get_recording(self, recording_id: str, _namespace: str = ""):
         source, inner_recording_id = self._split_recording_id(recording_id)
@@ -275,9 +302,12 @@ class NeurosoftDataModule(NeuralDataModule):
         ] = "on_vs_off",
         fold_number: Optional[int] = 0,
         recording_ids: Optional[list[str]] = None,
+        source_id: Optional[str] = None,
     ):
         dataset_task_type = _neurosoft_dataset_task_type(task_type)
-        transforms = _prepend_logfreq_transform(transforms, task_type)
+        transforms = _prepend_neurosoft_transforms(
+            transforms, task_type, source_id
+        )
         dataset_kwargs = {
             "recording_ids": recording_ids,
             "split_type": split_type,
@@ -317,12 +347,20 @@ class NeurosoftDataModule(NeuralDataModule):
 
 class NeurosoftMinipigs2026DataModule(NeurosoftDataModule):
     def __init__(self, **kwargs):
-        super().__init__(dataset_class=NeurosoftMinipigs2026, **kwargs)
+        super().__init__(
+            dataset_class=NeurosoftMinipigs2026,
+            source_id="minipigs",
+            **kwargs,
+        )
 
 
 class NeurosoftMonkeys2026DataModule(NeurosoftDataModule):
     def __init__(self, **kwargs):
-        super().__init__(dataset_class=NeurosoftMonkeys2026, **kwargs)
+        super().__init__(
+            dataset_class=NeurosoftMonkeys2026,
+            source_id="monkeys",
+            **kwargs,
+        )
 
 
 class NeurosoftMinipigsMonkeys2026DataModule(NeurosoftDataModule):
@@ -353,7 +391,7 @@ class NeurosoftMinipigsMonkeys2026DataModule(NeurosoftDataModule):
         monkeys_recording_ids: Optional[list[str]] = None,
     ):
         dataset_task_type = _neurosoft_dataset_task_type(task_type)
-        transforms = _prepend_logfreq_transform(transforms, task_type)
+        transforms = _prepend_neurosoft_transforms(transforms, task_type)
         dataset_kwargs = {
             "minipigs_recording_ids": minipigs_recording_ids,
             "monkeys_recording_ids": monkeys_recording_ids,

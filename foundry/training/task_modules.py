@@ -110,6 +110,7 @@ class BaseMultitaskModule(L.LightningModule):
         task_name: str,
         metric_preds: torch.Tensor,
         metric_target: torch.Tensor,
+        source_ids: list[str | None] | None = None,
     ) -> None:
         return None
 
@@ -143,9 +144,14 @@ class BaseMultitaskModule(L.LightningModule):
         return self._shared_step("val", batch)
 
     def _shared_step(self, stage: str, batch: Dict[str, Any]) -> torch.Tensor:
-        model_inputs, target_values, target_weights, output_decoder_index = (
-            self._unpack_batch(batch)
-        )
+        (
+            model_inputs,
+            target_values,
+            target_weights,
+            output_decoder_index,
+            session_ids,
+            sequence_source_ids,
+        ) = self._unpack_batch(batch)
         outputs = self.model(**model_inputs, unpack_output=False)
 
         total_loss, taskwise_loss = self._compute_multitask_loss(
@@ -172,8 +178,14 @@ class BaseMultitaskModule(L.LightningModule):
             )
 
             if stage == "val":
+                source_ids = self._source_ids_for_task(
+                    session_ids,
+                    output_decoder_index,
+                    task_name,
+                    sequence_source_ids,
+                )
                 self._update_validation_task_state(
-                    task_name, metric_preds, metric_target
+                    task_name, metric_preds, metric_target, source_ids
                 )
 
         return total_loss
@@ -230,12 +242,97 @@ class BaseMultitaskModule(L.LightningModule):
     def _unpack_batch(self, batch: Dict[str, Any]):
         target_values = batch.pop("target_values")
         target_weights = batch.pop("target_weights")
-        batch.pop("session_id", None)
+        session_ids = batch.pop("session_id", None)
+        sequence_source_ids = batch.pop("source_id", None)
         batch.pop("absolute_start", None)
         batch.pop("eval_mask", None)
 
         output_decoder_index = batch["output_decoder_index"]
-        return batch, target_values, target_weights, output_decoder_index
+        return (
+            batch,
+            target_values,
+            target_weights,
+            output_decoder_index,
+            session_ids,
+            sequence_source_ids,
+        )
+
+    def _source_ids_for_task(
+        self,
+        session_ids: list[str] | None,
+        output_decoder_index: torch.Tensor,
+        task_name: str,
+        sequence_source_ids: list[str] | None = None,
+    ) -> list[str | None] | None:
+        spec = self.model.readout_specs[task_name]
+        if not hasattr(spec, "id"):
+            return None
+
+        if output_decoder_index.ndim != 2:
+            return None
+
+        batch_size = output_decoder_index.shape[0]
+        explicit_sources = self._normalize_sequence_source_ids(
+            sequence_source_ids, batch_size
+        )
+        session_sources = self._sources_from_session_ids(
+            session_ids, batch_size
+        )
+
+        if explicit_sources is None and session_sources is None:
+            return None
+
+        source_by_sequence = [
+            explicit_source or session_source
+            for explicit_source, session_source in zip(
+                explicit_sources or [None] * batch_size,
+                session_sources or [None] * batch_size,
+            )
+        ]
+        if all(source is None for source in source_by_sequence):
+            return None
+
+        task_mask = (output_decoder_index == spec.id).detach().cpu()
+        source_ids: list[str | None] = []
+        for batch_idx, source in enumerate(source_by_sequence):
+            source_ids.extend([source] * int(task_mask[batch_idx].sum()))
+
+        return source_ids
+
+    @staticmethod
+    def _normalize_sequence_source_ids(
+        sequence_source_ids: list[str] | None,
+        batch_size: int,
+    ) -> list[str | None] | None:
+        if sequence_source_ids is None:
+            return None
+        if len(sequence_source_ids) != batch_size:
+            return None
+        return [
+            str(source_id) if source_id is not None else None
+            for source_id in sequence_source_ids
+        ]
+
+    @classmethod
+    def _sources_from_session_ids(
+        cls,
+        session_ids: list[str] | None,
+        batch_size: int,
+    ) -> list[str | None] | None:
+        if session_ids is None or len(session_ids) != batch_size:
+            return None
+        return [
+            cls._source_from_session_id(session_id)
+            for session_id in session_ids
+        ]
+
+    @staticmethod
+    def _source_from_session_id(session_id: object) -> str | None:
+        session_id = str(session_id)
+        if "/" not in session_id:
+            return None
+        source, _ = session_id.split("/", 1)
+        return source or None
 
     def _compute_multitask_loss(
         self,
@@ -295,6 +392,9 @@ class RegressionModule(BaseMultitaskModule):
         self.val_prediction_cache: dict[
             str, list[tuple[torch.Tensor, torch.Tensor]]
         ] = {}
+        self.val_source_prediction_cache: dict[
+            str, dict[str, list[tuple[torch.Tensor, torch.Tensor]]]
+        ] = {}
         self._initialize_task_modules()
         self.save_hyperparameters(
             ignore=["model", "class_names", "class_weights"]
@@ -308,6 +408,7 @@ class RegressionModule(BaseMultitaskModule):
     def _initialize_task_state(self, task_name: str, spec: Any) -> None:
         if spec.dim == 1:
             self.val_prediction_cache[task_name] = []
+            self.val_source_prediction_cache[task_name] = {}
 
     def _metric_summary_mode(self, metric_name: str) -> str:
         return "max" if metric_name.endswith("_r2") else "min"
@@ -327,16 +428,40 @@ class RegressionModule(BaseMultitaskModule):
         task_name: str,
         metric_preds: torch.Tensor,
         metric_target: torch.Tensor,
+        source_ids: list[str | None] | None = None,
     ) -> None:
         if task_name not in self.val_prediction_cache:
             return
 
+        predictions = metric_preds.detach().float().cpu().reshape(-1, 1)
+        targets = metric_target.detach().float().cpu().reshape(-1, 1)
         self.val_prediction_cache[task_name].append(
-            (
-                metric_preds.detach().float().cpu().reshape(-1, 1),
-                metric_target.detach().float().cpu().reshape(-1, 1),
-            )
+            (predictions, targets)
         )
+        self._update_source_prediction_cache(
+            task_name, predictions, targets, source_ids
+        )
+
+    def _update_source_prediction_cache(
+        self,
+        task_name: str,
+        predictions: torch.Tensor,
+        targets: torch.Tensor,
+        source_ids: list[str | None] | None,
+    ) -> None:
+        if source_ids is None or len(source_ids) != len(predictions):
+            return
+
+        source_cache = self.val_source_prediction_cache[task_name]
+        for source in sorted({source for source in source_ids if source}):
+            mask = torch.tensor(
+                [item == source for item in source_ids], dtype=torch.bool
+            )
+            if not torch.any(mask):
+                continue
+            source_cache.setdefault(source, []).append(
+                (predictions[mask], targets[mask])
+            )
 
     def _on_validation_epoch_end_task(self, task_name: str) -> None:
         if task_name not in self.val_prediction_cache:
@@ -382,7 +507,69 @@ class RegressionModule(BaseMultitaskModule):
                 )
 
         plt.close(fig)
+        self._log_source_regression_reports(task_name)
         self.val_prediction_cache[task_name] = []
+        self.val_source_prediction_cache[task_name] = {}
+
+    def _log_source_regression_reports(self, task_name: str) -> None:
+        source_cache = self.val_source_prediction_cache.get(task_name, {})
+        if not source_cache:
+            return
+
+        import matplotlib.pyplot as plt
+        from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
+
+        for source, cached in sorted(source_cache.items()):
+            if not cached:
+                continue
+
+            predictions = torch.cat(
+                [pred for pred, _ in cached], dim=0
+            ).flatten()
+            targets = torch.cat(
+                [target for _, target in cached], dim=0
+            ).flatten()
+            finite_mask = torch.isfinite(predictions) & torch.isfinite(targets)
+            predictions = predictions[finite_mask]
+            targets = targets[finite_mask]
+            if predictions.numel() == 0:
+                continue
+
+            prefix = f"val/{source}/{task_name}"
+            mse = torch.mean((targets - predictions) ** 2)
+            mae = torch.mean(torch.abs(targets - predictions))
+            r2_score = self._compute_scalar_r2(predictions, targets)
+            self.log(f"{prefix}_mse", mse, prog_bar=False, logger=True)
+            self.log(f"{prefix}_mae", mae, prog_bar=False, logger=True)
+            self.log(
+                f"{prefix}_r2",
+                predictions.new_tensor(r2_score),
+                prog_bar=False,
+                logger=True,
+            )
+
+            if not self.logger:
+                continue
+
+            fig = self._plot_regression_predictions(
+                predictions=predictions,
+                targets=targets,
+                task_name=f"{source}/{task_name}",
+                r2_score=r2_score,
+            )
+            if isinstance(self.logger, WandbLogger):
+                import wandb
+
+                self.logger.experiment.log(
+                    {f"{prefix}_prediction_scatter": wandb.Image(fig)}
+                )
+            elif isinstance(self.logger, TensorBoardLogger):
+                self.logger.experiment.add_figure(
+                    f"{prefix}_prediction_scatter",
+                    fig,
+                    self.current_epoch,
+                )
+            plt.close(fig)
 
     def _denormalize_regression_values(
         self,
@@ -482,6 +669,9 @@ class ClassificationModule(BaseMultitaskModule):
                 )
 
         self.val_confusion_matrices = nn.ModuleDict()
+        self.val_source_prediction_cache: dict[
+            str, dict[str, list[tuple[torch.Tensor, torch.Tensor]]]
+        ] = {}
         self._initialize_task_modules()
         self.save_hyperparameters(ignore=["model"])
 
@@ -495,6 +685,7 @@ class ClassificationModule(BaseMultitaskModule):
         self.val_confusion_matrices[task_name] = ConfusionMatrix(
             task=task_type, num_classes=spec.dim
         )
+        self.val_source_prediction_cache[task_name] = {}
 
     def _prepare_metric_inputs(
         self,
@@ -529,6 +720,27 @@ class ClassificationModule(BaseMultitaskModule):
 
         return target, weights
 
+    def _update_source_prediction_cache(
+        self,
+        task_name: str,
+        predictions: torch.Tensor,
+        targets: torch.Tensor,
+        source_ids: list[str | None] | None,
+    ) -> None:
+        if source_ids is None or len(source_ids) != len(targets):
+            return
+
+        source_cache = self.val_source_prediction_cache[task_name]
+        for source in sorted({source for source in source_ids if source}):
+            mask = torch.tensor(
+                [item == source for item in source_ids], dtype=torch.bool
+            )
+            if not torch.any(mask):
+                continue
+            source_cache.setdefault(source, []).append(
+                (predictions[mask], targets[mask])
+            )
+
     def _metric_summary_mode(self, metric_name: str) -> str:
         return "max"
 
@@ -537,9 +749,15 @@ class ClassificationModule(BaseMultitaskModule):
         task_name: str,
         metric_preds: torch.Tensor,
         metric_target: torch.Tensor,
+        source_ids: list[str | None] | None = None,
     ) -> None:
         self.val_confusion_matrices[task_name].update(
             metric_preds, metric_target
+        )
+        predictions = metric_preds.detach().float().cpu()
+        targets = metric_target.detach().long().cpu().reshape(-1)
+        self._update_source_prediction_cache(
+            task_name, predictions, targets, source_ids
         )
 
     def _on_validation_epoch_end_task(self, task_name: str) -> None:
@@ -569,7 +787,72 @@ class ClassificationModule(BaseMultitaskModule):
                 )
 
         plt.close(fig)
+        self._log_source_classification_reports(task_name)
         confusion_matrix.reset()
+        self.val_source_prediction_cache[task_name] = {}
+
+    def _log_source_classification_reports(self, task_name: str) -> None:
+        source_cache = self.val_source_prediction_cache.get(task_name, {})
+        if not source_cache:
+            return
+
+        import matplotlib.pyplot as plt
+        from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
+
+        spec = self.model.readout_specs[task_name]
+        task_type = "binary" if spec.dim == 2 else "multiclass"
+        class_names = self._class_names.get(task_name)
+
+        for source, cached in sorted(source_cache.items()):
+            if not cached:
+                continue
+
+            predictions = torch.cat(
+                [pred for pred, _ in cached], dim=0
+            ).float()
+            targets = torch.cat([target for _, target in cached], dim=0).long()
+            if targets.numel() == 0:
+                continue
+
+            metrics = _create_classification_metrics(
+                spec.dim, prefix=f"val/{source}/{task_name}_"
+            ).to(predictions.device)
+            self.log_dict(
+                metrics(predictions, targets),
+                on_step=False,
+                on_epoch=True,
+            )
+
+            source_confusion_matrix = ConfusionMatrix(
+                task=task_type, num_classes=spec.dim
+            ).to(predictions.device)
+            matrix = source_confusion_matrix(predictions, targets)
+
+            if not self.logger:
+                continue
+
+            fig = self._plot_confusion_matrix(
+                matrix,
+                f"{source}/{task_name}",
+                class_names,
+            )
+            if isinstance(self.logger, WandbLogger):
+                import wandb
+
+                self.logger.experiment.log(
+                    {
+                        f"val/{source}/{task_name}_confusion_matrix": (
+                            wandb.Image(fig)
+                        )
+                    }
+                )
+            elif isinstance(self.logger, TensorBoardLogger):
+                self.logger.experiment.add_figure(
+                    f"val/{source}/{task_name}_confusion_matrix",
+                    fig,
+                    self.current_epoch,
+                )
+            plt.close(fig)
 
     def _apply_label_mapping(
         self, target: torch.Tensor, task_name: str
