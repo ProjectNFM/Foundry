@@ -19,7 +19,7 @@ from foundry.models.utils import resolve_readout_specs
 
 class BaselineEEGModel(nn.Module):
     """
-    Base class for all reference EEG/iEEG models.
+    Base class for all baseline EEG/iEEG models.
     """
 
     SUPPORTED_MODALITIES = {"eeg", "ecog", "seeg", "ieeg"}
@@ -28,31 +28,23 @@ class BaselineEEGModel(nn.Module):
         self,
         num_channels: int,
         readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
-        num_samples: int | None = None,
     ):
         """
         Args:
             num_channels (int): Number of EEG channels.
             readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s) for multitask head.
-            num_samples (int | None, optional): Number of time samples per input window. Subclasses that require
-                a fixed window length (e.g., for shape checks or flattened readout dimensions) should pass this value.
-                Subclasses with adaptive pooling (e.g., TemporalConvAvgPool) may leave it as None. Default: None.
         """
         super().__init__()
         self.num_channels = num_channels
-        self.num_samples = num_samples
         self._readout_specs = resolve_readout_specs(readout_specs)
 
     @property
     def readout_specs(self) -> dict[str, ModalitySpec]:
         return self._readout_specs
 
-    def _normalize_input_shape(self, x: torch.Tensor) -> torch.Tensor:
+    def _check_input_shape_conv1d(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Normalizes input tensor to (B, C, T) format.
-
-        Converts (B, T, C) to (B, C, T) if the last dimension matches num_channels.
-        This is a generic shape normalization utility for all baseline models.
+        Ensures input tensor has correct shape for Conv1d layer: (B, C, T).
 
         Args:
             x (torch.Tensor): Input of shape (B, C, T) or (B, T, C).
@@ -65,18 +57,6 @@ class BaselineEEGModel(nn.Module):
             if x.shape[-1] == self.num_channels:
                 x = x.transpose(1, 2)
         return x
-
-    def _check_input_shape_conv1d(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Ensures input tensor has correct shape for Conv1d layer: (B, C, T).
-
-        Args:
-            x (torch.Tensor): Input of shape (B, C, T) or (B, T, C).
-
-        Returns:
-            torch.Tensor: Input tensor of shape (B, C, T).
-        """
-        return self._normalize_input_shape(x)
 
     def _check_input_shape_conv2d(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -183,7 +163,7 @@ class BaselineEEGModel(nn.Module):
             self.readout_specs,
         )
 
-        output = {
+        return {
             "input_values": pad2d(x),
             "output_decoder_index": pad8(output_task_index),
             "target_values": chain(output_values, allow_missing_keys=True),
@@ -192,9 +172,6 @@ class BaselineEEGModel(nn.Module):
             "absolute_start": float(data.absolute_start),
             "eval_mask": chain(output_eval_mask, allow_missing_keys=True),
         }
-        if hasattr(data, "source_id"):
-            output["source_id"] = data.source_id
-        return output
 
     def unpack_batch(self, batch: Dict[str, Any]) -> tuple:
         """Extract model inputs and targets from batch.
@@ -219,264 +196,7 @@ class BaselineEEGModel(nn.Module):
         return model_inputs, target_values, target_weights, output_decoder_index
 
 
-class Linear(BaselineEEGModel):
-    """
-    A simple linear baseline for EEG classification.
-
-    This minimal model flattens the full EEG input across channels and time
-    and then passes those features directly to a multitask linear readout.
-    Useful as a sanity check and lower-bound reference for model performance.
-    """
-
-    def __init__(
-        self,
-        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
-        num_channels: int = 64,
-        num_samples: int = 128,
-    ):
-        """
-        Args:
-            readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s).
-            num_channels (int, optional): Number of EEG channels. Default: 64.
-            num_samples (int, optional): Number of time samples per input window. Default: 128.
-        """
-        super().__init__(
-            num_channels=num_channels,
-            num_samples=num_samples,
-            readout_specs=readout_specs,
-        )
-
-        out_dim = num_channels * num_samples
-        self.readout = MultitaskReadout(
-            dim=out_dim,
-            readout_specs=self._readout_specs,
-        )
-
-    def forward(
-        self,
-        *,
-        input_values: torch.Tensor,
-        output_decoder_index: torch.Tensor,
-        **kwargs,
-    ) -> Dict[str, torch.Tensor]:
-        """
-        Forward pass for the Linear model.
-
-        Args:
-            input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
-            output_decoder_index (torch.Tensor): Task index tensor of shape (B, n_out).
-
-        Returns:
-            Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
-        """
-        x = self._normalize_input_shape(input_values)
-        if x.shape[-1] != self.num_samples:
-            raise ValueError(
-                f"Expected input with {self.num_samples} time samples, got {x.shape[-1]}"
-            )
-        # Flattens each input in the batch into a single feature vector (combining all channels and time samples)
-        x = x.reshape(x.size(0), -1)
-
-        batch_size = x.shape[0]
-        n_out = output_decoder_index.shape[1]
-
-        # Repeat (broadcast) the feature vector for each output task in the batch,
-        # so its shape is (batch_size, n_out, feature_dim) as required by MultitaskReadout
-        x = x.unsqueeze(1).expand(batch_size, n_out, -1)
-
-        return self.readout(
-            output_embs=x,
-            output_readout_index=output_decoder_index,
-            unpack_output=False,
-        )
-
-
-class MLP(BaselineEEGModel):
-    """
-    An MLP-based baseline for EEG classification.
-
-    This model flattens the full EEG input across channels and time, then passes
-    those features through a configurable MLP (multi-layer perceptron) before the
-    final multitask linear readout. Useful as an intermediate-complexity
-    reference between Linear and convolutional baselines.
-    """
-
-    def __init__(
-        self,
-        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
-        num_channels: int = 64,
-        num_samples: int = 128,
-        hidden_dims: list[int] | None = None,
-        dropout_rate: float = 0.5,
-    ):
-        """
-        Args:
-            readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s).
-            num_channels (int, optional): Number of EEG channels. Default: 64.
-            num_samples (int, optional): Number of time samples per input window. Default: 128.
-            hidden_dims (list[int], optional): Hidden layer dimensions. Default: [128, 64].
-            dropout_rate (float, optional): Dropout rate after each hidden layer. Default: 0.5.
-        """
-        super().__init__(
-            num_channels=num_channels,
-            num_samples=num_samples,
-            readout_specs=readout_specs,
-        )
-
-        if hidden_dims is None:
-            hidden_dims = [128, 64]
-
-        layers = []
-        in_dim = num_channels * num_samples
-        for hidden_dim in hidden_dims:
-            layers.append(nn.Linear(in_dim, hidden_dim))
-            layers.append(nn.ReLU())
-            layers.append(nn.Dropout(dropout_rate))
-            in_dim = hidden_dim
-
-        self.mlp = nn.Sequential(*layers)
-        out_dim = in_dim
-
-        self.readout = MultitaskReadout(
-            dim=out_dim,
-            readout_specs=self._readout_specs,
-        )
-
-    def forward(
-        self,
-        *,
-        input_values: torch.Tensor,
-        output_decoder_index: torch.Tensor,
-        **kwargs,
-    ) -> Dict[str, torch.Tensor]:
-        """
-        Forward pass for the MLP model.
-
-        Args:
-            input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
-            output_decoder_index (torch.Tensor): Task index tensor of shape (B, n_out).
-
-        Returns:
-            Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
-        """
-        x = self._normalize_input_shape(input_values)
-        if x.shape[-1] != self.num_samples:
-            raise ValueError(
-                f"Expected input with {self.num_samples} time samples, got {x.shape[-1]}"
-            )
-        x = x.reshape(x.size(0), -1)
-
-        x = self.mlp(x)
-
-        batch_size = x.shape[0]
-        n_out = output_decoder_index.shape[1]
-        x = x.unsqueeze(1).expand(batch_size, n_out, -1)
-
-        return self.readout(
-            output_embs=x,
-            output_readout_index=output_decoder_index,
-            unpack_output=False,
-        )
-
-
-class GRU(BaselineEEGModel):
-    """
-    A GRU-based baseline for EEG classification.
-
-    This model projects per-timestep channel values into a latent feature space,
-    processes the sequence with a (bi)directional GRU, and applies global temporal
-    averaging before a multitask readout.
-    """
-
-    def __init__(
-        self,
-        readout_specs: list[ModalitySpec | str] | dict[str, ModalitySpec],
-        num_channels: int = 64,
-        num_samples: int = 128,
-        input_proj_dim: int = 128,
-        hidden_size: int = 128,
-        num_layers: int = 2,
-        bidirectional: bool = True,
-        dropout_rate: float = 0.3,
-    ):
-        """
-        Args:
-            readout_specs (list[ModalitySpec | str] | dict[str, ModalitySpec]): Readout specification(s).
-            num_channels (int, optional): Number of EEG channels. Default: 64.
-            num_samples (int, optional): Number of time samples per input window. Default: 128.
-            input_proj_dim (int, optional): Per-timestep channel projection dimension. Default: 128.
-            hidden_size (int, optional): GRU hidden size per direction. Default: 128.
-            num_layers (int, optional): Number of stacked GRU layers. Default: 2.
-            bidirectional (bool, optional): Whether to use bidirectional GRU. Default: True.
-            dropout_rate (float, optional): Dropout rate between stacked GRU layers. Default: 0.3.
-        """
-        super().__init__(
-            num_channels=num_channels,
-            num_samples=num_samples,
-            readout_specs=readout_specs,
-        )
-
-        self.input_norm = nn.LayerNorm(num_channels)
-        self.input_proj = nn.Linear(num_channels, input_proj_dim)
-        self.gru = nn.GRU(
-            input_size=input_proj_dim,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            dropout=dropout_rate if num_layers > 1 else 0.0,
-            bidirectional=bidirectional,
-            batch_first=True,
-        )
-
-        out_dim = hidden_size * (2 if bidirectional else 1)
-        self.readout = MultitaskReadout(
-            dim=out_dim,
-            readout_specs=self._readout_specs,
-        )
-
-    def forward(
-        self,
-        *,
-        input_values: torch.Tensor,
-        output_decoder_index: torch.Tensor,
-        **kwargs,
-    ) -> Dict[str, torch.Tensor]:
-        """
-        Forward pass for GRU.
-
-        Args:
-            input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
-            output_decoder_index (torch.Tensor): Task index tensor of shape (B, n_out).
-
-        Returns:
-            Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
-        """
-        x = self._normalize_input_shape(input_values)
-        if x.shape[-1] != self.num_samples:
-            raise ValueError(
-                f"Expected input with {self.num_samples} time samples, got {x.shape[-1]}"
-            )
-
-        # Convert from (B, C, T) to (B, T, C) for sequence modeling over time.
-        x = x.transpose(1, 2)
-        x = self.input_norm(x)
-        x = self.input_proj(x)
-        x, _ = self.gru(x)
-
-        # Global average pooling across the temporal dimension.
-        x = x.mean(dim=1)
-
-        batch_size = x.shape[0]
-        n_out = output_decoder_index.shape[1]
-        x = x.unsqueeze(1).expand(batch_size, n_out, -1)
-
-        return self.readout(
-            output_embs=x,
-            output_readout_index=output_decoder_index,
-            unpack_output=False,
-        )
-
-
-class TemporalConvAvgPool(BaselineEEGModel):
+class TemporalConvAvgPoolClassifier(BaselineEEGModel):
     """
     A simple baseline classifier for EEG data.
 
@@ -491,7 +211,6 @@ class TemporalConvAvgPool(BaselineEEGModel):
         num_channels: int = 64,
         num_filters: int = 32,
         kernel_size: int = 64,
-        **kwargs,
     ):
         """
         Args:
@@ -499,12 +218,8 @@ class TemporalConvAvgPool(BaselineEEGModel):
             num_channels (int, optional): Number of EEG channels. Default: 64.
             num_filters (int, optional): Number of convolutional filters. Default: 32.
             kernel_size (int, optional): Temporal kernel size for Conv1d. Default: 64.
-            **kwargs: Additional keyword arguments.
         """
-        super().__init__(
-            num_channels=num_channels,
-            readout_specs=readout_specs,
-        )
+        super().__init__(num_channels, readout_specs)
 
         self.conv = nn.Conv1d(
             num_channels, num_filters, kernel_size, padding="same"
@@ -540,7 +255,7 @@ class TemporalConvAvgPool(BaselineEEGModel):
         x = self.bn(x)
         x = self.act(x)
         x = self.pool(x)
-        x = x.reshape(x.size(0), -1)
+        x = x.view(x.size(0), -1)
 
         batch_size = x.shape[0]
         n_out = output_decoder_index.shape[1]
@@ -580,11 +295,7 @@ class ShallowConvNet(BaselineEEGModel):
             kernel_length (int, optional): Temporal convolution kernel length. Default: 13.
             F1 (int, optional): Number of spatial/temporal filters. Default: 40.
         """
-        super().__init__(
-            num_channels=num_channels,
-            num_samples=num_samples,
-            readout_specs=readout_specs,
-        )
+        super().__init__(num_channels, readout_specs)
 
         # Temporal convolution
         self.conv1 = nn.Conv2d(
@@ -735,11 +446,7 @@ class EEGNetEncoder(BaselineEEGModel):
         kernel_length: int = 64,
         dropout_rate: float = 0.5,
     ):
-        super().__init__(
-            num_channels=num_channels,
-            num_samples=num_samples,
-            readout_specs=readout_specs,
-        )
+        super().__init__(num_channels, readout_specs)
 
         # ----------------------------------------------------------------------
         # Block 1: Bandpass & Spatial Filtering

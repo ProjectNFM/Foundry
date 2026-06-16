@@ -131,12 +131,3 @@ NEUROSOFT_ACOUSTIC_STIM = register_modality(
     value_key="acoustic_stim_trials.behavior_ids",
     loss_fn=CrossEntropyLoss(),
 )
-
-NEUROSOFT_ACOUSTIC_STIM_LOGFREQ = register_modality(
-    "neurosoft_acoustic_stim_logfreq",
-    dim=1,
-    type=DataType.CONTINUOUS,
-    timestamp_key="acoustic_stim_trials.timestamps",
-    value_key="acoustic_stim_trials.log_frequency_values",
-    loss_fn=MSELoss(),
-)

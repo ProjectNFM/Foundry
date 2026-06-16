@@ -59,14 +59,14 @@ trainer:
   precision: bf16-mixed
   callbacks:
     early_stopping:
-      monitor: val/neurosoft_acoustic_stim_f1
-      mode: max
+      monitor: val/loss
+      mode: min
       patience: 20
     model_checkpoint:
-      monitor: val/neurosoft_acoustic_stim_f1
-      mode: max
+      monitor: val/loss
+      mode: min
       auto_insert_metric_name: false
-      filename: "best-epoch{epoch:03d}-val_f1_{val/neurosoft_acoustic_stim_f1:.4f}"
+      filename: "best-val-loss"
 
 stage:
   skip: true

@@ -1,6 +1,4 @@
 from typing import Callable, Literal, Optional, Type
-
-import numpy as np
 from auditorydecoding import (
     NeurosoftDataset,
     NeurosoftMinipigs2026,
@@ -15,9 +13,6 @@ from torch_brain.dataset.dataset import DatasetIndex
 from foundry.data.datamodules.base import NeuralDataModule
 
 
-LOGFREQ_TASK = "acoustic_stim_logfreq"
-
-
 class AddNeurosoftSourceId:
     """Attach the Neurosoft source label to each sample before tokenization."""
 
@@ -29,134 +24,11 @@ class AddNeurosoftSourceId:
         return data
 
 
-def _neurosoft_dataset_task_type(task_type: Optional[str]) -> Optional[str]:
-    if task_type == LOGFREQ_TASK:
-        return "acoustic_stim"
-    return task_type
-
-
-def _stim_label_to_frequency_hz(label: object) -> float | None:
-    if isinstance(label, bytes):
-        label = label.decode()
-    label = str(label)
-
-    if label == "stim_wn":
-        return None
-    if label.startswith("stim_") and label.endswith("Hz"):
-        return float(label.removeprefix("stim_").removesuffix("Hz"))
-    raise ValueError(f"Cannot derive frequency from acoustic label {label!r}")
-
-
-def _tone_mask_and_frequencies(
-    behavior_labels: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    mask = []
-    frequencies = []
-    for label in behavior_labels:
-        frequency_hz = _stim_label_to_frequency_hz(label)
-        is_tone = frequency_hz is not None
-        mask.append(is_tone)
-        if is_tone:
-            frequencies.append(frequency_hz)
-    return (
-        np.asarray(mask, dtype=bool),
-        np.asarray(frequencies, dtype=np.float32),
-    )
-
-
-def _all_tone_log_frequencies() -> np.ndarray:
-    frequencies = [
-        frequency_hz
-        for label in STIM_FREQUENCY_TO_ID
-        if (frequency_hz := _stim_label_to_frequency_hz(label)) is not None
-    ]
-    return np.log(np.asarray(frequencies, dtype=np.float32))
-
-
-_LOGFREQ_VALUES = _all_tone_log_frequencies()
-LOGFREQ_NORMALIZE_MEAN = float(_LOGFREQ_VALUES.mean())
-LOGFREQ_NORMALIZE_STD = float(_LOGFREQ_VALUES.std())
-
-
-def filter_acoustic_stim_tone_intervals(
-    sampling_intervals: dict,
-    dataset: Optional[NeurosoftDataset] = None,
-) -> dict:
-    """Remove white-noise acoustic trials from sampler intervals."""
-    filtered = {}
-    tone_ids = {
-        label_id
-        for label, label_id in STIM_FREQUENCY_TO_ID.items()
-        if label != "stim_wn"
-    }
-
-    for recording_id, intervals in sampling_intervals.items():
-        if hasattr(intervals, "behavior_labels"):
-            mask, _ = _tone_mask_and_frequencies(intervals.behavior_labels)
-        elif hasattr(intervals, "behavior_ids"):
-            mask = np.isin(intervals.behavior_ids, list(tone_ids))
-        else:
-            if dataset is None:
-                filtered[recording_id] = intervals
-                continue
-            trials = dataset.get_recording(recording_id).acoustic_stim_trials
-            trials = trials.select_by_interval(intervals)
-            mask, _ = _tone_mask_and_frequencies(trials.behavior_labels)
-            filtered[recording_id] = trials.select_by_mask(mask)
-            continue
-        filtered[recording_id] = intervals.select_by_mask(mask)
-
-    return filtered
-
-
-class AddNeurosoftLogFrequencyTargets:
-    """Attach ln(frequency Hz) targets to Neurosoft acoustic tone trials."""
-
-    def __call__(self, data):
-        if not hasattr(data, "acoustic_stim_trials"):
-            raise ValueError("Data is missing acoustic_stim_trials")
-
-        trials = data.acoustic_stim_trials
-        if not hasattr(trials, "behavior_labels"):
-            raise ValueError(
-                "acoustic_stim_trials must include behavior_labels"
-            )
-
-        mask, frequencies_hz = _tone_mask_and_frequencies(
-            np.asarray(trials.behavior_labels)
-        )
-        trials = trials.select_by_mask(mask)
-        log_frequencies = np.log(frequencies_hz).astype(np.float32)
-        trials.log_frequency_values = log_frequencies.reshape(-1, 1)
-        data.acoustic_stim_trials = trials
-        data.config = dict(getattr(data, "config", {}) or {})
-        data.config["multitask_readout"] = [
-            {
-                "readout_id": "neurosoft_acoustic_stim_logfreq",
-                "normalize_mean": LOGFREQ_NORMALIZE_MEAN,
-                "normalize_std": LOGFREQ_NORMALIZE_STD,
-            }
-        ]
-        return data
-
-
-def _prepend_logfreq_transform(
-    transforms: Optional[list[Callable]],
-    task_type: Optional[str],
-) -> Optional[list[Callable]]:
-    if task_type != LOGFREQ_TASK:
-        return transforms
-    return [AddNeurosoftLogFrequencyTargets(), *(transforms or [])]
-
-
 def _prepend_neurosoft_transforms(
     transforms: Optional[list[Callable]],
-    task_type: Optional[str],
     source_id: Optional[str] = None,
 ) -> Optional[list[Callable]]:
     transform_list = list(transforms or [])
-    if task_type == LOGFREQ_TASK:
-        transform_list.insert(0, AddNeurosoftLogFrequencyTargets())
     if source_id is not None:
         transform_list.insert(0, AddNeurosoftSourceId(source_id))
     return transform_list or None
@@ -180,7 +52,6 @@ class NeurosoftMinipigsMonkeys2026:
         minipigs_recording_ids: Optional[list[str]] = None,
         monkeys_recording_ids: Optional[list[str]] = None,
     ):
-        dataset_task_type = _neurosoft_dataset_task_type(task_type)
         recording_ids = {
             "minipigs": minipigs_recording_ids,
             "monkeys": monkeys_recording_ids,
@@ -191,7 +62,7 @@ class NeurosoftMinipigsMonkeys2026:
                 transform=transform,
                 fold_num=fold_num,
                 split_type=split_type,
-                task_type=dataset_task_type,
+                task_type=task_type,
                 recording_ids=recording_ids[source],
             )
             for source, dataset_class in self.SOURCES.items()
@@ -266,7 +137,6 @@ class NeurosoftDataModule(NeuralDataModule):
     TASK_TO_READOUT = {
         "on_vs_off": ["neurosoft_on_vs_off"],
         "acoustic_stim": ["neurosoft_acoustic_stim"],
-        LOGFREQ_TASK: ["neurosoft_acoustic_stim_logfreq"],
     }
 
     READOUT_CLASS_NAMES: dict[str, list[str]] = {
@@ -297,21 +167,16 @@ class NeurosoftDataModule(NeuralDataModule):
                 "intrasession-causal",
             ]
         ] = None,
-        task_type: Optional[
-            Literal["on_vs_off", "acoustic_stim", "acoustic_stim_logfreq"]
-        ] = "on_vs_off",
+        task_type: Optional[Literal["on_vs_off", "acoustic_stim"]] = "on_vs_off",
         fold_number: Optional[int] = 0,
         recording_ids: Optional[list[str]] = None,
         source_id: Optional[str] = None,
     ):
-        dataset_task_type = _neurosoft_dataset_task_type(task_type)
-        transforms = _prepend_neurosoft_transforms(
-            transforms, task_type, source_id
-        )
+        transforms = _prepend_neurosoft_transforms(transforms, source_id)
         dataset_kwargs = {
             "recording_ids": recording_ids,
             "split_type": split_type,
-            "task_type": dataset_task_type,
+            "task_type": task_type,
             "fold_num": fold_number,
         }
         super().__init__(
@@ -333,16 +198,6 @@ class NeurosoftDataModule(NeuralDataModule):
 
     def get_channel_ids(self) -> list[str]:
         return sorted(self.dataset.get_channel_ids())
-
-    def _get_sampling_intervals(
-        self, split: Literal["train", "valid", "test"]
-    ) -> dict:
-        sampling_intervals = super()._get_sampling_intervals(split)
-        if self.task_type == LOGFREQ_TASK:
-            return filter_acoustic_stim_tone_intervals(
-                sampling_intervals, dataset=self.dataset
-            )
-        return sampling_intervals
 
 
 class NeurosoftMinipigs2026DataModule(NeurosoftDataModule):
@@ -383,20 +238,17 @@ class NeurosoftMinipigsMonkeys2026DataModule(NeurosoftDataModule):
                 "intrasession-causal",
             ]
         ] = None,
-        task_type: Optional[
-            Literal["on_vs_off", "acoustic_stim", "acoustic_stim_logfreq"]
-        ] = "on_vs_off",
+        task_type: Optional[Literal["on_vs_off", "acoustic_stim"]] = "on_vs_off",
         fold_number: Optional[int] = 0,
         minipigs_recording_ids: Optional[list[str]] = None,
         monkeys_recording_ids: Optional[list[str]] = None,
     ):
-        dataset_task_type = _neurosoft_dataset_task_type(task_type)
-        transforms = _prepend_neurosoft_transforms(transforms, task_type)
+        transforms = _prepend_neurosoft_transforms(transforms)
         dataset_kwargs = {
             "minipigs_recording_ids": minipigs_recording_ids,
             "monkeys_recording_ids": monkeys_recording_ids,
             "split_type": split_type,
-            "task_type": dataset_task_type,
+            "task_type": task_type,
             "fold_num": fold_number,
         }
         NeuralDataModule.__init__(

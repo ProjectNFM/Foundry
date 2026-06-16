@@ -215,7 +215,7 @@ class NeuralDataModule(LightningDataModule):
         Returns:
             DataLoader for the split.
         """
-        sampling_intervals = self._get_sampling_intervals(split)
+        sampling_intervals = self.dataset.get_sampling_intervals(split=split)
 
         sampler = RandomFixedWindowSampler(
             sampling_intervals=sampling_intervals,
@@ -235,11 +235,6 @@ class NeuralDataModule(LightningDataModule):
             prefetch_factor=2 if self.num_workers > 0 else None,
             drop_last=(split == "train"),  # Only drop last for training
         )
-
-    def _get_sampling_intervals(
-        self, split: Literal["train", "valid", "test"]
-    ) -> dict:
-        return self.dataset.get_sampling_intervals(split=split)
 
     def train_dataloader(self) -> DataLoader:
         """Create training DataLoader."""
