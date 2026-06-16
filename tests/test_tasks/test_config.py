@@ -282,4 +282,10 @@ EXPECTED_TASK_SPECS = {
         "timestamp_key": "acoustic_stim_trials.timestamps",
         "value_key": "acoustic_stim_trials.behavior_labels",
     },
+    "neurosoft_acoustic_stim_6band": {
+        "output_dim": 6,
+        "kind": "multiclass",
+        "timestamp_key": "acoustic_stim_trials.timestamps",
+        "value_key": "acoustic_stim_trials.behavior_labels",
+    },
 }
