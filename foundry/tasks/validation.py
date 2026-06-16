@@ -28,9 +28,9 @@ def validate_task_mappings(
             (likely a misconfiguration).
     """
     for name, cfg in task_configs.items():
-        if cfg.classification_mapping is None:
+        if cfg.class_mapping is None:
             continue
-        kept = cfg.classification_mapping.kept_inputs
+        kept = cfg.class_mapping.kept_input_classes
         value_key = cfg.target_extractor["value_key"]
 
         if not hasattr(dataset, "recording_ids"):
@@ -56,7 +56,7 @@ def validate_task_mappings(
         if not in_mapping:
             raise ValueError(
                 f"Task '{name}': none of the labels found in data "
-                f"({sorted(all_unique)}) match the classification_mapping. "
+                f"({sorted(all_unique)}) match the class_mapping. "
                 f"This is likely a misconfiguration."
             )
 

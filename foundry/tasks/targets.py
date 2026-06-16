@@ -36,7 +36,7 @@ class TargetExtractor:
         value_key: Dot-separated path to the target values array (e.g.
             ``"active_behavior_trials.behavior_id"`` or
             ``"pose_trajectories.values"``).
-        classification_mapping: Optional unified classification mapping.
+        class_mapping: Optional unified classification mapping.
             When set, raw labels are remapped via
             :meth:`ClassificationMapping.apply`.
 
@@ -51,14 +51,14 @@ class TargetExtractor:
 
     timestamp_key: str
     value_key: str
-    classification_mapping: ClassificationMapping | None = None
+    class_mapping: ClassificationMapping | None = None
 
     def __call__(self, data: Data) -> dict:
         timestamps = data.get_nested_attribute(self.timestamp_key)
         values = data.get_nested_attribute(self.value_key)
 
-        if self.classification_mapping is not None:
-            values = self.classification_mapping.apply(values)
+        if self.class_mapping is not None:
+            values = self.class_mapping.apply(values)
 
         if values.dtype == np.float64:
             values = values.astype(np.float32)
@@ -78,7 +78,7 @@ def extract_multitask_targets(
     """Extract targets for all configured tasks from a single data sample.
 
     Iterates tasks in sorted name order, builds a :class:`TargetExtractor` per
-    task (injecting ``classification_mapping`` when present), and collates the
+    task (injecting ``class_mapping`` when present), and collates the
     per-task timestamps into a single ``output_timestamps`` tensor with a
     parallel ``task_index`` tensor.
 

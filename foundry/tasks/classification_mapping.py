@@ -21,25 +21,38 @@ class ClassificationMapping:
     of first appearance of unique output names, or from an explicit ``order``.
 
     Args:
-        mapping: Input label to output class name. All keys must be the same
-            type (all int or all str).
+        mapping: Either a dict mapping input labels to output class names
+            (all keys must be the same type), or a list of labels to keep.
+            When a list is provided, each label is kept with its original
+            name (identity mapping) and the list order defines class IDs.
         order: Optional explicit ordering of output class names for ID
             assignment. Must contain exactly the unique values from mapping.
+            Ignored when mapping is a list (the list itself defines order).
     """
 
-    mapping: dict[int | str, str]
+    mapping: dict[int | str, str] | list[int | str]
     order: list[str] | None = None
 
-    _input_to_id: dict[int | str, int] = field(
+    _input_class_to_id: dict[int | str, int] = field(
         init=False, repr=False, compare=False
     )
     _id_to_name: list[str] = field(init=False, repr=False, compare=False)
-    _kept_inputs: frozenset[int | str] = field(
+    _kept_input_classes: frozenset[int | str] = field(
         init=False, repr=False, compare=False
     )
     _num_classes: int = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        if isinstance(self.mapping, list):
+            labels = list(self.mapping)
+            object.__setattr__(
+                self, "mapping", {label: str(label) for label in labels}
+            )
+            if self.order is None:
+                object.__setattr__(
+                    self, "order", [str(label) for label in labels]
+                )
+
         self._validate()
 
         if self.order is not None:
@@ -52,11 +65,13 @@ class ClassificationMapping:
             ordered_names = seen
 
         name_to_id = {name: i for i, name in enumerate(ordered_names)}
-        input_to_id = {k: name_to_id[v] for k, v in self.mapping.items()}
+        input_class_to_id = {k: name_to_id[v] for k, v in self.mapping.items()}
 
         object.__setattr__(self, "_id_to_name", ordered_names)
-        object.__setattr__(self, "_input_to_id", input_to_id)
-        object.__setattr__(self, "_kept_inputs", frozenset(self.mapping.keys()))
+        object.__setattr__(self, "_input_class_to_id", input_class_to_id)
+        object.__setattr__(
+            self, "_kept_input_classes", frozenset(self.mapping.keys())
+        )
         object.__setattr__(self, "_num_classes", len(ordered_names))
 
     def _validate(self) -> None:
@@ -95,9 +110,9 @@ class ClassificationMapping:
         return list(self._id_to_name)
 
     @property
-    def kept_inputs(self) -> frozenset[int | str]:
+    def kept_input_classes(self) -> frozenset[int | str]:
         """Set of input labels that are in the mapping."""
-        return self._kept_inputs
+        return self._kept_input_classes
 
     def apply(self, raw_values: np.ndarray) -> np.ndarray:
         """Map input label array to class IDs.
@@ -112,7 +127,7 @@ class ClassificationMapping:
             Int64 array of mapped class IDs.
         """
         result = np.full(len(raw_values), -1, dtype=np.int64)
-        for input_label, class_id in self._input_to_id.items():
+        for input_label, class_id in self._input_class_to_id.items():
             mask = raw_values == input_label
             result[mask] = class_id
         return result
@@ -120,7 +135,7 @@ class ClassificationMapping:
     def kept_mask(self, raw_values: np.ndarray) -> np.ndarray:
         """Boolean mask where True indicates a label present in the mapping."""
         mask = np.zeros(len(raw_values), dtype=bool)
-        for input_label in self._kept_inputs:
+        for input_label in self._kept_input_classes:
             mask |= raw_values == input_label
         return mask
 
@@ -141,9 +156,15 @@ class ClassificationMapping:
     def from_dict(cls, data: dict[str, Any]) -> ClassificationMapping:
         """Construct from a parsed YAML/dict representation.
 
-        Handles YAML's tendency to produce string keys for numeric values.
+        Accepts ``mapping`` as either a dict (input-label -> class-name) or a
+        list of labels to keep (identity mapping).  Handles YAML's tendency to
+        produce string keys for numeric values.
         """
         mapping_raw = data["mapping"]
+
+        if isinstance(mapping_raw, list):
+            return cls(mapping=mapping_raw)
+
         mapping: dict[int | str, str] = {}
 
         for k, v in mapping_raw.items():

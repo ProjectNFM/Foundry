@@ -1,6 +1,6 @@
 name: neurosoft_acoustic_stim_2band_rnd_a
 
-classification_mapping:
+class_mapping:
   mapping:
     stim_500Hz: class1
     stim_800Hz: class2

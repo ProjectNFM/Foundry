@@ -53,7 +53,7 @@ class FoundryModule(L.LightningModule):
 
             if (
                 cfg.kind in ("binary", "multiclass")
-                and cfg.classification_mapping is not None
+                and cfg.class_mapping is not None
             ):
                 self._val_confusion_trackers[name] = ConfusionMatrixTracker(
                     num_classes=cfg.output_dim,

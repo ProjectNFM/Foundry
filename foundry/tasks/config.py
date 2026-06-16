@@ -30,13 +30,13 @@ class TaskConfig:
     metrics: dict[str, Any] | None = None
     class_names: list[str] | None = None
     metric_summary_modes: dict[str, str] = field(default_factory=dict)
-    classification_mapping: ClassificationMapping | None = None
+    class_mapping: ClassificationMapping | None = None
     _extractor: Any = field(init=False, default=None, repr=False, compare=False)
 
     @property
     def output_dim(self) -> int:
-        if self.classification_mapping is not None:
-            return self.classification_mapping.num_classes
+        if self.class_mapping is not None:
+            return self.class_mapping.num_classes
         return self.head.get("output_dim", self.head.get("num_classes", 1))
 
     @property
@@ -47,8 +47,8 @@ class TaskConfig:
 
     def get_class_names(self) -> list[str] | None:
         """Canonical class names: mapping-derived takes priority over field."""
-        if self.classification_mapping is not None:
-            return self.classification_mapping.class_names
+        if self.class_mapping is not None:
+            return self.class_mapping.class_names
         return self.class_names
 
     @property
@@ -57,15 +57,15 @@ class TaskConfig:
 
         Uses ``_target_`` from the YAML spec for polymorphism (so you can swap
         in a different TargetExtractor subclass), but consumers never need to
-        worry about manually injecting the classification_mapping.
+        worry about manually injecting the class_mapping.
         """
         if self._extractor is None:
             from foundry.tasks.targets import TargetExtractor
 
             kwargs = dict(self.target_extractor)
             kwargs.pop("_target_", None)
-            if self.classification_mapping is not None:
-                kwargs["classification_mapping"] = self.classification_mapping
+            if self.class_mapping is not None:
+                kwargs["class_mapping"] = self.class_mapping
             object.__setattr__(self, "_extractor", TargetExtractor(**kwargs))
         return self._extractor
 
@@ -74,7 +74,7 @@ class TaskConfig:
         metrics = data.get("metrics")
         class_names = data.get("class_names")
 
-        mapping_data = data.get("classification_mapping")
+        mapping_data = data.get("class_mapping")
         mapping = (
             ClassificationMapping.from_dict(mapping_data)
             if mapping_data is not None
@@ -88,9 +88,9 @@ class TaskConfig:
             if declared is not None and declared != derived:
                 raise ValueError(
                     f"metrics.num_classes ({declared}) conflicts with "
-                    f"classification_mapping.num_classes ({derived}). "
+                    f"class_mapping.num_classes ({derived}). "
                     f"Remove metrics.num_classes and let it be derived "
-                    f"automatically, or fix the classification_mapping."
+                    f"automatically, or fix the class_mapping."
                 )
             metrics["num_classes"] = derived
         elif metrics is not None:
@@ -106,7 +106,7 @@ class TaskConfig:
             metrics=metrics,
             class_names=list(class_names) if class_names is not None else None,
             metric_summary_modes=dict(data.get("metric_summary_modes") or {}),
-            classification_mapping=mapping,
+            class_mapping=mapping,
         )
 
     @classmethod

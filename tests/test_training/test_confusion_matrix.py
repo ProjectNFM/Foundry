@@ -184,7 +184,7 @@ class TestConfusionMatrixCallback:
                 "num_classes": 3,
             },
             metric_summary_modes={"acc": "max"},
-            classification_mapping=ClassificationMapping(
+            class_mapping=ClassificationMapping(
                 mapping={0: "Wake", 1: "N2", 2: "REM"},
             ),
         )
@@ -259,7 +259,7 @@ class TestFoundryModuleConfusionMatrixIntegration:
                 "num_classes": 3,
             },
             metric_summary_modes={"acc": "max"},
-            classification_mapping=ClassificationMapping(
+            class_mapping=ClassificationMapping(
                 mapping={0: "Wake", 1: "N2", 2: "REM"},
             ),
         )

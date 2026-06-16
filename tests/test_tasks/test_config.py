@@ -159,7 +159,7 @@ class TestFromDictMetricsNumClasses:
 
     def test_num_classes_injected_when_mapping_present(self):
         data = _make_task_data(
-            classification_mapping={
+            class_mapping={
                 "mapping": {0: "A", 1: "B", 2: "C"},
             },
             metrics={
@@ -172,7 +172,7 @@ class TestFromDictMetricsNumClasses:
 
     def test_num_classes_injected_overwrites_matching_value(self):
         data = _make_task_data(
-            classification_mapping={
+            class_mapping={
                 "mapping": {0: "A", 1: "B", 2: "C"},
             },
             metrics={
@@ -186,7 +186,7 @@ class TestFromDictMetricsNumClasses:
 
     def test_raises_on_conflicting_num_classes(self):
         data = _make_task_data(
-            classification_mapping={
+            class_mapping={
                 "mapping": {0: "A", 1: "B", 2: "C"},
             },
             metrics={
@@ -212,7 +212,7 @@ class TestFromDictMetricsNumClasses:
 
     def test_no_metrics_with_mapping_leaves_metrics_none(self):
         data = _make_task_data(
-            classification_mapping={
+            class_mapping={
                 "mapping": {0: "A", 1: "B"},
             },
         )

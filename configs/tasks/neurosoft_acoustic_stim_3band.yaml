@@ -1,6 +1,6 @@
 name: neurosoft_acoustic_stim_3band
 
-classification_mapping:
+class_mapping:
   mapping:
     stim_500Hz: low
     stim_800Hz: low

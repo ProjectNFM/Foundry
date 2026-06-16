@@ -1,6 +1,6 @@
 name: sleep_stage_5class
 
-classification_mapping:
+class_mapping:
   mapping:
     Sleep stage W: Wake
     Sleep stage 1: N1

@@ -70,8 +70,8 @@ def _count_labels_for_task(
         if values is None:
             continue
 
-        if extractor.classification_mapping is not None:
-            mapping = extractor.classification_mapping
+        if extractor.class_mapping is not None:
+            mapping = extractor.class_mapping
             mapped, keep = mapping.filter_and_remap(values)
             if not np.any(keep):
                 continue

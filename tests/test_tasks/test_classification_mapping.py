@@ -79,15 +79,15 @@ class TestClassificationMappingDerivedProperties:
         )
         assert m.class_names == ["Sleep", "Wake"]
 
-    def test_kept_inputs_returns_all_mapping_keys(self):
+    def test_kept_input_classes_returns_all_mapping_keys(self):
         m = ClassificationMapping(
             mapping={4: "low", 6: "low", 14: "high", 16: "high"}
         )
-        assert m.kept_inputs == frozenset({4, 6, 14, 16})
+        assert m.kept_input_classes == frozenset({4, 6, 14, 16})
 
-    def test_kept_inputs_str_keys(self):
+    def test_kept_input_classes_str_keys(self):
         m = ClassificationMapping(mapping={"a": "X", "b": "Y"})
-        assert m.kept_inputs == frozenset({"a", "b"})
+        assert m.kept_input_classes == frozenset({"a", "b"})
 
 
 class TestClassificationMappingApply:
@@ -218,6 +218,65 @@ class TestFilterIntervalsByMapping:
         assert len(result.start) == 2
 
 
+class TestListMapping:
+    """ClassificationMapping accepts a list for identity-mapping with filtering."""
+
+    def test_list_of_str_creates_identity_mapping(self):
+        m = ClassificationMapping(mapping=["Wake", "N1", "N2"])
+        assert m.num_classes == 3
+        assert m.class_names == ["Wake", "N1", "N2"]
+        assert m.kept_input_classes == frozenset({"Wake", "N1", "N2"})
+
+    def test_list_of_int_creates_identity_mapping(self):
+        m = ClassificationMapping(mapping=[0, 1, 2])
+        assert m.num_classes == 3
+        assert m.class_names == ["0", "1", "2"]
+        assert m.kept_input_classes == frozenset({0, 1, 2})
+
+    def test_list_filters_unlisted_labels(self):
+        m = ClassificationMapping(mapping=["Wake", "N1", "N2"])
+        raw = np.array(["Wake", "N1", "REM", "N2", "Unknown"])
+        mask = m.kept_mask(raw)
+        expected = np.array([True, True, False, True, False])
+        np.testing.assert_array_equal(mask, expected)
+
+    def test_list_apply_maps_to_positional_ids(self):
+        m = ClassificationMapping(mapping=["Wake", "N1", "N2"])
+        raw = np.array(["N2", "Wake", "N1"])
+        result = m.apply(raw)
+        np.testing.assert_array_equal(result, [2, 0, 1])
+
+    def test_list_filter_and_remap(self):
+        m = ClassificationMapping(mapping=["A", "B", "C"])
+        values = np.array(["A", "D", "B", "E", "C"])
+        mapped, keep = m.filter_and_remap(values)
+        np.testing.assert_array_equal(keep, [True, False, True, False, True])
+        np.testing.assert_array_equal(mapped, [0, 1, 2])
+
+    def test_list_order_matches_input_order(self):
+        m = ClassificationMapping(mapping=["REM", "Wake", "N1"])
+        assert m.class_names == ["REM", "Wake", "N1"]
+        raw = np.array(["Wake", "REM", "N1"])
+        result = m.apply(raw)
+        np.testing.assert_array_equal(result, [1, 0, 2])
+
+    def test_empty_list_raises(self):
+        with pytest.raises(ValueError, match="at least one"):
+            ClassificationMapping(mapping=[])
+
+    def test_from_dict_with_list_mapping(self):
+        data = {"mapping": ["Wake", "N1", "N2", "N3", "REM"]}
+        m = ClassificationMapping.from_dict(data)
+        assert m.num_classes == 5
+        assert m.class_names == ["Wake", "N1", "N2", "N3", "REM"]
+
+    def test_from_dict_with_int_list_mapping(self):
+        data = {"mapping": [0, 1, 2]}
+        m = ClassificationMapping.from_dict(data)
+        assert m.num_classes == 3
+        assert m.kept_input_classes == frozenset({0, 1, 2})
+
+
 class TestFromDict:
     """Test from_dict parsing of new YAML format."""
 
@@ -231,7 +290,7 @@ class TestFromDict:
         """YAML often produces string keys for int values."""
         data = {"mapping": {"0": "Wake", "1": "N1", "2": "N2"}}
         m = ClassificationMapping.from_dict(data)
-        assert m.kept_inputs == frozenset({0, 1, 2})
+        assert m.kept_input_classes == frozenset({0, 1, 2})
 
     def test_with_explicit_order(self):
         data = {
@@ -244,7 +303,7 @@ class TestFromDict:
     def test_str_mapping_non_numeric_keys(self):
         data = {"mapping": {"cat": "animal", "dog": "animal", "rose": "plant"}}
         m = ClassificationMapping.from_dict(data)
-        assert m.kept_inputs == frozenset({"cat", "dog", "rose"})
+        assert m.kept_input_classes == frozenset({"cat", "dog", "rose"})
         assert m.num_classes == 2
 
 
@@ -261,7 +320,7 @@ class TestTaskConfigWithMapping:
                 "value_key": "v",
             },
             loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
-            classification_mapping=ClassificationMapping(
+            class_mapping=ClassificationMapping(
                 mapping={0: "Wake", 1: "N1", 2: "N2"}
             ),
         )
@@ -285,7 +344,7 @@ class TestTaskConfigWithMapping:
             head={"_target_": "foundry.tasks.heads.ReadoutHead"},
             target_extractor={"timestamp_key": "t", "value_key": "v"},
             loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
-            classification_mapping=ClassificationMapping(
+            class_mapping=ClassificationMapping(
                 mapping={0: "Wake", 1: "Sleep"}
             ),
         )
@@ -301,12 +360,12 @@ class TestTaskConfigWithMapping:
                 "value_key": "stages.id",
             },
             "loss": {"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
-            "classification_mapping": {
+            "class_mapping": {
                 "mapping": {0: "Wake", 1: "Light", 2: "Light", 3: "Deep"},
             },
         }
         cfg = TaskConfig.from_dict(data)
-        assert cfg.classification_mapping is not None
+        assert cfg.class_mapping is not None
         assert cfg.output_dim == 3
         assert cfg.get_class_names() == ["Wake", "Light", "Deep"]
 
@@ -321,7 +380,7 @@ class TestTaskConfigWithMapping:
             "loss": {"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
         }
         cfg = TaskConfig.from_dict(data)
-        assert cfg.classification_mapping is None
+        assert cfg.class_mapping is None
         assert cfg.output_dim == 5
 
 
@@ -353,7 +412,7 @@ class TestTargetExtractorWithMapping:
         extractor = TargetExtractor(
             timestamp_key="stages.start",
             value_key="stages.id",
-            classification_mapping=m,
+            class_mapping=m,
         )
         result = extractor(data)
         expected = np.array([0, 1, 3, 4], dtype=np.int64)
@@ -389,9 +448,9 @@ class TestExtractorProperty:
                 "value_key": "v",
             },
             loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
-            classification_mapping=m,
+            class_mapping=m,
         )
-        assert cfg.extractor.classification_mapping is m
+        assert cfg.extractor.class_mapping is m
 
 
 class TestValidateTaskMappings:
@@ -410,7 +469,7 @@ class TestValidateTaskMappings:
                 "value_key": "stages.id",
             },
             loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
-            classification_mapping=m,
+            class_mapping=m,
         )
 
         class _MockRec:
@@ -441,7 +500,7 @@ class TestValidateTaskMappings:
                 "value_key": "stages.id",
             },
             loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
-            classification_mapping=m,
+            class_mapping=m,
         )
 
         class _MockRec:
@@ -476,7 +535,7 @@ class TestValidateTaskMappings:
                 "value_key": "stages.id",
             },
             loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
-            classification_mapping=m,
+            class_mapping=m,
         )
 
         class _MockRec:
@@ -587,7 +646,7 @@ class TestClassWeightsWithMapping:
                 "value_key": "trials.values",
             },
             loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
-            classification_mapping=m,
+            class_mapping=m,
         )
 
         class _MockDataset:
