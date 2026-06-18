@@ -28,31 +28,31 @@ model:
 
 # Full frequency pool for binary-class pairs (C(n, 2) combos in hydra.sweeper.params).
 freq_universe:
-  - "stim_100Hz"
-  - "stim_200Hz"
-  - "stim_300Hz"
-  - "stim_400Hz"
+  # - "stim_100Hz"
+  # - "stim_200Hz"
+  # - "stim_300Hz"
+  # - "stim_400Hz"
   - "stim_500Hz"
-  - "stim_650Hz"
+  # - "stim_650Hz"
   - "stim_800Hz"
   - "stim_1000Hz"
-  - "stim_1500Hz"
+  # - "stim_1500Hz"
   - "stim_2000Hz"
-  - "stim_3000Hz"
-  - "stim_4000Hz"
+  # - "stim_3000Hz"
+  # - "stim_4000Hz"
   - "stim_5000Hz"
-  - "stim_7700Hz"
+  # - "stim_7700Hz"
   - "stim_8000Hz"
-  - "stim_9500Hz"
+  # - "stim_9500Hz"
   - "stim_10000Hz"
-  - "stim_12000Hz"
-  - "stim_13000Hz"
-  - "stim_15000Hz"
-  - "stim_16000Hz"
-  - "stim_18000Hz"
-  - "stim_20000Hz"
-  - "stim_30000Hz"
-  - "stim_40000Hz"
+  # - "stim_12000Hz"
+  # - "stim_13000Hz"
+  # - "stim_15000Hz"
+  # - "stim_16000Hz"
+  # - "stim_18000Hz"
+  # - "stim_20000Hz"
+  # - "stim_30000Hz"
+  # - "stim_40000Hz"
   - "stim_wn"
 
 data:
@@ -72,7 +72,6 @@ run:
     - baselines
     - ${hydra:runtime.choices.model}
     - raw_data
-    - binary_class
     - ${data.classes.0}
     - ${data.classes.1}
   seed: 42

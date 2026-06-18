@@ -37,6 +37,49 @@ FREQ_GROUPINGS = {
         "stim_5000Hz": "high",
         "stim_8000Hz": "high",
     },
+    # All 15 possible ways to pair 6 items into 3 unordered pairs,
+    # mapping each pair to a unique class ("class1", "class2", "class3").
+    # Each mapping below is a distinct pairing arrangement.
+    "3band_rnd_a": {  # (500,1000) (800,5000) (2000,8000)
+        "stim_500Hz": "class1", "stim_1000Hz": "class1",
+        "stim_800Hz": "class2", "stim_5000Hz": "class2",
+        "stim_2000Hz": "class3", "stim_8000Hz": "class3",
+    },
+    "3band_rnd_b": {  # (500,1000) (800,8000) (2000,5000)
+        "stim_500Hz": "class1", "stim_1000Hz": "class1",
+        "stim_800Hz": "class2", "stim_8000Hz": "class2",
+        "stim_2000Hz": "class3", "stim_5000Hz": "class3",
+    },
+    "3band_rnd_c": {  # (500,2000) (800,5000) (1000,8000)
+        "stim_500Hz": "class1", "stim_2000Hz": "class1",
+        "stim_800Hz": "class2", "stim_5000Hz": "class2",
+        "stim_1000Hz": "class3", "stim_8000Hz": "class3",
+    },
+    "3band_rnd_d": {  # (500,2000) (800,8000) (1000,5000)
+        "stim_500Hz": "class1", "stim_2000Hz": "class1",
+        "stim_800Hz": "class2", "stim_8000Hz": "class2",
+        "stim_1000Hz": "class3", "stim_5000Hz": "class3",
+    },
+    "3band_rnd_e": {  # (500,5000) (800,1000) (2000,8000)
+        "stim_500Hz": "class1", "stim_5000Hz": "class1",
+        "stim_800Hz": "class2", "stim_1000Hz": "class2",
+        "stim_2000Hz": "class3", "stim_8000Hz": "class3",
+    },
+    "3band_rnd_f": {  # (500,5000) (800,2000) (1000,8000)
+        "stim_500Hz": "class1", "stim_5000Hz": "class1",
+        "stim_800Hz": "class2", "stim_2000Hz": "class2",
+        "stim_1000Hz": "class3", "stim_8000Hz": "class3",
+    },
+    "3band_rnd_g": {  # (500,8000) (800,1000) (2000,5000)
+        "stim_500Hz": "class1", "stim_8000Hz": "class1",
+        "stim_800Hz": "class2", "stim_1000Hz": "class2",
+        "stim_2000Hz": "class3", "stim_5000Hz": "class3",
+    },
+    "3band_rnd_h": {  # (500,8000) (800,2000) (1000,5000)
+        "stim_500Hz": "class1", "stim_8000Hz": "class1",
+        "stim_800Hz": "class2", "stim_2000Hz": "class2",
+        "stim_1000Hz": "class3", "stim_5000Hz": "class3",
+    },
     "2band": {
         "stim_500Hz": "low",
         "stim_800Hz": "low",

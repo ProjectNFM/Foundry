@@ -30,7 +30,7 @@ model:
 data:
   split_type: intrasession-causal
   task_type: acoustic_stim
-  freq_grouping: null
+  freq_grouping: 3band_rnd_h
   classes:
   - "stim_500Hz"
   - "stim_800Hz"
@@ -52,7 +52,7 @@ run:
     - baselines
     - ${hydra:runtime.choices.model}
     - raw_data
-    - 6class
+    - 3band_rnd_h
   seed: 42
   log_level: INFO
 
