@@ -6,11 +6,7 @@ import torch.nn as nn
 from hydra.utils import instantiate
 from torch_brain.data import Data
 from torch_brain.batching import chain, collate, pad8, track_batch
-from torch_brain.nn import (
-    Embedding,
-    InfiniteVocabEmbedding,
-    RotaryTimeEmbedding,
-)
+from torch_brain.nn import InfiniteVocabEmbedding, RotaryTimeEmbedding
 from foundry.models.backbones import PerceiverIOBackbone
 from foundry.models.readout import ReadoutRouter
 from foundry.models.tokenizer import EEGTokenizer
@@ -113,12 +109,10 @@ class POYOEEGModel(nn.Module):
         self.session_emb = InfiniteVocabEmbedding(
             self.embed_dim, init_scale=emb_init_scale
         )
-        self.task_emb = Embedding(
-            self.router.num_tasks, self.embed_dim, init_scale=emb_init_scale
-        )
-        self.latent_emb = Embedding(
-            num_latents_per_step, self.embed_dim, init_scale=emb_init_scale
-        )
+        self.task_emb = nn.Embedding(self.router.num_tasks, self.embed_dim)
+        nn.init.normal_(self.task_emb.weight, mean=0, std=emb_init_scale)
+        self.latent_emb = nn.Embedding(num_latents_per_step, self.embed_dim)
+        nn.init.normal_(self.latent_emb.weight, mean=0, std=emb_init_scale)
         self.rotary_emb = RotaryTimeEmbedding(
             head_dim=dim_head,
             rotate_dim=dim_head // 2,
