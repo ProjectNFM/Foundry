@@ -4,6 +4,9 @@ defaults:
   - override /model: eegnet
   - override /data: ajile/singlesess
 
+task_configs:
+  - ajile_inactive_active
+
 model:
   num_channels: 94
   num_samples: 500

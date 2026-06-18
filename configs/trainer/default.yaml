@@ -40,6 +40,8 @@ callbacks:
     save_top_k: 1
     verbose: true
     save_on_train_epoch_end: false
+  confusion_matrix:
+    _target_: foundry.training.callbacks.ConfusionMatrixCallback
   parameter_watcher:
     _target_: foundry.training.callbacks.ParameterWatcherCallback
     param_patterns: ["*cwt*"]

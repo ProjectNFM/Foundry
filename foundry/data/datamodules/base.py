@@ -6,7 +6,7 @@ model-specific preprocessing.
 """
 
 import logging
-from typing import Callable, Literal, Optional
+from typing import TYPE_CHECKING, Callable, Literal, Optional
 
 import torch
 from hydra.utils import get_class
@@ -18,6 +18,13 @@ from lightning import LightningDataModule
 from torch_brain.transforms import Compose
 
 from foundry.tasks.class_weights import compute_class_weights_for_tasks
+from foundry.tasks.classification_mapping import (
+    filter_intervals_by_mapping,
+    validate_task_mappings,
+)
+
+if TYPE_CHECKING:
+    from foundry.tasks.config import TaskConfig
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +88,7 @@ class NeuralDataModule(LightningDataModule):
         split_type: Optional[str] = None,
         fold: Optional[int] = None,
         recording_ids: Optional[list[str]] = None,
+        task_configs: Optional[dict[str, "TaskConfig"]] = None,
     ):
         super().__init__()
         if isinstance(dataset_class, str):
@@ -93,6 +101,7 @@ class NeuralDataModule(LightningDataModule):
         self.sequence_length = sequence_length
         self.seed = seed
         self.dataset_kwargs = dict(dataset_kwargs or {})
+        self._task_configs = task_configs
 
         for key, val in (
             ("task_type", task_type),
@@ -139,21 +148,21 @@ class NeuralDataModule(LightningDataModule):
             **self.dataset_kwargs,
         )
 
+        if self._task_configs:
+            validate_task_mappings(self._task_configs, self.dataset)
+
     def compute_class_weights(
         self, smoothing: float = 1.0
     ) -> dict[str, list[float]]:
         if self.dataset is None:
             raise RuntimeError("Call setup() before compute_class_weights()")
-        if self.task_type is None:
+        if not self._task_configs:
             raise ValueError(
-                "task_type must be set to compute class weights automatically"
+                "task_configs must be provided to compute class weights"
             )
 
-        task_configs = self.dataset_class.get_tasks_for_experiment(
-            self.task_type
-        )
         return compute_class_weights_for_tasks(
-            task_configs, self.dataset, split="train", smoothing=smoothing
+            self._task_configs, self.dataset, split="train", smoothing=smoothing
         )
 
     def get_recording_ids(self) -> list[str]:
@@ -161,6 +170,22 @@ class NeuralDataModule(LightningDataModule):
 
     def get_channel_ids(self) -> list[str]:
         return sorted(self.dataset.get_channel_ids())
+
+    def _filter_intervals(self, sampling_intervals):
+        """Remove intervals containing labels that the mapping excludes."""
+        if not self._task_configs:
+            return sampling_intervals
+        for name, cfg in self._task_configs.items():
+            if cfg.class_mapping is None:
+                continue
+            value_field = cfg.target_extractor["value_key"].split(".")[-1]
+            sampling_intervals = {
+                rid: filter_intervals_by_mapping(
+                    intervals, cfg.class_mapping, value_field
+                )
+                for rid, intervals in sampling_intervals.items()
+            }
+        return sampling_intervals
 
     def _create_dataloader(
         self, split: Literal["train", "valid", "test"]
@@ -174,6 +199,7 @@ class NeuralDataModule(LightningDataModule):
             DataLoader for the split.
         """
         sampling_intervals = self.dataset.get_sampling_intervals(split=split)
+        sampling_intervals = self._filter_intervals(sampling_intervals)
 
         sampler = RandomFixedWindowSampler(
             sampling_intervals=sampling_intervals,

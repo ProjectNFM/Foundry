@@ -1,22 +1,20 @@
-name: sleep_stage_5class
+name: neurosoft_acoustic_stim_2band_rnd_a
 
 class_mapping:
   mapping:
-    Sleep stage W: Wake
-    Sleep stage 1: N1
-    Sleep stage 2: N2
-    Sleep stage 3: N3
-    Sleep stage 4: N3
-    Sleep stage R: REM
-  order: [Wake, N1, N2, N3, REM]
+    stim_500Hz: class1
+    stim_800Hz: class2
+    stim_5000Hz: class1
+    stim_8000Hz: class2
+  order: [class1, class2]
 
 head:
   _target_: foundry.tasks.heads.ReadoutHead
 
 target_extractor:
   _target_: foundry.tasks.targets.TargetExtractor
-  timestamp_key: stages.start
-  value_key: stages.names
+  timestamp_key: acoustic_stim_trials.timestamps
+  value_key: acoustic_stim_trials.behavior_labels
 
 loss:
   _target_: foundry.tasks.losses.CrossEntropyTaskLoss

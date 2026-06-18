@@ -14,9 +14,6 @@ from torch_brain.data import (
     RegularTimeSeries,
 )
 
-from foundry.data.datasets.peterson_brunton_pose_trajectory_2022 import (
-    PetersonBruntonPoseTrajectory2022,
-)
 from foundry.models import POYOEEGModel, EEGTokenizer, FixedChannelStrategy
 from foundry.models.embeddings.temporal import PatchLinearEmbedding
 from foundry.tasks.config import TaskConfig
@@ -24,6 +21,12 @@ from foundry.training import FoundryModule
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TASKS_DIR = REPO_ROOT / "configs" / "tasks"
+
+_TASK_TYPE_TO_YAML = {
+    "behavior": ["ajile_active_behavior"],
+    "active_vs_inactive": ["ajile_inactive_active"],
+    "pose_estimation": ["ajile_pose_estimation"],
+}
 
 
 class MockChannels:
@@ -38,7 +41,12 @@ class MockSession:
 
 
 def _make_ajile_task_configs(task_type: str = "behavior"):
-    return PetersonBruntonPoseTrajectory2022.get_tasks_for_experiment(task_type)
+    names = _TASK_TYPE_TO_YAML[task_type]
+    configs = {}
+    for name in names:
+        tc = TaskConfig.from_yaml(TASKS_DIR / f"{name}.yaml")
+        configs[tc.name] = tc
+    return configs
 
 
 def _make_poyo_model(task_configs: dict[str, TaskConfig]) -> POYOEEGModel:
@@ -67,16 +75,6 @@ def _make_poyo_model(task_configs: dict[str, TaskConfig]) -> POYOEEGModel:
     )
 
 
-def test_dataset_uses_task_mixin():
-    from foundry.data.datasets.mixins import TaskMixin
-
-    assert issubclass(PetersonBruntonPoseTrajectory2022, TaskMixin)
-    assert (
-        "ajile_active_behavior"
-        in PetersonBruntonPoseTrajectory2022.AVAILABLE_TASKS
-    )
-
-
 @pytest.mark.parametrize(
     ("task_type", "expected_task", "expected_kind", "class_names"),
     [
@@ -100,7 +98,7 @@ def test_dataset_uses_task_mixin():
         ),
     ],
 )
-def test_get_tasks_for_experiment_returns_task_configs(
+def test_task_configs_load_correctly(
     task_type, expected_task, expected_kind, class_names
 ):
     task_configs = _make_ajile_task_configs(task_type)
@@ -240,13 +238,3 @@ def test_foundry_module_training_step_regression():
     assert isinstance(loss, torch.Tensor)
     assert loss.requires_grad
     assert torch.isfinite(loss)
-
-
-def test_get_tasks_for_experiment_raises_when_tasks_unavailable(monkeypatch):
-    monkeypatch.setattr(
-        PetersonBruntonPoseTrajectory2022,
-        "AVAILABLE_TASKS",
-        {},
-    )
-    with pytest.raises(ValueError, match="Unknown task"):
-        PetersonBruntonPoseTrajectory2022.get_tasks_for_experiment("behavior")

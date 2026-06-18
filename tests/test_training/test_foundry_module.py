@@ -22,10 +22,12 @@ class _StubTaskModel(nn.Module):
     def __init__(self, task_configs: dict[str, TaskConfig], embed_dim: int = 8):
         super().__init__()
         self.task_configs = task_configs
-        heads = {
-            name: instantiate({**cfg.head, "embed_dim": embed_dim})
-            for name, cfg in task_configs.items()
-        }
+        heads = {}
+        for name, cfg in task_configs.items():
+            head_kwargs = {**cfg.head, "embed_dim": embed_dim}
+            if "output_dim" not in head_kwargs:
+                head_kwargs["output_dim"] = cfg.output_dim
+            heads[name] = instantiate(head_kwargs)
         self.router = ReadoutRouter(heads)
 
     def forward(

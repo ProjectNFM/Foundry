@@ -10,9 +10,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 
-from foundry.data.datasets.peterson_brunton_pose_trajectory_2022 import (
-    PetersonBruntonPoseTrajectory2022,
-)
+from foundry.tasks.config import TaskConfig
 from tests.test_configs.conftest import (
     CONFIGS_ROOT,
     load_resolved_config,
@@ -92,15 +90,25 @@ def _instantiate_node(yaml_path: Path, target_path: str) -> Any:
     kwargs: dict[str, Any] = {}
     target = node.get("_target_", "")
 
-    task_configs = PetersonBruntonPoseTrajectory2022.get_tasks_for_experiment(
-        "behavior"
-    )
+    task_configs = {
+        "ajile_active_behavior": TaskConfig.from_yaml(
+            CONFIGS_ROOT / "tasks" / "ajile_active_behavior.yaml"
+        )
+    }
 
     if "FoundryModule" in target:
         from foundry.models.readout import ReadoutRouter
 
         task_cfg = next(iter(task_configs.values()))
-        heads = {task_cfg.name: instantiate({**task_cfg.head, "embed_dim": 4})}
+        heads = {
+            task_cfg.name: instantiate(
+                {
+                    **task_cfg.head,
+                    "embed_dim": 4,
+                    "output_dim": task_cfg.output_dim,
+                }
+            )
+        }
 
         class _StubFoundryModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -130,8 +138,6 @@ def _instantiate_node(yaml_path: Path, target_path: str) -> Any:
             pytest.skip(
                 "POYO root requires composed tokenizer; see dedicated test"
             )
-        from foundry.tasks.config import TaskConfig
-
         kwargs["task_configs"] = {
             "ajile_inactive_active": TaskConfig.from_yaml(
                 CONFIGS_ROOT / "tasks" / "ajile_inactive_active.yaml"

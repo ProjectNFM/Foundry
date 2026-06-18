@@ -1,6 +1,6 @@
 _target_: foundry.data.datamodules.NeuralDataModule
 
-dataset_class: foundry.data.datasets.NeurosoftMinipigs2026
+dataset_class: foundry.data.datasets.KempSleepEDF2013
 
 root: ./data/processed/
 batch_size: ${hyperparameters.batch_size}
@@ -10,8 +10,7 @@ sequence_length: ${hyperparameters.sequence_length}
 seed: 42
 
 split_type: ???
+task_type: ???
 
 dataset_kwargs:
   fold: ${hyperparameters.fold_number}
-  recording_ids:
-    - "sub-01_ses-01_task-AcousStim_acq-LH_desc-raw"

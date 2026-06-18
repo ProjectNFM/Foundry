@@ -5,6 +5,9 @@ defaults:
   - override /data: ajile/singlesess
   - override /module: default
 
+task_configs:
+  - ajile_pose_estimation
+
 model:
   zero_output_timestamps: false
 

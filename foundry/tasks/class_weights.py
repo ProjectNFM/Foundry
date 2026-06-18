@@ -13,6 +13,47 @@ from foundry.tasks.targets import TargetExtractor
 logger = logging.getLogger(__name__)
 
 
+def _resolve_intervals_and_values(
+    dataset, rid, split_intervals, extractor, value_field: str
+):
+    """Resolve label values from split intervals, falling back to the recording.
+
+    The split intervals returned by ``get_sampling_intervals`` may not carry the
+    expected value field directly. In that case, fetch the parent label attribute
+    from the recording and filter it by the split time windows.
+
+    Returns ``(intervals, values)`` where both are aligned, or ``(None, None)``
+    if labels cannot be resolved.
+    """
+    if hasattr(split_intervals, value_field):
+        return split_intervals, np.asarray(
+            getattr(split_intervals, value_field)
+        )
+
+    parts = extractor.value_key.split(".")
+    if len(parts) < 2:
+        return None, None
+
+    parent_path = ".".join(parts[:-1])
+    try:
+        rec = dataset.get_recording(rid)
+        label_intervals = rec.get_nested_attribute(parent_path)
+    except (AttributeError, KeyError):
+        return None, None
+
+    if hasattr(label_intervals, "select_by_interval"):
+        label_intervals = label_intervals.select_by_interval(split_intervals)
+
+    if hasattr(label_intervals, value_field):
+        return label_intervals, np.asarray(
+            getattr(label_intervals, value_field)
+        )
+    if hasattr(label_intervals, "id"):
+        return label_intervals, np.asarray(getattr(label_intervals, "id"))
+
+    return None, None
+
+
 def _count_labels_for_task(
     dataset,
     split: str,
@@ -22,19 +63,25 @@ def _count_labels_for_task(
     train_intervals = dataset.get_sampling_intervals(split=split)
     counts: Counter = Counter()
 
-    for _rid, intervals in train_intervals.items():
-        if not hasattr(intervals, value_field):
+    for _rid, split_intervals in train_intervals.items():
+        intervals, values = _resolve_intervals_and_values(
+            dataset, _rid, split_intervals, extractor, value_field
+        )
+        if values is None:
             continue
 
-        values = getattr(intervals, value_field)
-
-        if extractor.label_map is not None:
-            for src, dst in extractor.label_map.items():
-                label_mask = values == src
-                if not np.any(label_mask):
-                    continue
-                selected = intervals.select_by_mask(label_mask)
-                counts[int(dst)] += sum(selected.end - selected.start)
+        if extractor.class_mapping is not None:
+            mapping = extractor.class_mapping
+            mapped, keep = mapping.filter_and_remap(values)
+            if not np.any(keep):
+                continue
+            selected = intervals.select_by_mask(keep)
+            for label in np.unique(mapped):
+                label_mask = mapped == label
+                durations = (
+                    selected.end[label_mask] - selected.start[label_mask]
+                )
+                counts[int(label)] += durations.sum()
             continue
 
         unique_labels = np.unique(values)
@@ -71,9 +118,7 @@ def compute_class_weights_for_tasks(
         if cfg.kind not in ("binary", "multiclass"):
             continue
 
-        ext_kwargs = dict(cfg.target_extractor)
-        ext_kwargs.pop("_target_", None)
-        extractor = TargetExtractor(**ext_kwargs)
+        extractor = cfg.extractor
 
         counts = _count_labels_for_task(dataset, split, extractor)
         task_weights = _inverse_frequency_weights(

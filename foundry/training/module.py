@@ -10,6 +10,7 @@ import torch.nn as nn
 from hydra.utils import instantiate
 
 from foundry.tasks.config import TaskConfig
+from foundry.training.confusion_matrix import ConfusionMatrixTracker
 
 
 class FoundryModule(L.LightningModule):
@@ -38,6 +39,7 @@ class FoundryModule(L.LightningModule):
         self._task_losses = nn.ModuleDict()
         self.train_metrics = nn.ModuleDict()
         self.val_metrics = nn.ModuleDict()
+        self._val_confusion_trackers: dict[str, ConfusionMatrixTracker] = {}
 
         for name, cfg in model.task_configs.items():
             self._task_losses[name] = instantiate(cfg.loss)
@@ -48,6 +50,15 @@ class FoundryModule(L.LightningModule):
                     prefix=f"train/{name}_"
                 )
                 self.val_metrics[name] = metrics.clone(prefix=f"val/{name}_")
+
+            if (
+                cfg.kind in ("binary", "multiclass")
+                and cfg.class_mapping is not None
+            ):
+                self._val_confusion_trackers[name] = ConfusionMatrixTracker(
+                    num_classes=cfg.output_dim,
+                    class_names=cfg.get_class_names(),
+                )
 
     def _metric_summary_mode(
         self, task_name: str, metric_name: str, cfg: Any
@@ -117,6 +128,17 @@ class FoundryModule(L.LightningModule):
             if name in taskwise_loss:
                 self.log(f"{stage}/{name}_loss", taskwise_loss[name])
 
+            # Defense-in-depth: mask any invalid targets that leaked through.
+            # Only applies to classification tasks where -1 is the sentinel
+            # for unmapped labels; regression targets can be legitimately negative.
+            if cfg.kind in ("binary", "multiclass"):
+                valid_mask = target >= 0
+                if not valid_mask.all():
+                    preds = preds[valid_mask]
+                    target = target[valid_mask]
+                    if target.numel() == 0:
+                        continue
+
             if name in metrics:
                 metric_preds, metric_target = self._prepare_for_metrics(
                     cfg, preds, target
@@ -127,6 +149,15 @@ class FoundryModule(L.LightningModule):
                     on_step=False,
                     on_epoch=True,
                 )
+
+            if stage == "val" and name in self._val_confusion_trackers:
+                if cfg.kind == "multiclass":
+                    pred_classes = preds.argmax(dim=-1)
+                elif cfg.kind == "binary":
+                    pred_classes = (preds[:, 1] > preds[:, 0]).long()
+                else:
+                    continue
+                self._val_confusion_trackers[name].update(pred_classes, target)
 
         return total_loss
 

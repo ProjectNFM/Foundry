@@ -9,7 +9,6 @@ import pytest
 import torch
 from torch_brain.data import Data, Interval, RegularTimeSeries
 
-from foundry.data.datasets.neurosoft import NeurosoftMinipigs2026
 from foundry.models import POYOEEGModel, EEGTokenizer, FixedChannelStrategy
 from foundry.models.embeddings.temporal import PatchLinearEmbedding
 from foundry.tasks.config import TaskConfig
@@ -17,6 +16,11 @@ from foundry.training import FoundryModule
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TASKS_DIR = REPO_ROOT / "configs" / "tasks"
+
+_TASK_TYPE_TO_YAML = {
+    "on_vs_off": ["neurosoft_on_vs_off"],
+    "acoustic_stim": ["neurosoft_acoustic_stim"],
+}
 
 
 class MockChannels:
@@ -31,7 +35,12 @@ class MockSession:
 
 
 def _make_neurosoft_task_configs(task_type: str = "on_vs_off"):
-    return NeurosoftMinipigs2026.get_tasks_for_experiment(task_type)
+    names = _TASK_TYPE_TO_YAML[task_type]
+    configs = {}
+    for name in names:
+        tc = TaskConfig.from_yaml(TASKS_DIR / f"{name}.yaml")
+        configs[tc.name] = tc
+    return configs
 
 
 def _make_poyo_model(task_configs: dict[str, TaskConfig]) -> POYOEEGModel:
@@ -57,20 +66,6 @@ def _make_poyo_model(task_configs: dict[str, TaskConfig]) -> POYOEEGModel:
         latent_step=0.5,
         num_latents_per_step=1,
         zero_output_timestamps=True,
-    )
-
-
-def test_dataset_uses_task_mixin():
-    from foundry.data.datasets.mixins import TaskMixin
-
-    assert issubclass(NeurosoftMinipigs2026, TaskMixin)
-    assert "neurosoft_on_vs_off" in NeurosoftMinipigs2026.AVAILABLE_TASKS
-    assert "neurosoft_acoustic_stim" in NeurosoftMinipigs2026.AVAILABLE_TASKS
-
-
-def test_dataset_has_no_readout_class_names():
-    assert not hasattr(NeurosoftMinipigs2026, "READOUT_CLASS_NAMES") or (
-        NeurosoftMinipigs2026.READOUT_CLASS_NAMES == {}
     )
 
 
@@ -118,7 +113,7 @@ def test_dataset_has_no_readout_class_names():
         ),
     ],
 )
-def test_get_tasks_for_experiment_returns_task_configs(
+def test_task_configs_load_correctly(
     task_type, expected_task, expected_kind, class_names
 ):
     task_configs = _make_neurosoft_task_configs(task_type)

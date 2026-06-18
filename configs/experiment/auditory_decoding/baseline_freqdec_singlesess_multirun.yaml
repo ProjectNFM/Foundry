@@ -19,13 +19,15 @@ defaults:
   - override /model: linear # linear, mlp, gru, shallowcnn, temporalcnn, eegnet
   - override /data: neurosoft_minipigs/singlesess
 
+task_configs:
+  - neurosoft_acoustic_stim
+
 model:
   num_channels: ${get_num_ecog_channels_by_name:${data.root}/neurosoft_minipigs_2026,${data.recording_ids.0}}
   num_samples: 1000
 
 data:
   split_type: intrasession-causal
-  task_type: acoustic_stim
 
 run:
   name: ${hydra:runtime.choices.model}_neurosoft_${data.recording_ids.0}

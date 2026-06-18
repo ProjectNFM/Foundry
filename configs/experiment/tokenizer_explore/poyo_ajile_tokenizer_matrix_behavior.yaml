@@ -21,6 +21,9 @@ _matrix:
     spatial_session_cwt: 512
     spatial_session_cwt_common: 512
 
+task_configs:
+  - ajile_active_behavior
+
 model:
   zero_output_timestamps: true
 
