@@ -37,8 +37,8 @@ class TargetExtractor:
             ``"active_behavior_trials.behavior_id"`` or
             ``"pose_trajectories.values"``).
         class_mapping: Optional unified classification mapping.
-            When set, raw labels are remapped via
-            :meth:`ClassificationMapping.apply`.
+            When set, raw labels are remapped to integer class IDs via
+            :meth:`ClassificationMapping.map_to_class_ids` during tokenization.
 
     Returns:
         A dict with:
@@ -58,7 +58,7 @@ class TargetExtractor:
         values = data.get_nested_attribute(self.value_key)
 
         if self.class_mapping is not None:
-            values = self.class_mapping.apply(values)
+            values = self.class_mapping.map_to_class_ids(values)
 
         if values.dtype == np.float64:
             values = values.astype(np.float32)

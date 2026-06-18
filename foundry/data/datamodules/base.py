@@ -18,7 +18,10 @@ from lightning import LightningDataModule
 from torch_brain.transforms import Compose
 
 from foundry.tasks.class_weights import compute_class_weights_for_tasks
-from foundry.tasks.classification_mapping import filter_intervals_by_mapping
+from foundry.tasks.classification_mapping import (
+    filter_intervals_by_mapping,
+    validate_task_mappings,
+)
 
 if TYPE_CHECKING:
     from foundry.tasks.config import TaskConfig
@@ -146,8 +149,6 @@ class NeuralDataModule(LightningDataModule):
         )
 
         if self._task_configs:
-            from foundry.tasks.validation import validate_task_mappings
-
             validate_task_mappings(self._task_configs, self.dataset)
 
     def compute_class_weights(

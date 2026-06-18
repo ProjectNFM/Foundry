@@ -98,7 +98,7 @@ class TestClassificationMappingApply:
             mapping={0: "Wake", 1: "N1", 2: "N2", 3: "N3", 4: "N3", 5: "REM"}
         )
         raw = np.array([0, 1, 2, 3, 4, 5], dtype=np.int64)
-        result = m.apply(raw)
+        result = m.map_to_class_ids(raw)
         expected = np.array([0, 1, 2, 3, 3, 4], dtype=np.int64)
         np.testing.assert_array_equal(result, expected)
 
@@ -107,7 +107,7 @@ class TestClassificationMappingApply:
             mapping={4: "low", 6: "low", 14: "high", 16: "high"}
         )
         raw = np.array([0, 4, 6, 10, 14, 16, 25], dtype=np.int64)
-        result = m.apply(raw)
+        result = m.map_to_class_ids(raw)
         expected = np.array([-1, 0, 0, -1, 1, 1, -1], dtype=np.int64)
         np.testing.assert_array_equal(result, expected)
 
@@ -116,14 +116,14 @@ class TestClassificationMappingApply:
             mapping={"cat": "animal", "dog": "animal", "rose": "plant"}
         )
         raw = np.array(["cat", "dog", "rose", "cat"])
-        result = m.apply(raw)
+        result = m.map_to_class_ids(raw)
         expected = np.array([0, 0, 1, 0], dtype=np.int64)
         np.testing.assert_array_equal(result, expected)
 
     def test_apply_str_unlisted_get_negative_one(self):
         m = ClassificationMapping(mapping={"cat": "animal", "dog": "animal"})
         raw = np.array(["cat", "fish", "dog"])
-        result = m.apply(raw)
+        result = m.map_to_class_ids(raw)
         expected = np.array([0, -1, 0], dtype=np.int64)
         np.testing.assert_array_equal(result, expected)
 
@@ -133,7 +133,7 @@ class TestClassificationMappingApply:
             order=["high", "low"],
         )
         raw = np.array([4, 14], dtype=np.int64)
-        result = m.apply(raw)
+        result = m.map_to_class_ids(raw)
         expected = np.array([1, 0], dtype=np.int64)
         np.testing.assert_array_equal(result, expected)
 
@@ -243,7 +243,7 @@ class TestListMapping:
     def test_list_apply_maps_to_positional_ids(self):
         m = ClassificationMapping(mapping=["Wake", "N1", "N2"])
         raw = np.array(["N2", "Wake", "N1"])
-        result = m.apply(raw)
+        result = m.map_to_class_ids(raw)
         np.testing.assert_array_equal(result, [2, 0, 1])
 
     def test_list_filter_and_remap(self):
@@ -257,7 +257,7 @@ class TestListMapping:
         m = ClassificationMapping(mapping=["REM", "Wake", "N1"])
         assert m.class_names == ["REM", "Wake", "N1"]
         raw = np.array(["Wake", "REM", "N1"])
-        result = m.apply(raw)
+        result = m.map_to_class_ids(raw)
         np.testing.assert_array_equal(result, [1, 0, 2])
 
     def test_empty_list_raises(self):
@@ -457,7 +457,7 @@ class TestValidateTaskMappings:
     """Startup validation logs informational message for unlisted labels."""
 
     def test_passes_when_all_labels_in_mapping(self):
-        from foundry.tasks.validation import validate_task_mappings
+        from foundry.tasks.classification_mapping import validate_task_mappings
 
         m = ClassificationMapping(mapping={0: "A", 1: "B", 2: "C"})
         cfg = TaskConfig(
@@ -488,7 +488,7 @@ class TestValidateTaskMappings:
         """Unlisted labels produce informational log, not an error."""
         import logging
 
-        from foundry.tasks.validation import validate_task_mappings
+        from foundry.tasks.classification_mapping import validate_task_mappings
 
         m = ClassificationMapping(mapping={0: "A", 1: "B"})
         cfg = TaskConfig(
@@ -523,7 +523,7 @@ class TestValidateTaskMappings:
 
     def test_raises_when_no_labels_match(self):
         """If zero data labels match the mapping, raise (likely misconfiguration)."""
-        from foundry.tasks.validation import validate_task_mappings
+        from foundry.tasks.classification_mapping import validate_task_mappings
 
         m = ClassificationMapping(mapping={10: "A", 11: "B"})
         cfg = TaskConfig(
@@ -552,7 +552,7 @@ class TestValidateTaskMappings:
             validate_task_mappings({"test": cfg}, _MockDataset())
 
     def test_skips_tasks_without_mapping(self):
-        from foundry.tasks.validation import validate_task_mappings
+        from foundry.tasks.classification_mapping import validate_task_mappings
 
         cfg = TaskConfig(
             name="test",

@@ -6,10 +6,16 @@ implicit filtering, derived class counts, and display names.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from foundry.tasks.config import TaskConfig
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -17,8 +23,10 @@ class ClassificationMapping:
     """User-friendly classification label mapping.
 
     Maps input labels (int or str) to output class names. Labels not listed
-    are implicitly filtered out. Class IDs are auto-assigned from the order
-    of first appearance of unique output names, or from an explicit ``order``.
+    are implicitly filtered out. Integer class IDs are auto-assigned from the
+    order of first appearance of unique output names, or from an explicit
+    ``order``; the tokenizer assigns these IDs to target values during
+    tokenization.
 
     Args:
         mapping: Either a dict mapping input labels to output class names
@@ -36,7 +44,6 @@ class ClassificationMapping:
     _input_class_to_id: dict[int | str, int] = field(
         init=False, repr=False, compare=False
     )
-    _id_to_name: list[str] = field(init=False, repr=False, compare=False)
     _kept_input_classes: frozenset[int | str] = field(
         init=False, repr=False, compare=False
     )
@@ -44,7 +51,7 @@ class ClassificationMapping:
 
     def __post_init__(self) -> None:
         if isinstance(self.mapping, list):
-            labels = list(self.mapping)
+            labels = self.mapping
             object.__setattr__(
                 self, "mapping", {label: str(label) for label in labels}
             )
@@ -55,24 +62,23 @@ class ClassificationMapping:
 
         self._validate()
 
-        if self.order is not None:
-            ordered_names = list(self.order)
-        else:
-            seen: list[str] = []
-            for name in self.mapping.values():
-                if name not in seen:
-                    seen.append(name)
-            ordered_names = seen
+        if self.order is None:
+            object.__setattr__(
+                self,
+                "order",
+                list(dict.fromkeys(self.mapping.values())),
+            )
 
-        name_to_id = {name: i for i, name in enumerate(ordered_names)}
-        input_class_to_id = {k: name_to_id[v] for k, v in self.mapping.items()}
+        output_class_to_id = {name: i for i, name in enumerate(self.order)}
+        input_class_to_id = {
+            k: output_class_to_id[v] for k, v in self.mapping.items()
+        }
 
-        object.__setattr__(self, "_id_to_name", ordered_names)
         object.__setattr__(self, "_input_class_to_id", input_class_to_id)
         object.__setattr__(
             self, "_kept_input_classes", frozenset(self.mapping.keys())
         )
-        object.__setattr__(self, "_num_classes", len(ordered_names))
+        object.__setattr__(self, "_num_classes", len(self.order))
 
     def _validate(self) -> None:
         if not self.mapping:
@@ -107,15 +113,15 @@ class ClassificationMapping:
     @property
     def class_names(self) -> list[str]:
         """Ordered list of output class names (index = class ID)."""
-        return list(self._id_to_name)
+        return list(self.order)
 
     @property
     def kept_input_classes(self) -> frozenset[int | str]:
         """Set of input labels that are in the mapping."""
         return self._kept_input_classes
 
-    def apply(self, raw_values: np.ndarray) -> np.ndarray:
-        """Map input label array to class IDs.
+    def map_to_class_ids(self, raw_values: np.ndarray) -> np.ndarray:
+        """Map input label array to integer class IDs.
 
         Labels not in the mapping get -1 (defense-in-depth; they should
         already be filtered by the sampler).
@@ -149,7 +155,7 @@ class ClassificationMapping:
             length == keep_mask.sum().
         """
         keep = self.kept_mask(values)
-        mapped = self.apply(values[keep])
+        mapped = self.map_to_class_ids(values[keep])
         return mapped, keep
 
     @classmethod
@@ -212,3 +218,59 @@ def filter_intervals_by_mapping(
     values = getattr(intervals, value_field)
     keep_mask = mapping.kept_mask(values)
     return intervals.select_by_mask(keep_mask)
+
+
+def validate_task_mappings(
+    task_configs: dict[str, TaskConfig],
+    dataset,
+    max_recordings: int = 5,
+) -> None:
+    """Verify classification mappings have at least some overlap with data.
+
+    Called once during setup. Scans a few recordings to inform the user about
+    labels in the data that are not in the mapping (will be filtered out).
+
+    Raises:
+        ValueError: If NO labels in the data match the mapping at all
+            (likely a misconfiguration).
+    """
+    for name, cfg in task_configs.items():
+        if cfg.class_mapping is None:
+            continue
+        kept = cfg.class_mapping.kept_input_classes
+        value_key = cfg.target_extractor["value_key"]
+
+        if not hasattr(dataset, "recording_ids"):
+            continue
+
+        all_unique: set = set()
+        sample_ids = list(dataset.recording_ids)[:max_recordings]
+        for rid in sample_ids:
+            rec = dataset.get_recording(rid)
+            try:
+                values = rec.get_nested_attribute(value_key)
+            except (AttributeError, KeyError):
+                continue
+            unique_raw = set(np.asarray(values).flat)
+            all_unique.update(unique_raw)
+
+        if not all_unique:
+            continue
+
+        not_in_mapping = all_unique - set(kept)
+        in_mapping = all_unique & set(kept)
+
+        if not in_mapping:
+            raise ValueError(
+                f"Task '{name}': none of the labels found in data "
+                f"({sorted(all_unique)}) match the class_mapping. "
+                f"This is likely a misconfiguration."
+            )
+
+        if not_in_mapping:
+            logger.info(
+                "Task '%s': labels %s found in data are not in the mapping "
+                "and will be filtered out during training.",
+                name,
+                sorted(not_in_mapping),
+            )

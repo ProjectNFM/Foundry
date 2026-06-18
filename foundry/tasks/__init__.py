@@ -1,6 +1,7 @@
 from foundry.tasks.classification_mapping import (
     ClassificationMapping,
     filter_intervals_by_mapping,
+    validate_task_mappings,
 )
 from foundry.tasks.config import TaskConfig
 from foundry.tasks.heads import MLPReadoutHead, ReadoutHead
@@ -26,6 +27,7 @@ __all__ = [
     "extract_multitask_targets",
     "classification_metrics",
     "filter_intervals_by_mapping",
+    "validate_task_mappings",
     "regression_metrics",
     "ssl_metrics",
 ]
