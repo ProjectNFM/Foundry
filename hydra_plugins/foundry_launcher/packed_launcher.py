@@ -85,6 +85,70 @@ class PackedSubmititLauncher(BaseSubmititLauncher):
         }
         executor.update_parameters(**params)
 
+        # When the Slurm job runs inside a CSCS Container Engine image
+        # (i.e. ``--environment=...`` is on either the ``#SBATCH`` directives
+        # or the per-step ``srun`` arguments), submitit's default Python path
+        # is wrong: it bakes ``sys.executable`` from the *submission* shell
+        # (typically the host ``.venv/bin/python``) into the sbatch script,
+        # but inside the container that interpreter either doesn't exist or
+        # doesn't see the image's site-packages. Override ``_python`` so the
+        # generated ``srun ... python -u -m submitit.core._submit ...`` line
+        # resolves ``python`` from the container's ``PATH`` instead.
+        if self._EXECUTOR == "slurm":
+            additional = self.params.get("additional_parameters") or {}
+            try:
+                additional = dict(additional)
+            except (TypeError, ValueError):
+                additional = (
+                    OmegaConf.to_container(additional, resolve=True) or {}
+                )
+
+            srun_args_raw = self.params.get("srun_args") or []
+            try:
+                srun_args_list = list(srun_args_raw)
+            except TypeError:
+                srun_args_list = (
+                    OmegaConf.to_container(srun_args_raw, resolve=True) or []
+                )
+            srun_args_list = [str(a) for a in srun_args_list]
+
+            container_in_additional = (
+                "environment" in additional or "container-image" in additional
+            )
+            container_in_srun = any(
+                a.startswith("--environment=")
+                or a.startswith("--container-image=")
+                for a in srun_args_list
+            )
+            uses_container = container_in_additional or container_in_srun
+
+            if uses_container:
+                inner = getattr(executor, "_executor", executor)
+                # submitit >=1.4 uses ``SlurmExecutor.python`` for the ``srun ...`` line
+                # (see ``_submitit_command_str``). Older builds used ``_python``; set both.
+                submitit_python = "python"
+                if hasattr(inner, "python"):
+                    inner.python = submitit_python
+                if hasattr(inner, "_python"):
+                    inner._python = submitit_python
+                env_value = additional.get(
+                    "environment", additional.get("container-image")
+                )
+                if env_value is None:
+                    for a in srun_args_list:
+                        if a.startswith("--environment=") or a.startswith(
+                            "--container-image="
+                        ):
+                            env_value = a.split("=", 1)[1]
+                            break
+                log.info(
+                    "Detected container env (--environment=%s); overriding "
+                    "submitit Slurm python to %r so the container interpreter is used "
+                    "(not the login-node venv path).",
+                    env_value,
+                    submitit_python,
+                )
+
         log.info(
             "Submitit '%s' sweep output dir: %s",
             self._EXECUTOR,
