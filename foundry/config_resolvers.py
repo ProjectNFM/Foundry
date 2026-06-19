@@ -9,7 +9,6 @@ SLURM jobs where buffered output is lost on crash.
 """
 
 import glob as _glob
-import itertools
 import os
 import sys
 import traceback
