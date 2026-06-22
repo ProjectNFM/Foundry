@@ -29,6 +29,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+_INTERPOLATION_ONLY_KEYS = ("subject",)
+
+
 def normalize_data_config(data_cfg: DictConfig) -> None:
     """Merge top-level dataset params into ``dataset_kwargs`` (in-place).
 
@@ -36,6 +39,11 @@ def normalize_data_config(data_cfg: DictConfig) -> None:
     the top level while base data configs may leave mandatory placeholders
     inside ``dataset_kwargs``. Hydra's recursive ``instantiate`` fails on
     those placeholders, so resolve them here before instantiation.
+
+    Keys listed in ``_INTERPOLATION_ONLY_KEYS`` (e.g. ``subject``) are used
+    only for config interpolation (such as resolver arguments) and are
+    stripped before instantiation so they are not passed to the datamodule
+    constructor.
     """
     merges = ("task_type", "split_type", "fold", "recording_ids")
     if "dataset_kwargs" not in data_cfg:
@@ -50,6 +58,18 @@ def normalize_data_config(data_cfg: DictConfig) -> None:
             for key in list(data_cfg.dataset_kwargs.keys()):
                 if OmegaConf.is_missing(data_cfg.dataset_kwargs, key):
                     del data_cfg.dataset_kwargs[key]
+
+        strip_keys = [k for k in _INTERPOLATION_ONLY_KEYS if k in data_cfg]
+        if strip_keys:
+            if "dataset_kwargs" in data_cfg:
+                for dk in list(data_cfg.dataset_kwargs.keys()):
+                    val = data_cfg.dataset_kwargs[dk]
+                    if isinstance(val, (list, tuple)):
+                        OmegaConf.update(
+                            data_cfg, f"dataset_kwargs.{dk}", list(val)
+                        )
+            for key in strip_keys:
+                del data_cfg[key]
 
 
 class NeuralDataModule(LightningDataModule):
@@ -169,7 +189,7 @@ class NeuralDataModule(LightningDataModule):
         return sorted(self.dataset.recording_ids)
 
     def get_channel_ids(self) -> list[str]:
-        return sorted(self.dataset.get_channel_ids())
+        return sorted(set(self.dataset.get_channel_ids()))
 
     def _filter_intervals(self, sampling_intervals):
         """Remove intervals containing labels that the mapping excludes."""
