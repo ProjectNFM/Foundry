@@ -254,8 +254,14 @@ def _get_resume_checkpoint_path(
         "run.resume_if_checkpoint_exists",
         default=False,
     )
+
+    explicit_ckpt = OmegaConf.select(cfg, "run.ckpt_path", default=None)
+
     if resume_if_checkpoint_exists:
-        ckpt_path = str(last_ckpt)
+        if explicit_ckpt:
+            ckpt_path = explicit_ckpt
+        else:
+            ckpt_path = str(last_ckpt)
         logger.info(
             "run.resume_if_checkpoint_exists=true. Resuming from %s.",
             ckpt_path,
@@ -297,6 +303,28 @@ def _log_config_to_wandb(trainer, cfg: DictConfig):
 
 
 # -- Entry point ------------------------------------------------------------
+
+def _load_weights_partially(lightning_module, ckpt_path: str) -> None:
+    """Load checkpoint weights, skipping any layers with size mismatches."""
+    checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    state_dict = checkpoint["state_dict"]
+
+    model_state = lightning_module.state_dict()
+    filtered = {
+        k: v for k, v in state_dict.items()
+        if k in model_state and v.shape == model_state[k].shape
+    }
+    skipped = [k for k in state_dict if k not in filtered]
+
+    if skipped:
+        logger.warning(
+            "Skipping %d mismatched layers during partial weight load: %s",
+            len(skipped),
+            skipped,
+        )
+
+    lightning_module.load_state_dict(filtered, strict=False)
+    logger.info("Partial weights loaded from %s", ckpt_path)
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
@@ -340,6 +368,12 @@ def main(cfg: DictConfig):
     ckpt_path = _get_resume_checkpoint_path(
         cfg, checkpoint_dir, slurm_restart_count
     )
+
+    partial_load = OmegaConf.select(cfg, "run.partial_load", default=False)
+    if ckpt_path and partial_load:
+        _load_weights_partially(lightning_module, ckpt_path)
+        ckpt_path = None 
+    
     try:
         trainer.fit(
             lightning_module,

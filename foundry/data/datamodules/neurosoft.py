@@ -12,7 +12,7 @@ from auditorydecoding.data.neurosoft_pipeline import (
 from torch_brain.transforms import Compose
 
 from foundry.data.datamodules.base import NeuralDataModule
-from foundry.data.transforms import StandardizeSignal, CARSignal
+from foundry.data.transforms import StandardizeSignal, CARSignal, DetectBadChannels, BalanceData, DownsampleSignal, BaselineSignal+
 from typing import Optional, Callable, Literal, Type
 
 
@@ -56,28 +56,12 @@ class NeurosoftDataModule(NeuralDataModule):
         ] = "on_vs_off",
         fold_number: Optional[int] = 0,
         recording_ids: Optional[list[str]] = None,
-        class_balance: Optional[
-            Literal["threshold", "downsample", "d-threshold", "percentile"]
-        ] = None,
-        balance_threshold: Optional[
-            int
-        ] = 25,
-        balance_seed: Optional[
-            int
-        ] = 42,
-        min_trials: Optional[
-            int
-        ] = 0,
     ):
         dataset_kwargs = {
             "recording_ids": recording_ids,
             "split_type": split_type,
             "task_type": task_type,
             "fold_num": fold_number,
-            "class_balance" : class_balance,
-            "balance_threshold": balance_threshold,
-            "min_trials": min_trials,
-            "balance_seed": balance_seed
         }
         super().__init__(
             dataset_class=dataset_class,
@@ -95,17 +79,30 @@ class NeurosoftDataModule(NeuralDataModule):
 
     def setup(self, stage=None):
         super().setup(stage)
+        
+        downsample = DownsampleSignal(field="ecog", target_sfreq=500.0)
+
+        bd = BalanceData(self.dataset, parent_split="train", balance_type="percentile", retain_percentile=40)
+
+        self.dataset = bd.modify_dataset(self.dataset)
+
+        # Set filter parameters 
+        bcd = DetectBadChannels(field="ecog")
+        bcd.fit(self.dataset, split="train")
 
         car = CARSignal(field="ecog")
+
         standardize = StandardizeSignal(field="ecog")
         standardize.fit(self.dataset, split="train")
+
+        baseline = BaselineSignal(field="ecog", trials_field="acoustic_stim_trials", baseline_duration=0.25)
 
         existing = (
             list(self.dataset.transform.transforms)
             if self.dataset.transform is not None
             else []
         )
-        self.dataset.transform = Compose([car, standardize] + existing)
+        self.dataset.transform = Compose([bcd, car, downsample, baseline, standardize] + existing)
 
     def get_recording_ids(self) -> list[str]:
         return sorted(self.dataset.recording_ids)
@@ -121,4 +118,4 @@ class NeurosoftMinipigs2026DataModule(NeurosoftDataModule):
 
 class NeurosoftMonkeys2026DataModule(NeurosoftDataModule):
     def __init__(self, **kwargs):
-        super().__init__(dataset_class=NeurosoftMonkeys2026, class_balance="percentile", balance_threshold=50, **kwargs)
+        super().__init__(dataset_class=NeurosoftMonkeys2026, **kwargs)

@@ -9,7 +9,7 @@ account: ${oc.env:CSCS_ACCOUNT,""}
 partition: ${oc.env:CSCS_PARTITION, ""}
 nodes: 1
 mem_gb: 32
-gres: gpu:1
+gres: gpu:4
 gpus_per_node: 4
 array_parallelism: 10
 name: ${hydra.job.name}

@@ -25,7 +25,7 @@ stage:
 run:
   # Keep fresh runs independent unless resume is explicitly requested.
   # SLURM restarts still auto-resume from last.ckpt in main.py.
-  resume_if_checkpoint_exists: false
+  resume_if_checkpoint_exists: true
   # Reuse a WandB run ID derived from run.name.
   # Keeps dashboards continuous for preempted/relaunched runs with same name.
   resume_wandb_if_name_matches: false
