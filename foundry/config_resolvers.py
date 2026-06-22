@@ -116,7 +116,15 @@ def _sweep_choices(values: List[str] | tuple[str, ...]) -> str:
 
 
 def _config_list_sweep_choices(config_path: str, key: str) -> str:
-    """Hydra-compatible choice string from a list key inside a YAML config."""
+    """Hydra ``choice()`` string that replaces ``recording_ids`` with one session each.
+
+    Use this when the data config has a long default ``recording_ids`` list but you
+    want a **single-session** multirun. Overriding only ``data.recording_ids.0`` keeps
+    the remaining list entries from the base config, so the dataset still loads many
+    sessions while the model may be sized for the first id only. Sweeping
+    ``data.recording_ids`` with values from this resolver replaces the whole list with
+    ``[session_id]`` per job.
+    """
     if not os.path.isfile(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
@@ -133,7 +141,11 @@ def _config_list_sweep_choices(config_path: str, key: str) -> str:
             f"Expected '{key}' in {config_path} to be a list/tuple, got {type(values)}"
         )
 
-    return _sweep_choices(tuple(str(value) for value in values))
+    def _bracket_list(session_id: str) -> str:
+        escaped = str(session_id).replace("'", "\\'")
+        return f"['{escaped}']"
+
+    return "choice(" + ",".join(_bracket_list(v) for v in values) + ")"
 
 
 def _count_ecog_channels(h5_path: str) -> int:
