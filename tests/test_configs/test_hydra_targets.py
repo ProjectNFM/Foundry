@@ -25,6 +25,7 @@ _SKIP_PREFIXES = (
 _SKIP_TARGET_PATHS = {
     ("model/poyo_eeg.yaml", ""),
     ("trainer/default.yaml", ""),
+    ("data/neurosoft_minipigs/intersession.yaml", ""),
 }
 
 
