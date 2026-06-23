@@ -35,7 +35,6 @@ run:
   name: ajile_behavior_${hydra:runtime.choices.model/tokenizer}_fold${hyperparameters.fold_number}
   group: AJILE12_MATRIX_ALLFOLDS_BEHAVIOR
   tags: [tokenizer_matrix, poyo_eeg, ajile, intrasession]
-  seed: 42
   log_level: INFO
 
 hyperparameters:

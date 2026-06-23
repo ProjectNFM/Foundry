@@ -30,7 +30,6 @@ run:
     - training
     - eegnet
     - 8band
-  seed: 42
   log_level: INFO
 
 hyperparameters:

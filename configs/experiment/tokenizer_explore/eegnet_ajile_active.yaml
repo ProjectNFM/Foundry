@@ -19,7 +19,6 @@ run:
   name: ajile_eegnet_classifier
   group: DEBUG
   tags: [debug, baselines, training, eeg_net_encoder, ajile]
-  seed: 42
   log_level: INFO
 
 hyperparameters:

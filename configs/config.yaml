@@ -27,6 +27,10 @@ class_weights:
   smoothing: 0.5
 
 run:
+  seed: 42
+  # Enable torch deterministic algorithms for bitwise reproducibility
+  # (slower; leave false for normal training).
+  deterministic: false
   # Keep fresh runs independent unless resume is explicitly requested.
   # SLURM restarts still auto-resume from last.ckpt in main.py.
   resume_if_checkpoint_exists: false

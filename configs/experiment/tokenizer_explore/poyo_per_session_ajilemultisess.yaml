@@ -20,7 +20,6 @@ run:
   name: enter_name
   group: DEBUG
   tags: [poyo_eeg, ajile, multisess, per_session]
-  seed: 42
   log_level: INFO
 
 hyperparameters:

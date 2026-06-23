@@ -7,13 +7,13 @@ import hydra
 import torch
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import get_class, instantiate
-from lightning import seed_everything
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
 from rich.logging import RichHandler
 
 from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
 from foundry.data.datamodules.base import normalize_data_config
+from foundry.seed import set_seed
 from foundry.tools.stage_data import stage_data
 
 logger = logging.getLogger(__name__)
@@ -354,7 +354,10 @@ def main(cfg: DictConfig):
     _ts.load = _permissive_load
     torch.load = _permissive_load
 
-    seed_everything(cfg.run.seed, workers=True)
+    set_seed(
+        cfg.run.seed,
+        deterministic=OmegaConf.select(cfg, "run.deterministic", default=False),
+    )
     logger.info("Starting training: %s", cfg.run.name)
 
     slurm_restart_count = _get_slurm_restart_count()

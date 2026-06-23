@@ -7,7 +7,7 @@ batch_size: ${hyperparameters.batch_size}
 num_workers: ${hyperparameters.num_workers}
 pin_memory: false
 sequence_length: ${hyperparameters.sequence_length}
-seed: 42
+seed: ${run.seed}
 
 split_type: intersession
 task_type: ???

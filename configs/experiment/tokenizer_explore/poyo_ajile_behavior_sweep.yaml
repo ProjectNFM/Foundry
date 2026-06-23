@@ -41,7 +41,6 @@ run:
   name: poyo_ajile_behavior_sweep_lr${hyperparameters.learning_rate}_bs${hyperparameters.batch_size}_cw${class_weights.mode}_sm${class_weights.smoothing}
   group: POYO_AJILE_BEHAVIOR_SWEEP
   tags: [sweep, poyo_eeg, ajile]
-  seed: 42
   log_level: INFO
 
 hyperparameters:

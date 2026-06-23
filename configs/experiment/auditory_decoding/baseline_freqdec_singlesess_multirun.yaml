@@ -38,7 +38,6 @@ run:
     - baselines
     - training
     - ${hydra:runtime.choices.model}
-  seed: 42
   log_level: INFO
 
 hyperparameters:
