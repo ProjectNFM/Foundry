@@ -19,7 +19,6 @@ run:
   name: kemp_sleep_poyo_allsess
   group: SLEEP_STAGING
   tags: [sleep_staging, poyo, cwt, kemp, allsess]
-  seed: 42
   log_level: INFO
 
 class_weights:

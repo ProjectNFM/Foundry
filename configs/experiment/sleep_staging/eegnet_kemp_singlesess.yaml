@@ -19,7 +19,6 @@ run:
   name: kemp_sleep_eegnet_singlesess
   group: SLEEP_STAGING
   tags: [sleep_staging, eegnet, kemp, singlesess]
-  seed: 42
   log_level: INFO
 
 class_weights:

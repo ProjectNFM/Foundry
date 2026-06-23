@@ -1,34 +1,33 @@
 # @package _global_
 #
-# EEGNet baseline on a single NeuroSoft minipig session for 8-band acoustic
+# POYO EEG classifier on a single NeuroSoft minipig session for 8-band acoustic
 # stimulus decoding.
 #
 # Usage:
-#   uv run python main.py experiment=auditory_decoding/eegnet_neurosoft_8band_singlesess
+#   uv run python main.py experiment=auditory_decoding/poyo_neurosoft_8band_singlesess
 
 defaults:
-  - override /model: eegnet
+  - override /model: poyo_eeg
   - override /data: neurosoft_minipigs/singlesess
 
 task_configs:
   - neurosoft_acoustic_stim_8band
 
 model:
-  num_channels: ${get_num_ecog_channels_by_name:${data.root}/neurosoft_minipigs_2026,${data.dataset_kwargs.recording_ids.0}}
-  num_samples: 1000
+  zero_output_timestamps: true
 
 data:
   split_type: intrasession-causal
   task_type: acoustic_stim
 
 run:
-  name: eegnet_neurosoft_8band_${data.dataset_kwargs.recording_ids.0}
+  name: poyo_neurosoft_8band_${data.dataset_kwargs.recording_ids.0}
   group: NEUROSOFT_SINGLE_SESSION
   tags:
     - neurosoft
     - baselines
     - training
-    - eegnet
+    - poyo_eeg
     - 8band
   log_level: INFO
 
@@ -37,8 +36,8 @@ hyperparameters:
   sequence_length: 0.5
   fold_number: 0
   num_workers: 4
-  learning_rate: 0.0015
-  weight_decay: 0.018
+  learning_rate: 3e-4
+  weight_decay: 0.01
 
 trainer:
   max_epochs: 1000

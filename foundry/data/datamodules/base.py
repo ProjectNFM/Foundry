@@ -207,6 +207,8 @@ class NeuralDataModule(LightningDataModule):
             }
         return sampling_intervals
 
+    _SPLIT_SEED_OFFSETS: dict[str, int] = {"train": 0, "valid": 1, "test": 2}
+
     def _create_dataloader(
         self, split: Literal["train", "valid", "test"]
     ) -> DataLoader:
@@ -221,11 +223,12 @@ class NeuralDataModule(LightningDataModule):
         sampling_intervals = self.dataset.get_sampling_intervals(split=split)
         sampling_intervals = self._filter_intervals(sampling_intervals)
 
+        split_seed = self.seed + self._SPLIT_SEED_OFFSETS[split]
         sampler = RandomFixedWindowSampler(
             sampling_intervals=sampling_intervals,
             window_length=self.sequence_length,
             drop_short=True,
-            generator=torch.Generator().manual_seed(self.seed),
+            generator=torch.Generator().manual_seed(split_seed),
         )
 
         return DataLoader(

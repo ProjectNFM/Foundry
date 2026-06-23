@@ -7,12 +7,12 @@ import torch
 import torch.profiler
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import get_class, instantiate
-from lightning import seed_everything
 from omegaconf import DictConfig, OmegaConf
 from rich.logging import RichHandler
 
 from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
 from foundry.data.datamodules.base import normalize_data_config
+from foundry.seed import set_seed
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,10 @@ def main(cfg: DictConfig):
     producing Chrome/Perfetto traces viewable in TensorBoard.
     """
     setup_logging(cfg.run.log_level)
-    seed_everything(cfg.run.seed, workers=True)
+    set_seed(
+        cfg.run.seed,
+        deterministic=OmegaConf.select(cfg, "run.deterministic", default=False),
+    )
 
     run_tag = _build_run_tag(cfg)
     logger.info(f"Starting profiling run: {run_tag}")

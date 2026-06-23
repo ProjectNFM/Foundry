@@ -19,7 +19,6 @@ run:
   name: ajile_poyo_eeg_pose_estimation
   group: DEBUG
   tags: [debug, pose, regression, poyo_eeg, ajile]
-  seed: 42
   log_level: INFO
 
 hyperparameters:

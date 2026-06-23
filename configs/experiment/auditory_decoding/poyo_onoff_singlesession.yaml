@@ -17,7 +17,6 @@ run:
   name: neurosoft_minipigs_2026_poyo_eeg_classifier
   group: DEBUG
   tags: [debug, baselines, training, poyo_eeg, neurosoft_minipigs_2026]
-  seed: 42
   log_level: INFO
 
 hyperparameters:

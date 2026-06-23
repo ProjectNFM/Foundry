@@ -22,7 +22,6 @@ run:
   name: ajile_poyo_eeg_classifier
   group: DEBUG
   tags: [debug, baselines, training, poyo_eeg, ajile]
-  seed: 42
   log_level: INFO
 
 hyperparameters:

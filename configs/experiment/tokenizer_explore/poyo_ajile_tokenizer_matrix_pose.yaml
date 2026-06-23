@@ -42,7 +42,6 @@ run:
   name: ajile_pose_estimation_${hydra:runtime.choices.model/tokenizer}_fold${hyperparameters.fold_number}
   group: AJILE12_INTRASESSION_TOKENIZER_CWT
   tags: [tokenizer_matrix, poyo_eeg, ajile, intrasession]
-  seed: 42
   log_level: INFO
 
 hyperparameters:
