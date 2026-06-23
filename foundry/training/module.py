@@ -107,7 +107,7 @@ class FoundryModule(L.LightningModule):
         return self._shared_step("val", batch)
 
     def _shared_step(self, stage: str, batch: Dict[str, Any]) -> torch.Tensor:
-        model_inputs, target_values, target_weights, task_index = (
+        model_inputs, target_values, target_weights, task_index, session_id = (
             self._unpack_batch(batch)
         )
         outputs = self.model(**model_inputs, unpack_output=False)
@@ -119,6 +119,12 @@ class FoundryModule(L.LightningModule):
 
         metrics = self.train_metrics if stage == "train" else self.val_metrics
 
+        accumulate_sessions = (
+            stage == "val"
+            and session_id is not None
+            and getattr(self, "_val_session_buffers", None) is not None
+        )
+
         for name, cfg in self.model.task_configs.items():
             preds = outputs.get(name)
             target = target_values.get(name)
@@ -128,9 +134,11 @@ class FoundryModule(L.LightningModule):
             if name in taskwise_loss:
                 self.log(f"{stage}/{name}_loss", taskwise_loss[name])
 
-            # Defense-in-depth: mask any invalid targets that leaked through.
-            # Only applies to classification tasks where -1 is the sentinel
-            # for unmapped labels; regression targets can be legitimately negative.
+            if accumulate_sessions and cfg.metrics is not None:
+                self._accumulate_session_preds(
+                    name, preds, target, task_index, session_id
+                )
+
             if cfg.kind in ("binary", "multiclass"):
                 valid_mask = target >= 0
                 if not valid_mask.all():
@@ -160,6 +168,40 @@ class FoundryModule(L.LightningModule):
                 self._val_confusion_trackers[name].update(pred_classes, target)
 
         return total_loss
+
+    def _accumulate_session_preds(
+        self,
+        task_name: str,
+        preds: torch.Tensor,
+        target: torch.Tensor,
+        task_index: torch.Tensor,
+        session_id: list[str],
+    ) -> None:
+        """Buffer per-session predictions/targets for epoch-end metric computation.
+
+        Uses ``task_index`` (B, n_out) to count how many output positions each
+        batch item contributes to this task, then splits the flat concatenated
+        ``preds``/``target`` tensors back into per-item chunks grouped by session.
+        """
+        router_idx = self.model.router.get_task_index_by_name(task_name) + 1
+        counts = (task_index == router_idx).sum(dim=1)
+
+        per_item_preds = torch.split(preds, counts.tolist())
+        per_item_targets = torch.split(target, counts.tolist())
+
+        if task_name not in self._val_session_buffers:
+            self._val_session_buffers[task_name] = {}
+
+        task_buf = self._val_session_buffers[task_name]
+        for sid, item_p, item_t in zip(
+            session_id, per_item_preds, per_item_targets
+        ):
+            if item_p.numel() == 0:
+                continue
+            if sid not in task_buf:
+                task_buf[sid] = {"preds": [], "targets": []}
+            task_buf[sid]["preds"].append(item_p.detach().cpu())
+            task_buf[sid]["targets"].append(item_t.detach().cpu())
 
     def _build_param_groups(self) -> list[dict]:
         if self.cwt_lr_multiplier == 1.0:
@@ -268,12 +310,12 @@ class FoundryModule(L.LightningModule):
     def _unpack_batch(self, batch: Dict[str, Any]):
         target_values = batch.pop("target_values")
         target_weights = batch.pop("target_weights")
-        batch.pop("session_id", None)
+        session_id = batch.pop("session_id", None)
         batch.pop("absolute_start", None)
         batch.pop("eval_mask", None)
 
         task_index = batch["task_index"]
-        return batch, target_values, target_weights, task_index
+        return batch, target_values, target_weights, task_index, session_id
 
     def _compute_task_losses(
         self,
