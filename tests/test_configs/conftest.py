@@ -102,6 +102,7 @@ def instantiation_context() -> DictConfig:
                 "name": "config_test",
                 "group": "config_test",
                 "tags": ["test"],
+                "seed": 42,
             },
         }
     )
