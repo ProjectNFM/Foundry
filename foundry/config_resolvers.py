@@ -197,6 +197,52 @@ def _int_div(numerator: int, denominator: int) -> int:
     return n // d
 
 
+def _filter_config_list_by_prefix(
+    config_path: str, key: str, prefix: str
+) -> list[str]:
+    """Return items from a YAML config list whose string value starts with *prefix*.
+
+    Useful for selecting all recording IDs belonging to a specific subject::
+
+        recording_ids: ${filter_config_list_by_prefix:configs/data/.../multisess_raw.yaml,dataset_kwargs.recording_ids,sub-01_}
+
+    Handles Hydra's CWD change by falling back to the original working
+    directory when a relative *config_path* is not found.
+    """
+    resolved = config_path
+    if not os.path.isabs(resolved) and not os.path.isfile(resolved):
+        try:
+            from hydra.utils import get_original_cwd
+
+            resolved = os.path.join(get_original_cwd(), config_path)
+        except (ImportError, ValueError):
+            pass
+
+    if not os.path.isfile(resolved):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    cfg = OmegaConf.load(resolved)
+    values = OmegaConf.select(cfg, key)
+    if values is None:
+        raise KeyError(f"Key '{key}' not found in config file: {config_path}")
+
+    if OmegaConf.is_config(values):
+        values = OmegaConf.to_container(values, resolve=True)
+
+    if not isinstance(values, (list, tuple)):
+        raise TypeError(
+            f"Expected '{key}' in {config_path} to be a list/tuple, "
+            f"got {type(values)}"
+        )
+
+    filtered = [str(v) for v in values if str(v).startswith(prefix)]
+    if not filtered:
+        raise ValueError(
+            f"No items in '{key}' of {config_path} match prefix '{prefix}'"
+        )
+    return filtered
+
+
 def _get_suffix(s: str) -> str:
     """Last segment of an underscore-separated string, upper-cased."""
     return s.split("_")[-1].upper()
@@ -239,6 +285,7 @@ def register_resolvers() -> None:
         "sweep_choices": _sweep_choices,
         "config_list_sweep_choices": _config_list_sweep_choices,
         "get_num_ecog_channels_by_name": _get_num_ecog_channels_by_name,
+        "filter_config_list_by_prefix": _filter_config_list_by_prefix,
     }
     for name, fn in _resolvers.items():
         if not OmegaConf.has_resolver(name):
