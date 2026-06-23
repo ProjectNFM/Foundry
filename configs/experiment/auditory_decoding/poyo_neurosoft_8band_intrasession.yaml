@@ -1,12 +1,12 @@
 # @package _global_
 #
-# POYO-EEG on NeuroSoft minipig intersession 8-band acoustic stimulus decoding.
+# POYO-EEG on NeuroSoft minipig intrasession 8-band acoustic stimulus decoding.
 #
 # Override ``data.subject`` to select the target subject.
 # Eligible subjects (≥2 sessions): sub-01, sub-02, sub-03, sub-04, sub-05, sub-07
 #
 # Usage:
-#   uv run python main.py experiment=auditory_decoding/poyo_neurosoft_8band_intersession data.subject=sub-03
+#   uv run python main.py experiment=auditory_decoding/poyo_neurosoft_8band_intrasession data.subject=sub-03
 
 defaults:
   - override /model: poyo_eeg
@@ -19,16 +19,16 @@ model:
   zero_output_timestamps: true
 
 data:
-  split_type: intersession
+  split_type: intrasession
   subject: ???
   task_type: acoustic_stim
 
 run:
-  name: poyo_neurosoft_8band_intersession_${data.subject}
-  group: NEUROSOFT_INTERSESSION
+  name: poyo_neurosoft_8band_intrasession_${data.subject}
+  group: NEUROSOFT_INTRASESSION
   tags:
     - neurosoft
-    - intersession
+    - intrasession
     - training
     - poyo_eeg
     - 8band
