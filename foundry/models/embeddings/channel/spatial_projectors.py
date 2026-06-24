@@ -53,7 +53,7 @@ class SessionSpatialProjector(nn.Module):
         session_configs: dict[str, int],
         num_sources: int,
         hidden_dim: int | None = None,
-        common_layer: bool = False,
+        common_layer: bool = True,
     ):
         super().__init__()
         self.num_sources = num_sources

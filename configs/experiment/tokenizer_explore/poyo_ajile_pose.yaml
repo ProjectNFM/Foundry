@@ -3,7 +3,10 @@
 defaults:
   - override /model: poyo_eeg
   - override /data: ajile/singlesess
-  - override /module: regression
+  - override /module: default
+
+task_configs:
+  - ajile_pose_estimation
 
 model:
   zero_output_timestamps: false
@@ -16,7 +19,6 @@ run:
   name: ajile_poyo_eeg_pose_estimation
   group: DEBUG
   tags: [debug, pose, regression, poyo_eeg, ajile]
-  seed: 42
   log_level: INFO
 
 hyperparameters:

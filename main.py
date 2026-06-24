@@ -7,13 +7,14 @@ import hydra
 import torch
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import get_class, instantiate
-from lightning import seed_everything
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.utilities.rank_zero import rank_zero_only
 from omegaconf import DictConfig, OmegaConf
 from rich.logging import RichHandler
 
 from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
+from foundry.data.datamodules.base import normalize_data_config
+from foundry.seed import set_seed
 from foundry.tools.stage_data import stage_data
 
 logger = logging.getLogger(__name__)
@@ -141,6 +142,7 @@ def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
     if session_configs is not None and num_channels is not None:
         return
 
+    normalize_data_config(cfg.data)
     dm = instantiate(cfg.data, tokenizer=None)
     dm.setup("fit")
 
@@ -176,44 +178,73 @@ def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
         )
 
 
+def _resolve_dataset_class(cfg: DictConfig):
+    dataset_class = cfg.data.dataset_class
+    if isinstance(dataset_class, str):
+        dataset_class = get_class(dataset_class)
+    return dataset_class
+
+
+_TASKS_DIR = Path(__file__).resolve().parent / "configs" / "tasks"
+
+
+def _load_task_configs(cfg: DictConfig) -> dict:
+    from foundry.tasks.config import TaskConfig
+
+    names = OmegaConf.to_container(cfg.task_configs, resolve=True)
+    configs = {}
+    for name in names:
+        path = _TASKS_DIR / f"{name}.yaml"
+        tc = TaskConfig.from_yaml(path)
+        configs[tc.name] = tc
+    return configs
+
+
+def _apply_auto_class_weights(
+    cfg: DictConfig, datamodule, task_configs: dict
+) -> dict:
+    class_weights_cfg = OmegaConf.select(cfg, "class_weights", default=None)
+    if class_weights_cfg is None:
+        return task_configs
+
+    mode = class_weights_cfg.get("mode", None)
+    if mode != "auto":
+        return task_configs
+
+    datamodule.setup("fit")
+    smoothing = class_weights_cfg.get("smoothing", 1.0)
+    weights = datamodule.compute_class_weights(smoothing=smoothing)
+    for name, class_weights in weights.items():
+        task_configs[name].loss["class_weights"] = class_weights
+    return task_configs
+
+
 def _build_model_and_data(cfg: DictConfig):
     _populate_data_driven_hyperparams(cfg)
 
-    DataModuleClass = get_class(cfg.data._target_)
-    readout_specs = DataModuleClass.get_readout_specs_for_task(
-        cfg.data.task_type
-    )
+    task_configs = _load_task_configs(cfg)
+    normalize_data_config(cfg.data)
+    datamodule = instantiate(cfg.data, tokenizer=None)
+    datamodule._task_configs = task_configs
+    task_configs = _apply_auto_class_weights(cfg, datamodule, task_configs)
 
-    model = instantiate(cfg.model, readout_specs=readout_specs)
+    ModelClass = get_class(cfg.model._target_)
+    model_kwargs = {
+        k: instantiate(v) if OmegaConf.is_config(v) else v
+        for k, v in cfg.model.items()
+        if k != "_target_"
+    }
+    model = ModelClass(task_configs=task_configs, **model_kwargs)
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
+    normalize_data_config(cfg.data)
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)
+    datamodule._task_configs = task_configs
 
     return model, datamodule
 
 
-def _compute_class_weights(cfg: DictConfig, datamodule):
-    if cfg.module.class_weights != "auto":
-        return None
-
-    datamodule.setup("fit")
-    smoothing = OmegaConf.select(
-        cfg, "module.class_weight_smoothing", default=1.0
-    )
-    return datamodule.compute_class_weights(smoothing=smoothing)
-
-
 def _build_lightning_module(cfg: DictConfig, model, datamodule):
-    class_weights = _compute_class_weights(cfg, datamodule)
-
-    if cfg.module.class_weights in (None, "none"):
-        OmegaConf.update(cfg, "module.class_weights", None)
-
-    return instantiate(
-        cfg.module,
-        model=model,
-        class_names=datamodule.get_class_names_for_task(cfg.data.task_type),
-        class_weights=class_weights,
-    )
+    return instantiate(cfg.module, model=model)
 
 
 def _build_trainer(cfg: DictConfig):
@@ -338,7 +369,25 @@ def main(cfg: DictConfig):
             )
         )
     )
-    seed_everything(cfg.run.seed, workers=True)
+    # PyTorch 2.6+ defaults weights_only=True in torch.load, but Lightning's
+    # BatchSizeFinder saves/restores full checkpoints containing OmegaConf
+    # configs and UninitializedParameter, which fail the safe-globals check.
+    # All checkpoints are locally generated, so this is safe.
+    import torch.serialization as _ts
+
+    _orig_load = _ts.load
+
+    def _permissive_load(*args, **kwargs):
+        kwargs["weights_only"] = False
+        return _orig_load(*args, **kwargs)
+
+    _ts.load = _permissive_load
+    torch.load = _permissive_load
+
+    set_seed(
+        cfg.run.seed,
+        deterministic=OmegaConf.select(cfg, "run.deterministic", default=False),
+    )
     logger.info("Starting training: %s", cfg.run.name)
 
     slurm_restart_count = _get_slurm_restart_count()

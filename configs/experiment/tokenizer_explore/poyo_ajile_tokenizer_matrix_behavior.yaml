@@ -21,6 +21,9 @@ _matrix:
     spatial_session_cwt: 512
     spatial_session_cwt_common: 512
 
+task_configs:
+  - ajile_active_behavior
+
 model:
   zero_output_timestamps: true
 
@@ -32,7 +35,6 @@ run:
   name: ajile_behavior_${hydra:runtime.choices.model/tokenizer}_fold${hyperparameters.fold_number}
   group: AJILE12_MATRIX_ALLFOLDS_BEHAVIOR
   tags: [tokenizer_matrix, poyo_eeg, ajile, intrasession]
-  seed: 42
   log_level: INFO
 
 hyperparameters:

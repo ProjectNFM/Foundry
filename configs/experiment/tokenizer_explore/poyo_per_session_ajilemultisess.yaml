@@ -7,6 +7,9 @@ defaults:
   - override /model/tokenizer: spatial_session_cwt # or session_mlp_per_timepoint
   - override /data: ajile/multisess
 
+task_configs:
+  - ajile_active_behavior
+
 model:
   zero_output_timestamps: true
 
@@ -17,7 +20,6 @@ run:
   name: enter_name
   group: DEBUG
   tags: [poyo_eeg, ajile, multisess, per_session]
-  seed: 42
   log_level: INFO
 
 hyperparameters:

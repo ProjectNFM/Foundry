@@ -4,6 +4,9 @@ defaults:
   - override /model: poyo_eeg
   - override /data: ajile/singlesess
 
+task_configs:
+  - ajile_inactive_active
+
 model:
   zero_output_timestamps: true
   tokenizer:
@@ -19,7 +22,6 @@ run:
   name: ajile_poyo_eeg_classifier
   group: DEBUG
   tags: [debug, baselines, training, poyo_eeg, ajile]
-  seed: 42
   log_level: INFO
 
 hyperparameters:

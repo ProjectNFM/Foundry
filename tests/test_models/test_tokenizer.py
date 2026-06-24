@@ -35,6 +35,7 @@ class TestMode1FixedChannelPatched:
             ),
             embed_dim=embed_dim,
             patch_duration=0.1,
+            channel_fusion="add",
         )
 
     def test_pretokenize_keys(self):
@@ -99,6 +100,7 @@ class TestMode2aPerChannelPatched:
             ),
             embed_dim=embed_dim,
             patch_duration=0.1,
+            channel_fusion="add",
         )
 
     def test_pretokenize_shapes(self):
@@ -237,6 +239,7 @@ class TestMode2aConcatPerChannelPatched:
                 embed_dim=64,
                 patch_duration=0.1,
                 channel_fusion="concat",
+                channel_emb_dim=None,
             )
 
     def test_channel_emb_dim_must_be_less_than_embed_dim(self):
@@ -274,6 +277,7 @@ class TestMode2bSpatialProjectionPatched:
             ),
             embed_dim=embed_dim,
             patch_duration=0.1,
+            channel_fusion="add",
         )
 
     def test_forward_shape(self, batch_size):
@@ -302,14 +306,15 @@ class TestMode3aSpatialProjectionCWT:
                 embed_dim=embed_dim,
                 num_sources=8,
                 init_freqs=INIT_FREQS,
-                target_time_tokens=32,
+                target_token_rate=32.0,
             ),
             embed_dim=embed_dim,
+            channel_fusion="add",
         )
 
     def test_pretokenize_timestamps_match_target_tokens(self):
         tokenizer = self._make_tokenizer()
-        signal = np.random.randn(200, 30).astype(np.float32)
+        signal = np.random.randn(250, 30).astype(np.float32)
         tokens = np.arange(30)
 
         result = tokenizer.pretokenize(signal, tokens, 250.0, 1.0)
@@ -318,9 +323,9 @@ class TestMode3aSpatialProjectionCWT:
     def test_forward_shape(self, batch_size):
         embed_dim = 64
         tokenizer = self._make_tokenizer(embed_dim=embed_dim)
-        x = torch.randn(batch_size, 64, 200)
+        x = torch.randn(batch_size, 64, 250)
         fs = torch.full((batch_size,), 250.0)
-        seq_lens = torch.full((batch_size,), 200, dtype=torch.long)
+        seq_lens = torch.full((batch_size,), 250, dtype=torch.long)
 
         out = tokenizer(x, input_sampling_rate=fs, input_seq_len=seq_lens)
         assert out.shape == (batch_size, 32, embed_dim)
@@ -342,6 +347,7 @@ class TestMode3bSpatialProjectionPerTimepoint:
                 embed_dim=embed_dim, input_dim=8
             ),
             embed_dim=embed_dim,
+            channel_fusion="add",
         )
 
     def test_pretokenize_timestamps_per_sample(self):
@@ -378,6 +384,7 @@ class TestMode3cSpatialProjectionIdentityTemporal:
                 embed_dim=embed_dim
             ),
             embed_dim=embed_dim,
+            channel_fusion="add",
         )
 
     def test_forward_shape(self, batch_size):
@@ -407,6 +414,7 @@ class TestMode4PerChannelPerTimepoint:
                 embed_dim=embed_dim, input_dim=1
             ),
             embed_dim=embed_dim,
+            channel_fusion="add",
         )
 
     def test_pretokenize_shapes(self):
@@ -484,6 +492,7 @@ class TestSpatialProjectionWithSessionConfig:
             ),
             embed_dim=embed_dim,
             patch_duration=0.1,
+            channel_fusion="add",
         )
 
     def _make_cwt_tokenizer(self, embed_dim=64):
@@ -500,9 +509,10 @@ class TestSpatialProjectionWithSessionConfig:
                 embed_dim=embed_dim,
                 num_sources=self.NUM_SOURCES,
                 init_freqs=INIT_FREQS,
-                target_time_tokens=16,
+                target_token_rate=20.0,
             ),
             embed_dim=embed_dim,
+            channel_fusion="add",
         )
 
     def test_pretokenize_shapes(self):
@@ -620,6 +630,7 @@ class TestPerceiverSpatialPatched:
             ),
             embed_dim=embed_dim,
             patch_duration=0.1,
+            channel_fusion="add",
         )
 
     def test_pretokenize_shapes(self):
@@ -674,6 +685,7 @@ class TestTokenizerProperties:
                 embed_dim=32, input_dim=1
             ),
             embed_dim=32,
+            channel_fusion="add",
         )
         assert tokenizer.uses_per_channel is True
 
@@ -685,6 +697,7 @@ class TestTokenizerProperties:
             ),
             embed_dim=32,
             patch_duration=0.1,
+            channel_fusion="add",
         )
         assert tokenizer.uses_per_channel is False
 
@@ -696,6 +709,7 @@ class TestTokenizerProperties:
             ),
             embed_dim=32,
             patch_duration=0.1,
+            channel_fusion="add",
         )
         assert tokenizer.stride == 0.1
 
@@ -708,5 +722,6 @@ class TestTokenizerProperties:
             embed_dim=32,
             patch_duration=0.2,
             stride=0.1,
+            channel_fusion="add",
         )
         assert tokenizer.stride == 0.1

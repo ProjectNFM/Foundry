@@ -7,11 +7,12 @@ import torch
 import torch.profiler
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import get_class, instantiate
-from lightning import seed_everything
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from rich.logging import RichHandler
 
 from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
+from foundry.data.datamodules.base import normalize_data_config
+from foundry.seed import set_seed
 
 logger = logging.getLogger(__name__)
 
@@ -55,19 +56,32 @@ def main(cfg: DictConfig):
     producing Chrome/Perfetto traces viewable in TensorBoard.
     """
     setup_logging(cfg.run.log_level)
-    seed_everything(cfg.run.seed, workers=True)
+    set_seed(
+        cfg.run.seed,
+        deterministic=OmegaConf.select(cfg, "run.deterministic", default=False),
+    )
 
     run_tag = _build_run_tag(cfg)
     logger.info(f"Starting profiling run: {run_tag}")
 
-    DataModuleClass = get_class(cfg.data._target_)
-    readout_specs = DataModuleClass.get_readout_specs_for_task(
-        cfg.data.task_type
+    dataset_class = cfg.data.dataset_class
+    if isinstance(dataset_class, str):
+        DatasetClass = get_class(dataset_class)
+    else:
+        DatasetClass = dataset_class
+    task_type = (
+        OmegaConf.select(cfg, "data.dataset_kwargs.task_type")
+        or cfg.data.task_type
     )
-
-    model = instantiate(cfg.model, readout_specs=readout_specs)
+    if not hasattr(DatasetClass, "get_tasks_for_experiment"):
+        raise ValueError(
+            f"{DatasetClass.__name__} must implement get_tasks_for_experiment"
+        )
+    task_configs = DatasetClass.get_tasks_for_experiment(task_type)
+    model = instantiate(cfg.model, task_configs=task_configs)
 
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
+    normalize_data_config(cfg.data)
     datamodule = instantiate(cfg.data, tokenizer=tokenizer)
 
     eeg_module = instantiate(cfg.module, model=model)

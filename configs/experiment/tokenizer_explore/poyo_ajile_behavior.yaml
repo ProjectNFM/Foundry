@@ -6,6 +6,9 @@ defaults:
   - override /model/tokenizer: spatial_session_cwt
   - override /hydra/launcher: slurm_default
 
+task_configs:
+  - ajile_active_behavior
+
 model:
   zero_output_timestamps: true
 
@@ -17,7 +20,6 @@ run:
   name: ajile_poyo_eeg_behavior_classifier
   group: DEBUG
   tags: [debug, baselines, training, poyo_eeg, ajile]
-  seed: 42
   log_level: INFO
 
 hyperparameters:
@@ -26,7 +28,7 @@ hyperparameters:
   patch_duration: 0.1
   fold_number: 0
   num_workers: 8
-  learning_rate: 0.0012
+  learning_rate: 3e-4
   weight_decay: 0.09
   sampling_rate: 500
   num_channels: null

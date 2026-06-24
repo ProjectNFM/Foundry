@@ -17,7 +17,7 @@
 defaults:
   - override /model: poyo_eeg
   - override /data: ajile/multisess
-  - override /module: regression
+  - override /module: default
   - override /hydra/launcher: local_gpu
 
 _matrix:
@@ -27,6 +27,9 @@ _matrix:
     per_channel_cwt_concat: 128
     spatial_session_cwt: 512
     spatial_session_cwt_common: 512
+
+task_configs:
+  - ajile_pose_estimation
 
 model:
   zero_output_timestamps: false
@@ -39,7 +42,6 @@ run:
   name: ajile_pose_estimation_${hydra:runtime.choices.model/tokenizer}_fold${hyperparameters.fold_number}
   group: AJILE12_INTRASESSION_TOKENIZER_CWT
   tags: [tokenizer_matrix, poyo_eeg, ajile, intrasession]
-  seed: 42
   log_level: INFO
 
 hyperparameters:

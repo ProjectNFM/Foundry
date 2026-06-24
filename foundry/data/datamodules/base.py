@@ -6,18 +6,70 @@ model-specific preprocessing.
 """
 
 import logging
-from collections import Counter
-from typing import Callable, Optional, Literal
+from typing import TYPE_CHECKING, Callable, Literal, Optional
 
-import numpy as np
 import torch
+from hydra.utils import get_class
+from omegaconf import DictConfig, OmegaConf, open_dict
 from torch.utils.data import DataLoader
-from torch_brain.data import collate
-from torch_brain.data.sampler import RandomFixedWindowSampler
+from torch_brain.batching import collate
+from torch_brain.samplers import RandomFixedWindowSampler
 from lightning import LightningDataModule
 from torch_brain.transforms import Compose
 
+from foundry.tasks.class_weights import compute_class_weights_for_tasks
+from foundry.tasks.classification_mapping import (
+    filter_intervals_by_mapping,
+    validate_task_mappings,
+)
+
+if TYPE_CHECKING:
+    from foundry.tasks.config import TaskConfig
+
 logger = logging.getLogger(__name__)
+
+
+_INTERPOLATION_ONLY_KEYS = ("subject",)
+
+
+def normalize_data_config(data_cfg: DictConfig) -> None:
+    """Merge top-level dataset params into ``dataset_kwargs`` (in-place).
+
+    Experiment configs override ``data.split_type`` / ``data.task_type`` at
+    the top level while base data configs may leave mandatory placeholders
+    inside ``dataset_kwargs``. Hydra's recursive ``instantiate`` fails on
+    those placeholders, so resolve them here before instantiation.
+
+    Keys listed in ``_INTERPOLATION_ONLY_KEYS`` (e.g. ``subject``) are used
+    only for config interpolation (such as resolver arguments) and are
+    stripped before instantiation so they are not passed to the datamodule
+    constructor.
+    """
+    merges = ("task_type", "split_type", "fold", "recording_ids")
+    if "dataset_kwargs" not in data_cfg:
+        OmegaConf.update(data_cfg, "dataset_kwargs", {}, force_add=True)
+
+    with open_dict(data_cfg):
+        with open_dict(data_cfg.dataset_kwargs):
+            for key in merges:
+                if key in data_cfg and not OmegaConf.is_missing(data_cfg, key):
+                    data_cfg.dataset_kwargs[key] = data_cfg[key]
+
+            for key in list(data_cfg.dataset_kwargs.keys()):
+                if OmegaConf.is_missing(data_cfg.dataset_kwargs, key):
+                    del data_cfg.dataset_kwargs[key]
+
+        strip_keys = [k for k in _INTERPOLATION_ONLY_KEYS if k in data_cfg]
+        if strip_keys:
+            if "dataset_kwargs" in data_cfg:
+                for dk in list(data_cfg.dataset_kwargs.keys()):
+                    val = data_cfg.dataset_kwargs[dk]
+                    if isinstance(val, (list, tuple)):
+                        OmegaConf.update(
+                            data_cfg, f"dataset_kwargs.{dk}", list(val)
+                        )
+            for key in strip_keys:
+                del data_cfg[key]
 
 
 class NeuralDataModule(LightningDataModule):
@@ -27,9 +79,6 @@ class NeuralDataModule(LightningDataModule):
     that has `get_sampling_intervals()` and optionally `get_channel_ids()` and
     `get_recording_ids()` methods. Model-specific preprocessing (tokenization)
     is applied as a transform, making the datamodule reusable.
-
-    Subclasses should define ``TASK_TO_READOUT`` to map their task_type values
-    to the corresponding readout spec names used by the model.
 
     Usage:
         dm = NeuralDataModule(
@@ -42,31 +91,6 @@ class NeuralDataModule(LightningDataModule):
         )
         trainer.fit(module, dm)
     """
-
-    TASK_TO_READOUT: dict[str, list[str]] = {}
-    READOUT_CLASS_NAMES: dict[str, list[str]] = {}
-
-    @classmethod
-    def get_class_names_for_task(cls, task_type: str) -> dict[str, list[str]]:
-        readout_names = cls.get_readout_specs_for_task(task_type)
-        return {
-            name: cls.READOUT_CLASS_NAMES[name]
-            for name in readout_names
-            if name in cls.READOUT_CLASS_NAMES
-        }
-
-    @classmethod
-    def get_readout_specs_for_task(cls, task_type: str) -> list[str]:
-        if not cls.TASK_TO_READOUT:
-            raise ValueError(
-                f"{cls.__name__} does not define a TASK_TO_READOUT mapping"
-            )
-        if task_type not in cls.TASK_TO_READOUT:
-            raise ValueError(
-                f"Unknown task_type '{task_type}' for {cls.__name__}. "
-                f"Available: {list(cls.TASK_TO_READOUT.keys())}"
-            )
-        return cls.TASK_TO_READOUT[task_type]
 
     def __init__(
         self,
@@ -81,8 +105,14 @@ class NeuralDataModule(LightningDataModule):
         seed: int = 42,
         dataset_kwargs: Optional[dict] = None,
         task_type: Optional[str] = None,
+        split_type: Optional[str] = None,
+        fold: Optional[int] = None,
+        recording_ids: Optional[list[str]] = None,
+        task_configs: Optional[dict[str, "TaskConfig"]] = None,
     ):
         super().__init__()
+        if isinstance(dataset_class, str):
+            dataset_class = get_class(dataset_class)
         self.dataset_class = dataset_class
         self.root = root
         self.batch_size = batch_size
@@ -90,8 +120,19 @@ class NeuralDataModule(LightningDataModule):
         self.pin_memory = pin_memory
         self.sequence_length = sequence_length
         self.seed = seed
-        self.dataset_kwargs = dataset_kwargs or {}
-        self.task_type = task_type
+        self.dataset_kwargs = dict(dataset_kwargs or {})
+        self._task_configs = task_configs
+
+        for key, val in (
+            ("task_type", task_type),
+            ("split_type", split_type),
+            ("fold", fold),
+            ("recording_ids", recording_ids),
+        ):
+            if val is not None:
+                self.dataset_kwargs[key] = val
+
+        self.task_type = self.dataset_kwargs.get("task_type")
 
         # Build transform pipeline
         transform_list = transforms or []
@@ -110,99 +151,63 @@ class NeuralDataModule(LightningDataModule):
         if self.dataset is not None:
             return
 
-        # Build transform
-        if self.transform:
-            transform = Compose(self.transform)
-        else:
-            transform = None
+        transform_list = list(self.transform) if self.transform else []
+        if self.task_type is not None and hasattr(
+            self.dataset_class, "get_required_transforms"
+        ):
+            required = self.dataset_class.get_required_transforms(
+                self.task_type
+            )
+            transform_list = list(required) + transform_list
 
-        # Instantiate dataset
+        transform = Compose(transform_list) if transform_list else None
+
         self.dataset = self.dataset_class(
             root=self.root,
             transform=transform,
             **self.dataset_kwargs,
         )
 
+        if self._task_configs:
+            validate_task_mappings(self._task_configs, self.dataset)
+
     def compute_class_weights(
         self, smoothing: float = 1.0
     ) -> dict[str, list[float]]:
-        """Compute inverse-frequency class weights from the training split.
-
-        Scans training intervals to count label occurrences per readout, then
-        returns weights proportional to ``total / (num_classes * class_count)``
-        (the same formula used by scikit-learn's ``compute_class_weight``),
-        raised to the power of ``smoothing``.
-
-        A smoothing of 1.0 gives standard inverse-frequency weights. Values
-        below 1 (e.g. 0.5 for sqrt-inverse-frequency) dampen the correction
-        and reduce over-prediction of minority classes, which often improves
-        macro-F1 on imbalanced datasets. A smoothing of 0.0 produces uniform
-        weights.
-
-        Must be called after :meth:`setup`.
-        """
-        from torch_brain.registry import MODALITY_REGISTRY
-        from foundry.data.datasets.modalities import MappedCrossEntropyLoss
-
         if self.dataset is None:
             raise RuntimeError("Call setup() before compute_class_weights()")
-        if self.task_type is None:
+        if not self._task_configs:
             raise ValueError(
-                "task_type must be set to compute class weights automatically"
+                "task_configs must be provided to compute class weights"
             )
 
-        readout_names = self.TASK_TO_READOUT.get(self.task_type, [])
-        if not readout_names:
-            return {}
+        return compute_class_weights_for_tasks(
+            self._task_configs, self.dataset, split="train", smoothing=smoothing
+        )
 
-        import foundry.data.datasets.modalities  # noqa: F401
+    def get_recording_ids(self) -> list[str]:
+        return sorted(self.dataset.recording_ids)
 
-        train_intervals = self.dataset.get_sampling_intervals(split="train")
+    def get_channel_ids(self) -> list[str]:
+        return sorted(set(self.dataset.get_channel_ids()))
 
-        class_weights: dict[str, list[float]] = {}
-        for readout_name in readout_names:
-            spec = MODALITY_REGISTRY[readout_name]
-            value_field = spec.value_key.split(".")[-1]
-
-            counts: Counter = Counter()
-            for rid, intervals in train_intervals.items():
-                if not hasattr(intervals, value_field):
-                    continue
-                values = getattr(intervals, value_field)
-                unique_labels = np.unique(values)
-                for v in unique_labels:
-                    selected = intervals.select_by_mask(values == v)
-                    counts[int(v)] += sum(selected.end - selected.start)
-
-            if isinstance(spec.loss_fn, MappedCrossEntropyLoss):
-                key_map = dict(
-                    zip(
-                        spec.loss_fn._keys.tolist(),
-                        spec.loss_fn._values.tolist(),
-                    )
+    def _filter_intervals(self, sampling_intervals):
+        """Remove intervals containing labels that the mapping excludes."""
+        if not self._task_configs:
+            return sampling_intervals
+        for name, cfg in self._task_configs.items():
+            if cfg.class_mapping is None:
+                continue
+            value_field = cfg.target_extractor["value_key"].split(".")[-1]
+            sampling_intervals = {
+                rid: filter_intervals_by_mapping(
+                    intervals, cfg.class_mapping, value_field
                 )
-                mapped_counts: Counter = Counter()
-                for label, count in counts.items():
-                    if label in key_map:
-                        mapped_counts[key_map[label]] += count
-                counts = mapped_counts
+                for rid, intervals in sampling_intervals.items()
+            }
+        return sampling_intervals
 
-            total = sum(counts.values())
-            num_classes = spec.dim
-            weights = [
-                (total / (num_classes * max(counts.get(i, 0), 1))) ** smoothing
-                for i in range(num_classes)
-            ]
-            class_weights[readout_name] = weights
-            logger.info(
-                "Class weights for %s (smoothing=%.2f): %s (counts: %s)",
-                readout_name,
-                smoothing,
-                [f"{w:.3f}" for w in weights],
-                dict(sorted(counts.items())),
-            )
-
-        return class_weights
+    _SPLIT_SEED_OFFSETS: dict[str, int] = {"train": 0, "valid": 1, "test": 2}
 
     def _create_dataloader(
         self, split: Literal["train", "valid", "test"]
@@ -216,12 +221,14 @@ class NeuralDataModule(LightningDataModule):
             DataLoader for the split.
         """
         sampling_intervals = self.dataset.get_sampling_intervals(split=split)
+        sampling_intervals = self._filter_intervals(sampling_intervals)
 
+        split_seed = self.seed + self._SPLIT_SEED_OFFSETS[split]
         sampler = RandomFixedWindowSampler(
             sampling_intervals=sampling_intervals,
             window_length=self.sequence_length,
             drop_short=True,
-            generator=torch.Generator().manual_seed(self.seed),
+            generator=torch.Generator().manual_seed(split_seed),
         )
 
         return DataLoader(

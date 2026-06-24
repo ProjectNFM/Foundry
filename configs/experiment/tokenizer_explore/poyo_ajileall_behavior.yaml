@@ -5,6 +5,9 @@ defaults:
   - override /data: ajile/allsess
   - override /model/tokenizer: spatial_session_cwt
 
+task_configs:
+  - ajile_active_behavior
+
 model:
   zero_output_timestamps: true
 
@@ -15,7 +18,6 @@ run:
   name: ajile_poyo_eeg_behavior_classifier
   group: DEBUG
   tags: [debug, baselines, training, poyo_eeg, ajile]
-  seed: 42
   log_level: INFO
 
 hyperparameters:

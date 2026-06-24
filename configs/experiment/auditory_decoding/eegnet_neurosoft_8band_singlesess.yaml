@@ -1,0 +1,55 @@
+# @package _global_
+#
+# EEGNet baseline on a single NeuroSoft minipig session for 8-band acoustic
+# stimulus decoding.
+#
+# Usage:
+#   uv run python main.py experiment=auditory_decoding/eegnet_neurosoft_8band_singlesess
+
+defaults:
+  - override /model: eegnet
+  - override /data: neurosoft_minipigs/singlesess
+
+task_configs:
+  - neurosoft_acoustic_stim_8band
+
+model:
+  num_channels: ${get_num_ecog_channels_by_name:${data.root}/neurosoft_minipigs_2026,${data.dataset_kwargs.recording_ids.0}}
+  num_samples: 1000
+
+data:
+  split_type: intrasession-causal
+  task_type: acoustic_stim
+
+run:
+  name: eegnet_neurosoft_8band_${data.dataset_kwargs.recording_ids.0}
+  group: NEUROSOFT_SINGLE_SESSION
+  tags:
+    - neurosoft
+    - baselines
+    - training
+    - eegnet
+    - 8band
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 0.5
+  fold_number: 0
+  num_workers: 4
+  learning_rate: 0.0015
+  weight_decay: 0.018
+
+trainer:
+  max_epochs: 1000
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/neurosoft_acoustic_stim_8band_f1
+      mode: max
+      patience: 20
+    model_checkpoint:
+      monitor: val/neurosoft_acoustic_stim_8band_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/neurosoft_acoustic_stim_8band_f1:.4f}"

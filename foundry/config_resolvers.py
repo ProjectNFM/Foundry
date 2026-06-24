@@ -116,7 +116,15 @@ def _sweep_choices(values: List[str] | tuple[str, ...]) -> str:
 
 
 def _config_list_sweep_choices(config_path: str, key: str) -> str:
-    """Hydra-compatible choice string from a list key inside a YAML config."""
+    """Hydra ``choice()`` string that replaces ``recording_ids`` with one session each.
+
+    Use this when the data config has a long default ``recording_ids`` list but you
+    want a **single-session** multirun. Overriding only ``data.recording_ids.0`` keeps
+    the remaining list entries from the base config, so the dataset still loads many
+    sessions while the model may be sized for the first id only. Sweeping
+    ``data.recording_ids`` with values from this resolver replaces the whole list with
+    ``[session_id]`` per job.
+    """
     if not os.path.isfile(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
@@ -133,7 +141,11 @@ def _config_list_sweep_choices(config_path: str, key: str) -> str:
             f"Expected '{key}' in {config_path} to be a list/tuple, got {type(values)}"
         )
 
-    return _sweep_choices(tuple(str(value) for value in values))
+    def _bracket_list(session_id: str) -> str:
+        escaped = str(session_id).replace("'", "\\'")
+        return f"['{escaped}']"
+
+    return "choice(" + ",".join(_bracket_list(v) for v in values) + ")"
 
 
 def _config_list_sweep_one_recording_lists(config_path: str, key: str) -> str:
@@ -218,6 +230,52 @@ def _int_div(numerator: int, denominator: int) -> int:
     return n // d
 
 
+def _filter_config_list_by_prefix(
+    config_path: str, key: str, prefix: str
+) -> list[str]:
+    """Return items from a YAML config list whose string value starts with *prefix*.
+
+    Useful for selecting all recording IDs belonging to a specific subject::
+
+        recording_ids: ${filter_config_list_by_prefix:configs/data/.../multisess_raw.yaml,dataset_kwargs.recording_ids,sub-01_}
+
+    Handles Hydra's CWD change by falling back to the original working
+    directory when a relative *config_path* is not found.
+    """
+    resolved = config_path
+    if not os.path.isabs(resolved) and not os.path.isfile(resolved):
+        try:
+            from hydra.utils import get_original_cwd
+
+            resolved = os.path.join(get_original_cwd(), config_path)
+        except (ImportError, ValueError):
+            pass
+
+    if not os.path.isfile(resolved):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    cfg = OmegaConf.load(resolved)
+    values = OmegaConf.select(cfg, key)
+    if values is None:
+        raise KeyError(f"Key '{key}' not found in config file: {config_path}")
+
+    if OmegaConf.is_config(values):
+        values = OmegaConf.to_container(values, resolve=True)
+
+    if not isinstance(values, (list, tuple)):
+        raise TypeError(
+            f"Expected '{key}' in {config_path} to be a list/tuple, "
+            f"got {type(values)}"
+        )
+
+    filtered = [str(v) for v in values if str(v).startswith(prefix)]
+    if not filtered:
+        raise ValueError(
+            f"No items in '{key}' of {config_path} match prefix '{prefix}'"
+        )
+    return filtered
+
+
 def _get_suffix(s: str) -> str:
     """Last segment of an underscore-separated string, upper-cased."""
     return s.split("_")[-1].upper()
@@ -255,11 +313,13 @@ def register_resolvers() -> None:
         "get_overrides_from_ckpt": _get_overrides_from_ckpt,
         "patch_samples": _patch_samples_resolver,
         "int_div": _int_div,
+        "eval": eval,
         "get_suffix": _get_suffix,
         "sweep_choices": _sweep_choices,
         "config_list_sweep_choices": _config_list_sweep_choices,
         "config_list_sweep_one_recording_lists": _config_list_sweep_one_recording_lists,
         "get_num_ecog_channels_by_name": _get_num_ecog_channels_by_name,
+        "filter_config_list_by_prefix": _filter_config_list_by_prefix,
     }
     for name, fn in _resolvers.items():
         if not OmegaConf.has_resolver(name):
