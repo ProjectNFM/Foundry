@@ -6,5 +6,6 @@ from foundry.data.transforms.bad_channel_detection import DetectBadChannels
 from foundry.data.transforms.data_filter import BalanceData
 from foundry.data.transforms.downsample import DownsampleSignal
 from foundry.data.transforms.baseline import BaselineSignal
+from foundry.data.transforms.filter_signal import FilterSignal
 
-__all__ = ["RescaleSignal", "PreparePoseTrajectories", "StandardizeSignal", "CARSignal", "DetectBadChannels", "BalanceData", "DownsampleSignal", "BaselineSignal"]
+__all__ = ["RescaleSignal", "PreparePoseTrajectories", "StandardizeSignal", "CARSignal", "DetectBadChannels", "BalanceData", "DownsampleSignal", "BaselineSignal", "FilterSignal"]

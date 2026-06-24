@@ -34,7 +34,7 @@ class BaselineSignal:
         signal = signal_data.signal
 
         starts = np.asarray(trials.start)
-        ends = np.asarray(trials.ends)
+        ends = np.asarray(trials.end)
 
         for t_start, t_end in zip(starts, ends):
             t_baseline_start = t_start - self.baseline_duration

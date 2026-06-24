@@ -12,7 +12,7 @@ from auditorydecoding.data.neurosoft_pipeline import (
 from torch_brain.transforms import Compose
 
 from foundry.data.datamodules.base import NeuralDataModule
-from foundry.data.transforms import StandardizeSignal, CARSignal, DetectBadChannels, BalanceData, DownsampleSignal, BaselineSignal+
+from foundry.data.transforms import StandardizeSignal, CARSignal, DetectBadChannels, BalanceData, DownsampleSignal, BaselineSignal, FilterSignal
 from typing import Optional, Callable, Literal, Type
 
 
@@ -82,6 +82,8 @@ class NeurosoftDataModule(NeuralDataModule):
         
         downsample = DownsampleSignal(field="ecog", target_sfreq=500.0)
 
+        notch = FilterSignal(freqs=[50.0, 100.0, 150.0], filter_types=["notch", "notch", "notch"])
+
         bd = BalanceData(self.dataset, parent_split="train", balance_type="percentile", retain_percentile=40)
 
         self.dataset = bd.modify_dataset(self.dataset)
@@ -102,7 +104,7 @@ class NeurosoftDataModule(NeuralDataModule):
             if self.dataset.transform is not None
             else []
         )
-        self.dataset.transform = Compose([bcd, car, downsample, baseline, standardize] + existing)
+        self.dataset.transform = Compose([bcd, notch, car, downsample, baseline, standardize] + existing)
 
     def get_recording_ids(self) -> list[str]:
         return sorted(self.dataset.recording_ids)

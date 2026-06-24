@@ -32,8 +32,8 @@ data:
   task_type: acoustic_stim
 
 run:
-  project: auditory_decoding
-  name: Monkey_downsample_ib
+  project: auditory_decoding_singlesess
+  name: Monkey_notch_baseline_param_ib_${data.recording_ids.0}_fold${hyperparameters.fold_number}
   group: NEUROSOFT_SINGLE_SESSION
   tags:
     - neurosoft
@@ -42,6 +42,7 @@ run:
     - ${hydra:runtime.choices.model}
     - raw_data
     - monkeys
+    - singlesess
   seed: 42
   log_level: INFO
 
@@ -50,7 +51,7 @@ hyperparameters:
   sequence_length: 0.5
   fold_number: 0
   num_workers: 16
-  learning_rate: 0.015
+  learning_rate: 0.0015
   weight_decay: 0.018
 
 trainer:

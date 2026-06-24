@@ -4,8 +4,8 @@ _target_: foundry.models.EEGNetEncoder
 # They need to be tuned for the specific dataset.
 num_channels: 32
 num_samples: 250
-F1: 16
-D: 4
-F2: 64
+F1: 32
+D: 8
+F2: 128
 kernel_length: 64
 dropout_rate: 0.25
