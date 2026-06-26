@@ -20,19 +20,21 @@ model:
   zero_output_timestamps: true
 
 data:
-  split_type: intrasession
+  split_type: intrasession-causal
   subject: ???
   task_type: acoustic_stim
 
 run:
+  project: auditory_decoding
   name: poyo_neurosoft_8band_intrasession_${data.subject}
-  group: NEUROSOFT_INTRASESSION
+  group: NEUROSOFT_MINIPIGS_INTRASESSION
   tags:
     - neurosoft
     - intrasession
     - training
-    - poyo_eeg
+    - ${hydra:runtime.choices.model}
     - 8band
+    - ${data.subject}
   seed: 42
   log_level: INFO
 
@@ -53,9 +55,18 @@ trainer:
     early_stopping:
       monitor: val/neurosoft_acoustic_stim_8band_f1
       mode: max
-      patience: 20
+      patience: 50
     model_checkpoint:
       monitor: val/neurosoft_acoustic_stim_8band_f1
       mode: max
       auto_insert_metric_name: false
       filename: "best-epoch{epoch:03d}-val_f1_{val/neurosoft_acoustic_stim_8band_f1:.4f}"
+
+stage:
+  skip: true
+
+hydra:
+  sweeper:
+    max_batch_size: 1000
+    params:
+      data.subject: choice(sub-01, sub-02, sub-03, sub-04, sub-05, sub-06, sub-07)

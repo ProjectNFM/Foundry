@@ -8,7 +8,7 @@
 
 defaults:
   - override /model: eegnet
-  - override /data: neurosoft_minipigs/singlesess
+  - override /data: neurosoft_minipigs/singlesubject
 
 task_configs:
   - neurosoft_acoustic_stim_8band
@@ -22,22 +22,25 @@ data:
   task_type: acoustic_stim
 
 run:
-  name: eegnet_neurosoft_8band_${data.dataset_kwargs.recording_ids.0}
-  group: NEUROSOFT_SINGLE_SESSION
+  project: auditory_decoding
+  name: ${hydra:runtime.choices.model}_neurosoft_8band_${data.dataset_kwargs.recording_ids.0}
+  group: NEUROSOFT_MINIPIGS_SINGLESESSION
   tags:
     - neurosoft
-    - baselines
+    - singlesess
     - training
-    - eegnet
+    - baselines
+    - ${hydra:runtime.choices.model}
     - 8band
+  seed: 42
   log_level: INFO
 
 hyperparameters:
-  batch_size: 64
+  batch_size: 16
   sequence_length: 0.5
   fold_number: 0
   num_workers: 4
-  learning_rate: 0.0015
+  learning_rate: 0.015
   weight_decay: 0.018
 
 trainer:
@@ -53,3 +56,12 @@ trainer:
       mode: max
       auto_insert_metric_name: false
       filename: "best-epoch{epoch:03d}-val_f1_{val/neurosoft_acoustic_stim_8band_f1:.4f}"
+
+stage:
+  skip: true
+
+hydra:
+  sweeper:
+    max_batch_size: 1000
+    params:
+      data.dataset_kwargs.recording_ids: ${config_list_sweep_choices:configs/data/neurosoft_minipigs/multisess_raw.yaml,dataset_kwargs.recording_ids}

@@ -8,7 +8,8 @@
 
 defaults:
   - override /model: poyo_eeg
-  - override /data: neurosoft_minipigs/singlesess
+  - override /model/tokenizer: per_channel_cwt_cnn
+  - override /data: neurosoft_minipigs/multisess_raw
 
 task_configs:
   - neurosoft_acoustic_stim_8band
@@ -21,23 +22,28 @@ data:
   task_type: acoustic_stim
 
 run:
+  project: auditory_decoding
   name: poyo_neurosoft_8band_${data.dataset_kwargs.recording_ids.0}
-  group: NEUROSOFT_SINGLE_SESSION
+  group: NEUROSOFT_MINIPIGS_SINGLESESSION
   tags:
     - neurosoft
-    - baselines
+    - singlesess
     - training
-    - poyo_eeg
+    - ${hydra:runtime.choices.model}
     - 8band
+  
+  seed: 42
   log_level: INFO
 
 hyperparameters:
-  batch_size: 64
+  batch_size: 128
   sequence_length: 0.5
+  patch_duration: 0.1
   fold_number: 0
   num_workers: 4
-  learning_rate: 3e-4
-  weight_decay: 0.01
+  sampling_rate: 2000
+  learning_rate: 2e-4
+  weight_decay: 0.06
 
 trainer:
   max_epochs: 1000
@@ -46,9 +52,18 @@ trainer:
     early_stopping:
       monitor: val/neurosoft_acoustic_stim_8band_f1
       mode: max
-      patience: 20
+      patience: 50
     model_checkpoint:
       monitor: val/neurosoft_acoustic_stim_8band_f1
       mode: max
       auto_insert_metric_name: false
       filename: "best-epoch{epoch:03d}-val_f1_{val/neurosoft_acoustic_stim_8band_f1:.4f}"
+
+stage:
+  skip: true
+
+hydra:
+  sweeper:
+    max_batch_size: 1000
+    params:
+      data.dataset_kwargs.recording_ids: ${config_list_sweep_choices:configs/data/neurosoft_minipigs/multisess_raw.yaml,dataset_kwargs.recording_ids}

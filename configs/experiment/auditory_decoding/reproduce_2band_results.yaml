@@ -23,7 +23,7 @@ defaults:
   - override /cluster: cscs
 
 task_configs:
-  - neurosoft_acoustic_stim_3band
+  - neurosoft_acoustic_stim_2band_rnd_b
 
 model:
   num_channels: ${get_num_ecog_channels_by_name:${data.root}/neurosoft_minipigs_2026,${data.dataset_kwargs.recording_ids.0}}
@@ -35,13 +35,15 @@ data:
   task_type: acoustic_stim
 
 run:
+  project: auditory_decoding
   name: ${hydra:runtime.choices.model}_${data.dataset_kwargs.recording_ids.0}_fold${hyperparameters.fold_number}
-  group: REPLICA_3BAND
+  group: REPLICA_2BAND
   tags:
     - neurosoft
     - debug
     - training
     - ${hydra:runtime.choices.model}
+    - rnd_b
   seed: 42
   log_level: INFO
 

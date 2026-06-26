@@ -24,6 +24,7 @@ data:
   task_type: acoustic_stim
 
 run:
+  project: auditory_decoding
   name: poyo_neurosoft_8band_intersession_${data.subject}
   group: NEUROSOFT_INTERSESSION
   tags:
