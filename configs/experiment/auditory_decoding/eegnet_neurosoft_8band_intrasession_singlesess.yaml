@@ -18,26 +18,28 @@ model:
   num_samples: 1000
 
 data:
-  split_type: intrasession-causal
+  split_type: intrasession-block
   task_type: acoustic_stim
 
 run:
-  name: eegnet_neurosoft_8band_${data.dataset_kwargs.recording_ids.0}
-  group: NEUROSOFT_SINGLE_SESSION
+  project: auditory_decoding
+  name: ${hydra:runtime.choices.model}_neurosoft_8band_${data.dataset_kwargs.recording_ids.0}
+  group: NEUROSOFT_INTRASESSION_SINGLESESS
   tags:
-    - neurosoft
     - baselines
+    - ${hydra:runtime.choices.model}
     - training
-    - eegnet
     - 8band
+    - minipigs
+  seed: 42
   log_level: INFO
 
 hyperparameters:
-  batch_size: 64
+  batch_size: 16
   sequence_length: 0.5
   fold_number: 0
   num_workers: 4
-  learning_rate: 0.0015
+  learning_rate: 0.015
   weight_decay: 0.018
 
 trainer:
