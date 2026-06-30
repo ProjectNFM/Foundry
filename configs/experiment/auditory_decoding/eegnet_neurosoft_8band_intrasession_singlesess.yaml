@@ -55,3 +55,12 @@ trainer:
       mode: max
       auto_insert_metric_name: false
       filename: "best-epoch{epoch:03d}-val_f1_{val/neurosoft_acoustic_stim_8band_f1:.4f}"
+
+stage:
+  skip: true
+
+hydra:
+  sweeper:
+    max_batch_size: 1000
+    params:
+      data.dataset_kwargs.recording_ids: ${config_list_sweep_choices:configs/data/neurosoft_minipigs/multisess_raw.yaml,dataset_kwargs.recording_ids}
