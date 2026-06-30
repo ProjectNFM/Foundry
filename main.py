@@ -73,6 +73,13 @@ def _configure_wandb(cfg: DictConfig, output_dir: str) -> None:
     if OmegaConf.select(cfg, "logger.id") is not None:
         return
 
+    # Attach to the run created by the wandb sweep agent (WANDB_RUN_ID).
+    if _is_sweep_mode():
+        sweep_run_id = os.environ.get("WANDB_RUN_ID")
+        if sweep_run_id:
+            OmegaConf.update(cfg, "logger.id", sweep_run_id)
+            return
+
     resume_wandb_if_name_matches = OmegaConf.select(
         cfg, "run.resume_wandb_if_name_matches", default=False
     )
@@ -325,6 +332,47 @@ def _log_config_to_wandb(trainer, cfg: DictConfig):
     )
 
 
+def _is_sweep_mode() -> bool:
+    """Check if running under WandB sweep."""
+    return "WANDB_SWEEP_ID" in os.environ
+
+
+def _inject_sweep_hyperparams(cfg: DictConfig) -> None:
+    """Inject hyperparameters from WandB sweep config into Hydra config.
+    
+    When running as a WandB sweep agent, the sweep system populates
+    wandb.config with the current trial's hyperparameters. This function
+    injects those into the Hydra config so they override defaults/CLI args.
+    """
+    try:
+        import wandb
+    except ImportError:
+        logger.warning("wandb not available; skipping sweep param injection")
+        return
+    
+    if not _is_sweep_mode():
+        return
+    
+    if wandb.run is None:
+        return
+    
+    # Pull all wandb.config values and inject into cfg
+    sweep_config = dict(wandb.config)
+    logger.info("Injecting %d sweep hyperparameters", len(sweep_config))
+    
+    for key, value in sweep_config.items():
+        try:
+            OmegaConf.update(cfg, key, value, force_add=True)
+            logger.debug("Injected sweep param: %s = %s", key, value)
+        except Exception as e:
+            logger.warning(
+                "Failed to inject sweep param %s = %s: %s",
+                key,
+                value,
+                e,
+            )
+
+
 # -- Entry point ------------------------------------------------------------
 
 
@@ -376,6 +424,10 @@ def main(cfg: DictConfig):
 
     output_dir, checkpoint_dir = _configure_output_paths(cfg)
     _configure_wandb(cfg, output_dir)
+    
+    # Inject WandB sweep hyperparameters if running under sweep
+    _inject_sweep_hyperparams(cfg)
+    
     _stage_data_if_needed(cfg)
 
     # Eagerly resolve cfg.run so that ${data.subject} (and similar

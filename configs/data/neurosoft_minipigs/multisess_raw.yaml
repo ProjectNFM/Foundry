@@ -2,7 +2,7 @@ _target_: foundry.data.datamodules.NeuralDataModule
 
 dataset_class: foundry.data.datasets.NeurosoftMinipigs2026
 
-root: ./data/processed/
+root: ${oc.env:PROJECT}/processed/
 batch_size: ${hyperparameters.batch_size}
 num_workers: ${hyperparameters.num_workers}
 pin_memory: false

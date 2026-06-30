@@ -1,0 +1,47 @@
+# WandB sweep template for auditory decoding hyperparameter tuning
+# Optimizes learning_rate, weight_decay, batch_size, and cwt_lr_multiplier
+#
+# IMPORTANT: This sweep expects to be run with an experiment that uses the
+# neurosoft_acoustic_stim_8band task. Example:
+#
+#   wandb sweep configs/sweep/auditory_decoding_hp.yaml
+#   wandb agent <sweep-id>   # legacy; use task_wandb_agent.sh or wandb_agent_worker instead
+#
+# The metric name must match the task: {task_name}_{metric_key}
+# Task: neurosoft_acoustic_stim_8band (from configs/tasks/)
+# Metric: f1 (from task's metric_summary_modes)
+
+defaults:
+  - default
+
+method: bayes
+metric:
+  name: val/neurosoft_acoustic_stim_8band_f1  # Must match: val/{task_name}_{metric_key}
+  goal: maximize
+early_stopping:
+  patience: 15
+  min_iter: 3
+parameters:
+  data.subject:
+    values:
+      - "sub-01"
+      - "sub-02"
+      - "sub-03"
+      - "sub-04"
+      - "sub-05"
+      - "sub-06"
+      - "sub-07"
+  hyperparameters.learning_rate:
+    distribution: log_uniform
+    min: 1.5e-5
+    max: 1.5e-2
+  hyperparameters.weight_decay:
+    distribution: log_uniform
+    min: 0.001
+    max: 0.1
+  hyperparameters.batch_size:
+    values: [32, 64, 128]
+  hyperparameters.cwt_lr_multiplier:
+    distribution: uniform
+    min: 0.01
+    max: 1.0

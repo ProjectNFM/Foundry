@@ -1,0 +1,21 @@
+# Grid search for exhaustive evaluation
+# Only suitable for very small search spaces (<=4 discrete hyperparameters)
+# Evaluates all combinations (cross product)
+
+defaults:
+  - default
+
+sampler:
+  type: grid
+
+pruner:
+  type: none  # Grid search does not support pruning
+
+optimization:
+  n_trials: null  # Grid will enumerate all combinations automatically
+  n_jobs: 1
+  show_progress: true
+
+study:
+  direction: minimize
+  metric_name: val_loss

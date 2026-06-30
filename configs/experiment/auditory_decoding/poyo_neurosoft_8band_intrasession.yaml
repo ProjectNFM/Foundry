@@ -12,6 +12,7 @@ defaults:
   - override /model: poyo_eeg
   - override /model/tokenizer: per_channel_cwt_cnn
   - override /data: neurosoft_minipigs/singlesubject
+  - override /cluster: cscs
 
 task_configs:
   - neurosoft_acoustic_stim_8band
@@ -35,6 +36,7 @@ run:
     - ${hydra:runtime.choices.model}
     - 8band
     - ${data.subject}
+    - hp_tuning
   seed: 42
   log_level: INFO
 

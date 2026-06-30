@@ -31,7 +31,7 @@ run:
     - training
     - ${hydra:runtime.choices.model}
     - 8band
-  
+    - hp_tuning
   seed: 42
   log_level: INFO
 

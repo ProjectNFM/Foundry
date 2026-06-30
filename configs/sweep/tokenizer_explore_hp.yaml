@@ -1,0 +1,29 @@
+# WandB sweep template for tokenizer exploration hyperparameter tuning
+# Optimizes batch_size and learning_rate for tokenizer models
+#
+# IMPORTANT: This sweep expects to be run with an experiment that uses the
+# ajile_inactive_active task. The metric must match the task configuration:
+#
+#   wandb sweep configs/sweep/tokenizer_explore_hp.yaml
+#   wandb agent <sweep-id> -- main.py experiment=tokenizer_explore/poyo_ajile_hp_sweep
+#
+# Task: ajile_inactive_active (from configs/tasks/)
+# Metric: loss (from task's metric_summary_modes)
+
+defaults:
+  - default
+
+method: random  # Start with random for exploration
+metric:
+  name: val_loss
+  goal: minimize
+early_stopping:
+  patience: 10
+  min_iter: 2
+parameters:
+  hyperparameters.batch_size:
+    values: [32, 64, 128, 256]
+  hyperparameters.learning_rate:
+    distribution: log_uniform
+    min: 1e-5
+    max: 1e-3

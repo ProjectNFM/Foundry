@@ -1,0 +1,96 @@
+# @package _global_
+#
+# POYO EEG classifier on a single NeuroSoft minipig session for 8-band acoustic
+# stimulus decoding with Optuna-based hyperparameter tuning.
+#
+# This config uses Optuna for intelligent search rather than Hydra grid/random search.
+# It defines the search space that will be used by the Optuna optimizer.
+#
+# Usage (local Optuna):
+#   uv run python -m foundry.optuna_launcher \
+#     --experiment=auditory_decoding/poyo_neurosoft_8band_hp_sweep \
+#     --n-trials=50 --sampler=bayes
+#
+# Usage (WandB sweep):
+#   wandb sweep configs/sweep/auditory_decoding_hp.yaml
+#   wandb agent <sweep-id>
+
+defaults:
+  - override /model: poyo_eeg
+  - override /model/tokenizer: per_channel_cwt_cnn
+  - override /data: neurosoft_minipigs/multisess_raw
+  - override /optuna: bayes
+
+task_configs:
+  - neurosoft_acoustic_stim_8band
+
+model:
+  zero_output_timestamps: true
+
+data:
+  split_type: intrasession-causal
+  task_type: acoustic_stim
+
+run:
+  project: auditory_decoding
+  name: poyo_neurosoft_8band_hp_sweep_${data.dataset_kwargs.recording_ids.0}
+  group: NEUROSOFT_MINIPIGS_HP_SWEEP
+  tags:
+    - neurosoft
+    - hp_sweep
+    - optuna
+    - ${hydra:runtime.choices.model}
+    - 8band
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 0.5
+  patch_duration: 0.1
+  fold_number: 0
+  num_workers: 4
+  sampling_rate: 2000
+  learning_rate: 1e-3
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 1000
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/neurosoft_acoustic_stim_8band_f1
+      mode: max
+      patience: 50
+    model_checkpoint:
+      monitor: val/neurosoft_acoustic_stim_8band_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/neurosoft_acoustic_stim_8band_f1:.4f}"
+
+stage:
+  skip: true
+
+# Sweep configuration for Optuna
+sweep:
+  metric_name: val/neurosoft_acoustic_stim_8band_f1
+  metric_direction: maximize
+  search_space:
+    hyperparameters.learning_rate:
+      type: float
+      low: 1e-5
+      high: 1e-2
+      log: true
+    hyperparameters.weight_decay:
+      type: float
+      low: 1e-4
+      high: 1e-1
+      log: true
+    hyperparameters.batch_size:
+      type: categorical
+      choices: [32, 64, 128]
+    hyperparameters.cwt_lr_multiplier:
+      type: float
+      low: 1e-3
+      high: 1.0
+      log: true

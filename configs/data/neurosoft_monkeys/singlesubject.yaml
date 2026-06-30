@@ -1,4 +1,4 @@
-# Per-subject data config for NeuroSoft minipigs.
+# Per-subject data config for NeuroSoft monkeys.
 #
 # The ``subject`` field must be overridden (e.g. ``data.subject=sub-01``).
 # The resolver automatically collects all recording IDs for that subject
@@ -8,11 +8,11 @@
 # strategy (e.g. ``intersession``, ``intrasession``, ``intrasession-causal``).
 #
 # Subjects with ≥2 sessions (eligible for intersession):
-#   sub-01, sub-02, sub-03, sub-04, sub-05, sub-07
+#   sub-01, sub-02, sub-03, sub-04, sub-05, sub-06
 
 _target_: foundry.data.datamodules.NeuralDataModule
 
-dataset_class: foundry.data.datasets.NeurosoftMinipigs2026
+dataset_class: foundry.data.datasets.NeurosoftMonkeys2026
 
 root: ${oc.env:PROJECT}/processed/
 batch_size: ${hyperparameters.batch_size}
@@ -26,4 +26,4 @@ subject: ???
 
 dataset_kwargs:
   fold: ${hyperparameters.fold_number}
-  recording_ids: ${filter_config_list_by_prefix:configs/data/neurosoft_minipigs/multisess_raw.yaml,dataset_kwargs.recording_ids,${data.subject}_}
+  recording_ids: ${filter_config_list_by_prefix:configs/data/neurosoft_monkeys/multisess_raw.yaml,dataset_kwargs.recording_ids,${data.subject}_}

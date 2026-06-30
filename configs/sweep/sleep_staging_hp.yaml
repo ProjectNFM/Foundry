@@ -1,0 +1,33 @@
+# WandB sweep template for sleep staging hyperparameter tuning
+# Optimizes learning_rate and batch_size for sleep staging models
+#
+# IMPORTANT: This sweep expects to be run with an experiment that uses the
+# neurosoft_sleep_stage task. The metric must match the task configuration:
+#
+#   wandb sweep configs/sweep/sleep_staging_hp.yaml
+#   wandb agent <sweep-id> -- main.py experiment=sleep_staging/eegnet_neurosoft_hp_sweep
+#
+# Task: neurosoft_sleep_stage (from configs/tasks/)
+# Metric: loss or f1 (from task's metric_summary_modes)
+
+defaults:
+  - default
+
+method: bayes
+metric:
+  name: val_loss
+  goal: minimize
+early_stopping:
+  patience: 12
+  min_iter: 3
+parameters:
+  hyperparameters.learning_rate:
+    distribution: log_uniform
+    min: 5e-5
+    max: 5e-3
+  hyperparameters.batch_size:
+    values: [32, 64, 128]
+  hyperparameters.weight_decay:
+    distribution: uniform
+    min: 0.0
+    max: 0.05

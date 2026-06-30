@@ -1,0 +1,68 @@
+# @package _global_
+#
+# Minimal test sweep configuration for CI and quick validation
+# Uses tiny search space (2 hyperparams, 3 trials) for fast execution
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: ajile/singlesess
+  - override /optuna: bayes
+
+task_configs:
+  - ajile_inactive_active
+
+model:
+  zero_output_timestamps: true
+  tokenizer:
+    patch_duration: ${hyperparameters.patch_duration}
+    channel_strategy:
+      num_channels: 94
+
+data:
+  split_type: intrasession
+  task_type: active_vs_inactive
+
+run:
+  name: test_minimal_hp_sweep
+  group: TEST_HP_SWEEP
+  tags: [test, minimal, hp_sweep]
+  log_level: WARNING
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 0.5
+  patch_duration: 0.1
+  sampling_rate: 500
+  fold_number: 0
+  num_workers: 2
+  learning_rate: 1e-3
+  weight_decay: 0.001
+
+trainer:
+  max_epochs: 2  # Minimal epochs for testing
+  precision: bf16-mixed
+  limit_train_batches: 0.1  # Use only 10% of training data
+  limit_val_batches: 0.1
+  callbacks:
+    early_stopping:
+      monitor: val_loss
+      mode: min
+      patience: 1
+    model_checkpoint:
+      monitor: val_loss
+      mode: min
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}"
+
+sweep:
+  metric_name: val_loss
+  metric_direction: minimize
+  search_space:
+    hyperparameters.learning_rate:
+      type: float
+      low: 1e-4
+      high: 1e-3
+      log: true
+    hyperparameters.batch_size:
+      type: categorical
+      choices: [32, 64]

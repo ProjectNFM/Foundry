@@ -1,0 +1,76 @@
+# @package _global_
+#
+# EEGNet classifier on NeuroSoft minipig for sleep staging with HP tuning
+# Suitable for single-session training with early stopping
+
+defaults:
+  - override /model: eegnet
+  - override /data: neurosoft_minipigs/multisess_raw
+  - override /optuna: bayes
+
+task_configs:
+  - neurosoft_sleep_stage
+
+model:
+  spatial_output_channels: null
+
+data:
+  split_type: intrasession-causal
+  task_type: sleep_stage
+
+run:
+  project: sleep_staging
+  name: eegnet_neurosoft_hp_sweep_${data.dataset_kwargs.recording_ids.0}
+  group: NEUROSOFT_SLEEP_HP_SWEEP
+  tags:
+    - neurosoft
+    - hp_sweep
+    - optuna
+    - eegnet
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 30.0
+  patch_duration: 1.0
+  fold_number: 0
+  num_workers: 4
+  sampling_rate: 250
+  learning_rate: 1e-3
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 500
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/neurosoft_sleep_stage_f1
+      mode: max
+      patience: 30
+    model_checkpoint:
+      monitor: val/neurosoft_sleep_stage_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/neurosoft_sleep_stage_f1:.4f}"
+
+stage:
+  skip: true
+
+sweep:
+  metric_name: val/neurosoft_sleep_stage_f1
+  metric_direction: maximize
+  search_space:
+    hyperparameters.learning_rate:
+      type: float
+      low: 1e-5
+      high: 1e-2
+      log: true
+    hyperparameters.weight_decay:
+      type: float
+      low: 0.0
+      high: 0.1
+      log: false
+    hyperparameters.batch_size:
+      type: categorical
+      choices: [32, 64, 128]

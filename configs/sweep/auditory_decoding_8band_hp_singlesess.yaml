@@ -1,0 +1,81 @@
+# WandB sweep template for auditory decoding hyperparameter tuning
+# Optimizes learning_rate, weight_decay, batch_size, and cwt_lr_multiplier
+#
+# IMPORTANT: This sweep expects to be run with an experiment that uses the
+# neurosoft_acoustic_stim_8band task. Example:
+#
+#   wandb sweep configs/sweep/auditory_decoding_hp.yaml
+#   wandb agent <sweep-id> -- main.py experiment=auditory_decoding/poyo_neurosoft_8band_hp_sweep
+#
+# The metric name must match the task: {task_name}_{metric_key}
+# Task: neurosoft_acoustic_stim_8band (from configs/tasks/)
+# Metric: f1 (from task's metric_summary_modes)
+
+defaults:
+  - default
+
+method: bayes
+metric:
+  name: val/neurosoft_acoustic_stim_8band_f1  # Must match: val/{task_name}_{metric_key}
+  goal: maximize
+early_stopping:
+  patience: 15
+  min_iter: 3
+parameters:
+  data.dataset_kwargs.recording_ids:
+    values:
+      - ["sub-01_ses-01_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-01_ses-02_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-02_ses-01_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-02_ses-01_task-AcousStim_acq-RH_desc-raw"]
+      - ["sub-02_ses-02_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-02_ses-02_task-AcousStim_acq-RH_desc-raw"]
+      - ["sub-03_ses-01_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-03_ses-01_task-AcousStim_acq-RH_desc-raw"]
+      - ["sub-03_ses-03_task-AcousStim_acq-LHanest_desc-raw"]
+      - ["sub-03_ses-03_task-AcousStim_acq-RHanest_desc-raw"]
+      - ["sub-03_ses-04_task-AcousStim_acq-LHanest_desc-raw"]
+      - ["sub-03_ses-04_task-AcousStim_acq-RHanest_desc-raw"]
+      - ["sub-03_ses-06_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-03_ses-06_task-AcousStim_acq-RH_desc-raw"]
+      - ["sub-03_ses-07_task-AcousStim_acq-LHanest_desc-raw"]
+      - ["sub-03_ses-07_task-AcousStim_acq-RH_desc-raw"]
+      - ["sub-03_ses-07_task-AcousStim_acq-RHanest_desc-raw"]
+      - ["sub-04_ses-01_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-04_ses-01_task-AcousStim_acq-RH_desc-raw"]
+      - ["sub-04_ses-02_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-04_ses-02_task-AcousStim_acq-RH_desc-raw"]
+      - ["sub-04_ses-03_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-04_ses-03_task-AcousStim_acq-RH_desc-raw"]
+      - ["sub-04_ses-04_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-04_ses-04_task-AcousStim_acq-RH_desc-raw"]
+      - ["sub-05_ses-01_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-05_ses-01_task-AcousStim_acq-RH_desc-raw"]
+      - ["sub-05_ses-02_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-05_ses-02_task-AcousStim_acq-RH_desc-raw"]
+      - ["sub-06_ses-02_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-06_ses-02_task-AcousStim_acq-RH_desc-raw"]
+      - ["sub-07_ses-01_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-07_ses-01_task-AcousStim_acq-RH_desc-raw"]
+      - ["sub-07_ses-02_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-07_ses-02_task-AcousStim_acq-RH_desc-raw"]
+      - ["sub-07_ses-03_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-07_ses-03_task-AcousStim_acq-RH_desc-raw"]
+      - ["sub-07_ses-04_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-07_ses-04_task-AcousStim_acq-RH_desc-raw"]
+      - ["sub-07_ses-05_task-AcousStim_acq-LH_desc-raw"]
+      - ["sub-07_ses-05_task-AcousStim_acq-RH_desc-raw"]
+  hyperparameters.learning_rate:
+    distribution: log_uniform
+    min: 1e-5
+    max: 1e-2
+  hyperparameters.weight_decay:
+    distribution: uniform
+    min: 0.0
+    max: 0.1
+  hyperparameters.batch_size:
+    values: [32, 64, 128]
+  hyperparameters.cwt_lr_multiplier:
+    distribution: uniform
+    min: 0.1
+    max: 1.0
