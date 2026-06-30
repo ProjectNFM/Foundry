@@ -100,6 +100,7 @@ def instantiation_context() -> DictConfig:
             },
             "run": {
                 "name": "config_test",
+                "project": "config_test",
                 "group": "config_test",
                 "tags": ["test"],
                 "seed": 42,
