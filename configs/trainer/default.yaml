@@ -42,6 +42,8 @@ callbacks:
     save_on_train_epoch_end: false
   confusion_matrix:
     _target_: foundry.training.callbacks.ConfusionMatrixCallback
+  session_metrics:
+    _target_: foundry.training.callbacks.SessionMetricsCallback
   parameter_watcher:
     _target_: foundry.training.callbacks.ParameterWatcherCallback
     param_patterns: ["*cwt*"]

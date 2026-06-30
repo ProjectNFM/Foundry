@@ -378,6 +378,11 @@ def main(cfg: DictConfig):
     _configure_wandb(cfg, output_dir)
     _stage_data_if_needed(cfg)
 
+    # Eagerly resolve cfg.run so that ${data.subject} (and similar
+    # interpolation-only keys) are baked in before normalize_data_config
+    # strips them from cfg.data.
+    OmegaConf.resolve(cfg.run)
+
     model, datamodule = _build_model_and_data(cfg)
     lightning_module = _build_lightning_module(cfg, model, datamodule)
     trainer = _build_trainer(cfg)

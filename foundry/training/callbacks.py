@@ -8,6 +8,7 @@ from typing import Any
 
 import lightning as L
 import torch
+from hydra.utils import instantiate
 from lightning import Trainer
 
 from foundry.core import VocabManager
@@ -69,6 +70,97 @@ class ConfusionMatrixCallback(L.Callback):
         if isinstance(trainer.logger, WandbLogger):
             return trainer.logger.experiment
         return None
+
+
+class SessionMetricsCallback(L.Callback):
+    """Log per-session (per-recording) validation metrics at epoch end.
+
+    When training on data that combines multiple sessions (e.g. with
+    ``singlesubject.yaml``), this callback breaks down the global
+    validation metrics by recording / session so you can identify
+    per-session performance variations.
+
+    The callback enables accumulation buffers on the :class:`FoundryModule`
+    at fit start.  During each validation step the module splits flat
+    predictions back to per-item chunks (using ``task_index``) and groups
+    them by ``session_id``.  At epoch end this callback instantiates
+    fresh metric collections per session, computes results, and logs them.
+
+    Logged metric keys follow the pattern::
+
+        val_session/{short_session_id}/{task_name}_{metric}
+
+    where ``short_session_id`` strips the ``task-*`` and ``desc-*``
+    segments from the full BIDS-style recording ID for readability.
+    """
+
+    def on_fit_start(
+        self, trainer: Trainer, pl_module: L.LightningModule
+    ) -> None:
+        pl_module._val_session_buffers = {}
+
+    def on_validation_epoch_end(
+        self, trainer: Trainer, pl_module: L.LightningModule
+    ) -> None:
+        buffers: dict | None = getattr(pl_module, "_val_session_buffers", None)
+        if not buffers:
+            return
+
+        all_metrics: dict[str, float] = {}
+
+        for task_name, session_data in buffers.items():
+            cfg = pl_module.model.task_configs.get(task_name)
+            if cfg is None or cfg.metrics is None:
+                continue
+
+            for session_id, data in session_data.items():
+                preds = torch.cat(data["preds"])
+                targets = torch.cat(data["targets"])
+
+                if cfg.kind in ("binary", "multiclass"):
+                    valid = targets >= 0
+                    if not valid.all():
+                        preds = preds[valid]
+                        targets = targets[valid]
+
+                if targets.numel() == 0:
+                    continue
+
+                try:
+                    metric_collection = instantiate(cfg.metrics)
+                    metric_preds, metric_targets = (
+                        pl_module._prepare_for_metrics(cfg, preds, targets)
+                    )
+                    metric_collection.update(metric_preds, metric_targets)
+                    result = metric_collection.compute()
+                except Exception:
+                    log.debug(
+                        "SessionMetrics: failed to compute metrics for "
+                        "task=%s session=%s, skipping.",
+                        task_name,
+                        session_id,
+                        exc_info=True,
+                    )
+                    continue
+
+                short = self._shorten_session_id(session_id)
+                for metric_name, value in result.items():
+                    key = f"val_session/{short}/{task_name}_{metric_name}"
+                    all_metrics[key] = (
+                        value.item() if torch.is_tensor(value) else value
+                    )
+
+        if all_metrics and trainer.logger is not None:
+            trainer.logger.log_metrics(all_metrics, step=trainer.current_epoch)
+
+        pl_module._val_session_buffers = {}
+
+    @staticmethod
+    def _shorten_session_id(session_id: str) -> str:
+        """Keep only subject, session, and acquisition segments."""
+        parts = session_id.split("_")
+        keep = [p for p in parts if p.startswith(("sub-", "ses-", "acq-"))]
+        return "_".join(keep) if keep else session_id
 
 
 class EffectiveBatchSizeCallback(L.Callback):
