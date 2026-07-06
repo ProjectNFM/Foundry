@@ -22,10 +22,10 @@ model:
 
 data:
   split_type: intrasession-causal
-  task_type: acoustic_stim
+  task_type: acoustic_stim_8class
 
 run:
-  name: poyo_neurosoft_minipigs_monkeys_freqdec_multisess
+  name: poyo_neurosoft_minipigs_monkeys_freqband8_multisess
   group: NEUROSOFT_JOINT_MULTISESSION
   tags:
     - neurosoft
@@ -34,6 +34,7 @@ run:
     - poyo_eeg
     - multisession
     - frequency_decoding
+    - frequency_band_8class
   seed: 42
   log_level: INFO
 

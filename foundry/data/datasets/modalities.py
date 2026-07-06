@@ -131,3 +131,12 @@ NEUROSOFT_ACOUSTIC_STIM = register_modality(
     value_key="acoustic_stim_trials.behavior_ids",
     loss_fn=CrossEntropyLoss(),
 )
+
+NEUROSOFT_ACOUSTIC_STIM_8CLASS = register_modality(
+    "neurosoft_acoustic_stim_8class",
+    dim=8,
+    type=DataType.MULTINOMIAL,
+    timestamp_key="acoustic_stim_trials.timestamps",
+    value_key="acoustic_stim_trials.band_ids",
+    loss_fn=CrossEntropyLoss(),
+)

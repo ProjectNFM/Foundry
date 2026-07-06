@@ -157,7 +157,7 @@ class NeuralDataModule(LightningDataModule):
 
         import foundry.data.datasets.modalities  # noqa: F401
 
-        train_intervals = self.dataset.get_sampling_intervals(split="train")
+        train_intervals = self._get_sampling_intervals(split="train")
 
         class_weights: dict[str, list[float]] = {}
         for readout_name in readout_names:
@@ -204,6 +204,11 @@ class NeuralDataModule(LightningDataModule):
 
         return class_weights
 
+    def _get_sampling_intervals(
+        self, split: Literal["train", "valid", "test"]
+    ) -> dict:
+        return self.dataset.get_sampling_intervals(split=split)
+
     def _create_dataloader(
         self, split: Literal["train", "valid", "test"]
     ) -> DataLoader:
@@ -215,7 +220,7 @@ class NeuralDataModule(LightningDataModule):
         Returns:
             DataLoader for the split.
         """
-        sampling_intervals = self.dataset.get_sampling_intervals(split=split)
+        sampling_intervals = self._get_sampling_intervals(split=split)
 
         sampler = RandomFixedWindowSampler(
             sampling_intervals=sampling_intervals,
