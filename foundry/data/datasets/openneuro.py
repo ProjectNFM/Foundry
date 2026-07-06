@@ -58,6 +58,7 @@ class OpenNeuroMultiBrainset(NestedDataset):
                 split_type=split_type,
                 recording_ids=recording_ids.get(name),
                 split_ratios=split_ratios,
+                **kwargs,
             )
 
         # NestedDataset.__init__ uses np_string_prefix on each child's

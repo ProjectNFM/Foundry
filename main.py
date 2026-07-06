@@ -103,8 +103,8 @@ def _finish_active_wandb_run() -> None:
 
 
 def _stage_data_if_needed(cfg: DictConfig) -> None:
-    slurm_tmpdir = os.environ.get("SLURM_TMPDIR")
-    if not slurm_tmpdir:
+    slurm_tmpdir = Path("/tmp")
+    if not slurm_tmpdir.exists():
         return
 
     stage_cfg = OmegaConf.to_container(
