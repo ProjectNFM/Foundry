@@ -13,6 +13,15 @@ from foundry.tasks.config import TaskConfig
 from foundry.training.confusion_matrix import ConfusionMatrixTracker
 
 
+def _squeeze_scalar_predictions(
+    preds: torch.Tensor, target: torch.Tensor
+) -> torch.Tensor:
+    """Squeeze trailing dim-1 from predictions when targets are 1-D."""
+    if preds.dim() == 2 and preds.shape[1] == 1 and target.dim() == 1:
+        return preds.squeeze(-1)
+    return preds
+
+
 class FoundryModule(L.LightningModule):
     """Single training module for classification, regression, and multitask runs.
 
@@ -80,13 +89,7 @@ class FoundryModule(L.LightningModule):
             return torch.softmax(predictions, dim=-1), targets
         if cfg.kind == "binary":
             return torch.softmax(predictions, dim=-1)[:, 1], targets
-        if (
-            predictions.dim() == 2
-            and predictions.shape[1] == 1
-            and targets.dim() == 1
-        ):
-            predictions = predictions.squeeze(-1)
-        return predictions, targets
+        return _squeeze_scalar_predictions(predictions, targets), targets
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
         from lightning.fabric.utilities.apply_func import move_data_to_device
@@ -120,16 +123,16 @@ class FoundryModule(L.LightningModule):
         )
         outputs = self.model(**model_inputs, unpack_output=False)
 
-        for key in list(outputs.keys()):
-            if key.endswith("_targets"):
-                task_name = key.removesuffix("_targets")
-                target_values[task_name] = outputs.pop(key)
-            elif key.endswith("_weights"):
-                task_name = key.removesuffix("_weights")
-                target_weights[task_name] = outputs.pop(key)
+        ssl_meta = outputs.pop("_ssl_meta", None)
+        ssl_task_names: set[str] = set()
+        if ssl_meta is not None:
+            for task_name, meta in ssl_meta.items():
+                target_values[task_name] = meta["targets"]
+                target_weights[task_name] = meta["weights"]
+                ssl_task_names.add(task_name)
 
         total_loss, taskwise_loss = self._compute_task_losses(
-            outputs, target_values, target_weights, task_index
+            outputs, target_values, target_weights, task_index, ssl_task_names
         )
         self.log(f"{stage}/loss", total_loss, prog_bar=True)
 
@@ -357,12 +360,15 @@ class FoundryModule(L.LightningModule):
         target_values: dict[str, torch.Tensor],
         target_weights: dict[str, torch.Tensor | float],
         task_index: torch.Tensor,
+        ssl_task_names: set[str] | None = None,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         multitask_loss = torch.tensor(
             0.0, device=self.device, dtype=torch.float32
         )
         taskwise_loss: dict[str, torch.Tensor] = {}
         total_sequences = 0
+        if ssl_task_names is None:
+            ssl_task_names = set()
 
         for name in self.model.task_configs:
             preds = outputs.get(name)
@@ -370,20 +376,17 @@ class FoundryModule(L.LightningModule):
             if preds is None or target is None or target.numel() == 0:
                 continue
 
-            if preds.dim() == 2 and preds.shape[1] == 1 and target.dim() == 1:
-                preds = preds.squeeze(-1)
+            preds = _squeeze_scalar_predictions(preds, target)
 
             weights = target_weights.get(name, 1.0)
             loss = self._task_losses[name](preds, target, weights)
             taskwise_loss[name] = loss
 
-            idx = self.model.router.get_task_index_by_name(name) + 1
-            num_sequences = torch.any(task_index == idx, dim=1).sum()
-            if num_sequences == 0:
-                # Model-injected task (e.g. reconstruction in SSL): its
-                # indices live in the model's internal combined_task_index,
-                # not in the batch task_index.  Count every batch item.
+            if name in ssl_task_names:
                 num_sequences = task_index.shape[0]
+            else:
+                idx = self.model.router.get_task_index_by_name(name) + 1
+                num_sequences = torch.any(task_index == idx, dim=1).sum()
             multitask_loss = multitask_loss + loss * num_sequences
             total_sequences += num_sequences
 

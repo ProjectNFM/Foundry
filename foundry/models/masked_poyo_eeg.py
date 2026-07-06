@@ -20,7 +20,7 @@ from foundry.models.poyo_eeg import POYOEEGModel
 from foundry.tasks.masking import MaskingStrategy
 
 
-def compute_visible_indices(
+def _compute_visible_indices(
     total_tokens: int,
     mask_indices: torch.LongTensor,
 ) -> torch.LongTensor:
@@ -60,6 +60,8 @@ class MaskedPOYOEEGModel(POYOEEGModel):
     7. Route through ReadoutRouter
     8. Gather reconstruction targets at masked positions, return in output dict
     """
+
+    RECONSTRUCTION_TASK_NAME: str = "masked_reconstruction"
 
     def __init__(self, *args, masking: MaskingStrategy, **kwargs):
         super().__init__(*args, **kwargs)
@@ -118,11 +120,10 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             num_channels=C_pad,
             num_time_tokens=N,
             channel_mask=input_mask,
+            device=device,
         )
-        mask_indices = mask_indices.to(device)
-        validity_mask = validity_mask.to(device)
 
-        visible_indices = compute_visible_indices(num_tokens, mask_indices)
+        visible_indices = _compute_visible_indices(num_tokens, mask_indices)
 
         # 3. Gather visible tokens
         expand_D = visible_indices.unsqueeze(-1).expand(-1, -1, D)
@@ -144,7 +145,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
 
         # 5. Build reconstruction queries at masked positions
         recon_task_idx = self.router.get_task_index_by_name(
-            "masked_reconstruction"
+            self.RECONSTRUCTION_TASK_NAME
         )
         recon_task_emb = self.task_emb(
             torch.full(
@@ -200,56 +201,21 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             flat_embs[valid], (flat_task_index[valid] - 1).long()
         )
 
-        # 9. Gather reconstruction targets and inject into output dict
+        # 9. Gather reconstruction targets and inject via explicit contract
         if reconstruction_targets is not None:
             gathered_targets = torch.gather(
                 reconstruction_targets, 1, mask_indices
             )
             recon_valid = (recon_task_index > 0).reshape(-1)
-            outputs["masked_reconstruction_targets"] = gathered_targets.reshape(
-                -1
-            )[recon_valid]
-            outputs["masked_reconstruction_weights"] = (
-                validity_mask.float().reshape(-1)[recon_valid]
-            )
+            task_name = self.RECONSTRUCTION_TASK_NAME
+            outputs["_ssl_meta"] = {
+                task_name: {
+                    "targets": gathered_targets.reshape(-1)[recon_valid],
+                    "weights": validity_mask.float().reshape(-1)[recon_valid],
+                }
+            }
 
         return outputs
-
-    def _get_filtered_signal(self, data: Data):
-        """Return the modality-filtered, T-normalized signal and sampling rate.
-
-        Mirrors the filtering applied in the base ``tokenize()`` and
-        ``pretokenize()`` so that reconstruction targets align with the
-        tokenizer's input grid.
-        """
-        signal_source, default_type, sampling_rate = (
-            self._resolve_signal_source(data)
-        )
-
-        modality_field = (
-            data.channels.type.astype(str)
-            if hasattr(data.channels, "type")
-            else np.array([default_type] * len(data.channels)).astype(str)
-        )
-        modality_mask = np.isin(
-            np.char.lower(modality_field),
-            list(self.SUPPORTED_MODALITIES),
-        )
-        signal = signal_source.signal[:, modality_mask]
-
-        non_finite = ~np.isfinite(signal)
-        if non_finite.any():
-            signal = np.where(non_finite, 0.0, signal)
-
-        expected_T = round(sampling_rate * self.sequence_length)
-        T = signal.shape[0]
-        if abs(T - expected_T) <= 2:
-            if T > expected_T:
-                signal = signal[:expected_T]
-            elif T < expected_T:
-                signal = np.pad(signal, ((0, expected_T - T), (0, 0)))
-
-        return signal, sampling_rate
 
     def tokenize(self, data: Data) -> dict:
         """Tokenize with reconstruction targets for masked pretraining.
@@ -260,7 +226,9 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         """
         result = super().tokenize(data)
 
-        signal, sampling_rate = self._get_filtered_signal(data)
+        signal, sampling_rate = self._prepare_signal(
+            data, normalize_length=True
+        )
 
         if not self.tokenizer._do_patching:
             N = max(
@@ -278,15 +246,16 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             C_actual = min(signal.shape[1], C_pad)
             targets = np.zeros((C_pad, N), dtype=np.float32)
 
-            for c in range(C_actual):
-                resampled_c = np.interp(token_times, raw_times, signal[:, c])
-                mu = resampled_c.mean()
-                std = resampled_c.std()
-                if std > 1e-8:
-                    resampled_c = (resampled_c - mu) / std
-                else:
-                    resampled_c = resampled_c - mu
-                targets[c, :] = resampled_c
+            resampled = np.column_stack(
+                [
+                    np.interp(token_times, raw_times, signal[:, c])
+                    for c in range(C_actual)
+                ]
+            ).T  # (C_actual, N)
+            mu = resampled.mean(axis=1, keepdims=True)
+            std = resampled.std(axis=1, keepdims=True)
+            std = np.where(std > 1e-8, std, 1.0)
+            targets[:C_actual] = (resampled - mu) / std
 
             result["reconstruction_targets"] = torch.from_numpy(
                 targets.reshape(-1)
@@ -319,20 +288,21 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         else:
             num_patches = 1
 
+        C_used = min(C_actual, C_pad)
+        starts = np.arange(num_patches) * stride_samples
+        # (num_patches, patch_samples) index array
+        idx = starts[:, None] + np.arange(patch_samples)[None, :]
+        # Gather patches for all channels at once: (C_used, num_patches, patch_samples)
+        patches = signal[idx, :C_used].transpose(2, 0, 1).astype(np.float32)
+
+        mu = patches.mean(axis=2, keepdims=True)
+        std = patches.std(axis=2, keepdims=True)
+        std = np.where(std > 1e-8, std, 1.0)
+        normalized = (patches - mu) / std
+
         targets = np.zeros(
             (C_pad, num_patches, patch_samples), dtype=np.float32
         )
-        for c in range(min(C_actual, C_pad)):
-            for p in range(num_patches):
-                start = p * stride_samples
-                end = start + patch_samples
-                patch = signal[start:end, c].astype(np.float32)
-                mu = patch.mean()
-                std = patch.std()
-                if std > 1e-8:
-                    patch = (patch - mu) / std
-                else:
-                    patch = patch - mu
-                targets[c, p, :] = patch
+        targets[:C_used] = normalized
 
         return torch.from_numpy(targets.reshape(C_pad * num_patches, -1))

@@ -7,7 +7,7 @@ from torch_brain.data import Data, Interval, RegularTimeSeries
 
 from foundry.models.masked_poyo_eeg import (
     MaskedPOYOEEGModel,
-    compute_visible_indices,
+    _compute_visible_indices,
 )
 from foundry.tasks.masking import RandomTokenMasking
 
@@ -197,8 +197,11 @@ class TestMaskedModelForward:
             model, B, C_pad, N, T, sr, include_recon_targets=True
         )
 
-        assert "masked_reconstruction_targets" in outputs
-        assert "masked_reconstruction_weights" in outputs
+        assert "_ssl_meta" in outputs
+        ssl_meta = outputs["_ssl_meta"]
+        assert "masked_reconstruction" in ssl_meta
+        assert "targets" in ssl_meta["masked_reconstruction"]
+        assert "weights" in ssl_meta["masked_reconstruction"]
 
     def test_prediction_shape_matches_targets(self, model):
         B, C_pad, N = 2, 4, 10
@@ -210,7 +213,7 @@ class TestMaskedModelForward:
         )
 
         preds = outputs["masked_reconstruction"]
-        targets = outputs["masked_reconstruction_targets"]
+        targets = outputs["_ssl_meta"]["masked_reconstruction"]["targets"]
         assert preds.shape[0] == targets.shape[0]
 
     def test_forward_without_recon_targets(self, model):
@@ -223,8 +226,7 @@ class TestMaskedModelForward:
         )
 
         assert "masked_reconstruction" in outputs
-        assert "masked_reconstruction_targets" not in outputs
-        assert "masked_reconstruction_weights" not in outputs
+        assert "_ssl_meta" not in outputs
 
     def test_weights_are_between_zero_and_one(self, model):
         B, C_pad, N = 2, 4, 10
@@ -235,7 +237,7 @@ class TestMaskedModelForward:
             model, B, C_pad, N, T, sr, include_recon_targets=True
         )
 
-        weights = outputs["masked_reconstruction_weights"]
+        weights = outputs["_ssl_meta"]["masked_reconstruction"]["weights"]
         assert (weights >= 0).all()
         assert (weights <= 1).all()
 
@@ -403,7 +405,7 @@ class TestComputeVisibleIndicesProperties:
     def test_preserves_token_order(self):
         total = 20
         mask_indices = torch.tensor([[5, 10, 15]])
-        visible = compute_visible_indices(total, mask_indices)
+        visible = _compute_visible_indices(total, mask_indices)
 
         diffs = visible[0, 1:] - visible[0, :-1]
         assert (diffs > 0).all(), "Visible indices should be in ascending order"

@@ -269,7 +269,7 @@ class TestComputeVisibleIndices:
     """Test the complement-of-mask utility."""
 
     def test_visible_plus_masked_equals_total(self):
-        from foundry.models.masked_poyo_eeg import compute_visible_indices
+        from foundry.models.masked_poyo_eeg import _compute_visible_indices
 
         B, total = 3, 20
         num_masked = 8
@@ -277,7 +277,7 @@ class TestComputeVisibleIndices:
             [torch.randperm(total)[:num_masked] for _ in range(B)]
         )
 
-        visible = compute_visible_indices(total, mask_indices)
+        visible = _compute_visible_indices(total, mask_indices)
         assert visible.shape == (B, total - num_masked)
 
         for b in range(B):
@@ -285,7 +285,7 @@ class TestComputeVisibleIndices:
             assert torch.equal(all_indices.sort()[0], torch.arange(total))
 
     def test_no_overlap_between_visible_and_masked(self):
-        from foundry.models.masked_poyo_eeg import compute_visible_indices
+        from foundry.models.masked_poyo_eeg import _compute_visible_indices
 
         B, total = 2, 15
         num_masked = 5
@@ -293,7 +293,7 @@ class TestComputeVisibleIndices:
             [torch.randperm(total)[:num_masked] for _ in range(B)]
         )
 
-        visible = compute_visible_indices(total, mask_indices)
+        visible = _compute_visible_indices(total, mask_indices)
 
         for b in range(B):
             mask_set = set(mask_indices[b].tolist())

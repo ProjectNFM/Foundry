@@ -229,6 +229,50 @@ class POYOEEGModel(nn.Module):
 
         raise ValueError("Data must have an 'eeg', 'ecog', or 'seeg' field")
 
+    def _prepare_signal(
+        self, data: Data, normalize_length: bool = False
+    ) -> tuple[np.ndarray, float]:
+        """Filter by modality, replace non-finite values, optionally normalize T.
+
+        Shared logic used by both ``tokenize()`` and subclass target computation.
+
+        Args:
+            data: Input data sample.
+            normalize_length: If True, trim/pad the time axis to match
+                ``round(sampling_rate * sequence_length)``.
+
+        Returns:
+            Tuple of (signal, sampling_rate) where signal has shape (T, C_filtered).
+        """
+        signal_source, default_type, sampling_rate = (
+            self._resolve_signal_source(data)
+        )
+
+        modality_field = (
+            data.channels.type.astype(str)
+            if hasattr(data.channels, "type")
+            else np.array([default_type] * len(data.channels)).astype(str)
+        )
+        modality_mask = np.isin(
+            np.char.lower(modality_field), list(self.SUPPORTED_MODALITIES)
+        )
+        signal = signal_source.signal[:, modality_mask]
+
+        non_finite = ~np.isfinite(signal)
+        if non_finite.any():
+            signal = np.where(non_finite, 0.0, signal)
+
+        if normalize_length:
+            expected_T = round(sampling_rate * self.sequence_length)
+            T = signal.shape[0]
+            if abs(T - expected_T) <= 2:
+                if T > expected_T:
+                    signal = signal[:expected_T]
+                elif T < expected_T:
+                    signal = np.pad(signal, ((0, expected_T - T), (0, 0)))
+
+        return signal, sampling_rate
+
     def _infer_sampling_rate_from_timestamps(
         self, timestamps: np.ndarray
     ) -> float:
@@ -261,10 +305,9 @@ class POYOEEGModel(nn.Module):
             dict with model_inputs, target_values, target_weights, and
             metadata.
         """
-        signal_source, default_type, sampling_rate = (
-            self._resolve_signal_source(data)
-        )
+        signal, sampling_rate = self._prepare_signal(data)
 
+        signal_source, default_type, _ = self._resolve_signal_source(data)
         modality_field = (
             data.channels.type.astype(str)
             if hasattr(data.channels, "type")
@@ -276,11 +319,6 @@ class POYOEEGModel(nn.Module):
 
         channel_ids = data.channels.id[modality_mask].astype(str)
         channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
-
-        signal = signal_source.signal[:, modality_mask]
-        non_finite = ~np.isfinite(signal)
-        if non_finite.any():
-            signal = np.where(non_finite, 0.0, signal)
 
         pretokenized = self.tokenizer.pretokenize(
             signal=signal,

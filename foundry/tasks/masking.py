@@ -27,12 +27,15 @@ class MaskingStrategy:
         num_channels: int,
         num_time_tokens: int,
         channel_mask: torch.BoolTensor,
+        device: torch.device | None = None,
     ) -> tuple[torch.LongTensor, torch.BoolTensor]:
         """
         Args:
             num_channels: C_pad (total padded channels).
             num_time_tokens: N (temporal tokens per channel).
             channel_mask: (B, C_pad) which channels are real.
+            device: Target device for output tensors. Defaults to
+                ``channel_mask.device``.
 
         Returns:
             mask_indices: (B, num_masked) indices into flattened (C_pad * N).
@@ -49,18 +52,23 @@ class RandomTokenMasking(MaskingStrategy):
     sample via random permutation.
     """
 
-    def __call__(self, num_channels, num_time_tokens, channel_mask):
+    def __call__(
+        self, num_channels, num_time_tokens, channel_mask, device=None
+    ):
+        device = device if device is not None else channel_mask.device
         B = channel_mask.shape[0]
         C, N = num_channels, num_time_tokens
         total_tokens = C * N
         num_masked = max(1, int(self.mask_ratio * total_tokens))
 
-        noise = torch.rand(B, total_tokens, device=channel_mask.device)
+        noise = torch.rand(B, total_tokens, device=device)
         indices = noise.argsort(dim=1)
         mask_indices = indices[:, :num_masked]
 
         channel_of_token = mask_indices // N
-        validity_mask = torch.gather(channel_mask, 1, channel_of_token)
+        validity_mask = torch.gather(
+            channel_mask.to(device), 1, channel_of_token
+        )
 
         return mask_indices, validity_mask
 
@@ -78,9 +86,11 @@ class TemporalBlockMasking(MaskingStrategy):
 
     block_size: int = 5
 
-    def __call__(self, num_channels, num_time_tokens, channel_mask):
+    def __call__(
+        self, num_channels, num_time_tokens, channel_mask, device=None
+    ):
         B = channel_mask.shape[0]
-        device = channel_mask.device
+        device = device if device is not None else channel_mask.device
         C, N = num_channels, num_time_tokens
 
         num_slots = N // self.block_size
@@ -116,7 +126,8 @@ class TemporalBlockMasking(MaskingStrategy):
         ).reshape(B, num_masked)
 
         validity_mask = (
-            channel_mask.unsqueeze(2)
+            channel_mask.to(device)
+            .unsqueeze(2)
             .expand(B, C, num_time_masked)
             .reshape(B, num_masked)
         )
@@ -135,15 +146,18 @@ class ChannelMasking(MaskingStrategy):
     Total ``num_masked = num_channels_masked * N`` (fixed).
     """
 
-    def __call__(self, num_channels, num_time_tokens, channel_mask):
+    def __call__(
+        self, num_channels, num_time_tokens, channel_mask, device=None
+    ):
         B = channel_mask.shape[0]
-        device = channel_mask.device
+        device = device if device is not None else channel_mask.device
         C, N = num_channels, num_time_tokens
         num_channels_masked = max(1, int(self.mask_ratio * C))
         num_masked = num_channels_masked * N
 
+        channel_mask_dev = channel_mask.to(device)
         noise = torch.rand(B, C, device=device)
-        noise = noise + (~channel_mask).float() * 2.0
+        noise = noise + (~channel_mask_dev).float() * 2.0
         selected = noise.argsort(dim=1)[:, :num_channels_masked]
 
         time_offsets = torch.arange(N, device=device)
@@ -152,7 +166,7 @@ class ChannelMasking(MaskingStrategy):
             channel_starts + time_offsets.unsqueeze(0).unsqueeze(0)
         ).reshape(B, num_masked)
 
-        selected_real = torch.gather(channel_mask, 1, selected)
+        selected_real = torch.gather(channel_mask_dev, 1, selected)
         validity_mask = (
             selected_real.unsqueeze(2)
             .expand(B, num_channels_masked, N)

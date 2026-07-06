@@ -57,10 +57,14 @@ class _StubSSLModel(nn.Module):
         else:
             flat_embs = output_embs
         outputs = self.router(flat_embs, (flat_task_index[valid] - 1).long())
-        for k, v in self._inject_targets.items():
-            outputs[f"{k}_targets"] = v
-        for k, v in self._inject_weights.items():
-            outputs[f"{k}_weights"] = v
+        if self._inject_targets:
+            ssl_meta = {}
+            for k, v in self._inject_targets.items():
+                ssl_meta[k] = {
+                    "targets": v,
+                    "weights": self._inject_weights.get(k, torch.ones_like(v)),
+                }
+            outputs["_ssl_meta"] = ssl_meta
         return outputs
 
 
@@ -266,9 +270,9 @@ class TestSSLLossWeighting:
 
         In real SSL batches, task_index from tokenize() is empty because
         there are no supervised targets. Reconstruction indices are only
-        created inside MaskedPOYOEEGModel.forward(). The weighting in
-        _compute_task_losses looks up recon in the batch task_index, finds
-        num_sequences=0, and multiplies the loss by 0.
+        created inside MaskedPOYOEEGModel.forward(). The _ssl_meta contract
+        communicates which tasks are model-injected so they get proper
+        weighting in _compute_task_losses.
         """
         cfg = TaskConfig(
             name="masked_reconstruction",
@@ -292,9 +296,10 @@ class TestSSLLossWeighting:
         target_weights = {"masked_reconstruction": weights}
 
         task_index = torch.zeros((2, 3), dtype=torch.long)
+        ssl_task_names = {"masked_reconstruction"}
 
         total_loss, taskwise_loss = module._compute_task_losses(
-            outputs, target_values, target_weights, task_index
+            outputs, target_values, target_weights, task_index, ssl_task_names
         )
 
         assert "masked_reconstruction" in taskwise_loss
@@ -308,8 +313,8 @@ class TestSSLLossWeighting:
         """Bug 2 (High): in SSL+supervised runs, SSL loss is silently dropped.
 
         task_index has supervised entries but no reconstruction entries.
-        _compute_task_losses computes the recon loss but weights it by
-        num_sequences=0, so only supervised loss survives in the total.
+        The _ssl_meta contract marks reconstruction as model-injected so
+        _compute_task_losses weights it by the full batch size.
         """
         ssl_cfg = TaskConfig(
             name="masked_reconstruction",
@@ -357,9 +362,10 @@ class TestSSLLossWeighting:
         }
 
         task_index = torch.tensor([[sup_idx, 0, 0], [sup_idx, 0, 0]])
+        ssl_task_names = {"masked_reconstruction"}
 
         total_loss, taskwise_loss = module._compute_task_losses(
-            outputs, target_values, target_weights, task_index
+            outputs, target_values, target_weights, task_index, ssl_task_names
         )
 
         assert "masked_reconstruction" in taskwise_loss
