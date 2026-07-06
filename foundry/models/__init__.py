@@ -25,6 +25,7 @@ from foundry.models.embeddings import (
 from foundry.models.tokenizer import EEGTokenizer
 
 from foundry.models.poyo_eeg import POYOEEGModel
+from foundry.models.masked_poyo_eeg import MaskedPOYOEEGModel
 from foundry.models.baselines import (
     TemporalConvAvgPool,
     Linear,
@@ -36,6 +37,7 @@ from foundry.models.baselines import (
 
 __all__ = [
     "POYOEEGModel",
+    "MaskedPOYOEEGModel",
     "EEGTokenizer",
     "TemporalConvAvgPool",
     "Linear",

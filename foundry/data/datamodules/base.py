@@ -196,7 +196,7 @@ class NeuralDataModule(LightningDataModule):
         if not self._task_configs:
             return sampling_intervals
         for name, cfg in self._task_configs.items():
-            if cfg.class_mapping is None:
+            if cfg.class_mapping is None or cfg.target_extractor is None:
                 continue
             value_field = cfg.target_extractor["value_key"].split(".")[-1]
             sampling_intervals = {

@@ -93,3 +93,35 @@ class MSETaskLoss(nn.Module):
         if isinstance(sample_weights, torch.Tensor):
             loss = loss * sample_weights.unsqueeze(-1)
         return loss.mean()
+
+
+class ReconstructionLoss(nn.Module):
+    """MSE loss for signal reconstruction with validity-mask weighting.
+
+    Expects targets to be pre-normalized (z-scored per channel during
+    tokenization). The ``sample_weights`` tensor encodes the validity mask:
+    positions from padded channels have weight=0 and do not contribute.
+
+    Follows the uniform ``(predictions, targets, sample_weights) → scalar``
+    signature used by all task losses.
+    """
+
+    def forward(
+        self,
+        predictions: torch.Tensor,
+        targets: torch.Tensor,
+        sample_weights: torch.Tensor | float = 1.0,
+    ) -> torch.Tensor:
+        if isinstance(sample_weights, (int, float)):
+            return F.mse_loss(predictions, targets)
+
+        valid = sample_weights > 0
+        if not valid.any():
+            return torch.tensor(0.0, device=predictions.device)
+
+        loss = F.mse_loss(predictions[valid], targets[valid], reduction="none")
+        if loss.dim() > 1:
+            loss = loss.mean(dim=-1)
+
+        weights_valid = sample_weights[valid]
+        return (loss * weights_valid).sum() / weights_valid.sum()

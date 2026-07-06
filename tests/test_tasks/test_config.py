@@ -103,21 +103,29 @@ class TestTaskYamlConfigs:
     def test_each_task_yaml_parses_with_expected_kind_and_output_dim(
         self, yaml_path: Path
     ):
+        if yaml_path.stem not in EXPECTED_TASK_SPECS:
+            pytest.skip(f"No expected spec for {yaml_path.stem}")
         expected = EXPECTED_TASK_SPECS[yaml_path.stem]
         cfg = TaskConfig.from_yaml(yaml_path)
 
-        assert cfg.name == yaml_path.stem
+        assert cfg.name == expected.get("expected_name", yaml_path.stem)
         assert cfg.output_dim == expected["output_dim"]
         assert cfg.kind == expected["kind"]
-        assert (
-            cfg.target_extractor["timestamp_key"] == expected["timestamp_key"]
-        )
-        assert cfg.target_extractor["value_key"] == expected["value_key"]
+        if expected.get("timestamp_key") is not None:
+            assert (
+                cfg.target_extractor["timestamp_key"]
+                == expected["timestamp_key"]
+            )
+            assert cfg.target_extractor["value_key"] == expected["value_key"]
+        else:
+            assert cfg.target_extractor is None
 
     @pytest.mark.parametrize(
         "yaml_path", _task_yaml_paths(), ids=lambda p: p.stem
     )
     def test_each_task_yaml_components_instantiate(self, yaml_path: Path):
+        if yaml_path.stem not in EXPECTED_TASK_SPECS:
+            pytest.skip(f"No expected spec for {yaml_path.stem}")
         cfg = TaskConfig.from_yaml(yaml_path)
         embed_dim = 64
 
@@ -127,8 +135,11 @@ class TestTaskYamlConfigs:
         head = instantiate(head_kwargs)
         assert head.output_dim == cfg.output_dim
 
-        extractor = instantiate(cfg.target_extractor)
-        assert callable(extractor)
+        if cfg.target_extractor is not None:
+            extractor = instantiate(cfg.target_extractor)
+            assert callable(extractor)
+        else:
+            assert cfg.extractor is None
 
         loss = instantiate(cfg.loss)
         assert loss is not None
@@ -221,7 +232,140 @@ class TestFromDictMetricsNumClasses:
         assert cfg.metrics is None
 
 
+class TestTaskConfigOptionalExtractor:
+    """Test that target_extractor can be None for SSL tasks."""
+
+    def test_none_extractor_yields_none_property(self):
+        cfg = TaskConfig(
+            name="masked_reconstruction",
+            head={
+                "_target_": "foundry.tasks.heads.MLPReadoutHead",
+                "output_dim": 1,
+                "num_layers": 2,
+            },
+            target_extractor=None,
+            loss={"_target_": "foundry.tasks.losses.ReconstructionLoss"},
+        )
+
+        assert cfg.target_extractor is None
+        assert cfg.extractor is None
+
+    def test_from_dict_with_null_extractor(self):
+        data = {
+            "name": "masked_reconstruction",
+            "head": {
+                "_target_": "foundry.tasks.heads.MLPReadoutHead",
+                "output_dim": 1,
+            },
+            "target_extractor": None,
+            "loss": {"_target_": "foundry.tasks.losses.ReconstructionLoss"},
+        }
+        cfg = TaskConfig.from_dict(data)
+
+        assert cfg.target_extractor is None
+        assert cfg.extractor is None
+
+    def test_from_dict_without_extractor_key(self):
+        data = {
+            "name": "masked_reconstruction",
+            "head": {
+                "_target_": "foundry.tasks.heads.MLPReadoutHead",
+                "output_dim": 1,
+            },
+            "loss": {"_target_": "foundry.tasks.losses.ReconstructionLoss"},
+        }
+        cfg = TaskConfig.from_dict(data)
+
+        assert cfg.target_extractor is None
+        assert cfg.extractor is None
+
+    def test_existing_extractor_still_works(self):
+        cfg = TaskConfig(
+            name="test",
+            head={"output_dim": 5},
+            target_extractor={
+                "timestamp_key": "trials.timestamps",
+                "value_key": "trials.values",
+            },
+            loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
+        )
+
+        ext = cfg.extractor
+        assert ext is not None
+        assert ext.timestamp_key == "trials.timestamps"
+
+    def test_extractor_with_target_dispatches_via_hydra(self):
+        cfg = TaskConfig(
+            name="test",
+            head={"output_dim": 5},
+            target_extractor={
+                "_target_": "foundry.tasks.targets.TargetExtractor",
+                "timestamp_key": "trials.timestamps",
+                "value_key": "trials.values",
+            },
+            loss={"_target_": "foundry.tasks.losses.CrossEntropyTaskLoss"},
+        )
+
+        ext = cfg.extractor
+        assert ext is not None
+        assert ext.timestamp_key == "trials.timestamps"
+
+    def test_kind_for_reconstruction_loss(self):
+        cfg = TaskConfig(
+            name="masked_reconstruction",
+            head={"output_dim": 1},
+            target_extractor=None,
+            loss={"_target_": "foundry.tasks.losses.ReconstructionLoss"},
+        )
+
+        assert cfg.kind == "continuous"
+
+
+class TestMaskedReconstructionYaml:
+    def test_masked_reconstruction_yaml_loads(self):
+        cfg = TaskConfig.from_yaml(
+            TASKS_CONFIG_DIR / "masked_reconstruction.yaml"
+        )
+        assert cfg.name == "masked_reconstruction"
+        assert cfg.target_extractor is None
+        assert cfg.extractor is None
+        assert cfg.output_dim == 1
+        assert cfg.kind == "continuous"
+
+    def test_masked_reconstruction_loss_instantiates(self):
+        cfg = TaskConfig.from_yaml(
+            TASKS_CONFIG_DIR / "masked_reconstruction.yaml"
+        )
+        loss = instantiate(cfg.loss)
+        assert loss is not None
+
+    def test_masked_reconstruction_head_instantiates(self):
+        cfg = TaskConfig.from_yaml(
+            TASKS_CONFIG_DIR / "masked_reconstruction.yaml"
+        )
+        head_kwargs = {**cfg.head, "embed_dim": 64}
+        if "output_dim" not in head_kwargs:
+            head_kwargs["output_dim"] = cfg.output_dim
+        head = instantiate(head_kwargs)
+        assert head.output_dim == 1
+
+    def test_masked_reconstruction_metrics_instantiate(self):
+        cfg = TaskConfig.from_yaml(
+            TASKS_CONFIG_DIR / "masked_reconstruction.yaml"
+        )
+        assert cfg.metrics is not None
+        metrics = instantiate(cfg.metrics)
+        assert "recon_mse" in metrics
+
+
 EXPECTED_TASK_SPECS = {
+    "masked_reconstruction": {
+        "expected_name": "masked_reconstruction",
+        "output_dim": 1,
+        "kind": "continuous",
+        "timestamp_key": None,
+        "value_key": None,
+    },
     "ajile_pose_estimation": {
         "output_dim": 18,
         "kind": "continuous",

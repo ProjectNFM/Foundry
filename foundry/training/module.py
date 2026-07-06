@@ -28,12 +28,14 @@ class FoundryModule(L.LightningModule):
         learning_rate: float = 1e-4,
         weight_decay: float = 0.01,
         cwt_lr_multiplier: float = 1.0,
+        warmup_epochs: int = 0,
     ):
         super().__init__()
         self.model = model
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.cwt_lr_multiplier = cwt_lr_multiplier
+        self.warmup_epochs = warmup_epochs
         self.save_hyperparameters(ignore=["model"])
 
         self._task_losses = nn.ModuleDict()
@@ -78,6 +80,12 @@ class FoundryModule(L.LightningModule):
             return torch.softmax(predictions, dim=-1), targets
         if cfg.kind == "binary":
             return torch.softmax(predictions, dim=-1)[:, 1], targets
+        if (
+            predictions.dim() == 2
+            and predictions.shape[1] == 1
+            and targets.dim() == 1
+        ):
+            predictions = predictions.squeeze(-1)
         return predictions, targets
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
@@ -111,6 +119,14 @@ class FoundryModule(L.LightningModule):
             self._unpack_batch(batch)
         )
         outputs = self.model(**model_inputs, unpack_output=False)
+
+        for key in list(outputs.keys()):
+            if key.endswith("_targets"):
+                task_name = key.removesuffix("_targets")
+                target_values[task_name] = outputs.pop(key)
+            elif key.endswith("_weights"):
+                task_name = key.removesuffix("_weights")
+                target_weights[task_name] = outputs.pop(key)
 
         total_loss, taskwise_loss = self._compute_task_losses(
             outputs, target_values, target_weights, task_index
@@ -258,9 +274,27 @@ class FoundryModule(L.LightningModule):
     def configure_optimizers(self):
         param_groups = self._build_param_groups()
         optimizer = torch.optim.AdamW(param_groups)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=self.trainer.max_epochs if self.trainer else 100
+
+        max_epochs = self.trainer.max_epochs if self.trainer else 100
+        cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=max(1, max_epochs - self.warmup_epochs)
         )
+
+        if self.warmup_epochs > 0:
+            warmup = torch.optim.lr_scheduler.LinearLR(
+                optimizer,
+                start_factor=1e-4,
+                end_factor=1.0,
+                total_iters=self.warmup_epochs,
+            )
+            scheduler = torch.optim.lr_scheduler.SequentialLR(
+                optimizer,
+                schedulers=[warmup, cosine],
+                milestones=[self.warmup_epochs],
+            )
+        else:
+            scheduler = cosine
+
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
@@ -336,12 +370,20 @@ class FoundryModule(L.LightningModule):
             if preds is None or target is None or target.numel() == 0:
                 continue
 
+            if preds.dim() == 2 and preds.shape[1] == 1 and target.dim() == 1:
+                preds = preds.squeeze(-1)
+
             weights = target_weights.get(name, 1.0)
             loss = self._task_losses[name](preds, target, weights)
             taskwise_loss[name] = loss
 
             idx = self.model.router.get_task_index_by_name(name) + 1
             num_sequences = torch.any(task_index == idx, dim=1).sum()
+            if num_sequences == 0:
+                # Model-injected task (e.g. reconstruction in SSL): its
+                # indices live in the model's internal combined_task_index,
+                # not in the batch task_index.  Count every batch item.
+                num_sequences = task_index.shape[0]
             multitask_loss = multitask_loss + loss * num_sequences
             total_sequences += num_sequences
 
