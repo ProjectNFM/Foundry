@@ -136,6 +136,12 @@ class FoundryModule(L.LightningModule):
         )
         self.log(f"{stage}/loss", total_loss, prog_bar=True)
 
+        if stage == "train" and getattr(self, "_trainer", None) is not None:
+            opt = self.optimizers()
+            if opt is not None:
+                current_lr = opt.param_groups[0]["lr"]
+                self.log("train/lr", current_lr, prog_bar=False)
+
         metrics = self.train_metrics if stage == "train" else self.val_metrics
 
         accumulate_sessions = (
@@ -153,7 +159,11 @@ class FoundryModule(L.LightningModule):
             if name in taskwise_loss:
                 self.log(f"{stage}/{name}_loss", taskwise_loss[name])
 
-            if accumulate_sessions and cfg.metrics is not None:
+            if (
+                accumulate_sessions
+                and cfg.metrics is not None
+                and name not in ssl_task_names
+            ):
                 self._accumulate_session_preds(
                     name, preds, target, task_index, session_id
                 )

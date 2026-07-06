@@ -19,6 +19,7 @@ module:
 
 run:
   name: poyo_multi_dataset_pretrain
+  project: foundry_pretraining
   group: PRETRAINING
   tags: [pretraining, mae, masked, multi_dataset]
   log_level: INFO

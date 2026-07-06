@@ -83,11 +83,12 @@ class OpenNeuroMultiBrainset(NestedDataset):
 
     # ------------------------------------------------------------------
     # NestedDataset does not provide get_channel_ids; aggregate from children
+    # with the dataset-name prefix that _namespace adds during __getitem__
     # ------------------------------------------------------------------
     def get_channel_ids(self) -> list[str]:
         all_ids: list[str] = []
-        for ds in self.datasets.values():
+        for name, ds in self.datasets.items():
             if len(ds.recording_ids) == 0:
                 continue
-            all_ids.extend(ds.get_channel_ids())
+            all_ids.extend(f"{name}/{ch}" for ch in ds.get_channel_ids())
         return sorted(set(all_ids))

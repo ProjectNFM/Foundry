@@ -17,11 +17,14 @@ from torch_brain.samplers import RandomFixedWindowSampler
 from lightning import LightningDataModule
 from torch_brain.transforms import Compose
 
+from foundry.data.fast_sampler import patch_sampler
 from foundry.tasks.class_weights import compute_class_weights_for_tasks
 from foundry.tasks.classification_mapping import (
     filter_intervals_by_mapping,
     validate_task_mappings,
 )
+
+patch_sampler()
 
 if TYPE_CHECKING:
     from foundry.tasks.config import TaskConfig
