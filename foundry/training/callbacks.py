@@ -18,28 +18,89 @@ log = logging.getLogger(__name__)
 
 
 class ReconstructionVisualizationCallback(L.Callback):
-    """Log example masked-reconstruction plots to W&B once per validation epoch.
+    """Log example masked-reconstruction plots to W&B.
 
     Works with :class:`~foundry.models.masked_poyo_eeg.MaskedPOYOEEGModel`.
-    During validation the :class:`~foundry.training.module.FoundryModule`
-    buffers a small number of per-sample reconstructions.  At epoch end this
-    callback renders them as matplotlib figures and logs to W&B.
+    During both training and validation the
+    :class:`~foundry.training.module.FoundryModule` buffers a small number of
+    per-sample reconstructions.  Training reconstructions are logged every
+    ``log_every_n_steps`` global steps; validation reconstructions are logged
+    at each validation epoch end.
 
     Args:
-        num_examples: How many samples to visualize per epoch.
+        num_examples: How many samples to visualize per log event.
         num_channels: Maximum number of EEG channels to show per sample.
+        log_every_n_steps: How often (in global training steps) to log
+            training reconstructions.  Set to 0 to disable training-step
+            visualization.
     """
 
-    def __init__(self, num_examples: int = 4, num_channels: int = 8):
+    def __init__(
+        self,
+        num_examples: int = 4,
+        num_channels: int = 8,
+        log_every_n_steps: int = 500,
+    ):
         super().__init__()
         self.num_examples = num_examples
         self.num_channels = num_channels
+        self.log_every_n_steps = log_every_n_steps
 
     def on_fit_start(
         self, trainer: Trainer, pl_module: L.LightningModule
     ) -> None:
         pl_module._reconstruction_viz_buffer = []
+        pl_module._reconstruction_train_viz_buffer = []
         pl_module._reconstruction_viz_max_examples = self.num_examples
+
+    def on_train_batch_end(
+        self,
+        trainer: Trainer,
+        pl_module: L.LightningModule,
+        outputs: Any,
+        batch: Any,
+        batch_idx: int,
+    ) -> None:
+        if self.log_every_n_steps <= 0:
+            return
+
+        step = trainer.global_step
+        if step % self.log_every_n_steps != 0:
+            return
+
+        buffer: list[dict] = getattr(
+            pl_module, "_reconstruction_train_viz_buffer", []
+        )
+        if not buffer:
+            return
+
+        wandb_experiment = self._get_wandb_experiment(trainer)
+        if wandb_experiment is None:
+            pl_module._reconstruction_train_viz_buffer = []
+            return
+
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        try:
+            import wandb
+        except ImportError:
+            pl_module._reconstruction_train_viz_buffer = []
+            return
+
+        figures: dict[str, Any] = {}
+        for i, example in enumerate(buffer):
+            fig = self._plot_reconstruction(example)
+            if fig is not None:
+                figures[f"train/reconstruction_example_{i}"] = wandb.Image(fig)
+                plt.close(fig)
+
+        if figures:
+            wandb_experiment.log(figures, commit=False)
+
+        pl_module._reconstruction_train_viz_buffer = []
 
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: L.LightningModule

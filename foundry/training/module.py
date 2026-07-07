@@ -197,14 +197,23 @@ class FoundryModule(L.LightningModule):
                     continue
                 self._val_confusion_trackers[name].update(pred_classes, target)
 
-        if (
-            stage == "val"
-            and reconstruction_viz is not None
-            and hasattr(self, "_reconstruction_viz_buffer")
-        ):
-            self._buffer_reconstruction_examples(
-                model_inputs, outputs, reconstruction_viz
-            )
+        if reconstruction_viz is not None:
+            if stage == "val" and hasattr(self, "_reconstruction_viz_buffer"):
+                self._buffer_reconstruction_examples(
+                    model_inputs,
+                    outputs,
+                    reconstruction_viz,
+                    self._reconstruction_viz_buffer,
+                )
+            if stage == "train" and hasattr(
+                self, "_reconstruction_train_viz_buffer"
+            ):
+                self._buffer_reconstruction_examples(
+                    model_inputs,
+                    outputs,
+                    reconstruction_viz,
+                    self._reconstruction_train_viz_buffer,
+                )
 
         return total_loss
 
@@ -213,9 +222,11 @@ class FoundryModule(L.LightningModule):
         model_inputs: Dict[str, Any],
         outputs: Dict[str, torch.Tensor],
         viz_meta: Dict[str, Any],
+        buffer: list[dict] | None = None,
     ) -> None:
         """Store a few per-sample reconstruction examples for visualization."""
-        buffer = self._reconstruction_viz_buffer
+        if buffer is None:
+            buffer = self._reconstruction_viz_buffer
         max_examples = getattr(self, "_reconstruction_viz_max_examples", 4)
         if len(buffer) >= max_examples:
             return
