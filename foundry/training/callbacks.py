@@ -751,3 +751,40 @@ class ParameterWatcherCallback(L.Callback):
         if isinstance(trainer.logger, WandbLogger):
             return trainer.logger.experiment
         return None
+
+
+class DeterministicSamplerCallback(L.Callback):
+    """Re-seed the train sampler at the start of every epoch.
+
+    When debugging with ``limit_train_batches=1``, the
+    :class:`RandomFixedWindowSampler` normally produces different windows
+    each epoch because its internal ``torch.Generator`` advances.  This
+    callback resets the generator so every epoch yields identical batches.
+    """
+
+    def on_train_epoch_start(
+        self, trainer: Trainer, pl_module: L.LightningModule
+    ) -> None:
+        loader = trainer.train_dataloader
+        if loader is None:
+            return
+        sampler = getattr(loader, "sampler", None)
+        gen = getattr(sampler, "generator", None)
+        if gen is not None:
+            seed = getattr(trainer.datamodule, "seed", 42)
+            gen.manual_seed(seed)
+
+    def on_validation_epoch_start(
+        self, trainer: Trainer, pl_module: L.LightningModule
+    ) -> None:
+        loaders = trainer.val_dataloaders
+        if loaders is None:
+            return
+        if not isinstance(loaders, (list, tuple)):
+            loaders = [loaders]
+        for loader in loaders:
+            sampler = getattr(loader, "sampler", None)
+            gen = getattr(sampler, "generator", None)
+            if gen is not None:
+                seed = getattr(trainer.datamodule, "seed", 42) + 1
+                gen.manual_seed(seed)

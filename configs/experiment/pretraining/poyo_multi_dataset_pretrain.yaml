@@ -44,3 +44,4 @@ trainer:
       mode: min
       auto_insert_metric_name: false
       filename: "best-epoch{epoch:03d}-val_loss_{val/loss:.4f}"
+      
