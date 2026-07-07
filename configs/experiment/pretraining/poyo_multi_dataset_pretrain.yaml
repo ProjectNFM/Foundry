@@ -8,7 +8,7 @@ task_configs:
   - masked_reconstruction
 
 model:
-  zero_output_timestamps: true
+  zero_output_timestamps: false
 
 data:
   split_type: intrasession

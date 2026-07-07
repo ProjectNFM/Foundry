@@ -71,6 +71,9 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             "MaskedPOYOEEGModel requires PerChannelStrategy. "
             "SpatialProjectionStrategy is not supported."
         )
+        self._variable_time_tokens = not hasattr(
+            self.tokenizer.temporal_embedding, "target_token_rate"
+        )
 
     def forward(
         self,
@@ -115,6 +118,16 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         C_pad = input_mask.shape[1]
         N = num_tokens // C_pad
 
+        # Flatten pad2d-collated (B, C_pad, N) → (B, C_pad*N) for
+        # variable-length temporal embeddings (e.g. PerTimepointLinear).
+        if input_timestamps.ndim == 3:
+            input_timestamps = input_timestamps.reshape(B, -1)
+        if (
+            reconstruction_targets is not None
+            and reconstruction_targets.ndim == 3
+        ):
+            reconstruction_targets = reconstruction_targets.reshape(B, -1)
+
         # 2. Generate mask from full (C_pad, N) grid
         mask_indices, validity_mask = self.masking(
             num_channels=C_pad,
@@ -122,6 +135,14 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             channel_mask=input_mask,
             device=device,
         )
+
+        # Exclude time-padded positions from validity when using
+        # variable-length temporal tokens (N = T_max across batch).
+        if self._variable_time_tokens and input_seq_len is not None:
+            time_of_token = mask_indices % N
+            validity_mask = validity_mask & (
+                time_of_token < input_seq_len.unsqueeze(1)
+            )
 
         visible_indices = _compute_visible_indices(num_tokens, mask_indices)
 
@@ -238,35 +259,50 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         )
 
         if not self.tokenizer._do_patching:
-            N = max(
-                1,
-                round(
-                    self.tokenizer.temporal_embedding.target_token_rate
-                    * self.sequence_length
-                ),
+            has_token_rate = hasattr(
+                self.tokenizer.temporal_embedding, "target_token_rate"
             )
-            token_times = np.linspace(0, self.sequence_length, N)
-            T = signal.shape[0]
-            raw_times = np.linspace(0, self.sequence_length, T)
 
+            T = signal.shape[0]
             C_pad = self.tokenizer.channel_strategy.max_channels
             C_actual = min(signal.shape[1], C_pad)
-            targets = np.zeros((C_pad, N), dtype=np.float32)
 
-            resampled = np.column_stack(
-                [
-                    np.interp(token_times, raw_times, signal[:, c])
-                    for c in range(C_actual)
-                ]
-            ).T  # (C_actual, N)
+            if has_token_rate:
+                N = max(
+                    1,
+                    round(
+                        self.tokenizer.temporal_embedding.target_token_rate
+                        * self.sequence_length
+                    ),
+                )
+                token_times = np.linspace(0, self.sequence_length, N)
+                raw_times = np.linspace(0, self.sequence_length, T)
+                resampled = np.column_stack(
+                    [
+                        np.interp(token_times, raw_times, signal[:, c])
+                        for c in range(C_actual)
+                    ]
+                ).T  # (C_actual, N)
+            else:
+                N = T
+                resampled = signal[:, :C_actual].T.astype(
+                    np.float32
+                )  # (C_actual, T)
+
+            targets = np.zeros((C_pad, N), dtype=np.float32)
             mu = resampled.mean(axis=1, keepdims=True)
             std = resampled.std(axis=1, keepdims=True)
             std = np.where(std > 1e-8, std, 1.0)
             targets[:C_actual] = (resampled - mu) / std
 
-            result["reconstruction_targets"] = torch.from_numpy(
-                targets.reshape(-1)
-            )
+            targets_tensor = torch.from_numpy(targets)  # (C_pad, N)
+            if has_token_rate:
+                result["reconstruction_targets"] = targets_tensor.reshape(-1)
+            else:
+                # Variable N — wrap as (C_pad, N) for mixed-SR collation.
+                result["reconstruction_targets"] = pad2d(targets_tensor)
+                ts = result["input_timestamps"]
+                result["input_timestamps"] = pad2d(ts.reshape(C_pad, N))
         else:
             result["reconstruction_targets"] = self._compute_patch_targets(
                 signal, sampling_rate
