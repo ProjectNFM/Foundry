@@ -124,6 +124,7 @@ class FoundryModule(L.LightningModule):
         outputs = self.model(**model_inputs, unpack_output=False)
 
         ssl_meta = outputs.pop("_ssl_meta", None)
+        reconstruction_viz = outputs.pop("_reconstruction_viz", None)
         ssl_task_names: set[str] = set()
         if ssl_meta is not None:
             for task_name, meta in ssl_meta.items():
@@ -196,7 +197,58 @@ class FoundryModule(L.LightningModule):
                     continue
                 self._val_confusion_trackers[name].update(pred_classes, target)
 
+        if (
+            stage == "val"
+            and reconstruction_viz is not None
+            and hasattr(self, "_reconstruction_viz_buffer")
+        ):
+            self._buffer_reconstruction_examples(
+                model_inputs, outputs, reconstruction_viz
+            )
+
         return total_loss
+
+    def _buffer_reconstruction_examples(
+        self,
+        model_inputs: Dict[str, Any],
+        outputs: Dict[str, torch.Tensor],
+        viz_meta: Dict[str, Any],
+    ) -> None:
+        """Store a few per-sample reconstruction examples for visualization."""
+        buffer = self._reconstruction_viz_buffer
+        max_examples = getattr(self, "_reconstruction_viz_max_examples", 4)
+        if len(buffer) >= max_examples:
+            return
+
+        recon_preds = outputs.get("masked_reconstruction")
+        targets = model_inputs.get("reconstruction_targets")
+        input_mask = model_inputs.get("input_mask")
+        if recon_preds is None or targets is None or input_mask is None:
+            return
+
+        mask_indices = viz_meta["mask_indices"]
+        validity_mask = viz_meta["validity_mask"]
+        C_pad = viz_meta["C_pad"]
+        N = viz_meta["N"]
+
+        per_sample_counts = validity_mask.sum(dim=1)
+        per_sample_preds = torch.split(recon_preds, per_sample_counts.tolist())
+
+        B = mask_indices.shape[0]
+        for b in range(B):
+            if len(buffer) >= max_examples:
+                break
+            buffer.append(
+                {
+                    "targets": targets[b].detach().cpu(),
+                    "predictions": per_sample_preds[b].detach().cpu(),
+                    "mask_indices": mask_indices[b].detach().cpu(),
+                    "validity_mask": validity_mask[b].detach().cpu(),
+                    "input_mask": input_mask[b].detach().cpu(),
+                    "C_pad": C_pad,
+                    "N": N,
+                }
+            )
 
     def _accumulate_session_preds(
         self,

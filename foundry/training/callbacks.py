@@ -17,6 +17,156 @@ from foundry.training.confusion_matrix import ConfusionMatrixTracker
 log = logging.getLogger(__name__)
 
 
+class ReconstructionVisualizationCallback(L.Callback):
+    """Log example masked-reconstruction plots to W&B once per validation epoch.
+
+    Works with :class:`~foundry.models.masked_poyo_eeg.MaskedPOYOEEGModel`.
+    During validation the :class:`~foundry.training.module.FoundryModule`
+    buffers a small number of per-sample reconstructions.  At epoch end this
+    callback renders them as matplotlib figures and logs to W&B.
+
+    Args:
+        num_examples: How many samples to visualize per epoch.
+        num_channels: Maximum number of EEG channels to show per sample.
+    """
+
+    def __init__(self, num_examples: int = 4, num_channels: int = 8):
+        super().__init__()
+        self.num_examples = num_examples
+        self.num_channels = num_channels
+
+    def on_fit_start(
+        self, trainer: Trainer, pl_module: L.LightningModule
+    ) -> None:
+        pl_module._reconstruction_viz_buffer = []
+        pl_module._reconstruction_viz_max_examples = self.num_examples
+
+    def on_validation_epoch_end(
+        self, trainer: Trainer, pl_module: L.LightningModule
+    ) -> None:
+        buffer: list[dict] = getattr(
+            pl_module, "_reconstruction_viz_buffer", []
+        )
+        if not buffer:
+            return
+
+        wandb_experiment = self._get_wandb_experiment(trainer)
+        if wandb_experiment is None:
+            pl_module._reconstruction_viz_buffer = []
+            return
+
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        try:
+            import wandb
+        except ImportError:
+            pl_module._reconstruction_viz_buffer = []
+            return
+
+        figures: dict[str, Any] = {}
+        for i, example in enumerate(buffer):
+            fig = self._plot_reconstruction(example)
+            if fig is not None:
+                figures[f"val/reconstruction_example_{i}"] = wandb.Image(fig)
+                plt.close(fig)
+
+        if figures:
+            wandb_experiment.log(figures, commit=False)
+
+        pl_module._reconstruction_viz_buffer = []
+
+    # ------------------------------------------------------------------
+
+    def _plot_reconstruction(self, example: dict):
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        targets_flat = example["targets"].float()
+        predictions = example["predictions"].float()
+        mask_indices = example["mask_indices"]
+        validity_mask = example["validity_mask"]
+        input_mask = example["input_mask"]
+        C_pad: int = example["C_pad"]
+        N: int = example["N"]
+
+        if predictions.dim() == 2 and predictions.shape[1] == 1:
+            predictions = predictions.squeeze(-1)
+        if predictions.dim() == 2 and predictions.shape[1] > 1:
+            return None
+
+        targets_2d = targets_flat.reshape(C_pad, N).numpy()
+
+        valid_indices = mask_indices[validity_mask.bool()]
+        valid_ch = (valid_indices // N).numpy()
+        valid_t = (valid_indices % N).numpy()
+        pred_values = predictions.numpy()
+
+        real_channels = input_mask.bool().nonzero(as_tuple=True)[0].numpy()
+        num_ch = min(len(real_channels), self.num_channels)
+        if num_ch == 0:
+            return None
+        channels_to_plot = real_channels[:num_ch]
+
+        fig, axes = plt.subplots(
+            num_ch, 1, figsize=(14, 2.5 * num_ch), sharex=True
+        )
+        if num_ch == 1:
+            axes = [axes]
+
+        time_axis = np.arange(N)
+
+        for ax_idx, ch in enumerate(channels_to_plot):
+            ax = axes[ax_idx]
+            gt = targets_2d[ch]
+
+            ax.plot(
+                time_axis,
+                gt,
+                color="steelblue",
+                linewidth=0.8,
+                alpha=0.7,
+                label="Ground truth" if ax_idx == 0 else None,
+            )
+
+            ch_all_mask = (mask_indices // N == ch).numpy()
+            ch_masked_times = (mask_indices[ch_all_mask] % N).numpy()
+            for t in ch_masked_times:
+                ax.axvspan(t - 0.5, t + 0.5, alpha=0.12, color="salmon")
+
+            ch_pred_sel = valid_ch == ch
+            ch_times = valid_t[ch_pred_sel]
+            ch_preds = pred_values[ch_pred_sel]
+            if len(ch_times) > 0:
+                ax.scatter(
+                    ch_times,
+                    ch_preds,
+                    color="red",
+                    s=12,
+                    zorder=5,
+                    label="Prediction" if ax_idx == 0 else None,
+                )
+
+            ax.set_ylabel(f"Ch {ch}", fontsize=8)
+            ax.tick_params(labelsize=7)
+
+        axes[0].legend(fontsize=8, loc="upper right")
+        axes[-1].set_xlabel("Token index")
+        fig.suptitle("Masked Reconstruction (z-scored)", fontsize=12)
+        fig.tight_layout()
+        return fig
+
+    @staticmethod
+    def _get_wandb_experiment(trainer: Trainer):
+        from lightning.pytorch.loggers import WandbLogger
+
+        if isinstance(trainer.logger, WandbLogger):
+            return trainer.logger.experiment
+        return None
+
+
 class ConfusionMatrixCallback(L.Callback):
     """Log confusion matrices for classification tasks at validation epoch end.
 

@@ -40,6 +40,10 @@ callbacks:
     save_top_k: 1
     verbose: true
     save_on_train_epoch_end: false
+  reconstruction_visualization:
+    _target_: foundry.training.callbacks.ReconstructionVisualizationCallback
+    num_examples: 4
+    num_channels: 8
   confusion_matrix:
     _target_: foundry.training.callbacks.ConfusionMatrixCallback
   session_metrics:

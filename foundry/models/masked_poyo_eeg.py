@@ -215,6 +215,13 @@ class MaskedPOYOEEGModel(POYOEEGModel):
                 }
             }
 
+        outputs["_reconstruction_viz"] = {
+            "mask_indices": mask_indices,
+            "validity_mask": validity_mask,
+            "C_pad": C_pad,
+            "N": N,
+        }
+
         return outputs
 
     def tokenize(self, data: Data) -> dict:
