@@ -23,6 +23,7 @@ run:
   group: PRETRAINING
   tags: [pretraining, mae, masked, multi_dataset]
   log_level: INFO
+  compile: default
 
 hyperparameters:
   batch_size: 64

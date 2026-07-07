@@ -384,6 +384,12 @@ def main(cfg: DictConfig):
     OmegaConf.resolve(cfg.run)
 
     model, datamodule = _build_model_and_data(cfg)
+
+    compile_mode = OmegaConf.select(cfg, "run.compile", default=False)
+    if compile_mode and torch.cuda.is_available():
+        logger.info("Compiling model with torch.compile(mode=%r)", compile_mode)
+        model = torch.compile(model, mode=str(compile_mode))
+
     lightning_module = _build_lightning_module(cfg, model, datamodule)
     trainer = _build_trainer(cfg)
 

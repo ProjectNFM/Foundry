@@ -40,3 +40,7 @@ run:
   resume_wandb_if_name_matches: false
   # A100 benefits from Tensor Core-enabled FP32 matmul kernels.
   float32_matmul_precision: high
+  # torch.compile the model for ~2x faster training on modern GPUs.
+  # Adds ~60s compilation overhead on first step.
+  # Options: false, "default", "reduce-overhead", "max-autotune"
+  compile: false
