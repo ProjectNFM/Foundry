@@ -15,5 +15,4 @@ task_type: ???
 dataset_kwargs:
   brainsets:
     - klinzing_sleep_ds005555
-    - shirazi_hbnr1_ds005505
   split_type: ${..split_type}
