@@ -23,6 +23,7 @@ task_configs:
 
 model:
   zero_output_timestamps: false
+  normalize_inputs: true
 
 data:
   root: ${oc.env:SLURM_TMPDIR}/brainsets/processed

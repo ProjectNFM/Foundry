@@ -43,6 +43,11 @@ class POYOEEGModel(nn.Module):
             window-level classification tasks where labels are not tied to a
             precise timepoint. Keep this False for timestamp-aware tasks such
             as trajectory regression.
+        normalize_inputs: If True, per-channel z-score the input signal in
+            ``_prepare_signal()``. Ensures scale invariance across datasets
+            with different amplifier gains and physical units. Recommended
+            for pretraining; not needed when downstream data is already
+            normalized.
     """
 
     SUPPORTED_MODALITIES = {"eeg", "ecog", "seeg", "ieeg"}
@@ -66,6 +71,7 @@ class POYOEEGModel(nn.Module):
         t_min: float = 1e-4,
         t_max: float = 2.0627,
         zero_output_timestamps: bool = False,
+        normalize_inputs: bool = False,
     ):
         super().__init__()
 
@@ -75,6 +81,7 @@ class POYOEEGModel(nn.Module):
         self.latent_step = latent_step
         self.num_latents_per_step = num_latents_per_step
         self.zero_output_timestamps = zero_output_timestamps
+        self.normalize_inputs = normalize_inputs
         self._task_configs = TaskConfig.normalize_task_configs(task_configs)
         self._latent_index, self._latent_timestamps = (
             create_linspace_latent_tokens(
@@ -232,9 +239,12 @@ class POYOEEGModel(nn.Module):
     def _prepare_signal(
         self, data: Data, normalize_length: bool = False
     ) -> tuple[np.ndarray, float]:
-        """Filter by modality, replace non-finite values, optionally normalize T.
+        """Filter by modality, optionally z-score per channel, optionally normalize T.
 
         Shared logic used by both ``tokenize()`` and subclass target computation.
+        When ``self.normalize_inputs`` is True, per-channel z-scoring ensures
+        scale invariance across datasets with different amplifier gains,
+        impedances, and physical units.
 
         Args:
             data: Input data sample.
@@ -261,6 +271,12 @@ class POYOEEGModel(nn.Module):
         non_finite = ~np.isfinite(signal)
         if non_finite.any():
             signal = np.where(non_finite, 0.0, signal)
+
+        if self.normalize_inputs:
+            mu = signal.mean(axis=0, keepdims=True)
+            std = signal.std(axis=0, keepdims=True)
+            std = np.where(std > 1e-8, std, 1.0)
+            signal = (signal - mu) / std
 
         if normalize_length:
             expected_T = round(sampling_rate * self.sequence_length)

@@ -18,7 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 WANDB_PROJECT = "foundry_pretraining"
-RUN_ID = "TODO"  # <-- fill in after launching the experiment
+RUN_ID = "1x9sf5ar"
 WANDB_ENTITY = os.environ.get("WANDB_ENTITY", None)
 
 FIGURES_DIR = Path(__file__).parent / "figures"

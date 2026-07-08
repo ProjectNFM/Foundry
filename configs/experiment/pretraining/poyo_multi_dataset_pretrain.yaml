@@ -9,6 +9,7 @@ task_configs:
 
 model:
   zero_output_timestamps: false
+  normalize_inputs: true
 
 data:
   split_type: intrasession
