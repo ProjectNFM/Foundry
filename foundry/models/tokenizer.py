@@ -14,6 +14,7 @@ from foundry.models.embeddings.patching import (
     compute_patch_timestamps,
     patch_signal,
 )
+from foundry.models.embeddings.temporal.base import TemporalEmbedding
 
 
 class EEGTokenizer(nn.Module):
@@ -52,7 +53,7 @@ class EEGTokenizer(nn.Module):
     def __init__(
         self,
         channel_strategy: ChannelStrategy,
-        temporal_embedding: nn.Module,
+        temporal_embedding: TemporalEmbedding,
         embed_dim: int,
         patch_duration: float | None = None,
         stride: float | None = None,
@@ -164,13 +165,9 @@ class EEGTokenizer(nn.Module):
             else:
                 result["input_timestamps"] = patch_timestamps
         else:
-            if hasattr(self.temporal_embedding, "target_token_rate"):
-                num_time_tokens = max(
-                    1,
-                    round(
-                        self.temporal_embedding.target_token_rate
-                        * sequence_length
-                    ),
+            if self.temporal_embedding.has_fixed_token_count:
+                num_time_tokens = self.temporal_embedding.get_num_time_tokens(
+                    sequence_length, sampling_rate
                 )
             else:
                 num_time_tokens = signal.shape[0]
@@ -189,6 +186,92 @@ class EEGTokenizer(nn.Module):
                 result["input_timestamps"] = sample_timestamps
 
         return result
+
+    def compute_reconstruction_targets(
+        self,
+        signal: np.ndarray,
+        sampling_rate: float,
+        sequence_length: float,
+    ) -> torch.Tensor:
+        """Compute per-token z-scored reconstruction targets.
+
+        Uses :meth:`get_num_time_tokens` and the channel strategy to produce
+        targets that match the tokenizer's token grid exactly.
+
+        Args:
+            signal: ``(T, C_actual)`` raw signal, already modality-filtered
+                and length-normalized.
+            sampling_rate: Sampling rate in Hz.
+            sequence_length: Duration of the context window in seconds.
+
+        Returns:
+            For patching mode: ``(C_pad * num_patches, patch_samples)``
+            Otherwise: ``(C_pad, N)`` where N is the number of time tokens.
+        """
+        if self._do_patching:
+            return self._compute_patch_targets(signal, sampling_rate)
+
+        C_pad = self.channel_strategy.max_channels
+        C_actual = min(signal.shape[1], C_pad)
+        N = self.temporal_embedding.get_num_time_tokens(
+            sequence_length, sampling_rate
+        )
+
+        T = signal.shape[0]
+        if self.temporal_embedding.has_fixed_token_count:
+            token_times = np.linspace(0, sequence_length, N)
+            raw_times = np.linspace(0, sequence_length, T)
+            resampled = np.column_stack(
+                [
+                    np.interp(token_times, raw_times, signal[:, c])
+                    for c in range(C_actual)
+                ]
+            ).T  # (C_actual, N)
+        else:
+            N = T
+            resampled = signal[:, :C_actual].T.astype(np.float32)
+
+        targets = np.zeros((C_pad, N), dtype=np.float32)
+        mu = resampled.mean(axis=1, keepdims=True)
+        std = resampled.std(axis=1, keepdims=True)
+        std = np.where(std > 1e-8, std, 1.0)
+        targets[:C_actual] = (resampled - mu) / std
+
+        return torch.from_numpy(targets)
+
+    def _compute_patch_targets(
+        self, signal: np.ndarray, sampling_rate: float
+    ) -> torch.Tensor:
+        """Compute reconstruction targets for patching mode.
+
+        Each token's target is the z-scored raw signal within its patch window.
+        """
+        patch_samples = max(1, round(self.patch_duration * sampling_rate))
+        stride_samples = max(1, round(self.stride * sampling_rate))
+        T, C_actual = signal.shape
+        C_pad = self.channel_strategy.max_channels
+
+        if T > patch_samples:
+            num_patches = (T - patch_samples) // stride_samples + 1
+        else:
+            num_patches = 1
+
+        C_used = min(C_actual, C_pad)
+        starts = np.arange(num_patches) * stride_samples
+        idx = starts[:, None] + np.arange(patch_samples)[None, :]
+        patches = signal[idx, :C_used].transpose(2, 0, 1).astype(np.float32)
+
+        mu = patches.mean(axis=2, keepdims=True)
+        std = patches.std(axis=2, keepdims=True)
+        std = np.where(std > 1e-8, std, 1.0)
+        normalized = (patches - mu) / std
+
+        targets = np.zeros(
+            (C_pad, num_patches, patch_samples), dtype=np.float32
+        )
+        targets[:C_used] = normalized
+
+        return torch.from_numpy(targets.reshape(C_pad * num_patches, -1))
 
     def forward(
         self,
@@ -242,7 +325,7 @@ class EEGTokenizer(nn.Module):
             )
             tokens = self.temporal_embedding(patches)
         else:
-            if hasattr(self.temporal_embedding, "target_token_rate"):
+            if self.temporal_embedding.has_fixed_token_count:
                 tokens = self.temporal_embedding(
                     transformed,
                     input_sampling_rate=sr,

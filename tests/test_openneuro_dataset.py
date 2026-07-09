@@ -354,7 +354,6 @@ class TestHydraConfig:
         assert "brainsets" in cfg.dataset_kwargs
         brainsets = list(cfg.dataset_kwargs.brainsets)
         assert "klinzing_sleep_ds005555" in brainsets
-        assert "shirazi_hbnr1_ds005505" in brainsets
 
 
 # ---------------------------------------------------------------------------

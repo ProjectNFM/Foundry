@@ -234,10 +234,9 @@ def _build_model_and_data(cfg: DictConfig):
         if k != "_target_"
     }
     model = ModelClass(task_configs=task_configs, **model_kwargs)
+
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
-    normalize_data_config(cfg.data)
-    datamodule = instantiate(cfg.data, tokenizer=tokenizer)
-    datamodule._task_configs = task_configs
+    datamodule.set_tokenizer(tokenizer)
 
     return model, datamodule
 

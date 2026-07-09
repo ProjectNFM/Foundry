@@ -238,7 +238,7 @@ class POYOEEGModel(nn.Module):
 
     def _prepare_signal(
         self, data: Data, normalize_length: bool = False
-    ) -> tuple[np.ndarray, float]:
+    ) -> tuple[np.ndarray, float, np.ndarray]:
         """Filter by modality, optionally z-score per channel, optionally normalize T.
 
         Shared logic used by both ``tokenize()`` and subclass target computation.
@@ -252,7 +252,9 @@ class POYOEEGModel(nn.Module):
                 ``round(sampling_rate * sequence_length)``.
 
         Returns:
-            Tuple of (signal, sampling_rate) where signal has shape (T, C_filtered).
+            Tuple of ``(signal, sampling_rate, modality_mask)`` where
+            signal has shape ``(T, C_filtered)`` and modality_mask is a
+            boolean array over the original channels.
         """
         signal_source, default_type, sampling_rate = (
             self._resolve_signal_source(data)
@@ -287,7 +289,7 @@ class POYOEEGModel(nn.Module):
                 elif T < expected_T:
                     signal = np.pad(signal, ((0, expected_T - T), (0, 0)))
 
-        return signal, sampling_rate
+        return signal, sampling_rate, modality_mask
 
     def _infer_sampling_rate_from_timestamps(
         self, timestamps: np.ndarray
@@ -321,17 +323,7 @@ class POYOEEGModel(nn.Module):
             dict with model_inputs, target_values, target_weights, and
             metadata.
         """
-        signal, sampling_rate = self._prepare_signal(data)
-
-        signal_source, default_type, _ = self._resolve_signal_source(data)
-        modality_field = (
-            data.channels.type.astype(str)
-            if hasattr(data.channels, "type")
-            else np.array([default_type] * len(data.channels)).astype(str)
-        )
-        modality_mask = np.isin(
-            np.char.lower(modality_field), list(self.SUPPORTED_MODALITIES)
-        )
+        signal, sampling_rate, modality_mask = self._prepare_signal(data)
 
         channel_ids = data.channels.id[modality_mask].astype(str)
         channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))

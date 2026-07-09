@@ -7,6 +7,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from foundry.models.embeddings.temporal.base import TemporalEmbedding
+
 _LOG_MAG_EPS = 1e-6
 
 FreqSpacing = Literal["linear", "log", "mel", "inverse"]
@@ -377,7 +379,7 @@ def _condition_scalogram(
     return mag, phase
 
 
-class CWTEmbedding(nn.Module):
+class CWTEmbedding(TemporalEmbedding):
     """Temporal embedding via learnable CWT.
 
     Operates on spatially-projected signal (``num_sources`` channels) and
@@ -450,6 +452,15 @@ class CWTEmbedding(nn.Module):
         nn.init.xavier_uniform_(self.feature_proj.weight, gain=1.0)
         nn.init.zeros_(self.feature_proj.bias)
 
+    def get_num_time_tokens(
+        self, sequence_length: float, sampling_rate: float
+    ) -> int:
+        return max(1, round(self.target_token_rate * sequence_length))
+
+    @property
+    def has_fixed_token_count(self) -> bool:
+        return True
+
     def _compute_target_tokens(
         self,
         input_seq_len: torch.Tensor,
@@ -501,7 +512,7 @@ class CWTEmbedding(nn.Module):
         return self.feature_proj(cwt_flat)
 
 
-class CWTCNNEmbedding(nn.Module):
+class CWTCNNEmbedding(TemporalEmbedding):
     """Temporal embedding via learnable CWT followed by a 1-D CNN.
 
     Combines CWT's sampling-rate-invariant frequency decomposition with a
@@ -589,6 +600,15 @@ class CWTCNNEmbedding(nn.Module):
                 nn.init.zeros_(m.bias)
         nn.init.xavier_uniform_(self.feature_proj.weight, gain=1.0)
         nn.init.zeros_(self.feature_proj.bias)
+
+    def get_num_time_tokens(
+        self, sequence_length: float, sampling_rate: float
+    ) -> int:
+        return max(1, round(self.target_token_rate * sequence_length))
+
+    @property
+    def has_fixed_token_count(self) -> bool:
+        return True
 
     def _compute_target_tokens(
         self,

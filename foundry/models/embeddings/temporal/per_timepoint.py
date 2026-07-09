@@ -1,8 +1,10 @@
 import torch
 import torch.nn as nn
 
+from foundry.models.embeddings.temporal.base import TemporalEmbedding
 
-class PerTimepointLinearEmbedding(nn.Module):
+
+class PerTimepointLinearEmbedding(TemporalEmbedding):
     """Project each timepoint independently via a linear layer.
 
     No patching or resampling is applied.  Variable sequence lengths are
@@ -20,6 +22,15 @@ class PerTimepointLinearEmbedding(nn.Module):
         self.input_dim = input_dim
         self.projection = nn.Linear(input_dim, embed_dim)
 
+    def get_num_time_tokens(
+        self, sequence_length: float, sampling_rate: float
+    ) -> int:
+        return round(sampling_rate * sequence_length)
+
+    @property
+    def has_fixed_token_count(self) -> bool:
+        return False
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
@@ -31,7 +42,7 @@ class PerTimepointLinearEmbedding(nn.Module):
         return self.projection(x)
 
 
-class PerTimepointIdentityEmbedding(nn.Module):
+class PerTimepointIdentityEmbedding(TemporalEmbedding):
     """Use timepoint features as tokens without a learned projection.
 
     This is useful when channel strategy output already matches the tokenizer
@@ -44,6 +55,15 @@ class PerTimepointIdentityEmbedding(nn.Module):
     def __init__(self, embed_dim: int):
         super().__init__()
         self.embed_dim = embed_dim
+
+    def get_num_time_tokens(
+        self, sequence_length: float, sampling_rate: float
+    ) -> int:
+        return round(sampling_rate * sequence_length)
+
+    @property
+    def has_fixed_token_count(self) -> bool:
+        return False
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

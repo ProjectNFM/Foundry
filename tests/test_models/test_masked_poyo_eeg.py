@@ -9,6 +9,7 @@ from foundry.models.masked_poyo_eeg import (
     MaskedPOYOEEGModel,
     _compute_visible_indices,
 )
+from foundry.models.ssl_meta import SSLTaskMeta
 from foundry.tasks.masking import RandomTokenMasking
 
 
@@ -200,8 +201,10 @@ class TestMaskedModelForward:
         assert "_ssl_meta" in outputs
         ssl_meta = outputs["_ssl_meta"]
         assert "masked_reconstruction" in ssl_meta
-        assert "targets" in ssl_meta["masked_reconstruction"]
-        assert "weights" in ssl_meta["masked_reconstruction"]
+        meta = ssl_meta["masked_reconstruction"]
+        assert isinstance(meta, SSLTaskMeta)
+        assert meta.targets is not None
+        assert meta.weights is not None
 
     def test_prediction_shape_matches_targets(self, model):
         B, C_pad, N = 2, 4, 10
@@ -213,7 +216,7 @@ class TestMaskedModelForward:
         )
 
         preds = outputs["masked_reconstruction"]
-        targets = outputs["_ssl_meta"]["masked_reconstruction"]["targets"]
+        targets = outputs["_ssl_meta"]["masked_reconstruction"].targets
         assert preds.shape[0] == targets.shape[0]
 
     def test_forward_without_recon_targets(self, model):
@@ -237,7 +240,7 @@ class TestMaskedModelForward:
             model, B, C_pad, N, T, sr, include_recon_targets=True
         )
 
-        weights = outputs["_ssl_meta"]["masked_reconstruction"]["weights"]
+        weights = outputs["_ssl_meta"]["masked_reconstruction"].weights
         assert (weights >= 0).all()
         assert (weights <= 1).all()
 

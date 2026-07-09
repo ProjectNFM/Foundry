@@ -150,8 +150,8 @@ class ReconstructionVisualizationCallback(L.Callback):
         mask_indices = example["mask_indices"]
         validity_mask = example["validity_mask"]
         input_mask = example["input_mask"]
-        C_pad: int = example["C_pad"]
-        N: int = example["N"]
+        C_pad: int = example["num_channels"]
+        N: int = example["num_time_tokens"]
 
         if predictions.dim() == 2 and predictions.shape[1] == 1:
             predictions = predictions.squeeze(-1)

@@ -6,11 +6,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from foundry.models.embeddings.activations import get_activation
+from foundry.models.embeddings.temporal.base import TemporalEmbedding
 
 _ANTIALIAS_ORDER = 6
 
 
-class ResampleCNNEmbedding(nn.Module):
+class ResampleCNNEmbedding(TemporalEmbedding):
     """Temporal embedding via time-resampling followed by a 1-D CNN.
 
     Ablation baseline for :class:`CWTEmbedding`: instead of decomposing the
@@ -80,6 +81,15 @@ class ResampleCNNEmbedding(nn.Module):
                 nn.init.zeros_(m.bias)
         nn.init.xavier_uniform_(self.feature_proj.weight, gain=1.0)
         nn.init.zeros_(self.feature_proj.bias)
+
+    def get_num_time_tokens(
+        self, sequence_length: float, sampling_rate: float
+    ) -> int:
+        return max(1, round(self.target_token_rate * sequence_length))
+
+    @property
+    def has_fixed_token_count(self) -> bool:
+        return True
 
     def _compute_target_tokens(
         self,

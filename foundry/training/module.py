@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 from hydra.utils import instantiate
 
+from foundry.models.ssl_meta import ReconstructionVizMeta, SSLTaskMeta
 from foundry.tasks.config import TaskConfig
 from foundry.training.confusion_matrix import ConfusionMatrixTracker
 
@@ -123,13 +124,15 @@ class FoundryModule(L.LightningModule):
         )
         outputs = self.model(**model_inputs, unpack_output=False)
 
-        ssl_meta = outputs.pop("_ssl_meta", None)
-        reconstruction_viz = outputs.pop("_reconstruction_viz", None)
+        ssl_meta: dict[str, SSLTaskMeta] | None = outputs.pop("_ssl_meta", None)
+        reconstruction_viz: ReconstructionVizMeta | None = outputs.pop(
+            "_reconstruction_viz", None
+        )
         ssl_task_names: set[str] = set()
         if ssl_meta is not None:
             for task_name, meta in ssl_meta.items():
-                target_values[task_name] = meta["targets"]
-                target_weights[task_name] = meta["weights"]
+                target_values[task_name] = meta.targets
+                target_weights[task_name] = meta.weights
                 ssl_task_names.add(task_name)
 
         total_loss, taskwise_loss = self._compute_task_losses(
@@ -221,7 +224,7 @@ class FoundryModule(L.LightningModule):
         self,
         model_inputs: Dict[str, Any],
         outputs: Dict[str, torch.Tensor],
-        viz_meta: Dict[str, Any],
+        viz_meta: ReconstructionVizMeta,
         buffer: list[dict] | None = None,
     ) -> None:
         """Store a few per-sample reconstruction examples for visualization."""
@@ -237,15 +240,10 @@ class FoundryModule(L.LightningModule):
         if recon_preds is None or targets is None or input_mask is None:
             return
 
-        mask_indices = viz_meta["mask_indices"]
-        validity_mask = viz_meta["validity_mask"]
-        C_pad = viz_meta["C_pad"]
-        N = viz_meta["N"]
-
-        per_sample_counts = validity_mask.sum(dim=1)
+        per_sample_counts = viz_meta.validity_mask.sum(dim=1)
         per_sample_preds = torch.split(recon_preds, per_sample_counts.tolist())
 
-        B = mask_indices.shape[0]
+        B = viz_meta.mask_indices.shape[0]
         for b in range(B):
             if len(buffer) >= max_examples:
                 break
@@ -253,11 +251,11 @@ class FoundryModule(L.LightningModule):
                 {
                     "targets": targets[b].detach().cpu(),
                     "predictions": per_sample_preds[b].detach().cpu(),
-                    "mask_indices": mask_indices[b].detach().cpu(),
-                    "validity_mask": validity_mask[b].detach().cpu(),
+                    "mask_indices": viz_meta.mask_indices[b].detach().cpu(),
+                    "validity_mask": viz_meta.validity_mask[b].detach().cpu(),
                     "input_mask": input_mask[b].detach().cpu(),
-                    "C_pad": C_pad,
-                    "N": N,
+                    "num_channels": viz_meta.num_channels,
+                    "num_time_tokens": viz_meta.num_time_tokens,
                 }
             )
 

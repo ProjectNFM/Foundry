@@ -13,6 +13,7 @@ import torch.nn as nn
 from hydra.utils import instantiate
 
 from foundry.models.readout import ReadoutRouter
+from foundry.models.ssl_meta import SSLTaskMeta
 from foundry.tasks.config import TaskConfig
 from foundry.training import FoundryModule
 
@@ -60,10 +61,10 @@ class _StubSSLModel(nn.Module):
         if self._inject_targets:
             ssl_meta = {}
             for k, v in self._inject_targets.items():
-                ssl_meta[k] = {
-                    "targets": v,
-                    "weights": self._inject_weights.get(k, torch.ones_like(v)),
-                }
+                ssl_meta[k] = SSLTaskMeta(
+                    targets=v,
+                    weights=self._inject_weights.get(k, torch.ones_like(v)),
+                )
             outputs["_ssl_meta"] = ssl_meta
         return outputs
 

@@ -1,3 +1,4 @@
+from foundry.models.embeddings.temporal.base import TemporalEmbedding
 from foundry.models.embeddings.temporal.cwt import (
     CWTCNNEmbedding,
     CWTEmbedding,
@@ -14,6 +15,7 @@ from foundry.models.embeddings.temporal.per_timepoint import (
 from foundry.models.embeddings.temporal.resample_cnn import ResampleCNNEmbedding
 
 __all__ = [
+    "TemporalEmbedding",
     "PatchLinearEmbedding",
     "PatchMLPEmbedding",
     "PatchCNNEmbedding",

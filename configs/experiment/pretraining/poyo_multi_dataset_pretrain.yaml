@@ -10,6 +10,9 @@ task_configs:
 model:
   zero_output_timestamps: false
   normalize_inputs: true
+  masking:
+    _target_: foundry.tasks.masking.ChannelMasking
+    mask_ratio: 0.5
 
 data:
   split_type: intrasession

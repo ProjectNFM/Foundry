@@ -11,12 +11,12 @@ from __future__ import annotations
 
 from typing import Optional
 
-import numpy as np
 import torch
 from torch_brain.data import Data
 from torch_brain.batching import pad2d
 
 from foundry.models.poyo_eeg import POYOEEGModel
+from foundry.models.ssl_meta import ReconstructionVizMeta, SSLTaskMeta
 from foundry.tasks.masking import MaskingStrategy
 
 
@@ -71,8 +71,8 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             "MaskedPOYOEEGModel requires PerChannelStrategy. "
             "SpatialProjectionStrategy is not supported."
         )
-        self._variable_time_tokens = not hasattr(
-            self.tokenizer.temporal_embedding, "target_token_rate"
+        self._variable_time_tokens = (
+            not self.tokenizer.temporal_embedding.has_fixed_token_count
         )
 
     def forward(
@@ -222,7 +222,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             flat_embs[valid], (flat_task_index[valid] - 1).long()
         )
 
-        # 9. Gather reconstruction targets and inject via explicit contract
+        # 9. Gather reconstruction targets and inject via typed contract
         if reconstruction_targets is not None:
             gathered_targets = torch.gather(
                 reconstruction_targets, 1, mask_indices
@@ -230,122 +230,49 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             recon_valid = (recon_task_index > 0).reshape(-1)
             task_name = self.RECONSTRUCTION_TASK_NAME
             outputs["_ssl_meta"] = {
-                task_name: {
-                    "targets": gathered_targets.reshape(-1)[recon_valid],
-                    "weights": validity_mask.float().reshape(-1)[recon_valid],
-                }
+                task_name: SSLTaskMeta(
+                    targets=gathered_targets.reshape(-1)[recon_valid],
+                    weights=validity_mask.float().reshape(-1)[recon_valid],
+                )
             }
 
-        outputs["_reconstruction_viz"] = {
-            "mask_indices": mask_indices,
-            "validity_mask": validity_mask,
-            "C_pad": C_pad,
-            "N": N,
-        }
+        outputs["_reconstruction_viz"] = ReconstructionVizMeta(
+            mask_indices=mask_indices,
+            validity_mask=validity_mask,
+            num_channels=C_pad,
+            num_time_tokens=N,
+        )
 
         return outputs
 
     def tokenize(self, data: Data) -> dict:
         """Tokenize with reconstruction targets for masked pretraining.
 
-        Calls the base ``tokenize()`` then computes per-channel z-scored
-        reconstruction targets and wraps ``input_values`` in ``pad2d`` for
-        mixed-sr collation.
+        Calls the base ``tokenize()`` then delegates reconstruction target
+        computation to the tokenizer and wraps ``input_values`` in ``pad2d``
+        for mixed-sr collation.
         """
         result = super().tokenize(data)
 
-        signal, sampling_rate = self._prepare_signal(
+        signal, sampling_rate, _ = self._prepare_signal(
             data, normalize_length=True
         )
 
-        if not self.tokenizer._do_patching:
-            has_token_rate = hasattr(
-                self.tokenizer.temporal_embedding, "target_token_rate"
-            )
+        C_pad = self.tokenizer.channel_strategy.max_channels
+        targets_tensor = self.tokenizer.compute_reconstruction_targets(
+            signal, sampling_rate, self.sequence_length
+        )
 
-            T = signal.shape[0]
-            C_pad = self.tokenizer.channel_strategy.max_channels
-            C_actual = min(signal.shape[1], C_pad)
-
-            if has_token_rate:
-                N = max(
-                    1,
-                    round(
-                        self.tokenizer.temporal_embedding.target_token_rate
-                        * self.sequence_length
-                    ),
-                )
-                token_times = np.linspace(0, self.sequence_length, N)
-                raw_times = np.linspace(0, self.sequence_length, T)
-                resampled = np.column_stack(
-                    [
-                        np.interp(token_times, raw_times, signal[:, c])
-                        for c in range(C_actual)
-                    ]
-                ).T  # (C_actual, N)
-            else:
-                N = T
-                resampled = signal[:, :C_actual].T.astype(
-                    np.float32
-                )  # (C_actual, T)
-
-            targets = np.zeros((C_pad, N), dtype=np.float32)
-            mu = resampled.mean(axis=1, keepdims=True)
-            std = resampled.std(axis=1, keepdims=True)
-            std = np.where(std > 1e-8, std, 1.0)
-            targets[:C_actual] = (resampled - mu) / std
-
-            targets_tensor = torch.from_numpy(targets)  # (C_pad, N)
-            if has_token_rate:
-                result["reconstruction_targets"] = targets_tensor.reshape(-1)
-            else:
-                # Variable N — wrap as (C_pad, N) for mixed-SR collation.
-                result["reconstruction_targets"] = pad2d(targets_tensor)
-                ts = result["input_timestamps"]
-                result["input_timestamps"] = pad2d(ts.reshape(C_pad, N))
+        if self.tokenizer._do_patching:
+            result["reconstruction_targets"] = targets_tensor
+        elif self.tokenizer.temporal_embedding.has_fixed_token_count:
+            result["reconstruction_targets"] = targets_tensor.reshape(-1)
         else:
-            result["reconstruction_targets"] = self._compute_patch_targets(
-                signal, sampling_rate
-            )
+            result["reconstruction_targets"] = pad2d(targets_tensor)
+            N = targets_tensor.shape[1]
+            ts = result["input_timestamps"]
+            result["input_timestamps"] = pad2d(ts.reshape(C_pad, N))
 
         result["input_values"] = pad2d(result["input_values"])
 
         return result
-
-    def _compute_patch_targets(
-        self, signal: np.ndarray, sampling_rate: float
-    ) -> torch.Tensor:
-        """Compute reconstruction targets for patching mode (single-sr only).
-
-        Each token's target is the z-scored raw signal within its patch window.
-        """
-        patch_samples = max(
-            1, round(self.tokenizer.patch_duration * sampling_rate)
-        )
-        stride_samples = max(1, round(self.tokenizer.stride * sampling_rate))
-        T, C_actual = signal.shape
-        C_pad = self.tokenizer.channel_strategy.max_channels
-
-        if T > patch_samples:
-            num_patches = (T - patch_samples) // stride_samples + 1
-        else:
-            num_patches = 1
-
-        C_used = min(C_actual, C_pad)
-        starts = np.arange(num_patches) * stride_samples
-        # (num_patches, patch_samples) index array
-        idx = starts[:, None] + np.arange(patch_samples)[None, :]
-        # Gather patches for all channels at once: (C_used, num_patches, patch_samples)
-        patches = signal[idx, :C_used].transpose(2, 0, 1).astype(np.float32)
-
-        mu = patches.mean(axis=2, keepdims=True)
-        std = patches.std(axis=2, keepdims=True)
-        std = np.where(std > 1e-8, std, 1.0)
-        normalized = (patches - mu) / std
-
-        targets = np.zeros(
-            (C_pad, num_patches, patch_samples), dtype=np.float32
-        )
-        targets[:C_used] = normalized
-
-        return torch.from_numpy(targets.reshape(C_pad * num_patches, -1))

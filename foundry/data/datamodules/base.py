@@ -137,7 +137,8 @@ class NeuralDataModule(LightningDataModule):
 
         self.task_type = self.dataset_kwargs.get("task_type")
 
-        # Build transform pipeline
+        self._tokenizer = tokenizer
+
         transform_list = transforms or []
         if tokenizer is not None:
             transform_list = list(transform_list) + [tokenizer]
@@ -173,6 +174,33 @@ class NeuralDataModule(LightningDataModule):
 
         if self._task_configs:
             validate_task_mappings(self._task_configs, self.dataset)
+
+    def set_tokenizer(self, tokenizer: Optional[Callable]) -> None:
+        """Replace the tokenizer in the transform pipeline.
+
+        Can be called before or after :meth:`setup`.  When the dataset
+        already exists, its transform is rebuilt in-place.
+        """
+        old = self._tokenizer
+        self._tokenizer = tokenizer
+
+        base = [t for t in (self.transform or []) if t is not old]
+        if tokenizer is not None:
+            base = list(base) + [tokenizer]
+        self.transform = base if base else None
+
+        if self.dataset is not None:
+            transform_list = list(self.transform) if self.transform else []
+            if self.task_type is not None and hasattr(
+                self.dataset_class, "get_required_transforms"
+            ):
+                required = self.dataset_class.get_required_transforms(
+                    self.task_type
+                )
+                transform_list = list(required) + transform_list
+            self.dataset.transform = (
+                Compose(transform_list) if transform_list else None
+            )
 
     def compute_class_weights(
         self, smoothing: float = 1.0
