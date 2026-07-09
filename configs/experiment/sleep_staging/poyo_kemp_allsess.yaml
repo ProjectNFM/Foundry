@@ -3,13 +3,14 @@
 defaults:
   - override /model: poyo_eeg
   - override /data: kemp_sleep_edf/allsess
-  - override /model/tokenizer: per_channel_cwt
+  - override /model/tokenizer: per_channel_resample_cnn
 
 task_configs:
   - sleep_stage_5class
 
 model:
   zero_output_timestamps: true
+  normalize_inputs: true
 
 data:
   split_type: intrasession
@@ -17,9 +18,10 @@ data:
 
 run:
   name: kemp_sleep_poyo_allsess
-  group: SLEEP_STAGING
+  group: SLEEP_STAGING_BASELINE_SEARCH
   tags: [sleep_staging, poyo, cwt, kemp, allsess]
   log_level: INFO
+  project: foundry_finetuning
 
 class_weights:
   mode: auto
@@ -28,11 +30,11 @@ class_weights:
 hyperparameters:
   batch_size: 32
   sequence_length: 30.0
-  patch_duration: 0.1
+  patch_duration: null
   sampling_rate: 100
   fold_number: 0
-  num_workers: 8
-  num_channels: 2
+  num_workers: 6
+  num_channels: null
   session_configs: null
   learning_rate: 1e-4
   weight_decay: 0.01
