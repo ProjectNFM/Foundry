@@ -24,6 +24,10 @@ task_configs:
 model:
   zero_output_timestamps: false
   normalize_inputs: true
+  masking:
+    _target_: foundry.tasks.masking.TemporalBlockMasking
+    block_size: 10
+    mask_ratio: 0.5
 
 data:
   root: ${oc.env:SLURM_TMPDIR}/brainsets/processed
@@ -68,7 +72,7 @@ stage:
 hydra:
   sweeper:
     params:
-      model/tokenizer: per_channel_resample_cnn,per_channel_cwt_cnn
+      model/tokenizer: per_channel_resample_cnn,per_channel_cwt_cnn, per_channel_per_timestep_linear
   launcher:
     tasks_per_node: 1
     cpus_per_task: 6
