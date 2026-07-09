@@ -248,13 +248,41 @@ class TestChannelMasking:
         strategy = ChannelMasking(mask_ratio=0.25)
         B, C, N = 100, 8, 10
         channel_mask = torch.zeros(B, C, dtype=torch.bool)
-        channel_mask[:, :2] = True  # only 2 real channels
+        channel_mask[:, :4] = True  # 4 real channels out of 8
 
         mask_indices, validity_mask = strategy(C, N, channel_mask)
 
         # With strong bias, most validity_mask entries should be True
         validity_rate = validity_mask.float().mean().item()
         assert validity_rate > 0.8
+
+    def test_at_least_one_real_channel_visible(self):
+        """At least one real channel must remain unmasked per sample."""
+        strategy = ChannelMasking(mask_ratio=0.75)
+
+        for _ in range(200):
+            B, C, N = 8, 4, 5
+            channel_mask = torch.tensor([[True, True, False, False]] * B)
+            mask_indices, _ = strategy(C, N, channel_mask)
+
+            for b in range(B):
+                masked_channels = set((mask_indices[b] // N).tolist())
+                real_channels = {c for c in range(C) if channel_mask[b, c]}
+                assert not real_channels.issubset(masked_channels), (
+                    "All real channels were masked"
+                )
+
+    def test_at_least_one_real_channel_visible_all_real(self):
+        """Protection works even when all C_pad channels are real."""
+        strategy = ChannelMasking(mask_ratio=1.0)
+        B, C, N = 4, 2, 5
+        channel_mask = torch.ones(B, C, dtype=torch.bool)
+
+        mask_indices, _ = strategy(C, N, channel_mask)
+
+        # With C=2 and cap to C-1, only 1 channel is masked
+        num_channels_masked = mask_indices.shape[1] // N
+        assert num_channels_masked == 1
 
     def test_indices_within_range(self, strategy):
         B, C, N = 2, 6, 12

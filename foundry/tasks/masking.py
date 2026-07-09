@@ -139,9 +139,11 @@ class TemporalBlockMasking(MaskingStrategy):
 class ChannelMasking(MaskingStrategy):
     """Masks entire channels (all time positions).
 
-    Selects ``floor(mask_ratio * C_pad)`` channels and masks all ``N`` time
-    positions for each. Channel selection is biased toward real channels
-    via noise offset (fully vectorized).
+    Selects ``min(floor(mask_ratio * C_pad), C_pad - 1)`` channels and masks
+    all ``N`` time positions for each. Channel selection is biased toward real
+    channels via noise offset (fully vectorized). One real channel per sample
+    is always protected from masking so the encoder never receives an input
+    with zero real channels.
 
     Total ``num_masked = num_channels_masked * N`` (fixed).
     """
@@ -153,10 +155,25 @@ class ChannelMasking(MaskingStrategy):
         device = device if device is not None else channel_mask.device
         C, N = num_channels, num_time_tokens
         num_channels_masked = max(1, int(self.mask_ratio * C))
+        if C > 1:
+            num_channels_masked = min(num_channels_masked, C - 1)
         num_masked = num_channels_masked * N
 
         channel_mask_dev = channel_mask.to(device)
         noise = torch.rand(B, C, device=device)
+
+        # Protect one real channel per sample so it is never masked.
+        # Pick the real channel with the highest random noise (arbitrary
+        # but uniform), then boost it above all others so it sorts last.
+        protect_noise = noise.clone()
+        protect_noise[~channel_mask_dev] = -float("inf")
+        _, protected_idx = protect_noise.max(dim=1)
+        noise.scatter_add_(
+            1,
+            protected_idx.unsqueeze(1),
+            torch.full((B, 1), 4.0, device=device),
+        )
+
         noise = noise + (~channel_mask_dev).float() * 2.0
         selected = noise.argsort(dim=1)[:, :num_channels_masked]
 
