@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-07-09
 **Parent experiment:** None (root)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Channel Identity in Reconstruction Decoder Queries](../experiments/004-channel-identity-in-decoder.md)
 
 ## Background
 

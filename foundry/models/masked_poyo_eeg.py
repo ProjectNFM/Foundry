@@ -75,6 +75,12 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             not self.tokenizer.temporal_embedding.has_fixed_token_count
         )
 
+        ch_dim = self.tokenizer.channel_emb_dim
+        if ch_dim != self.embed_dim:
+            self.recon_channel_proj = torch.nn.Linear(ch_dim, self.embed_dim)
+        else:
+            self.recon_channel_proj = None
+
     def forward(
         self,
         *,
@@ -177,7 +183,14 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             )
         )
         recon_session_emb = self.session_emb(input_session_index).unsqueeze(1)
-        recon_queries = recon_session_emb + recon_task_emb
+        masked_channel_idx = mask_indices // N
+        recon_channel_tokens = torch.gather(
+            input_channel_index, 1, masked_channel_idx
+        )
+        recon_channel_emb = self.channel_emb(recon_channel_tokens)
+        if self.recon_channel_proj is not None:
+            recon_channel_emb = self.recon_channel_proj(recon_channel_emb)
+        recon_queries = recon_session_emb + recon_task_emb + recon_channel_emb
 
         masked_ts = torch.gather(input_timestamps, 1, mask_indices)
         recon_ts_emb = self.rotary_emb(masked_ts)
