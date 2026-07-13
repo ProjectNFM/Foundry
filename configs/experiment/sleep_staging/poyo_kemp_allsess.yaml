@@ -13,7 +13,7 @@ model:
   normalize_inputs: true
 
 data:
-  split_type: intrasession
+  split_type: intersubject
   task_type: sleep_stage
 
 run:
@@ -22,14 +22,15 @@ run:
   tags: [sleep_staging, poyo, cwt, kemp, allsess]
   log_level: INFO
   project: foundry_finetuning
+  compile: default
 
 class_weights:
   mode: auto
-  smoothing: 0.1
+  smoothing: 1.0
 
 hyperparameters:
-  batch_size: 32
-  sequence_length: 30.0
+  batch_size: 512 
+  sequence_length: 2.0
   patch_duration: null
   sampling_rate: 100
   fold_number: 0
