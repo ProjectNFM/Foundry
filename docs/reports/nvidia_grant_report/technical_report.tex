@@ -1,0 +1,257 @@
+\documentclass[11pt, a4paper]{article}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{multirow}
+\usepackage[numbers,sort&compress]{natbib}
+
+\graphicspath{{../../figures/}}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!60!black,
+    citecolor=green!50!black,
+    urlcolor=blue!70!black,
+}
+
+\title{Tokenization Strategies for\\[0.3em]
+Large-Scale Neural Foundation Models}
+\author{Foundry Team}
+\date{July 2025}
+
+\emergencystretch=1em
+
+\begin{document}
+\maketitle
+
+%% ===================================================================
+\section{Executive Summary}
+%% ===================================================================
+
+Neural foundation models based on transformer architectures promise to unify the analysis of brain recordings across diverse experimental setups, but their performance depends critically on the \emph{tokenizer}---the module that converts continuous, multi-channel neural time series into discrete token embeddings.  This report presents a systematic investigation of tokenization architectures for such models, comparing approaches along two orthogonal axes: how multi-channel input is handled (channel strategy) and how the time-domain signal is mapped to tokens (temporal embedding).
+
+The investigation comprised over 190~controlled training runs across 9~experiment groups, with an additional 770~Bayesian hyperparameter sweep runs (over 960~total), all evaluated on a large intracranial ECoG dataset (AJILE12, 12~subjects) using a Perceiver-IO backbone.
+
+Key findings include:
+\begin{itemize}[nosep]
+    \item The naive per-timepoint linear tokenizer is consistently suboptimal, confirming the need for architectures that capture temporal and spectral structure in neural signals.
+    \item A learnable Continuous Wavelet Transform (CWT) achieves performance comparable to the ResampleCNN approach used by existing neural foundation models, while offering sampling-rate invariance by construction---a property critical for cross-dataset pretraining.
+    \item A hybrid architecture combining CWT with a convolutional stack (CWT+CNN) currently achieves the best downstream performance, with an additional benefit from highpass scalogram conditioning.
+    \item Temporal token rate can be reduced 4$\times$ (from 400\,Hz to 100\,Hz) with negligible performance loss, yielding substantial compute savings for large-scale training.
+\end{itemize}
+
+The exploration is ongoing.  The CWT-based approach is promising for scaling across heterogeneous datasets, but cross-dataset validation remains a critical next step.
+
+
+%% ===================================================================
+\section{Motivation}
+\label{sec:motivation}
+%% ===================================================================
+
+Neural foundation models aim to learn general-purpose representations from brain recordings that transfer across subjects, tasks, and recording setups.  A central challenge is the extreme heterogeneity of neural data: datasets differ in sampling rate (128--2048\,Hz), channel count (from a handful of scalp electrodes to hundreds of intracranial contacts), electrode placement, signal quality, and noise characteristics.  The tokenizer---the interface between raw signals and the transformer backbone---must handle all of this variation.
+
+The standard approach in existing neural foundation models (e.g., POYO, NDT2) uses a per-channel, per-timepoint linear projection or a convolutional stack after resampling.  The simplest variant (per-timepoint linear) scales poorly: token count grows as channels~$\times$~timepoints, temporal structure is ignored, and spatial correlation between electrodes is wasted.  In practice, models trained with this baseline did not exhibit the expected scaling benefits, motivating a systematic exploration of alternatives (Figure~\ref{fig:token-scaling}).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{token_count_scaling.pdf}
+    \caption{Token count scaling for a 1\,s window with 64~channels.  The per-timepoint linear tokenizer scales linearly with both sampling rate and channel count.  CWT- and CNN-based tokenizers decouple token count from sampling rate; spatial projection further decouples it from channel count.}
+    \label{fig:token-scaling}
+\end{figure}
+
+Experiments were conducted on intracranial EEG (electrocorticography, ECoG) rather than scalp EEG.  Intracranial recordings offer higher signal-to-noise ratio, finer spatial resolution, and richer high-frequency content, providing a cleaner test bed for isolating the effect of tokenizer architecture from input signal quality.  All experiments use the AJILE12 dataset (12~subjects, dense electrode arrays, naturalistic behavior, two downstream tasks: behavior classification and pose estimation).
+
+
+%% ===================================================================
+\section{Tokenizer Design Space}
+\label{sec:design-space}
+%% ===================================================================
+
+A neural foundation model must ingest recordings from highly heterogeneous sources: sampling rates ranging from 128 to 2048\,Hz, channel counts from a handful of scalp electrodes to hundreds of intracranial contacts, and widely varying signal quality and electrode placements.  This heterogeneity rules out tokenizer designs that assume a fixed sampling rate, a fixed channel layout, or a fixed input dimensionality.  The tokenizer architecture was therefore decomposed into two orthogonal components---a \emph{channel strategy} and a \emph{temporal embedding}---and only designs compatible with variable recording properties were considered.
+
+\subsection{Channel Strategies}
+
+\textbf{Per-channel tokenization} processes each electrode independently, preserving per-electrode identity through a learned channel embedding fused with the temporal features.  This produces $C \times N_\text{time}$~tokens per window, retaining fine-grained spatial information at the cost of a large token count, and naturally handles any number of channels.
+
+\textbf{Spatial session projection} applies a learned per-session linear mixing of all channels into a fixed number of latent ``source'' signals before temporal processing.  Each recording session has its own projection matrix, allowing adaptation to different electrode configurations.  This produces only $N_\text{time}$~tokens per window, independent of channel count, but risks discarding per-electrode information.
+
+\subsection{Temporal Embeddings}
+
+\textbf{Per-timepoint linear} (naive baseline): a simple linear projection applied independently at each timepoint, producing one token per timepoint with no temporal context.  This approach is a simplification of the event-based tokenization strategy that has proven highly effective for \emph{spike-based} neural foundation models such as POYO~\cite{azabou2023poyo} and NDT2~\cite{ye2023ndt2}, where neural activity is inherently sparse and each spike (or time-binned spike count) can be naturally represented as a discrete token.  For \emph{continuous} signals like EEG and ECoG, however, per-timepoint tokenization discards the rich temporal correlation structure that is fundamental to these recordings, and produces an excessive number of tokens at high sampling rates.
+
+\textbf{ResampleCNN} (standard approach in continuous-signal foundation models): the input is first resampled to a fixed token rate via differentiable interpolation (with an FFT-based Butterworth anti-aliasing filter), then processed by a 1D convolutional stack.  This is the dominant temporal embedding strategy in existing EEG and ECoG foundation models.  BENDR~\cite{kostas2021bendr} uses a stack of six strided 1D convolutions to downsample raw EEG; LaBraM~\cite{jiang2024labram} resamples all data to 200\,Hz before applying convolutional patch embeddings; and Neuro-GPT~\cite{cui2024neurogpt} similarly applies temporal and spatial convolutions to resampled EEG chunks.  The approach handles variable sampling rates through the explicit resampling step, but the resampling is an engineering workaround rather than a mathematical invariance.
+
+\textbf{Learnable Continuous Wavelet Transform (CWT)} (proposed approach): a differentiable time--frequency decomposition using complex Morlet wavelets at \emph{learnable} center frequencies and cycle counts, defined in physical units (Hz, seconds).  This produces a scalogram (magnitude and phase across frequency bins) that is resampled to a fixed token count via differentiable interpolation.  Unlike the ResampleCNN, the CWT is sampling-rate invariant \emph{by construction}: wavelets operate in physical time, so the same physical signal sampled at different rates yields mathematically the same representation without relying on an engineering workaround.  This property is particularly attractive for training across datasets with widely varying sampling rates and signal quality.
+
+\textbf{CWT+CNN hybrid} (proposed): the CWT scalogram is fed through a convolutional stack before the final linear projection, combining the CWT's structured, invariant frequency decomposition with the CNN's ability to learn cross-frequency and local-temporal features.
+
+
+%% ===================================================================
+\section{Experimental Results}
+\label{sec:results}
+%% ===================================================================
+
+All experiments use the AJILE12 dataset with a POYO-EEG Perceiver-IO backbone (depth=4, heads=8, dim\_head=128). The \emph{only} component that varies across experiments is the tokenizer module. Results are reported as mean $\pm$ standard deviation over 2~cross-validation folds, with early stopping (patience=20) on the validation metric. Hyperparameter sweeps (learning rate, weight decay) were conducted via Bayesian optimization to ensure fair comparisons across tokenizer families.
+
+\subsection{The Naive Baseline Is Suboptimal}
+
+An initial ablation across the full design space of channel strategies and temporal embeddings (11~configurations $\times$ 2~folds) revealed that the per-timepoint linear baseline consistently underperforms all alternatives, often by a substantial margin (Figure~\ref{fig:ablation}). Per-channel CWT achieved the highest AUROC ($\sim$0.91) on behavior classification, followed by per-channel CNN. This confirmed the intuition that ignoring temporal structure is costly and validated the effort to explore structured alternatives.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{ablation_behavior_filtered_bar.pdf}
+    \caption{Full tokenizer ablation on behavior classification (AUROC, mean $\pm$ std over folds). Per-channel configurations (right) consistently outperform spatial session variants (left). The per-timepoint linear baseline is among the weakest performers.}
+    \label{fig:ablation}
+\end{figure}
+
+
+\subsection{CWT vs.\ ResampleCNN: Comparable Performance, Different Properties}
+
+With matched hyperparameters identified through independent sweeps (LR=3e-4, WD=0.007), CWT and ResampleCNN were compared head-to-head on both behavior classification and pose estimation (Figure~\ref{fig:cwt-vs-cnn}). Both tokenizers achieve similar downstream performance: $\sim$0.88~AUROC for behavior classification (CWT holding a slight edge) and comparable $R^2$ for pose estimation (CNN holding a slight edge). Neither advantage is large enough to be conclusive given the current number of runs.
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{cwt_vs_cnn_behavior_bar.pdf}
+        \caption{Behavior classification (AUROC).}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{cwt_vs_cnn_pose_bar.pdf}
+        \caption{Pose estimation ($R^2$).}
+    \end{subfigure}
+    \caption{Head-to-head comparison of CWT and ResampleCNN with matched hyperparameters on two downstream tasks.}
+    \label{fig:cwt-vs-cnn}
+\end{figure}
+
+The comparable single-dataset performance, however, masks an important architectural distinction. The CWT is sampling-rate invariant \emph{by construction}: its wavelets are parameterized in physical units (Hz, seconds), so the same physical signal sampled at different rates produces approximately the same representation without any explicit resampling step. For a foundation model that must ingest data from dozens of recording setups with sampling rates ranging from 128 to 2048\,Hz, this property is highly desirable. The CNN achieves variable-rate handling through an explicit resampling step, which, while functional, introduces a processing choice (the anti-aliasing filter) rather than a mathematical invariance. Additionally, the CWT's learned center frequencies are directly interpretable as the spectral bands the model finds useful, providing a window into the model's feature extraction that a black-box CNN does not offer.
+
+These structural advantages---sampling-rate invariance and interpretability---make the CWT a particularly promising approach for scaling to a larger number of varied datasets, even though its single-dataset performance is comparable to the CNN.
+
+
+\subsection{The CWT+CNN Hybrid: Current Best Performer}
+
+A natural question is whether the CWT's structured frequency decomposition and the CNN's ability to learn complex temporal features can be combined.  The CWT+CNN hybrid feeds the full CWT scalogram through a convolutional stack before the final linear projection.  This architecture consistently outperforms both CWT and CNN alone ($\sim$0.90 vs.\ $\sim$0.89 vs.\ $\sim$0.88 AUROC on behavior classification).
+
+To determine whether this advantage is architectural or merely a capacity
+effect---the CWT+CNN has roughly 15$\times$ more parameters than either
+component alone---we conducted a parameter-matched comparison
+(Figure~\ref{fig:param-match}).  A CNN with the same number of convolutional
+filters (64) served as a control.  The CWT+CNN retained a
+$\sim$1.1\%~AUROC advantage over the matched CNN, confirming an
+architectural benefit.  At lower capacity (12~filters), the advantage
+narrowed to $\sim$0.4\%, revealing a synergistic effect: the convolutional
+stack needs sufficient width to exploit cross-frequency features from the
+CWT's 18-channel scalogram.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{param_match_bar.pdf}
+    \caption{Parameter-matched comparison: CWT+CNN vs.\ CNN at two capacity levels (12 and 64~convolutional filters). The CWT+CNN advantage is architectural but capacity-dependent, growing from $\sim$0.4\% at 12~filters to $\sim$1.1\% at 64~filters.}
+    \label{fig:param-match}
+\end{figure}
+
+
+\subsection{Compute Efficiency: Token Rate Is Not a Bottleneck}
+
+A sweep of the output token rate across \{100, 200, 400\}\,Hz revealed that downstream performance is surprisingly flat across this range for all tokenizer families (Figure~\ref{fig:token-rate}). Doubling or quadrupling the token count yields at most $\sim$0.5\%~AUROC improvement. This finding has immediate practical value: a token rate of 100\,Hz provides the same performance as 400\,Hz at one-quarter the compute cost, a substantial saving when scaling to larger datasets and longer training runs.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{token_rate_scaling_line.pdf}
+    \caption{AUROC vs.\ target token rate for CWT, CNN, and CWT+CNN. Performance is nearly flat across the 100--400\,Hz range, indicating that temporal granularity is not a bottleneck for this task.}
+    \label{fig:token-rate}
+\end{figure}
+
+
+\subsection{Robustness Conditioning for Cross-Dataset Training}
+
+The intended application of these tokenizers is large-scale pretraining across diverse EEG and ECoG datasets, which exhibit extreme heterogeneity: amplitudes can vary by orders of magnitude across laboratories and hardware, DC offsets are common, and artifacts (electrode pops, line noise, amplifier saturation) are prevalent in clinical recordings. If the tokenizer's internal representation is fragile under these corruptions, the downstream backbone will see large, uninformative representation shifts that destabilize training.
+
+A synthetic stability analysis revealed that the baseline CWT representation is sensitive to amplitude scaling and DC offset---precisely the corruptions most common in heterogeneous multi-dataset settings (Figure~\ref{fig:stability}).  Three lightweight conditioning steps were investigated: highpass filtering (causal running-mean subtraction), log-magnitude compression, and per-frequency normalization.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{cwt_stability/cosine_similarity.pdf}
+    \caption{Representation stability under six common signal corruptions (cosine similarity between clean and corrupted representations; higher is better). The baseline CWT (blue) is fragile under amplitude scaling and DC offset. Highpass + log-magnitude conditioning (green) achieves the best overall stability profile.}
+    \label{fig:stability}
+\end{figure}
+
+When tested on real data (Figure~\ref{fig:conditioning}), highpass conditioning alone produced the best result: $\sim$0.903~mean AUROC, the highest observed across all experiments in this investigation, and a $\sim$1.7\%~improvement over the parameter-matched CNN baseline. Log-magnitude compression was neutral on this relatively clean intracranial dataset but may provide additional robustness benefits on noisier scalp EEG data. Frequency normalization, despite providing near-perfect amplitude invariance in synthetic tests, consistently degraded real-data performance---likely because it discards absolute spectral power, which carries task-relevant information.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{cwt_conditioning_bar.pdf}
+    \caption{Effect of scalogram conditioning on CWT+CNN behavior classification. Highpass-only achieves the highest AUROC ($\sim$0.903). Frequency normalization consistently degrades performance.}
+    \label{fig:conditioning}
+\end{figure}
+
+
+%% ===================================================================
+\section{Current Best Architecture and Ongoing Exploration}
+\label{sec:current-best}
+%% ===================================================================
+
+The most performant configuration identified to date is the \textbf{CWT+CNN hybrid} (9~log-spaced frequencies, 0.5--30\,Hz, 64~convolutional filters) \textbf{with highpass scalogram conditioning}, using the per-channel strategy with concatenation-based channel embedding fusion. This architecture achieves $\sim$0.903~AUROC on AJILE12 behavior classification, representing a clear improvement over the per-timepoint linear baseline that motivated this investigation.
+
+It is important to emphasize that \textbf{this is not a final answer}. The exploration described in this report was conducted on a single, relatively clean intracranial dataset. Several important questions remain open and are the subject of ongoing work:
+
+\begin{itemize}[nosep]
+    \item \textbf{Cross-dataset generalization.} The tokenizer comparison may yield different results across the heterogeneous scalp EEG and intracranial datasets that a foundation model must handle. Validating the CWT's structural advantages (sampling-rate invariance, robustness conditioning) in a true multi-dataset pretraining regime is the most important next step.
+    \item \textbf{Interaction with self-supervised objectives.} All experiments to date use supervised downstream tasks. The CWT's spectral inductive bias may interact differently with self-supervised pretraining objectives (e.g., masked prediction, contrastive learning), which are the intended training paradigm for the foundation model.
+    \item \textbf{Transfer to scalp EEG.} The conditioning steps (highpass, log-magnitude) were designed to address corruptions more prevalent in scalp EEG than in the clean intracranial data used here. Their benefits may be substantially larger on noisier recordings.
+    \item \textbf{Spatial strategy refinement.} Per-channel tokenization consistently outperformed spatial session projection in our experiments, but the spatial approach was only tested with projection applied \emph{before} temporal embedding. Projecting high-dimensional features \emph{after} temporal embedding may yield different results and remains unexplored.
+\end{itemize}
+
+The CWT-based approach is particularly promising for the multi-dataset scaling that the foundation model requires, because its sampling-rate invariance is a mathematical property of the architecture rather than an engineering workaround, and its structured frequency decomposition provides a natural interface for the robustness conditioning needed to handle recording heterogeneity. However, confirming these advantages in the cross-dataset setting is essential before drawing definitive conclusions.
+
+
+%% ===================================================================
+\section{Summary of Compute Usage}
+\label{sec:compute}
+%% ===================================================================
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{llr}
+        \toprule
+        \textbf{Experiment Group} & \textbf{Focus} & \textbf{Training Runs} \\
+        \midrule
+        Tokenizer Ablation        & Full design space survey           & 42 \\
+        Extended Tokenizer Sweeps & Configuration and fold sweeps      & 75 \\
+        CWT vs.\ CNN              & Head-to-head comparison            & 12 \\
+        Token Rate Sweep          & Compute--performance trade-off     & 18 \\
+        Parameter Matching        & Capacity control                   & 10 \\
+        CWT LR Multiplier         & Learnable parameter adaptation     & 10 \\
+        CWT Spectral Resolution   & Frequency bin / cycle count sweep  & 12 \\
+        Scalogram Conditioning    & Robustness preprocessing           & 12 \\
+        \midrule
+        \multicolumn{2}{l}{\textbf{Subtotal: controlled experiments}} & \textbf{191} \\
+        \midrule
+        Hyperparameter Sweeps     & Bayesian optimization (W\&B)       & 770 \\
+        \midrule
+        \multicolumn{2}{l}{\textbf{Total training runs}} & \textbf{961} \\
+        \bottomrule
+    \end{tabular}
+    \caption{Summary of compute usage across experiment groups, as recorded in Weights \& Biases.  Each run trains a full model (Perceiver-IO backbone + tokenizer) on the AJILE12 dataset with early stopping.  Bayesian hyperparameter sweeps account for the majority of runs, reflecting the need to independently tune hyperparameters for each tokenizer family to ensure fair comparisons.  An additional $\sim$200 debug and exploratory runs are not included.}
+    \label{tab:compute}
+\end{table}
+
+All training was performed on GPUs with mixed-precision (bf16) training.  The AJILE12 dataset's high-density intracranial recordings and multi-subject design make each run computationally substantial.  The systematic, controlled nature of the investigation---matched hyperparameters, parameter-count controls, and multiple cross-validation folds---required a large number of runs but was essential for drawing reliable conclusions about architectural design choices.
+
+
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+
+\end{document}

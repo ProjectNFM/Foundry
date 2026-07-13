@@ -72,6 +72,89 @@ def _save(fig: plt.Figure, name: str) -> None:
     print(f"  Saved {path}")
 
 
+def _fetch_lr_sweep_from_wandb() -> list[dict]:
+    """Fetch CWT LR sweep runs from W&B API."""
+    import wandb
+    from common import WANDB_ENTITY, WANDB_PROJECT
+
+    api = wandb.Api(timeout=60)
+    runs = api.runs(
+        f"{WANDB_ENTITY}/{WANDB_PROJECT}",
+        filters={"group": "CWT_LR_AND_PARAM_MATCH"},
+    )
+
+    rows = []
+    for run in runs:
+        d = run.display_name
+        if "cwtlr" not in d:
+            continue
+
+        s = run.summary._json_dict
+        auroc = s.get(AUROC_KEY, {})
+        if isinstance(auroc, dict):
+            auroc = auroc.get("max")
+        if auroc is None:
+            continue
+
+        mult_str = d.split("cwtlr")[1].split("x")[0]
+        try:
+            multiplier = int(mult_str)
+        except ValueError:
+            continue
+
+        parts = d.split("_")
+        try:
+            fold = int(
+                [p for p in parts if p.startswith("fold")][0].replace(
+                    "fold", ""
+                )
+            )
+        except (IndexError, ValueError):
+            continue
+
+        freq_keys = sorted(
+            k
+            for k in s
+            if "freqs_hz/" in k
+            and not any(x in k for x in ["mean", "std", "min", "max", "norm"])
+        )
+        learned_freqs = [s[k] for k in freq_keys] if freq_keys else []
+
+        ncycles_keys = sorted(
+            k
+            for k in s
+            if "n_cycles/" in k
+            and "unconstrained" not in k
+            and not any(x in k for x in ["mean", "std", "min", "max", "norm"])
+        )
+        learned_ncycles = [s[k] for k in ncycles_keys] if ncycles_keys else []
+
+        upr_freqs = s.get(
+            "params/tokenizer.temporal_embedding.cwt.freqs_unconstrained"
+            "/optimizer/update_to_param_ratio"
+        )
+        upr_ncycles = s.get(
+            "params/tokenizer.temporal_embedding.cwt.n_cycles_unconstrained"
+            "/optimizer/update_to_param_ratio"
+        )
+
+        rows.append(
+            {
+                "run_name": d,
+                "multiplier": multiplier,
+                "fold": fold,
+                "auroc": auroc,
+                "source": "CWT_LR_AND_PARAM_MATCH",
+                "learned_freqs": json.dumps(learned_freqs),
+                "learned_ncycles": json.dumps(learned_ncycles),
+                "upr_freqs": upr_freqs,
+                "upr_ncycles": upr_ncycles,
+            }
+        )
+
+    return rows
+
+
 def collect_lr_sweep_data(plot_only: bool = False) -> pd.DataFrame:
     """Build a dataframe with AUROC and learned params for all multipliers."""
     cache_csv = CACHE_DIR / "CWT_LR_SWEEP.csv"
@@ -103,87 +186,91 @@ def collect_lr_sweep_data(plot_only: bool = False) -> pd.DataFrame:
         print(f"  Warning: {sweep_csv} not found, baseline will be missing")
 
     # LR sweep runs (10×, 50×, 100×)
-    for d in sorted(os.listdir(RUNS_DIR)):
-        run_path = RUNS_DIR / d
-        if not run_path.is_dir() or "cwtlr" not in d:
-            continue
+    if RUNS_DIR.exists():
+        for d in sorted(os.listdir(RUNS_DIR)):
+            run_path = RUNS_DIR / d
+            if not run_path.is_dir() or "cwtlr" not in d:
+                continue
 
-        # Extract multiplier from name like per_channel_cwt_cwtlr50x_rate200_fold0
-        mult_str = d.split("cwtlr")[1].split("x")[0]
-        try:
-            multiplier = int(mult_str)
-        except ValueError:
-            continue
+            mult_str = d.split("cwtlr")[1].split("x")[0]
+            try:
+                multiplier = int(mult_str)
+            except ValueError:
+                continue
 
-        summary_files = sorted(run_path.rglob("wandb-summary.json"))
-        if not summary_files:
-            continue
-        with open(summary_files[-1]) as f:
-            summary = json.load(f)
+            summary_files = sorted(run_path.rglob("wandb-summary.json"))
+            if not summary_files:
+                continue
+            with open(summary_files[-1]) as f:
+                summary = json.load(f)
 
-        auroc = summary.get(AUROC_KEY, {})
-        if isinstance(auroc, dict):
-            auroc = auroc.get("max")
-        if auroc is None:
-            continue
+            auroc = summary.get(AUROC_KEY, {})
+            if isinstance(auroc, dict):
+                auroc = auroc.get("max")
+            if auroc is None:
+                continue
 
-        parts = d.split("_")
-        fold = int(
-            [p for p in parts if p.startswith("fold")][0].replace("fold", "")
-        )
-
-        # Extract learned frequencies
-        freq_keys = sorted(
-            [
-                k
-                for k in summary.keys()
-                if "freqs_hz/" in k
-                and not any(
-                    x in k for x in ["mean", "std", "min", "max", "norm"]
+            parts = d.split("_")
+            fold = int(
+                [p for p in parts if p.startswith("fold")][0].replace(
+                    "fold", ""
                 )
-            ]
-        )
-        learned_freqs = [summary[k] for k in freq_keys] if freq_keys else []
+            )
 
-        # Extract learned n_cycles
-        ncycles_keys = sorted(
-            [
-                k
-                for k in summary.keys()
-                if "n_cycles/" in k
-                and "unconstrained" not in k
-                and not any(
-                    x in k for x in ["mean", "std", "min", "max", "norm"]
-                )
-            ]
-        )
-        learned_ncycles = (
-            [summary[k] for k in ncycles_keys] if ncycles_keys else []
-        )
+            freq_keys = sorted(
+                [
+                    k
+                    for k in summary.keys()
+                    if "freqs_hz/" in k
+                    and not any(
+                        x in k for x in ["mean", "std", "min", "max", "norm"]
+                    )
+                ]
+            )
+            learned_freqs = [summary[k] for k in freq_keys] if freq_keys else []
 
-        # Extract update-to-param ratios
-        upr_freqs = summary.get(
-            "params/tokenizer.temporal_embedding.cwt.freqs_unconstrained"
-            "/optimizer/update_to_param_ratio"
-        )
-        upr_ncycles = summary.get(
-            "params/tokenizer.temporal_embedding.cwt.n_cycles_unconstrained"
-            "/optimizer/update_to_param_ratio"
-        )
+            ncycles_keys = sorted(
+                [
+                    k
+                    for k in summary.keys()
+                    if "n_cycles/" in k
+                    and "unconstrained" not in k
+                    and not any(
+                        x in k for x in ["mean", "std", "min", "max", "norm"]
+                    )
+                ]
+            )
+            learned_ncycles = (
+                [summary[k] for k in ncycles_keys] if ncycles_keys else []
+            )
 
-        rows.append(
-            {
-                "run_name": d,
-                "multiplier": multiplier,
-                "fold": fold,
-                "auroc": auroc,
-                "source": "CWT_LR_AND_PARAM_MATCH",
-                "learned_freqs": json.dumps(learned_freqs),
-                "learned_ncycles": json.dumps(learned_ncycles),
-                "upr_freqs": upr_freqs,
-                "upr_ncycles": upr_ncycles,
-            }
-        )
+            upr_freqs = summary.get(
+                "params/tokenizer.temporal_embedding.cwt.freqs_unconstrained"
+                "/optimizer/update_to_param_ratio"
+            )
+            upr_ncycles = summary.get(
+                "params/tokenizer.temporal_embedding.cwt.n_cycles_unconstrained"
+                "/optimizer/update_to_param_ratio"
+            )
+
+            rows.append(
+                {
+                    "run_name": d,
+                    "multiplier": multiplier,
+                    "fold": fold,
+                    "auroc": auroc,
+                    "source": "CWT_LR_AND_PARAM_MATCH",
+                    "learned_freqs": json.dumps(learned_freqs),
+                    "learned_ncycles": json.dumps(learned_ncycles),
+                    "upr_freqs": upr_freqs,
+                    "upr_ncycles": upr_ncycles,
+                }
+            )
+    else:
+        print(f"  {RUNS_DIR} not found, fetching LR sweep from W&B API...")
+        wandb_rows = _fetch_lr_sweep_from_wandb()
+        rows.extend(wandb_rows)
+        print(f"  Fetched {len(wandb_rows)} LR sweep runs from W&B")
 
     df = pd.DataFrame(rows)
     df.to_csv(cache_csv, index=False)

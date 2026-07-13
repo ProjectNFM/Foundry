@@ -74,6 +74,61 @@ def _save(fig: plt.Figure, name: str) -> None:
     print(f"  Saved {path}")
 
 
+def _fetch_param_match_from_wandb(
+    group: str, prefixes: dict[str, str]
+) -> list[dict]:
+    """Fetch param match runs from W&B API."""
+    import wandb
+    from common import WANDB_ENTITY, WANDB_PROJECT
+
+    api = wandb.Api(timeout=60)
+    runs = api.runs(
+        f"{WANDB_ENTITY}/{WANDB_PROJECT}",
+        filters={"group": group},
+    )
+
+    rows = []
+    for run in runs:
+        d = run.display_name
+        s = run.summary._json_dict
+
+        matched_label = None
+        for prefix, label in prefixes.items():
+            if d.startswith(prefix):
+                matched_label = label
+                break
+        if matched_label is None:
+            continue
+
+        auroc = s.get(AUROC_KEY, {})
+        if isinstance(auroc, dict):
+            auroc = auroc.get("max")
+        if auroc is None:
+            continue
+
+        parts = d.split("_")
+        try:
+            fold = int(
+                [p for p in parts if p.startswith("fold")][0].replace(
+                    "fold", ""
+                )
+            )
+        except (IndexError, ValueError):
+            continue
+
+        rows.append(
+            {
+                "run_name": d,
+                "tokenizer": matched_label,
+                "fold": fold,
+                "auroc": auroc,
+                "source": group,
+            }
+        )
+
+    return rows
+
+
 def collect_exp4_data(plot_only: bool = False) -> pd.DataFrame:
     """Build a dataframe with AUROC for all four tokenizers at 200 Hz."""
     cache_csv = CACHE_DIR / "PARAM_MATCH.csv"
@@ -108,7 +163,7 @@ def collect_exp4_data(plot_only: bool = False) -> pd.DataFrame:
             f"  Warning: {sweep_csv} not found, CWT/CNN 12f bars will be missing"
         )
 
-    # --- Pull from local run directories ---
+    # --- Pull from local run directories or W&B ---
     run_sources = [
         (
             RUNS_DIR_PARAM_MATCH,
@@ -126,50 +181,55 @@ def collect_exp4_data(plot_only: bool = False) -> pd.DataFrame:
     ]
 
     for runs_dir, prefixes, source_name in run_sources:
-        if not runs_dir.exists():
-            print(f"  Warning: {runs_dir} not found, skipping")
-            continue
-        for d in sorted(os.listdir(runs_dir)):
-            run_path = runs_dir / d
-            if not run_path.is_dir() or d.startswith("."):
-                continue
+        if runs_dir.exists():
+            for d in sorted(os.listdir(runs_dir)):
+                run_path = runs_dir / d
+                if not run_path.is_dir() or d.startswith("."):
+                    continue
 
-            matched_label = None
-            for prefix, label in prefixes.items():
-                if d.startswith(prefix):
-                    matched_label = label
-                    break
-            if matched_label is None:
-                continue
+                matched_label = None
+                for prefix, label in prefixes.items():
+                    if d.startswith(prefix):
+                        matched_label = label
+                        break
+                if matched_label is None:
+                    continue
 
-            summary_files = list(run_path.rglob("wandb-summary.json"))
-            if not summary_files:
-                continue
-            with open(sorted(summary_files)[-1]) as f:
-                summary = json.load(f)
+                summary_files = list(run_path.rglob("wandb-summary.json"))
+                if not summary_files:
+                    continue
+                with open(sorted(summary_files)[-1]) as f:
+                    summary = json.load(f)
 
-            auroc = summary.get(AUROC_KEY, {})
-            if isinstance(auroc, dict):
-                auroc = auroc.get("max")
-            if auroc is None:
-                continue
+                auroc = summary.get(AUROC_KEY, {})
+                if isinstance(auroc, dict):
+                    auroc = auroc.get("max")
+                if auroc is None:
+                    continue
 
-            parts = d.split("_")
-            fold = int(
-                [p for p in parts if p.startswith("fold")][0].replace(
-                    "fold", ""
+                parts = d.split("_")
+                fold = int(
+                    [p for p in parts if p.startswith("fold")][0].replace(
+                        "fold", ""
+                    )
                 )
-            )
 
-            rows.append(
-                {
-                    "run_name": d,
-                    "tokenizer": matched_label,
-                    "fold": fold,
-                    "auroc": auroc,
-                    "source": source_name,
-                }
+                rows.append(
+                    {
+                        "run_name": d,
+                        "tokenizer": matched_label,
+                        "fold": fold,
+                        "auroc": auroc,
+                        "source": source_name,
+                    }
+                )
+        else:
+            print(
+                f"  {runs_dir} not found, fetching {source_name} from W&B API..."
             )
+            wandb_rows = _fetch_param_match_from_wandb(source_name, prefixes)
+            rows.extend(wandb_rows)
+            print(f"  Fetched {len(wandb_rows)} runs from W&B")
 
     df = pd.DataFrame(rows)
     df.to_csv(cache_csv, index=False)
@@ -265,6 +325,9 @@ def main() -> None:
 
     print("Generating Experiments 4 & 5 (param-match + 12f) figures...")
     df = collect_exp4_data(plot_only=args.plot_only)
+    if df.empty:
+        print("  No data available, skipping plots")
+        return
     print(df.groupby("tokenizer")["auroc"].agg(["mean", "std", "count"]))
     plot_param_match_bar(df)
     print("Done!")

@@ -3,7 +3,7 @@ LATEX = pdflatex
 FIGURES_DIR = ../../figures
 REPO_ROOT = ../../..
 
-.PHONY: all clean figures figures-cwt figures-ablation figures-alltoks figures-appendix figures-experiment figures-cwt-params figures-token-rate-sweep figures-param-match figures-cwt-lr-sweep figures-spectral-resolution
+.PHONY: all clean figures figures-cwt figures-ablation figures-alltoks figures-appendix figures-experiment figures-cwt-params figures-token-rate-sweep figures-param-match figures-cwt-lr-sweep figures-spectral-resolution figures-cwt-conditioning figures-cwt-stability
 
 all: $(TEX).pdf
 
@@ -12,7 +12,7 @@ $(TEX).pdf: $(TEX).tex $(wildcard $(FIGURES_DIR)/*.pdf)
 	$(LATEX) -interaction=nonstopmode $(TEX).tex
 	$(LATEX) -interaction=nonstopmode $(TEX).tex
 
-figures: figures-cwt figures-ablation figures-alltoks figures-appendix figures-experiment figures-cwt-params figures-token-rate-sweep figures-param-match figures-cwt-lr-sweep figures-spectral-resolution
+figures: figures-cwt figures-ablation figures-alltoks figures-appendix figures-experiment figures-cwt-params figures-token-rate-sweep figures-param-match figures-cwt-lr-sweep figures-spectral-resolution figures-cwt-conditioning figures-cwt-stability
 
 figures-cwt:
 	cd $(REPO_ROOT) && uv run scripts/analysis/cwt_vs_cnn.py
@@ -44,6 +44,12 @@ figures-cwt-lr-sweep:
 
 figures-spectral-resolution:
 	cd $(REPO_ROOT) && uv run scripts/analysis/cwt_spectral_resolution.py
+
+figures-cwt-conditioning:
+	cd $(REPO_ROOT) && uv run scripts/analysis/cwt_conditioning.py
+
+figures-cwt-stability:
+	cd $(REPO_ROOT) && uv run scripts/analysis/cwt_stability.py
 
 clean:
 	rm -f $(TEX).pdf $(TEX).aux $(TEX).log $(TEX).out $(TEX).toc \

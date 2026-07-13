@@ -76,35 +76,25 @@ def _save(fig: plt.Figure, name: str) -> None:
     print(f"  Saved {path}")
 
 
-def collect_data(plot_only: bool = False) -> tuple[pd.DataFrame, dict]:
-    """Extract metrics and gradient diagnostics from local wandb summaries."""
-    cache_csv = CACHE_DIR / "TOKEN_RATE_SWEEP.csv"
-    cache_grad = CACHE_DIR / "TOKEN_RATE_SWEEP_gradients.json"
+def _fetch_from_wandb() -> tuple[list[dict], dict]:
+    """Fetch TOKEN_RATE_SWEEP data from W&B API when local runs aren't available."""
+    import wandb
+    from common import WANDB_ENTITY, WANDB_PROJECT
 
-    if plot_only and cache_csv.exists() and cache_grad.exists():
-        df = pd.read_csv(cache_csv)
-        with open(cache_grad) as f:
-            grad_data = json.load(f)
-        print(f"  Loaded {len(df)} runs from cache")
-        return df, grad_data
-
-    import os
+    api = wandb.Api(timeout=60)
+    runs = api.runs(
+        f"{WANDB_ENTITY}/{WANDB_PROJECT}",
+        filters={"group": "TOKEN_RATE_SWEEP"},
+    )
 
     rows = []
     grad_data = {}
 
-    for d in sorted(os.listdir(RUNS_DIR)):
-        run_path = RUNS_DIR / d
-        if not run_path.is_dir() or d.startswith("."):
-            continue
+    for run in runs:
+        s = run.summary._json_dict
+        d = run.display_name
 
-        summary_files = list(run_path.rglob("wandb-summary.json"))
-        if not summary_files:
-            continue
-        with open(sorted(summary_files)[-1]) as f:
-            summary = json.load(f)
-
-        auroc = summary.get(AUROC_KEY, {})
+        auroc = s.get(AUROC_KEY, {})
         if isinstance(auroc, dict):
             auroc = auroc.get("max")
         if auroc is None:
@@ -118,12 +108,19 @@ def collect_data(plot_only: bool = False) -> tuple[pd.DataFrame, dict]:
             tokenizer = "CNN"
 
         parts = d.split("_")
-        rate = int(
-            [p for p in parts if p.startswith("rate")][0].replace("rate", "")
-        )
-        fold = int(
-            [p for p in parts if p.startswith("fold")][0].replace("fold", "")
-        )
+        try:
+            rate = int(
+                [p for p in parts if p.startswith("rate")][0].replace(
+                    "rate", ""
+                )
+            )
+            fold = int(
+                [p for p in parts if p.startswith("fold")][0].replace(
+                    "fold", ""
+                )
+            )
+        except (IndexError, ValueError):
+            continue
 
         rows.append(
             {
@@ -136,27 +133,27 @@ def collect_data(plot_only: bool = False) -> tuple[pd.DataFrame, dict]:
         )
 
         if tokenizer in ("CWT", "CWT+CNN"):
-            freqs_upr = summary.get(
+            freqs_upr = s.get(
                 "params/tokenizer.temporal_embedding.cwt.freqs_unconstrained"
                 "/optimizer/update_to_param_ratio"
             )
-            ncycles_upr = summary.get(
+            ncycles_upr = s.get(
                 "params/tokenizer.temporal_embedding.cwt.n_cycles_unconstrained"
                 "/optimizer/update_to_param_ratio"
             )
-            grad_norm_freqs = summary.get(
+            grad_norm_freqs = s.get(
                 "params/tokenizer.temporal_embedding.cwt.freqs_unconstrained"
                 "/grad/norm"
             )
-            grad_norm_ncycles = summary.get(
+            grad_norm_ncycles = s.get(
                 "params/tokenizer.temporal_embedding.cwt.n_cycles_unconstrained"
                 "/grad/norm"
             )
-            eff_step_freqs = summary.get(
+            eff_step_freqs = s.get(
                 "params/tokenizer.temporal_embedding.cwt.freqs_unconstrained"
                 "/optimizer/effective_step_norm"
             )
-            eff_step_ncycles = summary.get(
+            eff_step_ncycles = s.get(
                 "params/tokenizer.temporal_embedding.cwt.n_cycles_unconstrained"
                 "/optimizer/effective_step_norm"
             )
@@ -172,6 +169,115 @@ def collect_data(plot_only: bool = False) -> tuple[pd.DataFrame, dict]:
                 "freqs_effective_step_norm": eff_step_freqs,
                 "ncycles_effective_step_norm": eff_step_ncycles,
             }
+
+    return rows, grad_data
+
+
+def collect_data(plot_only: bool = False) -> tuple[pd.DataFrame, dict]:
+    """Extract metrics and gradient diagnostics from local wandb summaries."""
+    cache_csv = CACHE_DIR / "TOKEN_RATE_SWEEP.csv"
+    cache_grad = CACHE_DIR / "TOKEN_RATE_SWEEP_gradients.json"
+
+    if plot_only and cache_csv.exists() and cache_grad.exists():
+        df = pd.read_csv(cache_csv)
+        with open(cache_grad) as f:
+            grad_data = json.load(f)
+        print(f"  Loaded {len(df)} runs from cache")
+        return df, grad_data
+
+    rows = []
+    grad_data = {}
+
+    if RUNS_DIR.exists():
+        import os
+
+        for d in sorted(os.listdir(RUNS_DIR)):
+            run_path = RUNS_DIR / d
+            if not run_path.is_dir() or d.startswith("."):
+                continue
+
+            summary_files = list(run_path.rglob("wandb-summary.json"))
+            if not summary_files:
+                continue
+            with open(sorted(summary_files)[-1]) as f:
+                summary = json.load(f)
+
+            auroc = summary.get(AUROC_KEY, {})
+            if isinstance(auroc, dict):
+                auroc = auroc.get("max")
+            if auroc is None:
+                continue
+
+            if "cwt_cnn" in d:
+                tokenizer = "CWT+CNN"
+            elif "cwt" in d:
+                tokenizer = "CWT"
+            else:
+                tokenizer = "CNN"
+
+            parts = d.split("_")
+            rate = int(
+                [p for p in parts if p.startswith("rate")][0].replace(
+                    "rate", ""
+                )
+            )
+            fold = int(
+                [p for p in parts if p.startswith("fold")][0].replace(
+                    "fold", ""
+                )
+            )
+
+            rows.append(
+                {
+                    "run_name": d,
+                    "tokenizer": tokenizer,
+                    "rate": rate,
+                    "fold": fold,
+                    "auroc": auroc,
+                }
+            )
+
+            if tokenizer in ("CWT", "CWT+CNN"):
+                freqs_upr = summary.get(
+                    "params/tokenizer.temporal_embedding.cwt.freqs_unconstrained"
+                    "/optimizer/update_to_param_ratio"
+                )
+                ncycles_upr = summary.get(
+                    "params/tokenizer.temporal_embedding.cwt.n_cycles_unconstrained"
+                    "/optimizer/update_to_param_ratio"
+                )
+                grad_norm_freqs = summary.get(
+                    "params/tokenizer.temporal_embedding.cwt.freqs_unconstrained"
+                    "/grad/norm"
+                )
+                grad_norm_ncycles = summary.get(
+                    "params/tokenizer.temporal_embedding.cwt.n_cycles_unconstrained"
+                    "/grad/norm"
+                )
+                eff_step_freqs = summary.get(
+                    "params/tokenizer.temporal_embedding.cwt.freqs_unconstrained"
+                    "/optimizer/effective_step_norm"
+                )
+                eff_step_ncycles = summary.get(
+                    "params/tokenizer.temporal_embedding.cwt.n_cycles_unconstrained"
+                    "/optimizer/effective_step_norm"
+                )
+
+                grad_data[d] = {
+                    "tokenizer": tokenizer,
+                    "rate": rate,
+                    "fold": fold,
+                    "freqs_update_to_param_ratio": freqs_upr,
+                    "ncycles_update_to_param_ratio": ncycles_upr,
+                    "freqs_grad_norm": grad_norm_freqs,
+                    "ncycles_grad_norm": grad_norm_ncycles,
+                    "freqs_effective_step_norm": eff_step_freqs,
+                    "ncycles_effective_step_norm": eff_step_ncycles,
+                }
+    else:
+        print(f"  {RUNS_DIR} not found, fetching from W&B API...")
+        rows, grad_data = _fetch_from_wandb()
+        print(f"  Fetched {len(rows)} runs from W&B")
 
     df = pd.DataFrame(rows)
     df.to_csv(cache_csv, index=False)

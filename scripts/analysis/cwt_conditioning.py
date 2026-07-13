@@ -83,6 +83,59 @@ def _save(fig: plt.Figure, name: str, output_dir: Path) -> None:
     print(f"  Saved {path}")
 
 
+def _fetch_conditioning_from_wandb() -> list[dict]:
+    """Fetch CWT_CONDITIONING runs from W&B API."""
+    import wandb
+    from common import WANDB_ENTITY, WANDB_PROJECT
+
+    api = wandb.Api(timeout=60)
+    runs = api.runs(
+        f"{WANDB_ENTITY}/{WANDB_PROJECT}",
+        filters={"group": "CWT_CONDITIONING"},
+    )
+
+    rows = []
+    for run in runs:
+        d = run.display_name
+        s = run.summary._json_dict
+
+        matched_label = None
+        for prefix, label in RUN_PREFIX_MAP.items():
+            if d.startswith(prefix):
+                matched_label = label
+                break
+        if matched_label is None:
+            continue
+
+        auroc = s.get(AUROC_KEY, {})
+        if isinstance(auroc, dict):
+            auroc = auroc.get("max")
+        if auroc is None:
+            continue
+
+        parts = d.split("_")
+        try:
+            fold = int(
+                [p for p in parts if p.startswith("fold")][0].replace(
+                    "fold", ""
+                )
+            )
+        except (IndexError, ValueError):
+            continue
+
+        rows.append(
+            {
+                "run_name": d,
+                "tokenizer": matched_label,
+                "fold": fold,
+                "auroc": auroc,
+                "source": "CWT_CONDITIONING",
+            }
+        )
+
+    return rows
+
+
 def collect_data(cache_dir: Path, *, plot_only: bool = False) -> pd.DataFrame:
     cache_csv = cache_dir / "CWT_CONDITIONING.csv"
 
@@ -93,7 +146,7 @@ def collect_data(cache_dir: Path, *, plot_only: bool = False) -> pd.DataFrame:
 
     rows: list[dict] = []
 
-    # New conditioning runs from local outputs
+    # New conditioning runs from local outputs or W&B
     if RUNS_DIR.exists():
         for d in sorted(os.listdir(RUNS_DIR)):
             run_path = RUNS_DIR / d
@@ -136,31 +189,37 @@ def collect_data(cache_dir: Path, *, plot_only: bool = False) -> pd.DataFrame:
                     "source": "CWT_CONDITIONING",
                 }
             )
+    else:
+        print(f"  {RUNS_DIR} not found, fetching from W&B API...")
+        wandb_rows = _fetch_conditioning_from_wandb()
+        rows.extend(wandb_rows)
+        print(f"  Fetched {len(wandb_rows)} conditioning runs from W&B")
 
     # Baselines from PARAM_MATCH cache
     param_csv = cache_dir / "PARAM_MATCH.csv"
     if param_csv.exists():
         pm = pd.read_csv(param_csv)
-        for _, r in pm[pm["tokenizer"] == "CWT+CNN (64f)"].iterrows():
-            rows.append(
-                {
-                    "run_name": r["run_name"],
-                    "tokenizer": "CWT+CNN",
-                    "fold": r["fold"],
-                    "auroc": r["auroc"],
-                    "source": "CWT_LR_AND_PARAM_MATCH",
-                }
-            )
-        for _, r in pm[pm["tokenizer"] == "CNN (64f)"].iterrows():
-            rows.append(
-                {
-                    "run_name": r["run_name"],
-                    "tokenizer": "CNN 64f",
-                    "fold": r["fold"],
-                    "auroc": r["auroc"],
-                    "source": "CWT_LR_AND_PARAM_MATCH",
-                }
-            )
+        if not pm.empty:
+            for _, r in pm[pm["tokenizer"] == "CWT+CNN (64f)"].iterrows():
+                rows.append(
+                    {
+                        "run_name": r["run_name"],
+                        "tokenizer": "CWT+CNN",
+                        "fold": r["fold"],
+                        "auroc": r["auroc"],
+                        "source": "CWT_LR_AND_PARAM_MATCH",
+                    }
+                )
+            for _, r in pm[pm["tokenizer"] == "CNN (64f)"].iterrows():
+                rows.append(
+                    {
+                        "run_name": r["run_name"],
+                        "tokenizer": "CNN 64f",
+                        "fold": r["fold"],
+                        "auroc": r["auroc"],
+                        "source": "CWT_LR_AND_PARAM_MATCH",
+                    }
+                )
 
     df = pd.DataFrame(rows)
     df.to_csv(cache_csv, index=False)
