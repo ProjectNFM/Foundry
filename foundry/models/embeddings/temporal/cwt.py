@@ -90,6 +90,36 @@ def generate_freqs(
     return [1.0 / (inv_max - i * step) for i in range(num_freqs)]
 
 
+class _SafeAtan2(torch.autograd.Function):
+    """atan2 with a clamped denominator in the backward pass.
+
+    Prevents the gradient singularity at (0, 0) where the standard atan2
+    gradient ``x / (x² + y²)`` produces NaN due to 0/0.  The forward pass
+    is identical to ``torch.atan2``.
+    """
+
+    @staticmethod
+    def forward(ctx, y: torch.Tensor, x: torch.Tensor, min_sq: float):  # noqa: N805
+        ctx.save_for_backward(y, x)
+        ctx.min_sq = min_sq
+        return torch.atan2(y, x)
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        y, x = ctx.saved_tensors
+        denom = (x.square() + y.square()).clamp(min=ctx.min_sq)
+        grad_y = grad_output * x / denom
+        grad_x = grad_output * (-y) / denom
+        return grad_y, grad_x, None
+
+
+def _safe_atan2(
+    y: torch.Tensor, x: torch.Tensor, min_sq: float = 1e-4
+) -> torch.Tensor:
+    """Numerically safe atan2 that avoids gradient NaN at (0, 0)."""
+    return _SafeAtan2.apply(y, x, min_sq)
+
+
 def _inverse_softplus(x: torch.Tensor) -> torch.Tensor:
     threshold = 20.0
     return torch.where(x > threshold, x, torch.log(torch.expm1(x)))
@@ -328,7 +358,10 @@ class ContinuousCWTLayer(nn.Module):
 
         mag_sq = cont_real.square() + cont_imag.square()
         cont_mag = torch.sqrt(mag_sq + 1e-8)
-        raw_phase = torch.atan2(cont_imag, cont_real) / math.pi
+        raw_phase = (
+            _safe_atan2(cont_imag, cont_real, self.phase_stability_eps)
+            / math.pi
+        )
 
         # Phase is undefined for near-zero magnitude and can explode gradients.
         # Smoothly suppressing phase there keeps learnable CWT params stable.
