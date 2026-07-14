@@ -3,7 +3,7 @@
 **Status:** Draft
 **Date started:** 2026-07-09
 **Parent experiment:** None (root)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Kemp Sleep EDF — Tokenizer Baseline Comparison](../experiments/006-kemp-sleep-tokenizer-baseline.md)
 
 ## Background
 
