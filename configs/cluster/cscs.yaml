@@ -5,3 +5,6 @@ hydra:
   sweep:
     dir: /capstor/scratch/cscs/${oc.env:USER}/runs/${run.group}
     subdir: ${run.name}
+
+data:
+  root: ${oc.env:PROJECT}/processed/
