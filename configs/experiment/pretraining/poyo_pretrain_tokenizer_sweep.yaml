@@ -67,7 +67,7 @@ trainer:
       filename: "best-epoch{epoch:03d}-val_loss_{val/loss:.4f}"
 
 stage:
-  skip: true
+  skip: false
 
 hydra:
   sweeper:
