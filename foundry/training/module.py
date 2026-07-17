@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 from hydra.utils import instantiate
 
-from foundry.models.ssl_meta import ReconstructionVizMeta, SSLTaskMeta
+from foundry.models.ssl_meta import ModelOutput, ReconstructionVizMeta
 from foundry.tasks.config import TaskConfig
 from foundry.training.confusion_matrix import ConfusionMatrixTracker
 
@@ -122,12 +122,16 @@ class FoundryModule(L.LightningModule):
         model_inputs, target_values, target_weights, task_index, session_id = (
             self._unpack_batch(batch)
         )
-        outputs = self.model(**model_inputs, unpack_output=False)
+        model_output = self.model(**model_inputs, unpack_output=False)
 
-        ssl_meta: dict[str, SSLTaskMeta] | None = outputs.pop("_ssl_meta", None)
-        reconstruction_viz: ReconstructionVizMeta | None = outputs.pop(
-            "_reconstruction_viz", None
-        )
+        if isinstance(model_output, ModelOutput):
+            outputs = model_output.task_outputs
+            ssl_meta = model_output.ssl_meta
+            reconstruction_viz = model_output.viz
+        else:
+            outputs = model_output
+            ssl_meta = outputs.pop("_ssl_meta", None)
+            reconstruction_viz = outputs.pop("_reconstruction_viz", None)
         ssl_task_names: set[str] = set()
         if ssl_meta is not None:
             for task_name, meta in ssl_meta.items():

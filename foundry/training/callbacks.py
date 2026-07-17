@@ -17,6 +17,15 @@ from foundry.training.confusion_matrix import ConfusionMatrixTracker
 log = logging.getLogger(__name__)
 
 
+def get_wandb_experiment(trainer: Trainer):
+    """Return the W&B experiment object if a WandbLogger is active, else None."""
+    from lightning.pytorch.loggers import WandbLogger
+
+    if isinstance(trainer.logger, WandbLogger):
+        return trainer.logger.experiment
+    return None
+
+
 class ReconstructionVisualizationCallback(L.Callback):
     """Log example masked-reconstruction plots to W&B.
 
@@ -71,35 +80,7 @@ class ReconstructionVisualizationCallback(L.Callback):
         buffer: list[dict] = getattr(
             pl_module, "_reconstruction_train_viz_buffer", []
         )
-        if not buffer:
-            return
-
-        wandb_experiment = self._get_wandb_experiment(trainer)
-        if wandb_experiment is None:
-            pl_module._reconstruction_train_viz_buffer = []
-            return
-
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-
-        try:
-            import wandb
-        except ImportError:
-            pl_module._reconstruction_train_viz_buffer = []
-            return
-
-        figures: dict[str, Any] = {}
-        for i, example in enumerate(buffer):
-            fig = self._plot_reconstruction(example)
-            if fig is not None:
-                figures[f"train/reconstruction_example_{i}"] = wandb.Image(fig)
-                plt.close(fig)
-
-        if figures:
-            wandb_experiment.log(figures, commit=False)
-
+        self._log_reconstructions(buffer, "train", trainer)
         pl_module._reconstruction_train_viz_buffer = []
 
     def on_validation_epoch_end(
@@ -108,12 +89,21 @@ class ReconstructionVisualizationCallback(L.Callback):
         buffer: list[dict] = getattr(
             pl_module, "_reconstruction_viz_buffer", []
         )
+        self._log_reconstructions(buffer, "val", trainer)
+        pl_module._reconstruction_viz_buffer = []
+
+    def _log_reconstructions(
+        self,
+        buffer: list[dict],
+        prefix: str,
+        trainer: Trainer,
+    ) -> None:
+        """Plot reconstructions from *buffer* and log to W&B under *prefix*."""
         if not buffer:
             return
 
-        wandb_experiment = self._get_wandb_experiment(trainer)
+        wandb_experiment = get_wandb_experiment(trainer)
         if wandb_experiment is None:
-            pl_module._reconstruction_viz_buffer = []
             return
 
         import matplotlib
@@ -124,20 +114,19 @@ class ReconstructionVisualizationCallback(L.Callback):
         try:
             import wandb
         except ImportError:
-            pl_module._reconstruction_viz_buffer = []
             return
 
         figures: dict[str, Any] = {}
         for i, example in enumerate(buffer):
             fig = self._plot_reconstruction(example)
             if fig is not None:
-                figures[f"val/reconstruction_example_{i}"] = wandb.Image(fig)
+                figures[f"{prefix}/reconstruction_example_{i}"] = wandb.Image(
+                    fig
+                )
                 plt.close(fig)
 
         if figures:
             wandb_experiment.log(figures, commit=False)
-
-        pl_module._reconstruction_viz_buffer = []
 
     # ------------------------------------------------------------------
 
@@ -219,13 +208,7 @@ class ReconstructionVisualizationCallback(L.Callback):
         fig.tight_layout()
         return fig
 
-    @staticmethod
-    def _get_wandb_experiment(trainer: Trainer):
-        from lightning.pytorch.loggers import WandbLogger
-
-        if isinstance(trainer.logger, WandbLogger):
-            return trainer.logger.experiment
-        return None
+    # ------------------------------------------------------------------
 
 
 class ConfusionMatrixCallback(L.Callback):
@@ -246,7 +229,7 @@ class ConfusionMatrixCallback(L.Callback):
         if not trackers:
             return
 
-        wandb_experiment = self._get_wandb_experiment(trainer)
+        wandb_experiment = get_wandb_experiment(trainer)
 
         for name, tracker in trackers.items():
             counts, normalized = tracker.compute()
@@ -273,14 +256,6 @@ class ConfusionMatrixCallback(L.Callback):
                 )
 
             tracker.reset()
-
-    @staticmethod
-    def _get_wandb_experiment(trainer: Trainer):
-        from lightning.pytorch.loggers import WandbLogger
-
-        if isinstance(trainer.logger, WandbLogger):
-            return trainer.logger.experiment
-        return None
 
 
 class SessionMetricsCallback(L.Callback):
@@ -443,9 +418,8 @@ class EffectiveBatchSizeCallback(L.Callback):
             best_bs * accum,
         )
 
-    @staticmethod
     def _try_batch_size(
-        dl, trainer: Trainer, pl_module: L.LightningModule, device
+        self, dl, trainer: Trainer, pl_module: L.LightningModule, device
     ) -> bool:
         import gc
 
@@ -454,7 +428,7 @@ class EffectiveBatchSizeCallback(L.Callback):
 
         try:
             it = iter(dl)
-            for _ in range(3):
+            for _ in range(self.steps_per_trial):
                 try:
                     batch = next(it)
                 except StopIteration:
@@ -467,7 +441,7 @@ class EffectiveBatchSizeCallback(L.Callback):
 
             return True
         except RuntimeError as e:
-            if "out of memory" in str(e).lower() or "cuda" in str(e).lower():
+            if "out of memory" in str(e).lower():
                 log.info("BatchSizeFinder: OOM at current batch_size")
                 return False
             raise
@@ -643,7 +617,7 @@ class ParameterWatcherCallback(L.Callback):
         if step % self.log_every_n_steps != 0:
             return
 
-        wandb_experiment = self._get_wandb_experiment(trainer)
+        wandb_experiment = get_wandb_experiment(trainer)
         if wandb_experiment is None:
             return
 
@@ -803,14 +777,6 @@ class ParameterWatcherCallback(L.Callback):
         for pg in optimizer.param_groups:
             if any(p is param for p in pg["params"]):
                 return pg["lr"]
-        return None
-
-    @staticmethod
-    def _get_wandb_experiment(trainer: Trainer):
-        from lightning.pytorch.loggers import WandbLogger
-
-        if isinstance(trainer.logger, WandbLogger):
-            return trainer.logger.experiment
         return None
 
 

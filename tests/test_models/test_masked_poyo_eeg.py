@@ -9,7 +9,7 @@ from foundry.models.masked_poyo_eeg import (
     MaskedPOYOEEGModel,
     _compute_visible_indices,
 )
-from foundry.models.ssl_meta import SSLTaskMeta
+from foundry.models.ssl_meta import ModelOutput, SSLTaskMeta
 from foundry.tasks.masking import RandomTokenMasking
 
 
@@ -179,29 +179,28 @@ class TestMaskedModelForward:
             embed_dim=64, C_pad=4, N=10, sequence_length=1.0, mask_ratio=0.5
         )
 
-    def test_forward_returns_dict_with_predictions(self, model):
+    def test_forward_returns_model_output_with_predictions(self, model):
         B, C_pad, N = 2, 4, 10
         T = 100  # raw signal samples
         sr = 100.0
 
-        outputs = self._run_forward(model, B, C_pad, N, T, sr)
+        result = self._run_forward(model, B, C_pad, N, T, sr)
 
-        assert isinstance(outputs, dict)
-        assert "masked_reconstruction" in outputs
+        assert isinstance(result, ModelOutput)
+        assert "masked_reconstruction" in result.task_outputs
 
     def test_forward_returns_targets_and_weights(self, model):
         B, C_pad, N = 2, 4, 10
         T = 100
         sr = 100.0
 
-        outputs = self._run_forward(
+        result = self._run_forward(
             model, B, C_pad, N, T, sr, include_recon_targets=True
         )
 
-        assert "_ssl_meta" in outputs
-        ssl_meta = outputs["_ssl_meta"]
-        assert "masked_reconstruction" in ssl_meta
-        meta = ssl_meta["masked_reconstruction"]
+        assert result.ssl_meta is not None
+        assert "masked_reconstruction" in result.ssl_meta
+        meta = result.ssl_meta["masked_reconstruction"]
         assert isinstance(meta, SSLTaskMeta)
         assert meta.targets is not None
         assert meta.weights is not None
@@ -211,12 +210,12 @@ class TestMaskedModelForward:
         T = 100
         sr = 100.0
 
-        outputs = self._run_forward(
+        result = self._run_forward(
             model, B, C_pad, N, T, sr, include_recon_targets=True
         )
 
-        preds = outputs["masked_reconstruction"]
-        targets = outputs["_ssl_meta"]["masked_reconstruction"].targets
+        preds = result.task_outputs["masked_reconstruction"]
+        targets = result.ssl_meta["masked_reconstruction"].targets
         assert preds.shape[0] == targets.shape[0]
 
     def test_forward_without_recon_targets(self, model):
@@ -224,23 +223,23 @@ class TestMaskedModelForward:
         T = 100
         sr = 100.0
 
-        outputs = self._run_forward(
+        result = self._run_forward(
             model, B, C_pad, N, T, sr, include_recon_targets=False
         )
 
-        assert "masked_reconstruction" in outputs
-        assert "_ssl_meta" not in outputs
+        assert "masked_reconstruction" in result.task_outputs
+        assert result.ssl_meta is None
 
     def test_weights_are_between_zero_and_one(self, model):
         B, C_pad, N = 2, 4, 10
         T = 100
         sr = 100.0
 
-        outputs = self._run_forward(
+        result = self._run_forward(
             model, B, C_pad, N, T, sr, include_recon_targets=True
         )
 
-        weights = outputs["_ssl_meta"]["masked_reconstruction"].weights
+        weights = result.ssl_meta["masked_reconstruction"].weights
         assert (weights >= 0).all()
         assert (weights <= 1).all()
 
@@ -249,11 +248,11 @@ class TestMaskedModelForward:
         T = 100
         sr = 100.0
 
-        outputs = self._run_forward(
+        result = self._run_forward(
             model, B, C_pad, N, T, sr, include_recon_targets=True
         )
 
-        loss = outputs["masked_reconstruction"].sum()
+        loss = result.task_outputs["masked_reconstruction"].sum()
         loss.backward()
 
         has_grad = False

@@ -16,7 +16,11 @@ from torch_brain.data import Data
 from torch_brain.batching import pad2d
 
 from foundry.models.poyo_eeg import POYOEEGModel
-from foundry.models.ssl_meta import ReconstructionVizMeta, SSLTaskMeta
+from foundry.models.ssl_meta import (
+    ModelOutput,
+    ReconstructionVizMeta,
+    SSLTaskMeta,
+)
 from foundry.tasks.masking import MaskingStrategy
 
 
@@ -71,9 +75,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             "MaskedPOYOEEGModel requires PerChannelStrategy. "
             "SpatialProjectionStrategy is not supported."
         )
-        self._variable_time_tokens = (
-            not self.tokenizer.temporal_embedding.has_fixed_token_count
-        )
+        self._variable_time_tokens = not self.tokenizer.has_fixed_token_count
 
         ch_dim = self.tokenizer.channel_emb_dim
         if ch_dim != self.embed_dim:
@@ -100,24 +102,21 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         task_index: torch.Tensor,
         reconstruction_targets: Optional[torch.Tensor] = None,
         unpack_output: bool = False,
-    ) -> dict:
+    ) -> ModelOutput:
         del unpack_output
         self._validate_vocab_initialization()
 
-        # 1. GPU tokenization
-        inputs = self.tokenizer(
+        # 1. GPU tokenization (shared helper)
+        inputs, session_emb = self._tokenize_and_add_session(
             input_values,
-            input_channel_index=input_channel_index,
+            input_channel_index,
+            input_session_index,
             input_mask=input_mask,
             input_sampling_rate=input_sampling_rate,
             input_seq_len=input_seq_len,
             input_session_ids=input_session_ids,
             input_channel_counts=input_channel_counts,
-            channel_emb_fn=self.channel_emb,
         )
-
-        session_emb = self.session_emb(input_session_index).unsqueeze(1)
-        inputs = inputs + session_emb
 
         B, num_tokens, D = inputs.shape
         device = inputs.device
@@ -182,7 +181,6 @@ class MaskedPOYOEEGModel(POYOEEGModel):
                 device=device,
             )
         )
-        recon_session_emb = self.session_emb(input_session_index).unsqueeze(1)
         masked_channel_idx = mask_indices // N
         recon_channel_tokens = torch.gather(
             input_channel_index, 1, masked_channel_idx
@@ -190,7 +188,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         recon_channel_emb = self.channel_emb(recon_channel_tokens)
         if self.recon_channel_proj is not None:
             recon_channel_emb = self.recon_channel_proj(recon_channel_emb)
-        recon_queries = recon_session_emb + recon_task_emb + recon_channel_emb
+        recon_queries = session_emb + recon_task_emb + recon_channel_emb
 
         masked_ts = torch.gather(input_timestamps, 1, mask_indices)
         recon_ts_emb = self.rotary_emb(masked_ts)
@@ -226,61 +224,56 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             latent_ts_emb,
         )
 
-        # 8. Route through ReadoutRouter
-        B_out, N_out, D_out = output_latents.shape
-        flat_embs = output_latents.reshape(B_out * N_out, D_out)
-        flat_task_index = combined_task_index.reshape(B_out * N_out)
-        valid = flat_task_index > 0
-        outputs = self.router(
-            flat_embs[valid], (flat_task_index[valid] - 1).long()
-        )
+        # 8. Route through ReadoutRouter (shared helper)
+        task_outputs = self._route(output_latents, combined_task_index)
 
-        # 9. Gather reconstruction targets and inject via typed contract
+        # 9. Gather reconstruction targets and build typed output
+        ssl_meta: dict[str, SSLTaskMeta] | None = None
         if reconstruction_targets is not None:
             gathered_targets = torch.gather(
                 reconstruction_targets, 1, mask_indices
             )
             recon_valid = (recon_task_index > 0).reshape(-1)
             task_name = self.RECONSTRUCTION_TASK_NAME
-            outputs["_ssl_meta"] = {
+            ssl_meta = {
                 task_name: SSLTaskMeta(
                     targets=gathered_targets.reshape(-1)[recon_valid],
                     weights=validity_mask.float().reshape(-1)[recon_valid],
                 )
             }
 
-        outputs["_reconstruction_viz"] = ReconstructionVizMeta(
+        viz = ReconstructionVizMeta(
             mask_indices=mask_indices,
             validity_mask=validity_mask,
             num_channels=C_pad,
             num_time_tokens=N,
         )
 
-        return outputs
+        return ModelOutput(
+            task_outputs=task_outputs, ssl_meta=ssl_meta, viz=viz
+        )
 
     def tokenize(self, data: Data) -> dict:
         """Tokenize with reconstruction targets for masked pretraining.
 
-        Calls the base ``tokenize()`` then delegates reconstruction target
-        computation to the tokenizer and wraps ``input_values`` in ``pad2d``
-        for mixed-sr collation.
+        Calls the base ``_tokenize_core()`` and reuses the already-prepared
+        signal (with length normalization) for reconstruction targets,
+        avoiding a redundant ``_prepare_signal`` call.
         """
-        result = super().tokenize(data)
+        result, signal, sampling_rate, _ = self._tokenize_core(data)
 
-        signal, sampling_rate, _ = self._prepare_signal(
-            data, normalize_length=True
-        )
+        signal = self._normalize_signal_length(signal, sampling_rate)
 
-        C_pad = self.tokenizer.channel_strategy.max_channels
         targets_tensor = self.tokenizer.compute_reconstruction_targets(
             signal, sampling_rate, self.sequence_length
         )
 
-        if self.tokenizer._do_patching:
+        if self.tokenizer.does_patching:
             result["reconstruction_targets"] = targets_tensor
-        elif self.tokenizer.temporal_embedding.has_fixed_token_count:
+        elif self.tokenizer.has_fixed_token_count:
             result["reconstruction_targets"] = targets_tensor.reshape(-1)
         else:
+            C_pad = self.tokenizer.channel_strategy.max_channels
             result["reconstruction_targets"] = pad2d(targets_tensor)
             N = targets_tensor.shape[1]
             ts = result["input_timestamps"]

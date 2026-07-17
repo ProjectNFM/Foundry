@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Optional
 
 import numpy as np
 import torch
@@ -8,6 +8,7 @@ from torch_brain.batching import chain, pad8
 from torch_brain.nn import InfiniteVocabEmbedding, RotaryTimeEmbedding
 from foundry.models.backbones import PerceiverIOBackbone
 from foundry.models.readout import build_readout_router
+from foundry.models.ssl_meta import ModelOutput
 from foundry.models.tokenizer import EEGTokenizer
 from foundry.tasks.config import TaskConfig
 from foundry.tasks.targets import extract_multitask_targets
@@ -122,6 +123,52 @@ class POYOEEGModel(nn.Module):
             t_max=t_max,
         )
 
+    def _tokenize_and_add_session(
+        self,
+        input_values: torch.Tensor,
+        input_channel_index: torch.Tensor,
+        input_session_index: torch.Tensor,
+        input_mask: Optional[torch.Tensor] = None,
+        input_sampling_rate: Optional[torch.Tensor] = None,
+        input_seq_len: Optional[torch.Tensor] = None,
+        input_session_ids=None,
+        input_channel_counts: Optional[torch.Tensor] = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """GPU tokenization + session embedding addition.
+
+        Returns:
+            ``(inputs, session_emb)`` where *inputs* has shape
+            ``(B, num_tokens, embed_dim)`` and *session_emb* has shape
+            ``(B, 1, embed_dim)``.
+        """
+        inputs = self.tokenizer(
+            input_values,
+            input_channel_index=input_channel_index,
+            input_mask=input_mask,
+            input_sampling_rate=input_sampling_rate,
+            input_seq_len=input_seq_len,
+            input_session_ids=input_session_ids,
+            input_channel_counts=input_channel_counts,
+            channel_emb_fn=self.channel_emb,
+        )
+        session_emb = self.session_emb(input_session_index).unsqueeze(1)
+        inputs = inputs + session_emb
+        return inputs, session_emb
+
+    def _route(
+        self,
+        output_latents: torch.Tensor,
+        task_index: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        """Flatten output latents and dispatch through the readout router."""
+        B, N, D = output_latents.shape
+        flat_embs = output_latents.reshape(B * N, D)
+        flat_task_index = task_index.reshape(B * N)
+        valid = flat_task_index > 0
+        return self.router(
+            flat_embs[valid], (flat_task_index[valid] - 1).long()
+        )
+
     def forward(
         self,
         *,
@@ -140,7 +187,7 @@ class POYOEEGModel(nn.Module):
         output_timestamps: torch.Tensor,
         task_index: torch.Tensor,
         unpack_output: bool = False,
-    ) -> Dict:
+    ) -> ModelOutput:
         """Forward pass through the model.
 
         Args:
@@ -159,24 +206,21 @@ class POYOEEGModel(nn.Module):
             unpack_output: Whether to unpack outputs by batch sample.
 
         Returns:
-            Dictionary of task-specific outputs.
+            :class:`ModelOutput` with task-specific predictions.
         """
         del unpack_output
         self._validate_vocab_initialization()
 
-        inputs = self.tokenizer(
+        inputs, _session_emb = self._tokenize_and_add_session(
             input_values,
-            input_channel_index=input_channel_index,
+            input_channel_index,
+            input_session_index,
             input_mask=input_mask,
             input_sampling_rate=input_sampling_rate,
             input_seq_len=input_seq_len,
             input_session_ids=input_session_ids,
             input_channel_counts=input_channel_counts,
-            channel_emb_fn=self.channel_emb,
         )
-
-        session_emb = self.session_emb(input_session_index).unsqueeze(1)
-        inputs = inputs + session_emb
 
         input_timestamp_emb = self.rotary_emb(input_timestamps)
 
@@ -198,13 +242,7 @@ class POYOEEGModel(nn.Module):
             output_timestamp_emb=output_timestamp_emb,
         )
 
-        batch_size, n_out, dim = output_latents.shape
-        flat_embs = output_latents.reshape(batch_size * n_out, dim)
-        flat_task_index = task_index.reshape(batch_size * n_out)
-        valid = flat_task_index > 0
-        return self.router(
-            flat_embs[valid], (flat_task_index[valid] - 1).long()
-        )
+        return ModelOutput(task_outputs=self._route(output_latents, task_index))
 
     @property
     def task_configs(self) -> dict[str, TaskConfig]:
@@ -281,15 +319,22 @@ class POYOEEGModel(nn.Module):
             signal = (signal - mu) / std
 
         if normalize_length:
-            expected_T = round(sampling_rate * self.sequence_length)
-            T = signal.shape[0]
-            if abs(T - expected_T) <= 2:
-                if T > expected_T:
-                    signal = signal[:expected_T]
-                elif T < expected_T:
-                    signal = np.pad(signal, ((0, expected_T - T), (0, 0)))
+            signal = self._normalize_signal_length(signal, sampling_rate)
 
         return signal, sampling_rate, modality_mask
+
+    def _normalize_signal_length(
+        self, signal: np.ndarray, sampling_rate: float
+    ) -> np.ndarray:
+        """Trim or pad *signal* to match ``round(sampling_rate × sequence_length)``."""
+        expected_T = round(sampling_rate * self.sequence_length)
+        T = signal.shape[0]
+        if abs(T - expected_T) <= 2:
+            if T > expected_T:
+                signal = signal[:expected_T]
+            elif T < expected_T:
+                signal = np.pad(signal, ((0, expected_T - T), (0, 0)))
+        return signal
 
     def _infer_sampling_rate_from_timestamps(
         self, timestamps: np.ndarray
@@ -308,20 +353,15 @@ class POYOEEGModel(nn.Module):
     def _extract_targets(self, data: Data):
         return extract_multitask_targets(self._task_configs, data)
 
-    def tokenize(self, data: Data) -> dict:
-        """Tokenize the input data.
-
-        Delegates signal preparation to the :class:`EEGTokenizer` which
-        handles channel strategy, optional GPU patching, and temporal
-        embedding concerns. Target extraction uses :class:`TargetExtractor`
-        instances from the configured task configs.
-
-        Args:
-            data: TemporalData object containing raw EEG/ECoG/sEEG signal.
+    def _tokenize_core(
+        self, data: Data
+    ) -> tuple[dict, np.ndarray, float, np.ndarray]:
+        """Shared tokenization logic returning intermediate results.
 
         Returns:
-            dict with model_inputs, target_values, target_weights, and
-            metadata.
+            ``(result_dict, signal, sampling_rate, modality_mask)`` where
+            *signal* is the prepared (T, C_filtered) array and *result_dict*
+            is a complete tokenized sample ready for collation.
         """
         signal, sampling_rate, modality_mask = self._prepare_signal(data)
 
@@ -355,7 +395,7 @@ class POYOEEGModel(nn.Module):
             len(output_timestamps), input_session_index
         )
 
-        return {
+        result = {
             **pretokenized,
             "input_timestamps": input_timestamps,
             "input_session_index": input_session_index,
@@ -369,6 +409,25 @@ class POYOEEGModel(nn.Module):
             "session_id": data.session.id,
             "absolute_start": data.absolute_start,
         }
+        return result, signal, sampling_rate, modality_mask
+
+    def tokenize(self, data: Data) -> dict:
+        """Tokenize the input data.
+
+        Delegates signal preparation to the :class:`EEGTokenizer` which
+        handles channel strategy, optional GPU patching, and temporal
+        embedding concerns. Target extraction uses :class:`TargetExtractor`
+        instances from the configured task configs.
+
+        Args:
+            data: TemporalData object containing raw EEG/ECoG/sEEG signal.
+
+        Returns:
+            dict with model_inputs, target_values, target_weights, and
+            metadata.
+        """
+        result, _signal, _sr, _mask = self._tokenize_core(data)
+        return result
 
     def initialize_vocabs(self, vocab_info: dict):
         """Initialize vocabularies from dataset information.

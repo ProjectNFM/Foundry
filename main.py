@@ -339,21 +339,6 @@ def main(cfg: DictConfig):
             )
         )
     )
-    # PyTorch 2.6+ defaults weights_only=True in torch.load, but Lightning's
-    # BatchSizeFinder saves/restores full checkpoints containing OmegaConf
-    # configs and UninitializedParameter, which fail the safe-globals check.
-    # All checkpoints are locally generated, so this is safe.
-    import torch.serialization as _ts
-
-    _orig_load = _ts.load
-
-    def _permissive_load(*args, **kwargs):
-        kwargs["weights_only"] = False
-        return _orig_load(*args, **kwargs)
-
-    _ts.load = _permissive_load
-    torch.load = _permissive_load
-
     set_seed(
         cfg.run.seed,
         deterministic=OmegaConf.select(cfg, "run.deterministic", default=False),
@@ -405,7 +390,22 @@ def main(cfg: DictConfig):
     ckpt_path = _get_resume_checkpoint_path(
         cfg, checkpoint_dir, slurm_restart_count
     )
+
+    # PyTorch 2.6+ defaults weights_only=True in torch.load, but Lightning
+    # checkpoints contain OmegaConf configs and UninitializedParameter which
+    # fail the safe-globals check.  Scope the override to trainer.fit only.
+    import torch.serialization as _ts
+
+    _orig_ts_load = _ts.load
+    _orig_torch_load = torch.load
+
+    def _permissive_load(*args, **kwargs):
+        kwargs["weights_only"] = False
+        return _orig_ts_load(*args, **kwargs)
+
     try:
+        _ts.load = _permissive_load
+        torch.load = _permissive_load
         trainer.fit(
             lightning_module,
             datamodule,
@@ -413,6 +413,8 @@ def main(cfg: DictConfig):
             weights_only=False,
         )
     finally:
+        _ts.load = _orig_ts_load
+        torch.load = _orig_torch_load
         if using_wandb_logger:
             _finish_active_wandb_run()
 

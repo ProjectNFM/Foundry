@@ -86,6 +86,16 @@ class EEGTokenizer(nn.Module):
         self.post_proj_norm = nn.LayerNorm(self.token_embed_dim)
 
     @property
+    def does_patching(self) -> bool:
+        """Whether this tokenizer applies GPU-side signal patching."""
+        return self._do_patching
+
+    @property
+    def has_fixed_token_count(self) -> bool:
+        """Whether the temporal embedding produces a fixed token count."""
+        return self.temporal_embedding.has_fixed_token_count
+
+    @property
     def channel_emb_dim(self) -> int:
         """Dimension expected for channel identity embeddings."""
         return self._channel_emb_dim
