@@ -257,15 +257,14 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         """Tokenize with reconstruction targets for masked pretraining.
 
         Calls the base ``_tokenize_core()`` and reuses the already-prepared
-        signal (with length normalization) for reconstruction targets,
-        avoiding a redundant ``_prepare_signal`` call.
+        signal (already length-normalized via :class:`PreparedSignal`) for
+        reconstruction targets, ensuring encoder inputs and targets share
+        the same signal contract.
         """
-        result, signal, sampling_rate, _ = self._tokenize_core(data)
-
-        signal = self._normalize_signal_length(signal, sampling_rate)
+        result, prepared = self._tokenize_core(data)
 
         targets_tensor = self.tokenizer.compute_reconstruction_targets(
-            signal, sampling_rate, self.sequence_length
+            prepared.signal, prepared.sampling_rate, self.sequence_length
         )
 
         if self.tokenizer.does_patching:

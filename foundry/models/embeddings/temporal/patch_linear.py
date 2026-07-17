@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 
 from foundry.models.embeddings.temporal.base import TemporalEmbedding
+from foundry.models.signal_preparation import compute_num_patches
 
 
 class PatchLinearEmbedding(TemporalEmbedding):
@@ -32,7 +33,9 @@ class PatchLinearEmbedding(TemporalEmbedding):
         self, sequence_length: float, sampling_rate: float
     ) -> int:
         num_samples = round(sampling_rate * sequence_length)
-        return max(1, num_samples // self.patch_samples)
+        return compute_num_patches(
+            num_samples, self.patch_samples, self.patch_samples
+        )
 
     @property
     def has_fixed_token_count(self) -> bool:

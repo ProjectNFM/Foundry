@@ -22,6 +22,13 @@ from foundry.models.embeddings import (
     patch_signal,
     compute_patch_timestamps,
 )
+from foundry.models.signal_preparation import (
+    PreparedSignal,
+    compute_num_patches,
+    normalize_encoder_inputs,
+    normalize_reconstruction_targets,
+    normalize_signal_length,
+)
 from foundry.models.tokenizer import EEGTokenizer
 
 from foundry.models.poyo_eeg import POYOEEGModel
@@ -39,6 +46,11 @@ __all__ = [
     "POYOEEGModel",
     "MaskedPOYOEEGModel",
     "EEGTokenizer",
+    "PreparedSignal",
+    "compute_num_patches",
+    "normalize_signal_length",
+    "normalize_encoder_inputs",
+    "normalize_reconstruction_targets",
     "TemporalConvAvgPool",
     "Linear",
     "MLP",

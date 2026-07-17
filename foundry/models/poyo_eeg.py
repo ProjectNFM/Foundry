@@ -8,6 +8,10 @@ from torch_brain.batching import chain, pad8
 from torch_brain.nn import InfiniteVocabEmbedding, RotaryTimeEmbedding
 from foundry.models.backbones import PerceiverIOBackbone
 from foundry.models.readout import build_readout_router
+from foundry.models.signal_preparation import (
+    PreparedSignal,
+    normalize_encoder_inputs,
+)
 from foundry.models.ssl_meta import ModelOutput
 from foundry.models.tokenizer import EEGTokenizer
 from foundry.tasks.config import TaskConfig
@@ -274,25 +278,23 @@ class POYOEEGModel(nn.Module):
 
         raise ValueError("Data must have an 'eeg', 'ecog', or 'seeg' field")
 
-    def _prepare_signal(
-        self, data: Data, normalize_length: bool = False
-    ) -> tuple[np.ndarray, float, np.ndarray]:
-        """Filter by modality, optionally z-score per channel, optionally normalize T.
+    def _prepare_signal(self, data: Data) -> PreparedSignal:
+        """Filter by modality, sanitize, normalize length, and optionally z-score.
 
         Shared logic used by both ``tokenize()`` and subclass target computation.
+        Always length-normalizes so that encoder inputs and reconstruction targets
+        share the same prepared signal.
+
         When ``self.normalize_inputs`` is True, per-channel z-scoring ensures
         scale invariance across datasets with different amplifier gains,
         impedances, and physical units.
 
         Args:
             data: Input data sample.
-            normalize_length: If True, trim/pad the time axis to match
-                ``round(sampling_rate * sequence_length)``.
 
         Returns:
-            Tuple of ``(signal, sampling_rate, modality_mask)`` where
-            signal has shape ``(T, C_filtered)`` and modality_mask is a
-            boolean array over the original channels.
+            :class:`PreparedSignal` containing the length-normalized,
+            sanitized signal and token-grid metadata.
         """
         signal_source, default_type, sampling_rate = (
             self._resolve_signal_source(data)
@@ -313,28 +315,11 @@ class POYOEEGModel(nn.Module):
             signal = np.where(non_finite, 0.0, signal)
 
         if self.normalize_inputs:
-            mu = signal.mean(axis=0, keepdims=True)
-            std = signal.std(axis=0, keepdims=True)
-            std = np.where(std > 1e-8, std, 1.0)
-            signal = (signal - mu) / std
+            signal = normalize_encoder_inputs(signal)
 
-        if normalize_length:
-            signal = self._normalize_signal_length(signal, sampling_rate)
-
-        return signal, sampling_rate, modality_mask
-
-    def _normalize_signal_length(
-        self, signal: np.ndarray, sampling_rate: float
-    ) -> np.ndarray:
-        """Trim or pad *signal* to match ``round(sampling_rate × sequence_length)``."""
-        expected_T = round(sampling_rate * self.sequence_length)
-        T = signal.shape[0]
-        if abs(T - expected_T) <= 2:
-            if T > expected_T:
-                signal = signal[:expected_T]
-            elif T < expected_T:
-                signal = np.pad(signal, ((0, expected_T - T), (0, 0)))
-        return signal
+        return self.tokenizer.prepare_signal(
+            signal, sampling_rate, self.sequence_length, modality_mask
+        )
 
     def _infer_sampling_rate_from_timestamps(
         self, timestamps: np.ndarray
@@ -353,25 +338,23 @@ class POYOEEGModel(nn.Module):
     def _extract_targets(self, data: Data):
         return extract_multitask_targets(self._task_configs, data)
 
-    def _tokenize_core(
-        self, data: Data
-    ) -> tuple[dict, np.ndarray, float, np.ndarray]:
+    def _tokenize_core(self, data: Data) -> tuple[dict, PreparedSignal]:
         """Shared tokenization logic returning intermediate results.
 
         Returns:
-            ``(result_dict, signal, sampling_rate, modality_mask)`` where
-            *signal* is the prepared (T, C_filtered) array and *result_dict*
-            is a complete tokenized sample ready for collation.
+            ``(result_dict, prepared_signal)`` where *prepared_signal* is the
+            :class:`PreparedSignal` contract and *result_dict* is a complete
+            tokenized sample ready for collation.
         """
-        signal, sampling_rate, modality_mask = self._prepare_signal(data)
+        prepared = self._prepare_signal(data)
 
-        channel_ids = data.channels.id[modality_mask].astype(str)
+        channel_ids = data.channels.id[prepared.modality_mask].astype(str)
         channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
 
         pretokenized = self.tokenizer.pretokenize(
-            signal=signal,
+            signal=prepared.signal,
             channel_tokens=channel_tokens,
-            sampling_rate=sampling_rate,
+            sampling_rate=prepared.sampling_rate,
             sequence_length=self.sequence_length,
         )
         pretokenized["input_session_ids"] = str(data.session.id)
@@ -409,7 +392,7 @@ class POYOEEGModel(nn.Module):
             "session_id": data.session.id,
             "absolute_start": data.absolute_start,
         }
-        return result, signal, sampling_rate, modality_mask
+        return result, prepared
 
     def tokenize(self, data: Data) -> dict:
         """Tokenize the input data.
@@ -426,7 +409,7 @@ class POYOEEGModel(nn.Module):
             dict with model_inputs, target_values, target_weights, and
             metadata.
         """
-        result, _signal, _sr, _mask = self._tokenize_core(data)
+        result, _prepared = self._tokenize_core(data)
         return result
 
     def initialize_vocabs(self, vocab_info: dict):
