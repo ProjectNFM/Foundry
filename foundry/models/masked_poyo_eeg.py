@@ -21,7 +21,7 @@ from foundry.models.ssl_meta import (
     ReconstructionVizMeta,
     SSLTaskMeta,
 )
-from foundry.tasks.masking import MaskingStrategy
+from foundry.tasks.masking import MaskingStrategy, build_token_validity_mask
 
 
 def _compute_visible_indices(
@@ -71,10 +71,11 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         super().__init__(*args, **kwargs)
         self.masking = masking
 
-        assert self.tokenizer.uses_per_channel, (
-            "MaskedPOYOEEGModel requires PerChannelStrategy. "
-            "SpatialProjectionStrategy is not supported."
-        )
+        if not self.tokenizer.uses_per_channel:
+            raise ValueError(
+                "MaskedPOYOEEGModel requires PerChannelStrategy. "
+                "SpatialProjectionStrategy is not supported."
+            )
         self._variable_time_tokens = not self.tokenizer.has_fixed_token_count
 
         ch_dim = self.tokenizer.channel_emb_dim
@@ -90,7 +91,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         input_timestamps: torch.Tensor,
         input_channel_index: torch.Tensor,
         input_session_index: torch.Tensor,
-        input_mask: Optional[torch.Tensor] = None,
+        input_mask: torch.Tensor,
         input_sampling_rate: Optional[torch.Tensor] = None,
         input_seq_len: Optional[torch.Tensor] = None,
         input_session_ids=None,
@@ -133,31 +134,43 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         ):
             reconstruction_targets = reconstruction_targets.reshape(B, -1)
 
-        # 2. Generate mask from full (C_pad, N) grid
-        mask_indices, validity_mask = self.masking(
+        # 2. Build authoritative token validity from channel + time info
+        token_validity = build_token_validity_mask(
+            input_mask,
+            N,
+            input_seq_len=input_seq_len if self._variable_time_tokens else None,
+        )
+
+        # 3. Generate mask from full (C_pad, N) grid
+        mask_indices, _channel_validity = self.masking(
             num_channels=C_pad,
             num_time_tokens=N,
             channel_mask=input_mask,
             device=device,
         )
 
-        # Exclude time-padded positions from validity when using
-        # variable-length temporal tokens (N = T_max across batch).
-        if self._variable_time_tokens and input_seq_len is not None:
-            time_of_token = mask_indices % N
-            validity_mask = validity_mask & (
-                time_of_token < input_seq_len.unsqueeze(1)
-            )
+        # Derive per-position validity from the authoritative mask
+        masked_validity = torch.gather(token_validity, 1, mask_indices)
 
         visible_indices = _compute_visible_indices(num_tokens, mask_indices)
+        visible_validity = torch.gather(token_validity, 1, visible_indices)
 
-        # 3. Gather visible tokens
+        # Validate: at least one valid visible token per sample
+        valid_visible_per_sample = visible_validity.sum(dim=1)
+        if (valid_visible_per_sample == 0).any():
+            raise ValueError(
+                "At least one sample has zero valid visible tokens after "
+                "masking. This can happen when all real channels are masked "
+                "or the sequence is fully padded."
+            )
+
+        # 4. Gather visible tokens
         expand_D = visible_indices.unsqueeze(-1).expand(-1, -1, D)
         visible_inputs = torch.gather(inputs, 1, expand_D)
         visible_ts = torch.gather(input_timestamps, 1, visible_indices)
         visible_ts_emb = self.rotary_emb(visible_ts)
 
-        # 4. Encoder + processor on visible only
+        # 5. Encoder + processor on visible only (with validity mask)
         latents = self.latent_emb(latent_index)
         latent_ts_emb = self.rotary_emb(latent_timestamps)
 
@@ -166,10 +179,11 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             visible_inputs,
             latent_ts_emb,
             visible_ts_emb,
+            input_mask=visible_validity,
         )
         latents = self.backbone.processor(latents, latent_ts_emb)
 
-        # 5. Build reconstruction queries at masked positions
+        # 6. Build reconstruction queries at masked positions
         recon_task_idx = self.router.get_task_index_by_name(
             self.RECONSTRUCTION_TASK_NAME
         )
@@ -194,12 +208,12 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         recon_ts_emb = self.rotary_emb(masked_ts)
 
         recon_task_index = torch.where(
-            validity_mask,
+            masked_validity,
             torch.full_like(mask_indices, recon_task_idx + 1),
             torch.zeros_like(mask_indices),
         )
 
-        # 6. Build downstream queries (if any)
+        # 7. Build downstream queries (if any)
         if output_timestamps.numel() > 0:
             ds_task_ids = (task_index - 1).clamp(min=0)
             downstream_queries = self.session_emb(
@@ -216,7 +230,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             all_ts_emb = recon_ts_emb
             combined_task_index = recon_task_index
 
-        # 7. Decode
+        # 8. Decode
         output_latents = self.backbone.decoder(
             all_queries,
             latents,
@@ -224,10 +238,10 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             latent_ts_emb,
         )
 
-        # 8. Route through ReadoutRouter (shared helper)
+        # 9. Route through ReadoutRouter (shared helper)
         task_outputs = self._route(output_latents, combined_task_index)
 
-        # 9. Gather reconstruction targets and build typed output
+        # 10. Gather reconstruction targets and build typed output
         ssl_meta: dict[str, SSLTaskMeta] | None = None
         if reconstruction_targets is not None:
             gathered_targets = torch.gather(
@@ -238,13 +252,13 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             ssl_meta = {
                 task_name: SSLTaskMeta(
                     targets=gathered_targets.reshape(-1)[recon_valid],
-                    weights=validity_mask.float().reshape(-1)[recon_valid],
+                    weights=masked_validity.float().reshape(-1)[recon_valid],
                 )
             }
 
         viz = ReconstructionVizMeta(
             mask_indices=mask_indices,
-            validity_mask=validity_mask,
+            validity_mask=masked_validity,
             num_channels=C_pad,
             num_time_tokens=N,
         )

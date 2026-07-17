@@ -104,6 +104,11 @@ class ReconstructionLoss(nn.Module):
 
     Follows the uniform ``(predictions, targets, sample_weights) → scalar``
     signature used by all task losses.
+
+    Scalar weights are broadcast: ``0.0`` produces a differentiable zero loss,
+    ``0.5`` scales the MSE by that factor, and ``1.0`` is equivalent to plain
+    MSE. Zero-valid-target batches return ``predictions.sum() * 0.0`` to
+    preserve dtype, device, and gradient graph.
     """
 
     def forward(
@@ -113,11 +118,13 @@ class ReconstructionLoss(nn.Module):
         sample_weights: torch.Tensor | float = 1.0,
     ) -> torch.Tensor:
         if isinstance(sample_weights, (int, float)):
-            return F.mse_loss(predictions, targets)
+            if sample_weights == 0.0:
+                return predictions.sum() * 0.0
+            return F.mse_loss(predictions, targets) * sample_weights
 
         valid = sample_weights > 0
         if not valid.any():
-            return torch.tensor(0.0, device=predictions.device)
+            return predictions.sum() * 0.0
 
         loss = F.mse_loss(predictions[valid], targets[valid], reduction="none")
         if loss.dim() > 1:

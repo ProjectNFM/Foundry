@@ -156,7 +156,7 @@ class TestMaskedModelInit:
             }
         }
 
-        with pytest.raises(AssertionError, match="PerChannelStrategy"):
+        with pytest.raises(ValueError, match="PerChannelStrategy"):
             MaskedPOYOEEGModel(
                 tokenizer=tokenizer,
                 task_configs=task_configs,
