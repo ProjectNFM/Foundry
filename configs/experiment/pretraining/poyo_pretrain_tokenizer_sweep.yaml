@@ -16,7 +16,7 @@
 defaults:
   - override /model: masked_poyo_eeg
   - override /data: openneuro/multi_brainset
-  - override /hydra/launcher: slurm_default
+  - override /hydra/launcher: cluv_default
 
 task_configs:
   - masked_reconstruction
@@ -72,15 +72,9 @@ stage:
 hydra:
   sweeper:
     params:
-      model/tokenizer: per_channel_resample_cnn, per_channel_cwt_cnn,per_channel_per_timepoint_linear 
+      model/tokenizer: per_channel_cwt_cnn
   launcher:
     tasks_per_node: 1
     cpus_per_task: 6
     mem_gb: 32
     gres: gpu:l40s:1
-    setup:
-      - "set -a"
-      - "source .env"
-      - "set +a"
-      - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment pretraining/poyo_pretrain_tokenizer_sweep"
