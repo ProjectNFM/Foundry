@@ -27,8 +27,11 @@ class _DummyModel(nn.Module):
         self.router = nn.Linear(embed_dim, 5)
 
 
-def _save_lightning_ckpt(model: nn.Module, path: Path) -> None:
-    state_dict = {f"model.{k}": v for k, v in model.state_dict().items()}
+def _save_lightning_ckpt(
+    model: nn.Module, path: Path, compiled: bool = False
+) -> None:
+    prefix = "model._orig_mod." if compiled else "model."
+    state_dict = {f"{prefix}{k}": v for k, v in model.state_dict().items()}
     torch.save({"state_dict": state_dict}, path)
 
 
@@ -97,6 +100,29 @@ class TestLoadPretrainedWeights:
 
         loaded, skipped = load_pretrained_weights(dst, ckpt_path)
         assert len(loaded) == 0, "No keys should load with mismatched shapes"
+
+    def test_compiled_checkpoint_strips_orig_mod(self, tmp_path):
+        """Checkpoints saved from torch.compile'd models have _orig_mod. prefix."""
+        src = _DummyModel(embed_dim=16)
+        dst = _DummyModel(embed_dim=16)
+
+        ckpt_path = tmp_path / "compiled.ckpt"
+        _save_lightning_ckpt(src, ckpt_path, compiled=True)
+
+        loaded, skipped = load_pretrained_weights(dst, ckpt_path)
+
+        for prefix in ("tokenizer.", "backbone.", "rotary_emb.", "latent_emb."):
+            matching = [k for k in loaded if k.startswith(prefix)]
+            assert len(matching) > 0, (
+                f"No keys transferred for {prefix} from compiled checkpoint"
+            )
+
+        for key in loaded:
+            src_val = dict(src.named_parameters())[key]
+            dst_val = dict(dst.named_parameters())[key]
+            assert torch.allclose(src_val, dst_val), (
+                f"Weight mismatch for {key}"
+            )
 
     def test_missing_checkpoint_raises(self, tmp_path):
         dst = _DummyModel(embed_dim=16)

@@ -73,8 +73,14 @@ def load_pretrained_weights(
     ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     ckpt_state = ckpt["state_dict"]
 
+    def _strip_prefix(key: str) -> str:
+        key = key.removeprefix("model.")
+        # torch.compile wraps the original module as ``_orig_mod``
+        key = key.removeprefix("_orig_mod.")
+        return key
+
     pretrained_state = {
-        k.removeprefix("model."): v
+        _strip_prefix(k): v
         for k, v in ckpt_state.items()
         if k.startswith("model.")
     }

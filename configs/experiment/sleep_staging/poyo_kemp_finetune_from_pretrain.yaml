@@ -38,7 +38,7 @@ data:
 
 run:
   name: kemp_finetune_${hydra:runtime.choices.model/tokenizer}_fold${hyperparameters.fold_number}
-  group: KEMP_FINETUNE_FROM_PRETRAIN
+  group: KEMP_FINETUNE_FROM_PRETRAIN_FIXED
   tags: [sleep_staging, poyo, kemp, finetuning, pretrained]
   log_level: INFO
   project: foundry_finetuning
