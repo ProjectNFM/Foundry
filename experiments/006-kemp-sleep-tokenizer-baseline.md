@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-07-13
 **Parent experiment:** [Tokenizer Architecture Comparison for Masked Pretraining](../experiments/005-tokenizer-comparison.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Pretraining Loss vs Downstream Task Performance](../experiments/007-pretraining-loss-vs-downstream.md)
 
 ## Background
 

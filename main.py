@@ -15,6 +15,7 @@ from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
 from foundry.data.datamodules.base import normalize_data_config
 from foundry.seed import set_seed
 from foundry.tools.stage_data import stage_data
+from foundry.training.pretrained import load_pretrained_weights
 
 logger = logging.getLogger(__name__)
 
@@ -383,6 +384,13 @@ def main(cfg: DictConfig):
     OmegaConf.resolve(cfg.run)
 
     model, datamodule = _build_model_and_data(cfg)
+
+    pretrained_ckpt = OmegaConf.select(
+        cfg, "run.pretrained_checkpoint", default=None
+    )
+    if pretrained_ckpt:
+        freeze = OmegaConf.select(cfg, "run.freeze_pretrained", default=False)
+        load_pretrained_weights(model, pretrained_ckpt, freeze=freeze)
 
     compile_mode = OmegaConf.select(cfg, "run.compile", default=False)
     if compile_mode and torch.cuda.is_available():
