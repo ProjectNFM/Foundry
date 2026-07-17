@@ -10,6 +10,7 @@ defaults:
   - override /model: poyo_eeg
   - override /model/tokenizer: per_channel_cwt_cnn
   - override /data: neurosoft_minipigs/singlesess
+  - override /cluster: cscs
 
 task_configs:
   - neurosoft_acoustic_stim_8band
@@ -18,7 +19,7 @@ model:
   zero_output_timestamps: true
 
 data:
-  split_type: intrasession-block
+  split_type: intrasession-causal
   task_type: acoustic_stim
 
 run:
@@ -31,18 +32,19 @@ run:
     - training
     - 8band
     - minipigs
+    - hp-tuning
   seed: 42
   log_level: INFO
 
 hyperparameters:
   batch_size: 128
+  learning_rate: 2.5e-5
+  weight_decay: 0.5
   sequence_length: 0.5
   patch_duration: 0.1
   fold_number: 0
   num_workers: 4
   sampling_rate: 2000
-  learning_rate: 2.5e-5
-  weight_decay: 0.06
 
 trainer:
   max_epochs: 1000
@@ -51,7 +53,7 @@ trainer:
     early_stopping:
       monitor: val/neurosoft_acoustic_stim_8band_f1
       mode: max
-      patience: 50
+      patience: 500
     model_checkpoint:
       monitor: val/neurosoft_acoustic_stim_8band_f1
       mode: max

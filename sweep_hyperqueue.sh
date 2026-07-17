@@ -16,8 +16,10 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
+#SBATCH --exclusive
+#SBATCH --mem=450G  # full GH200 node (~4×72 cores)
+#SBATCH --cpus-per-task=288   # full GH200 node (~4×72 cores)
 #SBATCH --time=12:00:00
-#SBATCH --mem=32G
 #SBATCH --output=/capstor/scratch/cscs/%u/wandb_logs/wandb_sweep_hq_%j.log
 
 # Configuration

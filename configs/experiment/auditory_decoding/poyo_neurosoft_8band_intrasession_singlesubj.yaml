@@ -34,6 +34,7 @@ run:
     - training
     - 8band
     - minipigs
+    - hp-tuning
   seed: 42
   log_level: INFO
 

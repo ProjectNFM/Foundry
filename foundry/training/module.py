@@ -1,7 +1,7 @@
 """Unified Lightning training module for all task types."""
 
 from __future__ import annotations
-
+import math
 from typing import Any, Dict
 
 import lightning as L
@@ -27,11 +27,17 @@ class FoundryModule(L.LightningModule):
         model: nn.Module,
         learning_rate: float = 1e-4,
         weight_decay: float = 0.01,
+        warmup_steps: int = 100,
+        hold_steps: int = 10,
+        decay_steps: int = 100,
         cwt_lr_multiplier: float = 1.0,
     ):
         super().__init__()
         self.model = model
         self.learning_rate = learning_rate
+        self.warmup_steps = warmup_steps
+        self.hold_steps = hold_steps
+        self.decay_steps = decay_steps
         self.weight_decay = weight_decay
         self.cwt_lr_multiplier = cwt_lr_multiplier
         self.save_hyperparameters(ignore=["model"])
@@ -255,17 +261,58 @@ class FoundryModule(L.LightningModule):
 
         return groups
 
+    def lr_lambda(self, current_step):
+        """Learning rate scheduler lambda.
+
+        Implements linear warmup, hold, and cosine decay scheduling for the optimizer's
+        learning rate, with an optional minimum LR factor. The schedule consists of:
+          - Linear warmup for `self.warmup_steps`
+          - Hold at max LR for `self.hold_steps`
+          - Cosine decay to `min_lr_factor` over `self.decay_steps`
+          - Then hold at min LR.
+
+        Args:
+            current_step (int): The current global training step.
+
+        Returns:
+            float: Multiplicative factor for the base learning rate.
+        """
+   
+        warmup_steps = self.warmup_steps
+        hold_steps = self.hold_steps
+        decay_steps = self.decay_steps
+        min_lr_factor = 0.1  # Decay to 10% of max_lr
+        if current_step < warmup_steps:
+            return float(current_step) / float(max(1, warmup_steps))
+        elif current_step < warmup_steps + hold_steps or decay_steps == 0:
+            # Hold phase. If decay_steps is 0, we don't decay.
+            return 1.0
+        elif current_step < warmup_steps + hold_steps + decay_steps:
+            # Cosine decay phase
+            progress = float(current_step - warmup_steps - hold_steps) / float(
+                decay_steps
+            )
+            cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
+            # Decay from 1.0 down to min_lr_factor
+            return min_lr_factor + (1.0 - min_lr_factor) * cosine_decay
+        else:
+            # Hold phase
+            return min_lr_factor
+
     def configure_optimizers(self):
         param_groups = self._build_param_groups()
         optimizer = torch.optim.AdamW(param_groups)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=self.trainer.max_epochs if self.trainer else 100
         )
+        # scheduler = torch.optim.lr_scheduler.LambdaLR(
+        #     optimizer, lr_lambda=self.lr_lambda
+        # )
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "interval": "epoch",
+                "interval": "step",
                 "frequency": 1,
             },
         }

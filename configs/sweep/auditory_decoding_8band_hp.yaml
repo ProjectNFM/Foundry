@@ -14,29 +14,43 @@
 defaults:
   - default
 
-method: bayes
+method: grid
 metric:
   name: val/neurosoft_acoustic_stim_8band_f1  # Must match: val/{task_name}_{metric_key}
   goal: maximize
 parameters:
+  model/tokenizer:
+    values:
+      - per_channel_cwt_cnn
+      - per_channel_resample_cnn_dim512
+      - per_channel_resample_cnn_add  
+      - per_channel_resample_cnn
   model.atn_dropout:
     values:
       - 0.2
       - 0.4
-      - 0.6
-      - 0.8
   data.split_type:
     values:
-      - intrasession-causal
       - intrasession-block
   hyperparameters.batch_size:
     values:
       - 128
-  hyperparameters.learning_rate:
-    distribution: uniform
-    min: 2.5e-5
-    max: 5.0e-5
+  hyperparameters.learning_rate: # max learning rate before decay
+    values:
+      - 2.5e-5
+      - 2.75e-5
+      - 3.0e-5
   hyperparameters.weight_decay:
-    distribution: uniform
-    max: 0.7
-    min: 0.01
+    values:
+      - 0.08
+      - 0.1
+  hyperparameters.warmup_steps:
+    values:
+      - 0
+  hyperparameters.hold_steps:
+    values:
+      - 0
+  hyperparameters.decay_steps:
+    values:
+      - 0
+
