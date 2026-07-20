@@ -35,17 +35,17 @@ SCRATCH_RUNS = {
     },
 }
 
-# --- Finetuned runs (experiment 007) — fill in after runs complete ---
+# --- Finetuned runs (experiment 007, group: KEMP_FINETUNE_FROM_PRETRAIN_FIXED) ---
 FINETUNE_RUNS = {
     "ResampleCNN": {
-        "fold0": "FILL_IN",
-        "fold1": "FILL_IN",
-        "fold2": "FILL_IN",
+        "fold0": "wdg0f677",
+        "fold1": "flmottw3",
+        "fold2": "6yfsvspp",
     },
     "CWT-CNN": {
-        "fold0": "FILL_IN",
-        "fold1": "FILL_IN",
-        "fold2": "FILL_IN",
+        "fold0": "inad6ohi",
+        "fold1": "olvv36r6",
+        "fold2": "33sfsb7y",
     },
 }
 
