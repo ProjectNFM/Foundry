@@ -300,6 +300,31 @@ def _get_resume_checkpoint_path(
     return None
 
 
+def _validate_checkpoint_policy(
+    resume_path: str | None,
+    pretrained_path: str | None,
+) -> None:
+    """Validate that resume and pretrained checkpoints don't conflict.
+
+    When resuming from a checkpoint, all trainer state (model weights,
+    optimizer, scheduler, epoch) is restored.  Pretrained transfer should
+    only apply when starting a *new* run, since resume already restores
+    the model weights that include previously transferred pretrained state.
+
+    Raises:
+        ValueError: If both resume and pretrained paths are specified.
+    """
+    if resume_path and pretrained_path:
+        raise ValueError(
+            f"Both resume checkpoint ({resume_path}) and pretrained checkpoint "
+            f"({pretrained_path}) are specified.  When resuming, all model "
+            f"state is restored from the resume checkpoint, making pretrained "
+            f"transfer redundant and potentially harmful.  Either remove "
+            f"run.pretrained_checkpoint when resuming, or remove the resume "
+            f"checkpoint to start fresh with pretrained initialization."
+        )
+
+
 # -- WandB -----------------------------------------------------------------
 
 
@@ -397,21 +422,9 @@ def main(cfg: DictConfig):
         cfg, checkpoint_dir, slurm_restart_count
     )
 
-    # PyTorch 2.6+ defaults weights_only=True in torch.load, but Lightning
-    # checkpoints contain OmegaConf configs and UninitializedParameter which
-    # fail the safe-globals check.  Scope the override to trainer.fit only.
-    import torch.serialization as _ts
-
-    _orig_ts_load = _ts.load
-    _orig_torch_load = torch.load
-
-    def _permissive_load(*args, **kwargs):
-        kwargs["weights_only"] = False
-        return _orig_ts_load(*args, **kwargs)
+    _validate_checkpoint_policy(ckpt_path, pretrained_ckpt)
 
     try:
-        _ts.load = _permissive_load
-        torch.load = _permissive_load
         trainer.fit(
             lightning_module,
             datamodule,
@@ -419,8 +432,6 @@ def main(cfg: DictConfig):
             weights_only=False,
         )
     finally:
-        _ts.load = _orig_ts_load
-        torch.load = _orig_torch_load
         if using_wandb_logger:
             _finish_active_wandb_run()
 
