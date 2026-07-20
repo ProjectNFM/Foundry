@@ -43,6 +43,11 @@ class POYOEEGModel(nn.Module):
             window-level classification tasks where labels are not tied to a
             precise timepoint. Keep this False for timestamp-aware tasks such
             as trajectory regression.
+        normalize_inputs: If True, per-channel z-score the input signal in
+            ``_prepare_signal()``. Ensures scale invariance across datasets
+            with different amplifier gains and physical units. Recommended
+            for pretraining; not needed when downstream data is already
+            normalized.
     """
 
     SUPPORTED_MODALITIES = {"eeg", "ecog", "seeg", "ieeg"}
@@ -66,6 +71,7 @@ class POYOEEGModel(nn.Module):
         t_min: float = 1e-4,
         t_max: float = 2.0627,
         zero_output_timestamps: bool = False,
+        normalize_inputs: bool = True,
     ):
         super().__init__()
 
@@ -75,6 +81,7 @@ class POYOEEGModel(nn.Module):
         self.latent_step = latent_step
         self.num_latents_per_step = num_latents_per_step
         self.zero_output_timestamps = zero_output_timestamps
+        self.normalize_inputs = normalize_inputs
         self._task_configs = TaskConfig.normalize_task_configs(task_configs)
         self._latent_index, self._latent_timestamps = (
             create_linspace_latent_tokens(
@@ -229,6 +236,61 @@ class POYOEEGModel(nn.Module):
 
         raise ValueError("Data must have an 'eeg', 'ecog', or 'seeg' field")
 
+    def _prepare_signal(
+        self, data: Data, normalize_length: bool = False
+    ) -> tuple[np.ndarray, float, np.ndarray]:
+        """Filter by modality, optionally z-score per channel, optionally normalize T.
+
+        Shared logic used by both ``tokenize()`` and subclass target computation.
+        When ``self.normalize_inputs`` is True, per-channel z-scoring ensures
+        scale invariance across datasets with different amplifier gains,
+        impedances, and physical units.
+
+        Args:
+            data: Input data sample.
+            normalize_length: If True, trim/pad the time axis to match
+                ``round(sampling_rate * sequence_length)``.
+
+        Returns:
+            Tuple of ``(signal, sampling_rate, modality_mask)`` where
+            signal has shape ``(T, C_filtered)`` and modality_mask is a
+            boolean array over the original channels.
+        """
+        signal_source, default_type, sampling_rate = (
+            self._resolve_signal_source(data)
+        )
+
+        modality_field = (
+            data.channels.type.astype(str)
+            if hasattr(data.channels, "type")
+            else np.array([default_type] * len(data.channels)).astype(str)
+        )
+        modality_mask = np.isin(
+            np.char.lower(modality_field), list(self.SUPPORTED_MODALITIES)
+        )
+        signal = signal_source.signal[:, modality_mask]
+
+        non_finite = ~np.isfinite(signal)
+        if non_finite.any():
+            signal = np.where(non_finite, 0.0, signal)
+
+        if self.normalize_inputs:
+            mu = signal.mean(axis=0, keepdims=True)
+            std = signal.std(axis=0, keepdims=True)
+            std = np.where(std > 1e-8, std, 1.0)
+            signal = (signal - mu) / std
+
+        if normalize_length:
+            expected_T = round(sampling_rate * self.sequence_length)
+            T = signal.shape[0]
+            if abs(T - expected_T) <= 2:
+                if T > expected_T:
+                    signal = signal[:expected_T]
+                elif T < expected_T:
+                    signal = np.pad(signal, ((0, expected_T - T), (0, 0)))
+
+        return signal, sampling_rate, modality_mask
+    
     def _infer_sampling_rate_from_timestamps(
         self, timestamps: np.ndarray
     ) -> float:
@@ -261,26 +323,27 @@ class POYOEEGModel(nn.Module):
             dict with model_inputs, target_values, target_weights, and
             metadata.
         """
-        signal_source, default_type, sampling_rate = (
-            self._resolve_signal_source(data)
-        )
+        # signal_source, default_type, sampling_rate = (
+        #     self._resolve_signal_source(data)
+        # )
 
-        modality_field = (
-            data.channels.type.astype(str)
-            if hasattr(data.channels, "type")
-            else np.array([default_type] * len(data.channels)).astype(str)
-        )
-        modality_mask = np.isin(
-            np.char.lower(modality_field), list(self.SUPPORTED_MODALITIES)
-        )
+        # modality_field = (
+        #     data.channels.type.astype(str)
+        #     if hasattr(data.channels, "type")
+        #     else np.array([default_type] * len(data.channels)).astype(str)
+        # )
+        # modality_mask = np.isin(
+        #     np.char.lower(modality_field), list(self.SUPPORTED_MODALITIES)
+        # )
+        signal, sampling_rate, modality_mask = self._prepare_signal(data)
 
         channel_ids = data.channels.id[modality_mask].astype(str)
         channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
 
-        signal = signal_source.signal[:, modality_mask]
-        non_finite = ~np.isfinite(signal)
-        if non_finite.any():
-            signal = np.where(non_finite, 0.0, signal)
+        # signal = signal_source.signal[:, modality_mask]
+        # non_finite = ~np.isfinite(signal)
+        # if non_finite.any():
+        #     signal = np.where(non_finite, 0.0, signal)
 
         pretokenized = self.tokenizer.pretokenize(
             signal=signal,
