@@ -90,8 +90,9 @@ class ParameterWatcherCallback(L.Callback):
         model = self._resolve_model(pl_module)
         self._matched_params = self._discover_matched_params(model)
         if not self._matched_params:
-            log.warning(
-                "ParameterWatcherCallback: no parameters matched patterns %s",
+            log.info(
+                "ParameterWatcherCallback: no parameters matched patterns %s; "
+                "callback will be inactive this run.",
                 self.param_patterns,
             )
         else:

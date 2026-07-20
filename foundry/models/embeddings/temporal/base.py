@@ -61,9 +61,19 @@ class TokenRateTemporalEmbedding(TemporalEmbedding, ABC):
         input_seq_len: torch.Tensor,
         input_sampling_rate: torch.Tensor,
     ) -> int:
+        cached = getattr(self, "_cached_target_tokens", None)
+        if cached is not None:
+            return cached
         durations = input_seq_len.float() / input_sampling_rate
         max_duration = durations.max().item()
-        return max(1, round(self.target_token_rate * max_duration))
+        result = max(1, round(self.target_token_rate * max_duration))
+        self._cached_target_tokens = result
+        return result
+
+    def train(self, mode: bool = True):
+        if mode != self.training:
+            self._cached_target_tokens = None
+        return super().train(mode)
 
 
 __all__ = ["TemporalEmbedding", "TokenRateTemporalEmbedding"]

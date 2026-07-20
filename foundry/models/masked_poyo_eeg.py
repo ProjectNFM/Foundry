@@ -258,12 +258,13 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         latents, latent_ts_emb = self._build_latents(
             latent_index, latent_timestamps
         )
+        encoder_mask = None if visible_validity.all() else visible_validity
         latents = self._encode_and_process(
             visible_inputs,
             visible_ts_emb,
             latents,
             latent_ts_emb,
-            input_mask=visible_validity,
+            input_mask=encoder_mask,
         )
 
         # 6. Build reconstruction queries (masked-model helper)

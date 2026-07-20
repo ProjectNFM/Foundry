@@ -88,6 +88,30 @@ def _is_wandb_logger_enabled(cfg: DictConfig) -> bool:
     return "WandbLogger" in OmegaConf.select(cfg, "logger._target_", default="")
 
 
+def _log_output_destinations(
+    cfg: DictConfig,
+    output_dir: str,
+    checkpoint_dir: str,
+    using_wandb: bool,
+) -> None:
+    """Print a concise summary of where artifacts and metrics will be stored."""
+    lines = [
+        f"  Hydra output dir : {output_dir}",
+        f"  Checkpoints      : {checkpoint_dir}",
+    ]
+    if using_wandb:
+        project = OmegaConf.select(cfg, "logger.project", default="(default)")
+        lines.append(f"  WandB project    : {project}")
+        lines.append(
+            f"  WandB save dir   : {OmegaConf.select(cfg, 'logger.save_dir', default=output_dir)}"
+        )
+    else:
+        lines.append(
+            "  Logger           : (no WandB — metrics to console only)"
+        )
+    logger.info("Output destinations:\n%s", "\n".join(lines))
+
+
 def _finish_active_wandb_run() -> None:
     try:
         import wandb
@@ -388,6 +412,10 @@ def main(cfg: DictConfig):
 
     output_dir, checkpoint_dir = _configure_output_paths(cfg)
     _configure_wandb(cfg, output_dir)
+
+    _log_output_destinations(
+        cfg, output_dir, checkpoint_dir, using_wandb_logger
+    )
     _stage_data_if_needed(cfg)
 
     # Eagerly resolve cfg.run so that ${data.subject} (and similar

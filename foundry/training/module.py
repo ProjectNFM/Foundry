@@ -94,17 +94,16 @@ class FoundryModule(L.LightningModule):
         return _squeeze_scalar_predictions(predictions, targets), targets
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
-        from lightning.fabric.utilities.apply_func import move_data_to_device
         from lightning_utilities.core.apply_func import apply_to_collection
 
-        batch = apply_to_collection(
-            batch,
-            dtype=torch.Tensor,
-            function=lambda tensor: (
-                tensor.float() if tensor.dtype == torch.float64 else tensor
-            ),
+        def _move_and_convert(tensor):
+            if tensor.dtype == torch.float64:
+                tensor = tensor.float()
+            return tensor.to(device, non_blocking=True)
+
+        return apply_to_collection(
+            batch, dtype=torch.Tensor, function=_move_and_convert
         )
-        return move_data_to_device(batch, device)
 
     def forward(self, **kwargs) -> Dict[str, Any]:
         return self.model(**kwargs)
@@ -125,6 +124,7 @@ class FoundryModule(L.LightningModule):
         model_inputs, target_values, target_weights, task_index, session_id = (
             self._unpack_batch(batch)
         )
+        batch_size = task_index.shape[0]
         model_output = self.model(**model_inputs, unpack_output=False)
 
         if isinstance(model_output, ModelOutput):
@@ -145,13 +145,20 @@ class FoundryModule(L.LightningModule):
         total_loss, taskwise_loss = self._compute_task_losses(
             outputs, target_values, target_weights, task_index, ssl_task_names
         )
-        self.log(f"{stage}/loss", total_loss, prog_bar=True)
+        self.log(
+            f"{stage}/loss", total_loss, prog_bar=True, batch_size=batch_size
+        )
 
         if stage == "train" and getattr(self, "_trainer", None) is not None:
             opt = self.optimizers()
             if opt is not None:
                 current_lr = opt.param_groups[0]["lr"]
-                self.log("train/lr", current_lr, prog_bar=False)
+                self.log(
+                    "train/lr",
+                    current_lr,
+                    prog_bar=False,
+                    batch_size=batch_size,
+                )
 
         metrics = self.train_metrics if stage == "train" else self.val_metrics
 
@@ -162,7 +169,11 @@ class FoundryModule(L.LightningModule):
                 continue
 
             if name in taskwise_loss:
-                self.log(f"{stage}/{name}_loss", taskwise_loss[name])
+                self.log(
+                    f"{stage}/{name}_loss",
+                    taskwise_loss[name],
+                    batch_size=batch_size,
+                )
 
             if cfg.kind in ("binary", "multiclass"):
                 valid_mask = target >= 0
@@ -181,6 +192,7 @@ class FoundryModule(L.LightningModule):
                     metrics[name],
                     on_step=False,
                     on_epoch=True,
+                    batch_size=batch_size,
                 )
 
             if stage == "val" and name in self._val_confusion_trackers:

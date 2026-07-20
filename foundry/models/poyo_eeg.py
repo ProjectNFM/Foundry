@@ -94,6 +94,7 @@ class POYOEEGModel(nn.Module):
         t_max: float = 2.0627,
         zero_output_timestamps: bool = False,
         normalize_inputs: bool = False,
+        rotate_value: bool = True,
     ):
         super().__init__()
 
@@ -125,6 +126,7 @@ class POYOEEGModel(nn.Module):
             ffn_dropout=ffn_dropout,
             lin_dropout=lin_dropout,
             atn_dropout=atn_dropout,
+            rotate_value=rotate_value,
         )
 
         self.channel_emb = InfiniteVocabEmbedding(

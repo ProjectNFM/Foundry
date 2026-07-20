@@ -298,12 +298,17 @@ class EEGTokenizer(nn.Module):
         if self.temporal_embedding.has_fixed_token_count:
             token_times = np.linspace(0, sequence_length, N)
             raw_times = np.linspace(0, sequence_length, T)
-            resampled = np.column_stack(
-                [
-                    np.interp(token_times, raw_times, signal[:, c])
-                    for c in range(C_actual)
-                ]
-            ).T  # (C_actual, N)
+            from scipy.interpolate import interp1d
+
+            f = interp1d(
+                raw_times,
+                signal[:, :C_actual],
+                axis=0,
+                kind="linear",
+                assume_sorted=True,
+                copy=False,
+            )
+            resampled = f(token_times).T.astype(np.float32)
         else:
             N = T
             resampled = signal[:, :C_actual].T.astype(np.float32)
@@ -459,7 +464,7 @@ class EEGTokenizer(nn.Module):
         tokens = tokens.reshape(B, C * N, -1)
 
         token_mask = channel_mask.unsqueeze(2).expand(B, C, N).reshape(B, C * N)
-        tokens = tokens * token_mask.unsqueeze(-1).float()
+        tokens = tokens.masked_fill(~token_mask.unsqueeze(-1), 0.0)
 
         return tokens
 
