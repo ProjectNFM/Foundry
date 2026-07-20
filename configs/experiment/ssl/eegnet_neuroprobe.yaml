@@ -1,0 +1,83 @@
+# @package _global_
+#
+# EEGNet baseline on Neuroprobe (SS-SM regime).
+# Diagnostic: determines if the dataset is learnable independent of POYO.
+#
+# Single run (subject 1, onset):
+#   uv run python main.py experiment=ssl/eegnet_neuroprobe
+#
+# Full sweep (3 tasks x 3 sessions = 9 runs):
+#   uv run python main.py -m experiment=ssl/eegnet_neuroprobe
+
+defaults:
+  - override /model: eeg_net_encoder
+  - override /data: neuroprobe/default
+  - override /hydra/launcher: local_gpu
+
+model:
+  num_channels: ${hyperparameters.num_channels}
+  num_samples: ${eval:'int(${hyperparameters.sequence_length} * ${hyperparameters.sampling_rate})'}
+  F1: 16
+  D: 2
+  F2: 32
+  kernel_length: 128
+  dropout_rate: 0.5
+
+data:
+  task_type: ${data.task}_binary
+  task: onset
+  label_mode: binary
+  subset_tier: lite
+  regime: SS-SM
+  fold: 0
+  test_pair: "1x1"
+  test_subject: ${pair_int:${data.test_pair},0}
+  test_session: ${pair_int:${data.test_pair},1}
+
+run:
+  mode: train
+  name: eegnet_neuroprobe_${data.task}_s${data.test_subject}_ses${data.test_session}
+  group: NEUROPROBE_EEGNET_BASELINE
+  tags:
+    - ssl_exp1
+    - neuroprobe
+    - eegnet
+    - baseline
+    - ${data.task}
+  seed: 42
+  log_level: INFO
+
+logger:
+  project: foundry_ssl
+
+hyperparameters:
+  batch_size: 32
+  sequence_length: 1.0
+  patch_duration: 0.1
+  sampling_rate: 2048
+  num_channels: null
+  session_configs: null
+  fold_number: 0
+  num_workers: 4
+  learning_rate: 1e-4
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 10000
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/neuroprobe_${data.task}_binary_auroc
+      mode: max
+      patience: 100
+    model_checkpoint: null
+
+stage:
+  skip: true
+
+hydra:
+  sweeper:
+    params:
+      data.task: onset,gpt2_surprisal,face_num
+      data.test_pair: 1x1,3x0,7x0
+      data.fold: 0,1

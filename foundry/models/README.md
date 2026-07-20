@@ -162,5 +162,6 @@ model = POYOEEGModel(
 - `TemporalConvAvgPoolClassifier`
 - `ShallowConvNet`
 - `EEGNetEncoder`
+- `LinearEEGClassifier`
 
 These use the same multitask readout interface, but do not use `EEGTokenizer`.
