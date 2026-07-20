@@ -2,7 +2,6 @@ defaults:
   - cluv_launcher
 
 cluster: mila
-submitit_folder: ${hydra.sweep.dir}/slurm_logs/%j
 stderr_to_stdout: true
 timeout_min: 180
 signal_delay_s: 300
