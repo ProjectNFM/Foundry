@@ -273,8 +273,12 @@ class TestChannelMasking:
                 )
 
     def test_at_least_one_real_channel_visible_all_real(self):
-        """Protection works even when all C_pad channels are real."""
-        strategy = ChannelMasking(mask_ratio=1.0)
+        """Protection works even when all C_pad channels are real.
+
+        Uses 0.99 (just under 1.0) because mask_ratio=1.0 is now rejected
+        by constructor validation.
+        """
+        strategy = ChannelMasking(mask_ratio=0.99)
         B, C, N = 4, 2, 5
         channel_mask = torch.ones(B, C, dtype=torch.bool)
 

@@ -9,9 +9,10 @@ import torch
 import torch.nn as nn
 from hydra.utils import instantiate
 
-from foundry.models.ssl_meta import ReconstructionVizMeta, SSLTaskMeta
+from foundry.models.ssl_meta import ModelOutput
 from foundry.tasks.config import TaskConfig
 from foundry.training.confusion_matrix import ConfusionMatrixTracker
+from foundry.training.step_output import StepOutput
 
 
 def _squeeze_scalar_predictions(
@@ -93,41 +94,47 @@ class FoundryModule(L.LightningModule):
         return _squeeze_scalar_predictions(predictions, targets), targets
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
-        from lightning.fabric.utilities.apply_func import move_data_to_device
         from lightning_utilities.core.apply_func import apply_to_collection
 
-        batch = apply_to_collection(
-            batch,
-            dtype=torch.Tensor,
-            function=lambda tensor: (
-                tensor.float() if tensor.dtype == torch.float64 else tensor
-            ),
+        def _move_and_convert(tensor):
+            if tensor.dtype == torch.float64:
+                tensor = tensor.float()
+            return tensor.to(device, non_blocking=True)
+
+        return apply_to_collection(
+            batch, dtype=torch.Tensor, function=_move_and_convert
         )
-        return move_data_to_device(batch, device)
 
     def forward(self, **kwargs) -> Dict[str, Any]:
         return self.model(**kwargs)
 
     def training_step(
         self, batch: Dict[str, Any], batch_idx: int
-    ) -> torch.Tensor:
-        return self._shared_step("train", batch)
+    ) -> Dict[str, Any]:
+        step_output = self._shared_step("train", batch)
+        return {"loss": step_output.loss, "step_output": step_output}
 
     def validation_step(
         self, batch: Dict[str, Any], batch_idx: int
-    ) -> torch.Tensor:
-        return self._shared_step("val", batch)
+    ) -> Dict[str, Any]:
+        step_output = self._shared_step("val", batch)
+        return {"loss": step_output.loss, "step_output": step_output}
 
-    def _shared_step(self, stage: str, batch: Dict[str, Any]) -> torch.Tensor:
+    def _shared_step(self, stage: str, batch: Dict[str, Any]) -> StepOutput:
         model_inputs, target_values, target_weights, task_index, session_id = (
             self._unpack_batch(batch)
         )
-        outputs = self.model(**model_inputs, unpack_output=False)
+        batch_size = task_index.shape[0]
+        model_output = self.model(**model_inputs, unpack_output=False)
 
-        ssl_meta: dict[str, SSLTaskMeta] | None = outputs.pop("_ssl_meta", None)
-        reconstruction_viz: ReconstructionVizMeta | None = outputs.pop(
-            "_reconstruction_viz", None
-        )
+        if isinstance(model_output, ModelOutput):
+            outputs = model_output.task_outputs
+            ssl_meta = model_output.ssl_meta
+            reconstruction_viz = model_output.viz
+        else:
+            outputs = model_output
+            ssl_meta = outputs.pop("_ssl_meta", None)
+            reconstruction_viz = outputs.pop("_reconstruction_viz", None)
         ssl_task_names: set[str] = set()
         if ssl_meta is not None:
             for task_name, meta in ssl_meta.items():
@@ -138,21 +145,22 @@ class FoundryModule(L.LightningModule):
         total_loss, taskwise_loss = self._compute_task_losses(
             outputs, target_values, target_weights, task_index, ssl_task_names
         )
-        self.log(f"{stage}/loss", total_loss, prog_bar=True)
+        self.log(
+            f"{stage}/loss", total_loss, prog_bar=True, batch_size=batch_size
+        )
 
         if stage == "train" and getattr(self, "_trainer", None) is not None:
             opt = self.optimizers()
             if opt is not None:
                 current_lr = opt.param_groups[0]["lr"]
-                self.log("train/lr", current_lr, prog_bar=False)
+                self.log(
+                    "train/lr",
+                    current_lr,
+                    prog_bar=False,
+                    batch_size=batch_size,
+                )
 
         metrics = self.train_metrics if stage == "train" else self.val_metrics
-
-        accumulate_sessions = (
-            stage == "val"
-            and session_id is not None
-            and getattr(self, "_val_session_buffers", None) is not None
-        )
 
         for name, cfg in self.model.task_configs.items():
             preds = outputs.get(name)
@@ -161,15 +169,10 @@ class FoundryModule(L.LightningModule):
                 continue
 
             if name in taskwise_loss:
-                self.log(f"{stage}/{name}_loss", taskwise_loss[name])
-
-            if (
-                accumulate_sessions
-                and cfg.metrics is not None
-                and name not in ssl_task_names
-            ):
-                self._accumulate_session_preds(
-                    name, preds, target, task_index, session_id
+                self.log(
+                    f"{stage}/{name}_loss",
+                    taskwise_loss[name],
+                    batch_size=batch_size,
                 )
 
             if cfg.kind in ("binary", "multiclass"):
@@ -189,6 +192,7 @@ class FoundryModule(L.LightningModule):
                     metrics[name],
                     on_step=False,
                     on_epoch=True,
+                    batch_size=batch_size,
                 )
 
             if stage == "val" and name in self._val_confusion_trackers:
@@ -200,98 +204,18 @@ class FoundryModule(L.LightningModule):
                     continue
                 self._val_confusion_trackers[name].update(pred_classes, target)
 
-        if reconstruction_viz is not None:
-            if stage == "val" and hasattr(self, "_reconstruction_viz_buffer"):
-                self._buffer_reconstruction_examples(
-                    model_inputs,
-                    outputs,
-                    reconstruction_viz,
-                    self._reconstruction_viz_buffer,
-                )
-            if stage == "train" and hasattr(
-                self, "_reconstruction_train_viz_buffer"
-            ):
-                self._buffer_reconstruction_examples(
-                    model_inputs,
-                    outputs,
-                    reconstruction_viz,
-                    self._reconstruction_train_viz_buffer,
-                )
-
-        return total_loss
-
-    def _buffer_reconstruction_examples(
-        self,
-        model_inputs: Dict[str, Any],
-        outputs: Dict[str, torch.Tensor],
-        viz_meta: ReconstructionVizMeta,
-        buffer: list[dict] | None = None,
-    ) -> None:
-        """Store a few per-sample reconstruction examples for visualization."""
-        if buffer is None:
-            buffer = self._reconstruction_viz_buffer
-        max_examples = getattr(self, "_reconstruction_viz_max_examples", 4)
-        if len(buffer) >= max_examples:
-            return
-
-        recon_preds = outputs.get("masked_reconstruction")
-        targets = model_inputs.get("reconstruction_targets")
-        input_mask = model_inputs.get("input_mask")
-        if recon_preds is None or targets is None or input_mask is None:
-            return
-
-        per_sample_counts = viz_meta.validity_mask.sum(dim=1)
-        per_sample_preds = torch.split(recon_preds, per_sample_counts.tolist())
-
-        B = viz_meta.mask_indices.shape[0]
-        for b in range(B):
-            if len(buffer) >= max_examples:
-                break
-            buffer.append(
-                {
-                    "targets": targets[b].detach().cpu(),
-                    "predictions": per_sample_preds[b].detach().cpu(),
-                    "mask_indices": viz_meta.mask_indices[b].detach().cpu(),
-                    "validity_mask": viz_meta.validity_mask[b].detach().cpu(),
-                    "input_mask": input_mask[b].detach().cpu(),
-                    "num_channels": viz_meta.num_channels,
-                    "num_time_tokens": viz_meta.num_time_tokens,
-                }
-            )
-
-    def _accumulate_session_preds(
-        self,
-        task_name: str,
-        preds: torch.Tensor,
-        target: torch.Tensor,
-        task_index: torch.Tensor,
-        session_id: list[str],
-    ) -> None:
-        """Buffer per-session predictions/targets for epoch-end metric computation.
-
-        Uses ``task_index`` (B, n_out) to count how many output positions each
-        batch item contributes to this task, then splits the flat concatenated
-        ``preds``/``target`` tensors back into per-item chunks grouped by session.
-        """
-        router_idx = self.model.router.get_task_index_by_name(task_name) + 1
-        counts = (task_index == router_idx).sum(dim=1)
-
-        per_item_preds = torch.split(preds, counts.tolist())
-        per_item_targets = torch.split(target, counts.tolist())
-
-        if task_name not in self._val_session_buffers:
-            self._val_session_buffers[task_name] = {}
-
-        task_buf = self._val_session_buffers[task_name]
-        for sid, item_p, item_t in zip(
-            session_id, per_item_preds, per_item_targets
-        ):
-            if item_p.numel() == 0:
-                continue
-            if sid not in task_buf:
-                task_buf[sid] = {"preds": [], "targets": []}
-            task_buf[sid]["preds"].append(item_p.detach().cpu())
-            task_buf[sid]["targets"].append(item_t.detach().cpu())
+        return StepOutput(
+            loss=total_loss,
+            task_outputs=outputs,
+            target_values=target_values,
+            target_weights=target_weights,
+            task_index=task_index,
+            session_id=session_id,
+            ssl_task_names=ssl_task_names,
+            reconstruction_viz=reconstruction_viz,
+            reconstruction_targets=model_inputs.get("reconstruction_targets"),
+            input_mask=model_inputs.get("input_mask"),
+        )
 
     def _build_param_groups(self) -> list[dict]:
         if self.cwt_lr_multiplier == 1.0:

@@ -6,7 +6,7 @@ model-specific preprocessing.
 """
 
 import logging
-from typing import TYPE_CHECKING, Callable, Literal, Optional
+from typing import TYPE_CHECKING, Callable, Literal, Optional, Type
 
 import torch
 from hydra.utils import get_class
@@ -17,14 +17,12 @@ from torch_brain.samplers import RandomFixedWindowSampler
 from lightning import LightningDataModule
 from torch_brain.transforms import Compose
 
-from foundry.data.fast_sampler import patch_sampler
+from foundry.data.samplers import FastRandomFixedWindowSampler
 from foundry.tasks.class_weights import compute_class_weights_for_tasks
 from foundry.tasks.classification_mapping import (
     filter_intervals_by_mapping,
     validate_task_mappings,
 )
-
-patch_sampler()
 
 if TYPE_CHECKING:
     from foundry.tasks.config import TaskConfig
@@ -112,6 +110,7 @@ class NeuralDataModule(LightningDataModule):
         fold: Optional[int] = None,
         recording_ids: Optional[list[str]] = None,
         task_configs: Optional[dict[str, "TaskConfig"]] = None,
+        sampler_class: Optional[Type[RandomFixedWindowSampler]] = None,
     ):
         super().__init__()
         if isinstance(dataset_class, str):
@@ -124,6 +123,11 @@ class NeuralDataModule(LightningDataModule):
         self.sequence_length = sequence_length
         self.seed = seed
         self.dataset_kwargs = dict(dataset_kwargs or {})
+        self.sampler_class: Type[RandomFixedWindowSampler] = (
+            sampler_class
+            if sampler_class is not None
+            else FastRandomFixedWindowSampler
+        )
         self._task_configs = task_configs
 
         for key, val in (
@@ -255,7 +259,7 @@ class NeuralDataModule(LightningDataModule):
         sampling_intervals = self._filter_intervals(sampling_intervals)
 
         split_seed = self.seed + self._SPLIT_SEED_OFFSETS[split]
-        sampler = RandomFixedWindowSampler(
+        sampler = self.sampler_class(
             sampling_intervals=sampling_intervals,
             window_length=self.sequence_length,
             drop_short=True,

@@ -6,51 +6,37 @@ Usage:
 Requires WANDB_API_KEY (and optionally WANDB_ENTITY) in environment or .env.
 """
 
-import os
-import sys
-from pathlib import Path
-
-import wandb
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from analysis._wandb_utils import (
+    default_entity,
+    fetch_metric_history,
+    figures_dir,
+    get_run,
+)
+
 WANDB_PROJECT = "foundry_pretraining"
 RUN_ID = "gii7gvev"
-WANDB_ENTITY = os.environ.get("WANDB_ENTITY", None)
 
-FIGURES_DIR = Path(__file__).parent / "figures"
-FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+FIGURES_DIR = figures_dir(__file__)
 
 
 def main():
-    api = wandb.Api()
-
-    path = (
-        f"{WANDB_ENTITY}/{WANDB_PROJECT}/{RUN_ID}"
-        if WANDB_ENTITY
-        else f"{WANDB_PROJECT}/{RUN_ID}"
-    )
-    try:
-        run = api.run(path)
-    except Exception:
-        print(
-            f"Could not find run {RUN_ID} in project {WANDB_PROJECT}. "
-            "Make sure WANDB_ENTITY is set.",
-            file=sys.stderr,
-        )
-        raise
+    entity = default_entity()
+    run = get_run(RUN_ID, WANDB_PROJECT, entity)
 
     print(f"Run: {run.name}  (id={run.id})")
     print(f"State: {run.state}")
     print(f"Created: {run.created_at}")
     print()
 
-    history = run.history(samples=10_000)
-
-    train_loss = history[["_step", "train/loss"]].dropna()
-    val_loss = history[["_step", "val/loss"]].dropna()
+    train_loss = fetch_metric_history(
+        RUN_ID, "train/loss", WANDB_PROJECT, entity
+    )
+    val_loss = fetch_metric_history(RUN_ID, "val/loss", WANDB_PROJECT, entity)
 
     print("=== Training Loss ===")
     print(f"  Start (epoch 0):   {train_loss['train/loss'].iloc[0]:.4f}")

@@ -7,7 +7,7 @@ reconstruction metadata between :class:`MaskedPOYOEEGModel` and
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import torch
 
@@ -30,4 +30,17 @@ class ReconstructionVizMeta:
     num_time_tokens: int
 
 
-__all__ = ["SSLTaskMeta", "ReconstructionVizMeta"]
+@dataclass
+class ModelOutput:
+    """Structured output from model forward passes.
+
+    Replaces the magic ``_ssl_meta`` / ``_reconstruction_viz`` dict keys
+    that were previously stuffed into the task-output dict.
+    """
+
+    task_outputs: dict[str, torch.Tensor] = field(default_factory=dict)
+    ssl_meta: dict[str, SSLTaskMeta] | None = None
+    viz: ReconstructionVizMeta | None = None
+
+
+__all__ = ["SSLTaskMeta", "ReconstructionVizMeta", "ModelOutput"]

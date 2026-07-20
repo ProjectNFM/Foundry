@@ -6,13 +6,11 @@ Runs:
   - TestingFull (xcqs9lt5): RandomTokenMasking, mask_ratio=0.5
 """
 
-import wandb
-import pandas as pd
 import matplotlib.pyplot as plt
-from pathlib import Path
+
+from analysis._wandb_utils import fetch_metric_history, figures_dir
 
 WANDB_PROJECT = "foundry_pretraining"
-WANDB_ENTITY = None  # uses default entity
 
 RUNS = {
     "ChannelMasking": "j0i9jacr",
@@ -21,31 +19,21 @@ RUNS = {
 }
 
 METRIC = "train/loss"
-FIGURES_DIR = Path(__file__).parent / "figures"
-
-
-def fetch_training_loss(run_id: str) -> pd.DataFrame:
-    api = wandb.Api()
-    run = api.run(f"{WANDB_PROJECT}/{run_id}")
-    history = run.history(keys=[METRIC, "trainer/global_step"], pandas=True)
-    history = history.dropna(subset=[METRIC])
-    return history[["trainer/global_step", METRIC]].reset_index(drop=True)
+FIGURES_DIR = figures_dir(__file__)
 
 
 def main():
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-
     dfs = {}
     for name, run_id in RUNS.items():
         print(f"Fetching {name} ({run_id})...")
-        dfs[name] = fetch_training_loss(run_id)
+        dfs[name] = fetch_metric_history(
+            run_id, METRIC, WANDB_PROJECT, x_axis="trainer/global_step"
+        )
 
-    # Find common step range (intersection of all runs)
     max_min_step = max(df["trainer/global_step"].min() for df in dfs.values())
     min_max_step = min(df["trainer/global_step"].max() for df in dfs.values())
     print(f"\nCommon step range: [{max_min_step}, {min_max_step}]")
 
-    # Filter to common steps
     for name in dfs:
         df = dfs[name]
         dfs[name] = df[
@@ -53,7 +41,6 @@ def main():
             & (df["trainer/global_step"] <= min_max_step)
         ]
 
-    # Print summary table
     print(
         f"\n{'Masking Strategy':<25} {'Mean Loss':>12} {'Final Loss':>12} {'Steps':>8}"
     )
@@ -64,7 +51,6 @@ def main():
         n_steps = len(df)
         print(f"{name:<25} {mean_loss:>12.6f} {final_loss:>12.6f} {n_steps:>8}")
 
-    # Plot
     fig, ax = plt.subplots(figsize=(10, 6))
     for name, df in dfs.items():
         ax.plot(df["trainer/global_step"], df[METRIC], label=name, alpha=0.8)

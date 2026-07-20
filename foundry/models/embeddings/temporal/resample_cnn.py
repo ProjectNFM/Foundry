@@ -6,12 +6,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from foundry.models.embeddings.activations import get_activation
-from foundry.models.embeddings.temporal.base import TemporalEmbedding
+from foundry.models.embeddings.temporal.base import TokenRateTemporalEmbedding
 
 _ANTIALIAS_ORDER = 6
 
 
-class ResampleCNNEmbedding(TemporalEmbedding):
+class ResampleCNNEmbedding(TokenRateTemporalEmbedding):
     """Temporal embedding via time-resampling followed by a 1-D CNN.
 
     Ablation baseline for :class:`CWTEmbedding`: instead of decomposing the
@@ -82,23 +82,10 @@ class ResampleCNNEmbedding(TemporalEmbedding):
         nn.init.xavier_uniform_(self.feature_proj.weight, gain=1.0)
         nn.init.zeros_(self.feature_proj.bias)
 
-    def get_num_time_tokens(
-        self, sequence_length: float, sampling_rate: float
-    ) -> int:
-        return max(1, round(self.target_token_rate * sequence_length))
-
-    @property
-    def has_fixed_token_count(self) -> bool:
-        return True
-
-    def _compute_target_tokens(
-        self,
-        input_seq_len: torch.Tensor,
-        input_sampling_rate: torch.Tensor,
-    ) -> int:
-        durations = input_seq_len.float() / input_sampling_rate
-        max_duration = durations.max().item()
-        return max(1, round(self.target_token_rate * max_duration))
+    def train(self, mode: bool = True):
+        if mode != self.training:
+            self._cached_max_ratio = None
+        return super().train(mode)
 
     def _antialias_lowpass(
         self,
@@ -116,7 +103,12 @@ class ResampleCNNEmbedding(TemporalEmbedding):
         device = x.device
         dtype = x.dtype
 
-        max_ratio = seq_lens.float().max().item() / target_time_tokens
+        cached_ratio = getattr(self, "_cached_max_ratio", None)
+        if cached_ratio is not None:
+            max_ratio = cached_ratio
+        else:
+            max_ratio = seq_lens.float().max().item() / target_time_tokens
+            self._cached_max_ratio = max_ratio
         if max_ratio <= 1.0:
             return x
 
@@ -158,26 +150,32 @@ class ResampleCNNEmbedding(TemporalEmbedding):
         device = x.device
         orig_dtype = x.dtype
 
-        if orig_dtype == torch.bfloat16:
-            x = x.float()
-
         seq_lens = seq_lens.clamp(min=1, max=Max_T)
 
         if self.antialias:
             x = self._antialias_lowpass(x, seq_lens, target_time_tokens)
 
         end_x = -1.0 + 2.0 * (seq_lens.float() - 1) / max(1, Max_T - 1)
-        steps = torch.linspace(
-            0.0, 1.0, target_time_tokens, device=device
-        ).unsqueeze(0)
+        cached = getattr(self, "_cached_steps", None)
+        if (
+            cached is None
+            or cached.shape[1] != target_time_tokens
+            or cached.device != device
+        ):
+            self._cached_steps = torch.linspace(
+                0.0, 1.0, target_time_tokens, device=device
+            ).unsqueeze(0)
+        steps = self._cached_steps
         x_coords = -1.0 + steps * (end_x.unsqueeze(1) - (-1.0))
 
         grid_x = x_coords.unsqueeze(1)  # (B, 1, T_out)
         grid_y = torch.zeros_like(grid_x)
         grid = torch.stack([grid_x, grid_y], dim=-1)  # (B, 1, T_out, 2)
 
+        x_grid = x.float() if orig_dtype == torch.bfloat16 else x
+
         resampled = F.grid_sample(
-            x.unsqueeze(2),
+            x_grid.unsqueeze(2),
             grid,
             mode="bilinear",
             padding_mode="zeros",

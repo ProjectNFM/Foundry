@@ -15,6 +15,11 @@ from foundry.models.embeddings.patching import (
     patch_signal,
 )
 from foundry.models.embeddings.temporal.base import TemporalEmbedding
+from foundry.models.signal_preparation import (
+    PreparedSignal,
+    compute_num_patches,
+    normalize_signal_length,
+)
 
 
 class EEGTokenizer(nn.Module):
@@ -86,6 +91,16 @@ class EEGTokenizer(nn.Module):
         self.post_proj_norm = nn.LayerNorm(self.token_embed_dim)
 
     @property
+    def does_patching(self) -> bool:
+        """Whether this tokenizer applies GPU-side signal patching."""
+        return self._do_patching
+
+    @property
+    def has_fixed_token_count(self) -> bool:
+        """Whether the temporal embedding produces a fixed token count."""
+        return self.temporal_embedding.has_fixed_token_count
+
+    @property
     def channel_emb_dim(self) -> int:
         """Dimension expected for channel identity embeddings."""
         return self._channel_emb_dim
@@ -105,6 +120,75 @@ class EEGTokenizer(nn.Module):
     def uses_per_channel(self) -> bool:
         return isinstance(self.channel_strategy, PerChannelStrategy)
 
+    def get_patch_samples(self, sampling_rate: float) -> int:
+        """Number of time samples per patch for the given sampling rate."""
+        if not self._do_patching:
+            raise ValueError(
+                "get_patch_samples() requires patch_duration to be set"
+            )
+        return max(1, round(self.patch_duration * sampling_rate))
+
+    def get_stride_samples(self, sampling_rate: float) -> int:
+        """Number of time samples between patch starts for the given sampling rate."""
+        if not self._do_patching:
+            raise ValueError(
+                "get_stride_samples() requires patch_duration to be set"
+            )
+        return max(1, round(self.stride * sampling_rate))
+
+    def get_num_time_tokens(
+        self, sequence_length: float, sampling_rate: float
+    ) -> int:
+        """Canonical token count for a given window duration and rate.
+
+        Delegates to either the patch-count formula or the temporal embedding.
+        """
+        if self._do_patching:
+            num_samples = round(sampling_rate * sequence_length)
+            patch_samples = self.get_patch_samples(sampling_rate)
+            stride_samples = self.get_stride_samples(sampling_rate)
+            return compute_num_patches(
+                num_samples, patch_samples, stride_samples
+            )
+        return self.temporal_embedding.get_num_time_tokens(
+            sequence_length, sampling_rate
+        )
+
+    def prepare_signal(
+        self,
+        signal: np.ndarray,
+        sampling_rate: float,
+        sequence_length: float,
+        modality_mask: np.ndarray,
+    ) -> PreparedSignal:
+        """Normalize signal length and produce the token-grid contract.
+
+        This is the single entry point that ensures encoder inputs and
+        reconstruction targets share the same prepared signal.
+
+        Args:
+            signal: (T, C_filtered) modality-filtered, sanitized signal.
+            sampling_rate: Sampling rate in Hz.
+            sequence_length: Target duration in seconds.
+            modality_mask: Boolean mask over original channels.
+
+        Returns:
+            Immutable :class:`PreparedSignal` with normalized signal
+            and token-grid metadata.
+        """
+        original_T = signal.shape[0]
+        normalized = normalize_signal_length(
+            signal, sampling_rate, sequence_length
+        )
+        return PreparedSignal(
+            signal=normalized,
+            sampling_rate=sampling_rate,
+            num_samples=normalized.shape[0],
+            original_num_samples=original_T,
+            num_channels=normalized.shape[1],
+            modality_mask=modality_mask,
+        )
+
     def pretokenize(
         self,
         signal: np.ndarray,
@@ -115,9 +199,11 @@ class EEGTokenizer(nn.Module):
         """CPU-side per-sample preparation.
 
         Called from ``POYOEEGModel.tokenize()`` during data loading.
+        Expects a signal that has already been length-normalized via
+        :func:`~foundry.models.signal_preparation.normalize_signal_length`.
 
         Args:
-            signal: (T, C_actual) raw signal.
+            signal: (T, C_actual) length-normalized signal.
             channel_tokens: (C_actual,) channel-token indices.
             sampling_rate: Sampling rate in Hz.
             sequence_length: Duration of the context window in seconds.
@@ -125,17 +211,6 @@ class EEGTokenizer(nn.Module):
         Returns:
             dict with model input tensors including ``input_timestamps``.
         """
-        # Normalize to a fixed length so batches can collate.  Without this,
-        # even small T variations across samples cause "Trying to resize
-        # storage that is not resizable" in the DataLoader's shared-memory
-        # collation.
-        expected_T = round(sampling_rate * sequence_length)
-        T = signal.shape[0]
-        if T > expected_T:
-            signal = signal[:expected_T]
-        elif T < expected_T:
-            signal = np.pad(signal, ((0, expected_T - T), (0, 0)))
-
         result = self.channel_strategy.prepare_pretokenize(
             signal,
             channel_tokens,
@@ -144,14 +219,11 @@ class EEGTokenizer(nn.Module):
 
         if self._do_patching:
             num_samples = signal.shape[0]
-            patch_samples = max(1, round(self.patch_duration * sampling_rate))
-            stride_samples = max(1, round(self.stride * sampling_rate))
-            if num_samples > patch_samples:
-                num_patches = (
-                    num_samples - patch_samples
-                ) // stride_samples + 1
-            else:
-                num_patches = 1
+            patch_samples = self.get_patch_samples(sampling_rate)
+            stride_samples = self.get_stride_samples(sampling_rate)
+            num_patches = compute_num_patches(
+                num_samples, patch_samples, stride_samples
+            )
 
             patch_timestamps = compute_patch_timestamps(
                 start_time=0.0,
@@ -199,6 +271,10 @@ class EEGTokenizer(nn.Module):
         Uses :meth:`get_num_time_tokens` and the channel strategy to produce
         targets that match the tokenizer's token grid exactly.
 
+        The signal must already be length-normalized (via
+        :func:`~foundry.models.signal_preparation.normalize_signal_length`)
+        so that its grid aligns with the encoder input.
+
         Args:
             signal: ``(T, C_actual)`` raw signal, already modality-filtered
                 and length-normalized.
@@ -222,12 +298,17 @@ class EEGTokenizer(nn.Module):
         if self.temporal_embedding.has_fixed_token_count:
             token_times = np.linspace(0, sequence_length, N)
             raw_times = np.linspace(0, sequence_length, T)
-            resampled = np.column_stack(
-                [
-                    np.interp(token_times, raw_times, signal[:, c])
-                    for c in range(C_actual)
-                ]
-            ).T  # (C_actual, N)
+            from scipy.interpolate import interp1d
+
+            f = interp1d(
+                raw_times,
+                signal[:, :C_actual],
+                axis=0,
+                kind="linear",
+                assume_sorted=True,
+                copy=False,
+            )
+            resampled = f(token_times).T.astype(np.float32)
         else:
             N = T
             resampled = signal[:, :C_actual].T.astype(np.float32)
@@ -247,15 +328,12 @@ class EEGTokenizer(nn.Module):
 
         Each token's target is the z-scored raw signal within its patch window.
         """
-        patch_samples = max(1, round(self.patch_duration * sampling_rate))
-        stride_samples = max(1, round(self.stride * sampling_rate))
+        patch_samples = self.get_patch_samples(sampling_rate)
+        stride_samples = self.get_stride_samples(sampling_rate)
         T, C_actual = signal.shape
         C_pad = self.channel_strategy.max_channels
 
-        if T > patch_samples:
-            num_patches = (T - patch_samples) // stride_samples + 1
-        else:
-            num_patches = 1
+        num_patches = compute_num_patches(T, patch_samples, stride_samples)
 
         C_used = min(C_actual, C_pad)
         starts = np.arange(num_patches) * stride_samples
@@ -386,7 +464,7 @@ class EEGTokenizer(nn.Module):
         tokens = tokens.reshape(B, C * N, -1)
 
         token_mask = channel_mask.unsqueeze(2).expand(B, C, N).reshape(B, C * N)
-        tokens = tokens * token_mask.unsqueeze(-1).float()
+        tokens = tokens.masked_fill(~token_mask.unsqueeze(-1), 0.0)
 
         return tokens
 

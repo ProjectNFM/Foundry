@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import math
+from abc import ABC, abstractmethod
 from typing import Literal
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from foundry.models.embeddings.temporal.base import TemporalEmbedding
+from foundry.models.embeddings.temporal.base import TokenRateTemporalEmbedding
 
 _LOG_MAG_EPS = 1e-6
 
@@ -412,7 +413,96 @@ def _condition_scalogram(
     return mag, phase
 
 
-class CWTEmbedding(TemporalEmbedding):
+class _CWTBase(TokenRateTemporalEmbedding, ABC):
+    """Shared CWT init and forward pre-processing for CWT-based embeddings.
+
+    Handles frequency resolution, the CWT layer, and optional highpass /
+    log-magnitude conditioning.  Subclasses implement :meth:`_head` to map
+    the ``(B, S, 2, F, T)`` CWT output to ``(B, T, embed_dim)``.
+    """
+
+    def __init__(
+        self,
+        embed_dim: int,
+        num_sources: int,
+        target_token_rate: float = 100.0,
+        init_freqs: list[float] | None = None,
+        *,
+        num_freqs: int | None = None,
+        min_freq: float | None = None,
+        max_freq: float | None = None,
+        freq_spacing: FreqSpacing | None = None,
+        n_cycles: float = 2.5,
+        highpass: bool = False,
+        highpass_window_sec: float = 0.05,
+        log_mag: bool = False,
+    ):
+        super().__init__()
+        resolved_freqs = _resolve_init_freqs(
+            init_freqs,
+            num_freqs,
+            min_freq,
+            max_freq,
+            freq_spacing,
+        )
+
+        self.embed_dim = embed_dim
+        self.num_sources = num_sources
+        self.target_token_rate = target_token_rate
+        self._num_freqs = len(resolved_freqs)
+        self._highpass = highpass
+        self._highpass_window_sec = highpass_window_sec
+        self._log_mag = log_mag
+
+        self.cwt = ContinuousCWTLayer(
+            init_freqs=resolved_freqs,
+            n_cycles=n_cycles,
+        )
+
+    @abstractmethod
+    def _head(self, cwt_out: torch.Tensor) -> torch.Tensor:
+        """Map ``(B, S, 2, F, T)`` CWT output to ``(B, T, embed_dim)``."""
+        ...
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        *,
+        input_sampling_rate: torch.Tensor,
+        input_seq_len: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Args:
+            x: ``(B, num_sources, max_T)`` spatially-projected signal.
+            input_sampling_rate: ``(B,)`` sampling rate per item.
+            input_seq_len: ``(B,)`` true sample count per item.
+
+        Returns:
+            ``(B, target_time_tokens, embed_dim)`` where
+            ``target_time_tokens = round(target_token_rate × max_duration)``.
+        """
+        if self._highpass:
+            x = _apply_highpass(
+                x, input_sampling_rate, self._highpass_window_sec
+            )
+
+        target_time_tokens = self._compute_target_tokens(
+            input_seq_len, input_sampling_rate
+        )
+        cwt_out = self.cwt(
+            x, input_sampling_rate, input_seq_len, target_time_tokens
+        )
+
+        if self._log_mag:
+            mag = cwt_out[:, :, 0, :, :]
+            phase = cwt_out[:, :, 1, :, :]
+            mag, phase = _condition_scalogram(mag, phase, log_mag=self._log_mag)
+            cwt_out = torch.stack([mag, phase], dim=2)
+
+        return self._head(cwt_out)
+
+
+class CWTEmbedding(_CWTBase):
     """Temporal embedding via learnable CWT.
 
     Operates on spatially-projected signal (``num_sources`` channels) and
@@ -458,94 +548,33 @@ class CWTEmbedding(TemporalEmbedding):
         highpass_window_sec: float = 0.05,
         log_mag: bool = False,
     ):
-        super().__init__()
-        resolved_freqs = _resolve_init_freqs(
+        super().__init__(
+            embed_dim,
+            num_sources,
+            target_token_rate,
             init_freqs,
-            num_freqs,
-            min_freq,
-            max_freq,
-            freq_spacing,
-        )
-
-        self.embed_dim = embed_dim
-        self.num_sources = num_sources
-        self.target_token_rate = target_token_rate
-        self._num_freqs = len(resolved_freqs)
-        self._highpass = highpass
-        self._highpass_window_sec = highpass_window_sec
-        self._log_mag = log_mag
-
-        self.cwt = ContinuousCWTLayer(
-            init_freqs=resolved_freqs,
+            num_freqs=num_freqs,
+            min_freq=min_freq,
+            max_freq=max_freq,
+            freq_spacing=freq_spacing,
             n_cycles=n_cycles,
+            highpass=highpass,
+            highpass_window_sec=highpass_window_sec,
+            log_mag=log_mag,
         )
 
-        feat_dim = num_sources * 2 * len(resolved_freqs)
+        feat_dim = num_sources * 2 * self._num_freqs
         self.feature_proj = nn.Linear(feat_dim, embed_dim)
         nn.init.xavier_uniform_(self.feature_proj.weight, gain=1.0)
         nn.init.zeros_(self.feature_proj.bias)
 
-    def get_num_time_tokens(
-        self, sequence_length: float, sampling_rate: float
-    ) -> int:
-        return max(1, round(self.target_token_rate * sequence_length))
-
-    @property
-    def has_fixed_token_count(self) -> bool:
-        return True
-
-    def _compute_target_tokens(
-        self,
-        input_seq_len: torch.Tensor,
-        input_sampling_rate: torch.Tensor,
-    ) -> int:
-        durations = input_seq_len.float() / input_sampling_rate
-        max_duration = durations.max().item()
-        return max(1, round(self.target_token_rate * max_duration))
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        *,
-        input_sampling_rate: torch.Tensor,
-        input_seq_len: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Args:
-            x: ``(B, num_sources, max_T)`` spatially-projected signal.
-            input_sampling_rate: ``(B,)`` sampling rate per item.
-            input_seq_len: ``(B,)`` true sample count per item.
-
-        Returns:
-            ``(B, target_time_tokens, embed_dim)`` where
-            ``target_time_tokens = round(target_token_rate × max_duration)``.
-        """
-        if self._highpass:
-            x = _apply_highpass(
-                x, input_sampling_rate, self._highpass_window_sec
-            )
-
-        target_time_tokens = self._compute_target_tokens(
-            input_seq_len, input_sampling_rate
-        )
-        cwt_out = self.cwt(
-            x, input_sampling_rate, input_seq_len, target_time_tokens
-        )
-
+    def _head(self, cwt_out: torch.Tensor) -> torch.Tensor:
         B, S, _two, F_dim, T = cwt_out.shape
-        mag = cwt_out[:, :, 0, :, :]
-        phase = cwt_out[:, :, 1, :, :]
-
-        if self._log_mag:
-            mag, phase = _condition_scalogram(mag, phase, log_mag=self._log_mag)
-
-        cwt_out = torch.stack([mag, phase], dim=2)
         cwt_flat = cwt_out.permute(0, 4, 1, 2, 3).reshape(B, T, S * 2 * F_dim)
-
         return self.feature_proj(cwt_flat)
 
 
-class CWTCNNEmbedding(TemporalEmbedding):
+class CWTCNNEmbedding(_CWTBase):
     """Temporal embedding via learnable CWT followed by a 1-D CNN.
 
     Combines CWT's sampling-rate-invariant frequency decomposition with a
@@ -585,31 +614,23 @@ class CWTCNNEmbedding(TemporalEmbedding):
         highpass_window_sec: float = 0.05,
         log_mag: bool = False,
     ):
-        super().__init__()
+        super().__init__(
+            embed_dim,
+            num_sources,
+            target_token_rate,
+            init_freqs,
+            num_freqs=num_freqs,
+            min_freq=min_freq,
+            max_freq=max_freq,
+            freq_spacing=freq_spacing,
+            n_cycles=n_cycles,
+            highpass=highpass,
+            highpass_window_sec=highpass_window_sec,
+            log_mag=log_mag,
+        )
         from foundry.models.embeddings.activations import get_activation
 
-        resolved_freqs = _resolve_init_freqs(
-            init_freqs,
-            num_freqs,
-            min_freq,
-            max_freq,
-            freq_spacing,
-        )
-
-        self.embed_dim = embed_dim
-        self.num_sources = num_sources
-        self.target_token_rate = target_token_rate
-        self._num_freqs = len(resolved_freqs)
-        self._highpass = highpass
-        self._highpass_window_sec = highpass_window_sec
-        self._log_mag = log_mag
-
-        self.cwt = ContinuousCWTLayer(
-            init_freqs=resolved_freqs,
-            n_cycles=n_cycles,
-        )
-
-        cwt_channels = num_sources * 2 * len(resolved_freqs)
+        cwt_channels = num_sources * 2 * self._num_freqs
         layers: list[nn.Module] = []
         in_channels = cwt_channels
         for _ in range(num_conv_layers):
@@ -634,63 +655,9 @@ class CWTCNNEmbedding(TemporalEmbedding):
         nn.init.xavier_uniform_(self.feature_proj.weight, gain=1.0)
         nn.init.zeros_(self.feature_proj.bias)
 
-    def get_num_time_tokens(
-        self, sequence_length: float, sampling_rate: float
-    ) -> int:
-        return max(1, round(self.target_token_rate * sequence_length))
-
-    @property
-    def has_fixed_token_count(self) -> bool:
-        return True
-
-    def _compute_target_tokens(
-        self,
-        input_seq_len: torch.Tensor,
-        input_sampling_rate: torch.Tensor,
-    ) -> int:
-        durations = input_seq_len.float() / input_sampling_rate
-        max_duration = durations.max().item()
-        return max(1, round(self.target_token_rate * max_duration))
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        *,
-        input_sampling_rate: torch.Tensor,
-        input_seq_len: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Args:
-            x: ``(B, num_sources, max_T)`` spatially-projected signal.
-            input_sampling_rate: ``(B,)`` sampling rate per item.
-            input_seq_len: ``(B,)`` true sample count per item.
-
-        Returns:
-            ``(B, target_time_tokens, embed_dim)`` where
-            ``target_time_tokens = round(target_token_rate × max_duration)``.
-        """
-        if self._highpass:
-            x = _apply_highpass(
-                x, input_sampling_rate, self._highpass_window_sec
-            )
-
-        target_time_tokens = self._compute_target_tokens(
-            input_seq_len, input_sampling_rate
-        )
-        cwt_out = self.cwt(
-            x, input_sampling_rate, input_seq_len, target_time_tokens
-        )
-
+    def _head(self, cwt_out: torch.Tensor) -> torch.Tensor:
         B, S, _two, F_dim, T = cwt_out.shape
-
-        if self._log_mag:
-            mag = cwt_out[:, :, 0, :, :]
-            phase = cwt_out[:, :, 1, :, :]
-            mag, phase = _condition_scalogram(mag, phase, log_mag=self._log_mag)
-            cwt_out = torch.stack([mag, phase], dim=2)
-
         cwt_flat = cwt_out.reshape(B, S * 2 * F_dim, T)
-
         features = self.cnn(cwt_flat)
         return self.feature_proj(features.transpose(1, 2))
 

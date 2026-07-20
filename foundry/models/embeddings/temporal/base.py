@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 
+import torch
 import torch.nn as nn
 
 
@@ -35,4 +36,44 @@ class TemporalEmbedding(nn.Module, ABC):
         ...
 
 
-__all__ = ["TemporalEmbedding"]
+class TokenRateTemporalEmbedding(TemporalEmbedding, ABC):
+    """Temporal embedding whose token count is ``round(rate × duration)``.
+
+    Stores ``target_token_rate`` and provides concrete implementations of
+    :meth:`get_num_time_tokens`, :attr:`has_fixed_token_count`, and the
+    GPU-side :meth:`_compute_target_tokens` helper so subclasses only need
+    to implement :meth:`forward`.
+    """
+
+    target_token_rate: float
+
+    def get_num_time_tokens(
+        self, sequence_length: float, sampling_rate: float
+    ) -> int:
+        return max(1, round(self.target_token_rate * sequence_length))
+
+    @property
+    def has_fixed_token_count(self) -> bool:
+        return True
+
+    def _compute_target_tokens(
+        self,
+        input_seq_len: torch.Tensor,
+        input_sampling_rate: torch.Tensor,
+    ) -> int:
+        cached = getattr(self, "_cached_target_tokens", None)
+        if cached is not None:
+            return cached
+        durations = input_seq_len.float() / input_sampling_rate
+        max_duration = durations.max().item()
+        result = max(1, round(self.target_token_rate * max_duration))
+        self._cached_target_tokens = result
+        return result
+
+    def train(self, mode: bool = True):
+        if mode != self.training:
+            self._cached_target_tokens = None
+        return super().train(mode)
+
+
+__all__ = ["TemporalEmbedding", "TokenRateTemporalEmbedding"]

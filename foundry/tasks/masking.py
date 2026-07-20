@@ -12,8 +12,52 @@ positions correspond to real channels (True) vs padded channels (False).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 import torch
+
+
+def build_token_validity_mask(
+    channel_mask: torch.BoolTensor,
+    num_time_tokens: int,
+    input_seq_len: Optional[torch.Tensor] = None,
+) -> torch.BoolTensor:
+    """Build a ``(B, C_pad * N)`` validity mask over the full token grid.
+
+    A token is valid when its channel is real (from ``channel_mask``) **and**
+    its time position is within the sample's true sequence length.
+
+    Args:
+        channel_mask: ``(B, C_pad)`` which channels are real.
+        num_time_tokens: ``N`` temporal tokens per channel.
+        input_seq_len: ``(B,)`` per-item true time-token count.
+            When ``None``, all time positions are considered valid
+            (fixed-length grid).
+
+    Returns:
+        ``(B, C_pad * N)`` boolean tensor on the same device as
+        ``channel_mask``.
+    """
+    B, C_pad = channel_mask.shape
+    N = num_time_tokens
+    device = channel_mask.device
+
+    # Channel validity: (B, C_pad) → (B, C_pad, N) → (B, C_pad * N)
+    validity = (
+        channel_mask.unsqueeze(2).expand(B, C_pad, N).reshape(B, C_pad * N)
+    )
+
+    if input_seq_len is not None:
+        # Time validity: token index within each channel block < seq_len
+        time_idx = torch.arange(N, device=device).unsqueeze(0)  # (1, N)
+        time_valid = time_idx < input_seq_len.unsqueeze(1)  # (B, N)
+        # Tile across channels: (B, N) → (B, C_pad * N)
+        time_valid = (
+            time_valid.unsqueeze(1).expand(B, C_pad, N).reshape(B, C_pad * N)
+        )
+        validity = validity & time_valid
+
+    return validity
 
 
 @dataclass(frozen=True)
@@ -52,6 +96,12 @@ class RandomTokenMasking(MaskingStrategy):
     sample via random permutation.
     """
 
+    def __post_init__(self):
+        if not (0 < self.mask_ratio < 1):
+            raise ValueError(
+                f"mask_ratio must be in (0, 1), got {self.mask_ratio}"
+            )
+
     def __call__(
         self, num_channels, num_time_tokens, channel_mask, device=None
     ):
@@ -85,6 +135,14 @@ class TemporalBlockMasking(MaskingStrategy):
     """
 
     block_size: int = 5
+
+    def __post_init__(self):
+        if not (0 < self.mask_ratio < 1):
+            raise ValueError(
+                f"mask_ratio must be in (0, 1), got {self.mask_ratio}"
+            )
+        if self.block_size < 1:
+            raise ValueError(f"block_size must be >= 1, got {self.block_size}")
 
     def __call__(
         self, num_channels, num_time_tokens, channel_mask, device=None
@@ -146,17 +204,33 @@ class ChannelMasking(MaskingStrategy):
     with zero real channels.
 
     Total ``num_masked = num_channels_masked * N`` (fixed).
+
+    Raises:
+        ValueError: If ``num_channels == 1``, because masking the only channel
+            would leave zero visible channels.  Use :class:`RandomTokenMasking`
+            for single-channel data.
     """
+
+    def __post_init__(self):
+        if not (0 < self.mask_ratio < 1):
+            raise ValueError(
+                f"mask_ratio must be in (0, 1), got {self.mask_ratio}"
+            )
 
     def __call__(
         self, num_channels, num_time_tokens, channel_mask, device=None
     ):
+        if num_channels < 2:
+            raise ValueError(
+                f"ChannelMasking requires num_channels >= 2, got "
+                f"{num_channels}. Use RandomTokenMasking for single-channel "
+                f"data."
+            )
         B = channel_mask.shape[0]
         device = device if device is not None else channel_mask.device
         C, N = num_channels, num_time_tokens
         num_channels_masked = max(1, int(self.mask_ratio * C))
-        if C > 1:
-            num_channels_masked = min(num_channels_masked, C - 1)
+        num_channels_masked = min(num_channels_masked, C - 1)
         num_masked = num_channels_masked * N
 
         channel_mask_dev = channel_mask.to(device)

@@ -280,8 +280,8 @@ class TestHeterogeneousBatching:
         batch = collate([tokens1, tokens2])
         output = model_with_linear(**extract_model_inputs(batch))
 
-        assert "test_task1" in output
-        assert output["test_task1"].shape[0] == 2
+        assert "test_task1" in output.task_outputs
+        assert output.task_outputs["test_task1"].shape[0] == 2
 
     def test_forward_heterogeneous_cnn(self, model_with_cnn):
         """Forward pass works with CNNEmbedding and heterogeneous channels."""
@@ -299,8 +299,8 @@ class TestHeterogeneousBatching:
         batch = collate([tokens1, tokens2])
         output = model_with_cnn(**extract_model_inputs(batch))
 
-        assert "test_task1" in output
-        assert output["test_task1"].shape[0] == 2
+        assert "test_task1" in output.task_outputs
+        assert output.task_outputs["test_task1"].shape[0] == 2
 
     def test_forward_heterogeneous_mlp(self, model_with_mlp):
         """Forward pass works with MLPEmbedding and heterogeneous channels."""
@@ -318,8 +318,8 @@ class TestHeterogeneousBatching:
         batch = collate([tokens1, tokens2])
         output = model_with_mlp(**extract_model_inputs(batch))
 
-        assert "test_task1" in output
-        assert output["test_task1"].shape[0] == 2
+        assert "test_task1" in output.task_outputs
+        assert output.task_outputs["test_task1"].shape[0] == 2
 
     def test_forward_three_samples(self, model_with_linear):
         """Forward pass works with 3 samples of varying channel counts."""
@@ -339,5 +339,5 @@ class TestHeterogeneousBatching:
         batch = collate([tokens1, tokens2, tokens3])
         output = model_with_linear(**extract_model_inputs(batch))
 
-        assert "test_task1" in output
-        assert output["test_task1"].shape[0] == 3
+        assert "test_task1" in output.task_outputs
+        assert output.task_outputs["test_task1"].shape[0] == 3

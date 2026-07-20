@@ -1,4 +1,4 @@
-"""Kemp Sleep EDF tokenizer baseline: compare 3 tokenizers × 3 CV folds.
+"""Kemp Sleep EDF tokenizer baseline: compare 3 tokenizers x 3 CV folds.
 
 WandB project: foundry_finetuning
 Group: KEMP_SLEEP_TOKENIZER_BASELINE
@@ -12,14 +12,19 @@ Runs (name -> run_id):
     fold0: 182pkp6v  fold1: hb4n732s  fold2: oi7v77lc
 """
 
-import wandb
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from pathlib import Path
+
+from analysis._wandb_utils import (
+    default_entity,
+    fetch_metric_history,
+    fetch_run_summary,
+    figures_dir,
+)
 
 WANDB_PROJECT = "foundry_finetuning"
-WANDB_ENTITY = None  # uses default entity
+WANDB_ENTITY = default_entity()
 
 RUNS = {
     "ResampleCNN": {
@@ -43,56 +48,24 @@ VAL_F1 = "val/sleep_stage_5class_f1"
 VAL_LOSS = "val/loss"
 TRAIN_LOSS = "train/loss"
 
-FIGURES_DIR = Path(__file__).parent / "figures"
+SUMMARY_SPEC: dict[str, tuple[str, str]] = {
+    "best_val_f1": (VAL_F1, "max"),
+    "best_val_loss": (VAL_LOSS, "min"),
+    "final_train_loss": (TRAIN_LOSS, "min"),
+    "best_epoch": ("epoch", "max"),
+}
 
-
-def make_run_path(run_id: str) -> str:
-    if WANDB_ENTITY:
-        return f"{WANDB_ENTITY}/{WANDB_PROJECT}/{run_id}"
-    return f"{WANDB_PROJECT}/{run_id}"
-
-
-def _unwrap(val, key="max"):
-    """WandB summary may return a SummarySubDict like {'max': 0.57}."""
-    try:
-        return float(val[key])
-    except (TypeError, KeyError, IndexError):
-        pass
-    try:
-        return float(val)
-    except (TypeError, ValueError):
-        return val
-
-
-def fetch_run_summary(run_id: str) -> dict:
-    api = wandb.Api()
-    run = api.run(make_run_path(run_id))
-    return {
-        "best_val_f1": _unwrap(run.summary.get(VAL_F1), "max"),
-        "best_val_loss": _unwrap(run.summary.get(VAL_LOSS), "min"),
-        "final_train_loss": _unwrap(run.summary.get(TRAIN_LOSS), "min"),
-        "best_epoch": _unwrap(run.summary.get("epoch"), "max"),
-        "state": run.state,
-    }
-
-
-def fetch_metric_history(run_id: str, metric: str) -> pd.DataFrame:
-    api = wandb.Api()
-    run = api.run(make_run_path(run_id))
-    history = run.history(keys=[metric, "epoch"], pandas=True)
-    history = history.dropna(subset=[metric])
-    return history[["epoch", metric]].reset_index(drop=True)
+FIGURES_DIR = figures_dir(__file__)
 
 
 def main():
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-
-    # --- Collect summaries ---
     rows = []
     for tokenizer, folds in RUNS.items():
         for fold_name, run_id in folds.items():
             print(f"Fetching {tokenizer} {fold_name} ({run_id})...")
-            s = fetch_run_summary(run_id)
+            s = fetch_run_summary(
+                run_id, WANDB_PROJECT, SUMMARY_SPEC, WANDB_ENTITY
+            )
             rows.append(
                 {
                     "Tokenizer": tokenizer,
@@ -108,13 +81,11 @@ def main():
 
     df = pd.DataFrame(rows)
 
-    # --- Per-run table ---
     print("\n" + "=" * 90)
     print("Per-run results")
     print("=" * 90)
     print(df.to_string(index=False))
 
-    # --- Aggregate table (mean ± std across folds) ---
     agg = (
         df.groupby("Tokenizer")[
             ["Best Val F1", "Best Val Loss", "Final Train Loss"]
@@ -123,7 +94,7 @@ def main():
         .round(4)
     )
     print("\n" + "=" * 90)
-    print("Aggregated across folds (mean ± std)")
+    print("Aggregated across folds (mean +/- std)")
     print("=" * 90)
     for tokenizer in RUNS:
         f1_mean = agg.loc[tokenizer, ("Best Val F1", "mean")]
@@ -134,9 +105,9 @@ def main():
         tl_std = agg.loc[tokenizer, ("Final Train Loss", "std")]
         print(
             f"  {tokenizer:<22}  "
-            f"F1={f1_mean:.4f}±{f1_std:.4f}  "
-            f"Val Loss={vl_mean:.4f}±{vl_std:.4f}  "
-            f"Train Loss={tl_mean:.4f}±{tl_std:.4f}"
+            f"F1={f1_mean:.4f}+/-{f1_std:.4f}  "
+            f"Val Loss={vl_mean:.4f}+/-{vl_std:.4f}  "
+            f"Train Loss={tl_mean:.4f}+/-{tl_std:.4f}"
         )
 
     # --- Figure 1: Val F1 bar chart with per-fold dots ---
@@ -183,7 +154,9 @@ def main():
     for tokenizer, folds in RUNS.items():
         all_histories = []
         for fold_name, run_id in folds.items():
-            h = fetch_metric_history(run_id, VAL_F1)
+            h = fetch_metric_history(
+                run_id, VAL_F1, WANDB_PROJECT, WANDB_ENTITY, x_axis="epoch"
+            )
             if not h.empty:
                 all_histories.append(h.set_index("epoch")[VAL_F1])
                 ax.plot(
