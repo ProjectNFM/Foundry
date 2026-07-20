@@ -35,6 +35,9 @@ run:
   # Keep fresh runs independent unless resume is explicitly requested.
   # SLURM restarts still auto-resume from last.ckpt in main.py.
   resume_if_checkpoint_exists: false
+  # Transfer mode for pretrained weight loading: "strict" (default) raises
+  # on missing/mismatched keys; "permissive" loads what it can and warns.
+  pretrained_transfer_mode: strict
   # Freeze the pretrained weights during training.
   freeze_pretrained: false
   # Reuse a WandB run ID derived from run.name.

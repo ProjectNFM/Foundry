@@ -19,6 +19,8 @@ from foundry.training.pretrained import TransferMode, load_pretrained_weights
 
 logger = logging.getLogger(__name__)
 
+os.environ.setdefault("SLURM_TMPDIR", "/tmp")
+
 DEFAULT_SOURCE_ROOT = "../scratch/brainsets/processed"
 DEFAULT_COMPRESSED_ROOT = "../scratch/brainsets/compressed"
 
@@ -104,7 +106,7 @@ def _finish_active_wandb_run() -> None:
 
 
 def _stage_data_if_needed(cfg: DictConfig) -> None:
-    slurm_tmpdir = Path("/tmp")
+    slurm_tmpdir = Path(os.environ.get("SLURM_TMPDIR", "/tmp"))
     if not slurm_tmpdir.exists():
         return
 
