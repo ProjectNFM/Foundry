@@ -159,12 +159,101 @@ class POYOEEGModel(nn.Module):
         inputs = inputs + session_emb
         return inputs, session_emb
 
+    # ------------------------------------------------------------------
+    # Orchestration helpers – shared between base and masked forward
+    # ------------------------------------------------------------------
+
+    def _build_latents(
+        self,
+        latent_index: torch.Tensor,
+        latent_timestamps: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Construct latent embeddings and their rotary timestamp embeddings.
+
+        Returns:
+            ``(latents, latent_ts_emb)`` with shapes
+            ``(B, n_latent, embed_dim)`` and the corresponding rotary pairs.
+        """
+        latents = self.latent_emb(latent_index)
+        latent_ts_emb = self.rotary_emb(latent_timestamps)
+        return latents, latent_ts_emb
+
+    def _build_downstream_queries(
+        self,
+        output_session_index: torch.Tensor,
+        task_index: torch.Tensor,
+        output_timestamps: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Construct downstream task queries and their rotary timestamp embeddings.
+
+        Owns the ``padded task_index -> router index`` conversion:
+        batch ``task_index`` uses 0 for padding and ``router_idx + 1`` for
+        real tasks; the embedding table is indexed by the 0-based router index.
+
+        Returns:
+            ``(queries, ts_emb)`` with shapes ``(B, n_out, embed_dim)`` and
+            the corresponding rotary pairs.
+        """
+        task_ids = (task_index - 1).clamp(min=0)
+        queries = self.session_emb(output_session_index) + self.task_emb(
+            task_ids
+        )
+        ts_emb = self.rotary_emb(output_timestamps)
+        return queries, ts_emb
+
+    def _encode_and_process(
+        self,
+        inputs: torch.Tensor,
+        input_ts_emb: torch.Tensor,
+        latents: torch.Tensor,
+        latent_ts_emb: torch.Tensor,
+        input_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Run encoder cross-attention followed by processor self-attention.
+
+        Args:
+            inputs: (B, N_in, D) embedded input tokens.
+            input_ts_emb: Rotary pairs for *inputs*.
+            latents: (B, N_lat, D) latent embeddings.
+            latent_ts_emb: Rotary pairs for *latents*.
+            input_mask: Optional (B, N_in) validity mask forwarded to the
+                encoder cross-attention.
+
+        Returns:
+            Processed latents, same shape as *latents*.
+        """
+        latents = self.backbone.encoder(
+            latents, inputs, latent_ts_emb, input_ts_emb, input_mask
+        )
+        latents = self.backbone.processor(latents, latent_ts_emb)
+        return latents
+
+    def _decode(
+        self,
+        queries: torch.Tensor,
+        latents: torch.Tensor,
+        query_ts_emb: torch.Tensor,
+        latent_ts_emb: torch.Tensor,
+    ) -> torch.Tensor:
+        """Run decoder cross-attention from processed latents to output queries.
+
+        Returns:
+            Output embeddings with the same leading dimensions as *queries*.
+        """
+        return self.backbone.decoder(
+            queries, latents, query_ts_emb, latent_ts_emb
+        )
+
     def _route(
         self,
         output_latents: torch.Tensor,
         task_index: torch.Tensor,
     ) -> dict[str, torch.Tensor]:
-        """Flatten output latents and dispatch through the readout router."""
+        """Flatten output latents and dispatch through the readout router.
+
+        Uses the padded task-index convention: 0 means padding (skipped),
+        positive values are ``router_idx + 1``.
+        """
         B, N, D = output_latents.shape
         flat_embs = output_latents.reshape(B * N, D)
         flat_task_index = task_index.reshape(B * N)
@@ -172,6 +261,10 @@ class POYOEEGModel(nn.Module):
         return self.router(
             flat_embs[valid], (flat_task_index[valid] - 1).long()
         )
+
+    # ------------------------------------------------------------------
+    # Forward
+    # ------------------------------------------------------------------
 
     def forward(
         self,
@@ -225,25 +318,20 @@ class POYOEEGModel(nn.Module):
             input_session_ids=input_session_ids,
             input_channel_counts=input_channel_counts,
         )
+        input_ts_emb = self.rotary_emb(input_timestamps)
 
-        input_timestamp_emb = self.rotary_emb(input_timestamps)
-
-        latents = self.latent_emb(latent_index)
-        latent_timestamp_emb = self.rotary_emb(latent_timestamps)
-
-        task_ids = (task_index - 1).clamp(min=0)
-        output_queries = self.session_emb(output_session_index) + self.task_emb(
-            task_ids
+        latents, latent_ts_emb = self._build_latents(
+            latent_index, latent_timestamps
         )
-        output_timestamp_emb = self.rotary_emb(output_timestamps)
+        queries, query_ts_emb = self._build_downstream_queries(
+            output_session_index, task_index, output_timestamps
+        )
 
-        output_latents = self.backbone(
-            inputs=inputs,
-            input_timestamp_emb=input_timestamp_emb,
-            latents=latents,
-            latent_timestamp_emb=latent_timestamp_emb,
-            output_queries=output_queries,
-            output_timestamp_emb=output_timestamp_emb,
+        latents = self._encode_and_process(
+            inputs, input_ts_emb, latents, latent_ts_emb
+        )
+        output_latents = self._decode(
+            queries, latents, query_ts_emb, latent_ts_emb
         )
 
         return ModelOutput(task_outputs=self._route(output_latents, task_index))
