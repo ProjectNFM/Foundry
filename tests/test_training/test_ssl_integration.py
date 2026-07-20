@@ -113,9 +113,9 @@ class TestSharedStepTargetExtraction:
             "session_id": ["s0", "s1"],
         }
 
-        loss = module._shared_step("train", batch)
-        assert loss.dim() == 0
-        assert loss.item() > 0
+        result = module._shared_step("train", batch)
+        assert result.loss.dim() == 0
+        assert result.loss.item() > 0
 
     def test_mixed_supervised_and_ssl_targets(self):
         ssl_cfg = TaskConfig(
@@ -178,9 +178,9 @@ class TestSharedStepTargetExtraction:
             "session_id": ["s0", "s1"],
         }
 
-        loss = module._shared_step("train", batch)
-        assert loss.dim() == 0
-        assert loss.item() > 0
+        result = module._shared_step("train", batch)
+        assert result.loss.dim() == 0
+        assert result.loss.item() > 0
 
 
 class TestWarmupScheduler:
