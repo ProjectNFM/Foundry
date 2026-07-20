@@ -5,10 +5,9 @@ Runs:
   - TimeMasking_ChannelEmbDecoder (qgohh6dc): + channel identity in decoder queries
 """
 
-import wandb
-import pandas as pd
 import matplotlib.pyplot as plt
-from pathlib import Path
+
+from analysis._wandb_utils import fetch_metric_history, figures_dir
 
 WANDB_PROJECT = "foundry_pretraining"
 
@@ -18,24 +17,16 @@ RUNS = {
 }
 
 METRIC = "train/loss"
-FIGURES_DIR = Path(__file__).parent / "figures"
-
-
-def fetch_training_loss(run_id: str) -> pd.DataFrame:
-    api = wandb.Api()
-    run = api.run(f"{WANDB_PROJECT}/{run_id}")
-    history = run.history(keys=[METRIC, "trainer/global_step"], pandas=True)
-    history = history.dropna(subset=[METRIC])
-    return history[["trainer/global_step", METRIC]].reset_index(drop=True)
+FIGURES_DIR = figures_dir(__file__)
 
 
 def main():
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-
     dfs = {}
     for name, run_id in RUNS.items():
         print(f"Fetching {name} ({run_id})...")
-        dfs[name] = fetch_training_loss(run_id)
+        dfs[name] = fetch_metric_history(
+            run_id, METRIC, WANDB_PROJECT, x_axis="trainer/global_step"
+        )
 
     max_min_step = max(df["trainer/global_step"].min() for df in dfs.values())
     min_max_step = min(df["trainer/global_step"].max() for df in dfs.values())

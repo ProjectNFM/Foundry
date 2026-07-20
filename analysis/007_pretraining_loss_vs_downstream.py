@@ -8,20 +8,22 @@ Groups: KEMP_FINETUNE_FROM_PRETRAIN (finetuned), KEMP_SLEEP_TOKENIZER_BASELINE (
 
 Usage:
     uv run python analysis/007_pretraining_loss_vs_downstream.py
-
-Fill in the FINETUNE_RUNS dict below with wandb run IDs once the runs complete.
 """
 
-import wandb
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from pathlib import Path
+
+from analysis._wandb_utils import (
+    default_entity,
+    fetch_metric_history,
+    fetch_run_summary,
+    figures_dir,
+)
 
 WANDB_PROJECT = "foundry_finetuning"
-WANDB_ENTITY = None
+WANDB_ENTITY = default_entity()
 
-# --- From-scratch baselines (experiment 006) ---
 SCRATCH_RUNS = {
     "ResampleCNN": {
         "fold0": "mj5b3gsu",
@@ -35,7 +37,6 @@ SCRATCH_RUNS = {
     },
 }
 
-# --- Finetuned runs (experiment 007, group: KEMP_FINETUNE_FROM_PRETRAIN_FIXED) ---
 FINETUNE_RUNS = {
     "ResampleCNN": {
         "fold0": "wdg0f677",
@@ -58,44 +59,14 @@ VAL_F1 = "val/sleep_stage_5class_f1"
 VAL_LOSS = "val/loss"
 TRAIN_LOSS = "train/loss"
 
-FIGURES_DIR = Path(__file__).parent / "figures"
+SUMMARY_SPEC: dict[str, tuple[str, str]] = {
+    "best_val_f1": (VAL_F1, "max"),
+    "best_val_loss": (VAL_LOSS, "min"),
+    "final_train_loss": (TRAIN_LOSS, "min"),
+    "best_epoch": ("epoch", "max"),
+}
 
-
-def make_run_path(run_id: str) -> str:
-    if WANDB_ENTITY:
-        return f"{WANDB_ENTITY}/{WANDB_PROJECT}/{run_id}"
-    return f"{WANDB_PROJECT}/{run_id}"
-
-
-def _unwrap(val, key="max"):
-    try:
-        return float(val[key])
-    except (TypeError, KeyError, IndexError):
-        pass
-    try:
-        return float(val)
-    except (TypeError, ValueError):
-        return val
-
-
-def fetch_run_summary(run_id: str) -> dict:
-    api = wandb.Api()
-    run = api.run(make_run_path(run_id))
-    return {
-        "best_val_f1": _unwrap(run.summary.get(VAL_F1), "max"),
-        "best_val_loss": _unwrap(run.summary.get(VAL_LOSS), "min"),
-        "final_train_loss": _unwrap(run.summary.get(TRAIN_LOSS), "min"),
-        "best_epoch": _unwrap(run.summary.get("epoch"), "max"),
-        "state": run.state,
-    }
-
-
-def fetch_metric_history(run_id: str, metric: str) -> pd.DataFrame:
-    api = wandb.Api()
-    run = api.run(make_run_path(run_id))
-    history = run.history(keys=[metric, "epoch"], pandas=True)
-    history = history.dropna(subset=[metric])
-    return history[["epoch", metric]].reset_index(drop=True)
+FIGURES_DIR = figures_dir(__file__)
 
 
 def _has_valid_run_ids(runs: dict) -> bool:
@@ -105,8 +76,6 @@ def _has_valid_run_ids(runs: dict) -> bool:
 
 
 def main():
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-
     if not _has_valid_run_ids(FINETUNE_RUNS):
         print(
             "WARNING: FINETUNE_RUNS contains placeholder IDs ('FILL_IN').\n"
@@ -120,7 +89,9 @@ def main():
     for tokenizer, folds in SCRATCH_RUNS.items():
         for fold_name, run_id in folds.items():
             print(f"Fetching scratch {tokenizer} {fold_name} ({run_id})...")
-            s = fetch_run_summary(run_id)
+            s = fetch_run_summary(
+                run_id, WANDB_PROJECT, SUMMARY_SPEC, WANDB_ENTITY
+            )
             rows.append(
                 {
                     "Tokenizer": tokenizer,
@@ -141,7 +112,9 @@ def main():
                 print(
                     f"Fetching finetuned {tokenizer} {fold_name} ({run_id})..."
                 )
-                s = fetch_run_summary(run_id)
+                s = fetch_run_summary(
+                    run_id, WANDB_PROJECT, SUMMARY_SPEC, WANDB_ENTITY
+                )
                 rows.append(
                     {
                         "Tokenizer": tokenizer,
@@ -170,16 +143,14 @@ def main():
     )
 
     print("\n" + "=" * 100)
-    print("Aggregated F1 across folds (mean ± std)")
+    print("Aggregated F1 across folds (mean +/- std)")
     print("=" * 100)
     print(agg.to_string())
 
-    # --- Figure 1: Grouped bar chart (scratch vs finetuned) ---
     if _has_valid_run_ids(FINETUNE_RUNS):
         _plot_comparison(df, agg)
         _plot_pretrain_loss_vs_downstream_f1(df)
 
-    # --- Figure 2: Learning curves ---
     _plot_learning_curves(df)
 
 
@@ -240,7 +211,6 @@ def _plot_comparison(df: pd.DataFrame, agg: pd.DataFrame):
 
 
 def _plot_pretrain_loss_vs_downstream_f1(df: pd.DataFrame):
-    """Scatter plot: pretraining val loss (x) vs downstream F1 (y)."""
     ft = df[df["Condition"] == "Finetuned"].copy()
     if ft.empty:
         return
@@ -276,7 +246,6 @@ def _plot_pretrain_loss_vs_downstream_f1(df: pd.DataFrame):
 
 
 def _plot_learning_curves(df: pd.DataFrame):
-    """Val F1 learning curves for all conditions."""
     fig, ax = plt.subplots(figsize=(10, 6))
     styles = {
         ("ResampleCNN", "From scratch"): ("#4C72B0", "-"),
@@ -295,7 +264,9 @@ def _plot_learning_curves(df: pd.DataFrame):
             rid = row["Run ID"]
             if rid == "FILL_IN":
                 continue
-            h = fetch_metric_history(rid, VAL_F1)
+            h = fetch_metric_history(
+                rid, VAL_F1, WANDB_PROJECT, WANDB_ENTITY, x_axis="epoch"
+            )
             if not h.empty:
                 all_histories.append(h.set_index("epoch")[VAL_F1])
                 ax.plot(

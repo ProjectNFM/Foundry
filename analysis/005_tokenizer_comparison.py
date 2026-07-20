@@ -9,14 +9,19 @@ Runs (name -> run_id):
   pretrain_tokenizer_per_channel_per_timepoint_linear: 092n6bv1
 """
 
-import wandb
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from pathlib import Path
+
+from analysis._wandb_utils import (
+    default_entity,
+    fetch_metric_history,
+    fetch_run_summary,
+    figures_dir,
+)
 
 WANDB_PROJECT = "foundry_pretraining"
-WANDB_ENTITY = None  # uses default entity
+WANDB_ENTITY = default_entity()
 
 RUNS = {
     "ResampleCNN": "vup5m7er",
@@ -28,57 +33,23 @@ VAL_LOSS = "val/loss"
 TRAIN_LOSS = "train/loss"
 VAL_RECON_MSE = "val/masked_reconstruction_recon_mse"
 
-FIGURES_DIR = Path(__file__).parent / "figures"
+SUMMARY_SPEC: dict[str, tuple[str, str]] = {
+    "best_val_loss": (VAL_LOSS, "min"),
+    "best_val_recon_mse": (VAL_RECON_MSE, "min"),
+    "best_train_loss": (TRAIN_LOSS, "min"),
+    "epoch": ("epoch", "max"),
+    "global_step": ("trainer/global_step", "max"),
+    "runtime_s": ("_runtime", "max"),
+}
 
-
-def make_run_path(run_id: str) -> str:
-    if WANDB_ENTITY:
-        return f"{WANDB_ENTITY}/{WANDB_PROJECT}/{run_id}"
-    return f"{WANDB_PROJECT}/{run_id}"
-
-
-def _unwrap(val, key="min"):
-    """WandB summary may return a SummarySubDict like {'min': 0.12}."""
-    try:
-        return float(val[key])
-    except (TypeError, KeyError, IndexError):
-        pass
-    try:
-        return float(val)
-    except (TypeError, ValueError):
-        return val
-
-
-def fetch_run_summary(run_id: str) -> dict:
-    api = wandb.Api()
-    run = api.run(make_run_path(run_id))
-    return {
-        "best_val_loss": _unwrap(run.summary.get(VAL_LOSS), "min"),
-        "best_val_recon_mse": _unwrap(run.summary.get(VAL_RECON_MSE), "min"),
-        "best_train_loss": _unwrap(run.summary.get(TRAIN_LOSS), "min"),
-        "epoch": _unwrap(run.summary.get("epoch")),
-        "global_step": _unwrap(run.summary.get("trainer/global_step")),
-        "runtime_s": _unwrap(run.summary.get("_runtime")),
-        "state": run.state,
-    }
-
-
-def fetch_metric_history(run_id: str, metric: str) -> pd.DataFrame:
-    api = wandb.Api()
-    run = api.run(make_run_path(run_id))
-    history = run.history(keys=[metric, "_step"], pandas=True)
-    history = history.dropna(subset=[metric])
-    return history[["_step", metric]].reset_index(drop=True)
+FIGURES_DIR = figures_dir(__file__)
 
 
 def main():
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-
-    # --- Collect summaries ---
     rows = []
     for tokenizer, run_id in RUNS.items():
         print(f"Fetching {tokenizer} ({run_id})...")
-        s = fetch_run_summary(run_id)
+        s = fetch_run_summary(run_id, WANDB_PROJECT, SUMMARY_SPEC, WANDB_ENTITY)
         rows.append(
             {
                 "Tokenizer": tokenizer,
@@ -95,7 +66,6 @@ def main():
 
     df = pd.DataFrame(rows)
 
-    # --- Summary table ---
     print("\n" + "=" * 100)
     print("PRETRAIN TOKENIZER SWEEP — Summary")
     print("=" * 100)
@@ -161,7 +131,7 @@ def main():
     }
 
     for tokenizer, run_id in RUNS.items():
-        h = fetch_metric_history(run_id, VAL_LOSS)
+        h = fetch_metric_history(run_id, VAL_LOSS, WANDB_PROJECT, WANDB_ENTITY)
         if not h.empty:
             ax.plot(
                 h["_step"],
@@ -187,7 +157,9 @@ def main():
     fig, ax = plt.subplots(figsize=(10, 6))
 
     for tokenizer, run_id in RUNS.items():
-        h = fetch_metric_history(run_id, TRAIN_LOSS)
+        h = fetch_metric_history(
+            run_id, TRAIN_LOSS, WANDB_PROJECT, WANDB_ENTITY
+        )
         if not h.empty:
             ax.plot(
                 h["_step"],
