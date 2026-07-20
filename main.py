@@ -437,6 +437,19 @@ def main(cfg: DictConfig):
         load_pretrained_weights(
             model, pretrained_ckpt, freeze=freeze, mode=transfer_mode
         )
+    elif OmegaConf.select(cfg, "run.freeze_backbone", default=False):
+        if hasattr(model, "transferable_components"):
+            frozen_count = 0
+            for comp_name in model.transferable_components():
+                component = getattr(model, comp_name, None)
+                if component is not None:
+                    for param in component.parameters():
+                        param.requires_grad = False
+                        frozen_count += 1
+            logger.info(
+                "Froze %d backbone parameters (freeze_backbone=true, no checkpoint).",
+                frozen_count,
+            )
 
     compile_mode = OmegaConf.select(cfg, "run.compile", default=False)
     if compile_mode and torch.cuda.is_available():

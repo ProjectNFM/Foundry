@@ -20,6 +20,10 @@ hyperparameters:
   weight_decay: ???
   cwt_lr_multiplier: 1.0
 
+extract:
+  output_dir: outputs/embeddings/default
+  max_batches: null
+
 stage:
   skip: false
 
@@ -40,6 +44,9 @@ run:
   pretrained_transfer_mode: strict
   # Freeze the pretrained weights during training.
   freeze_pretrained: false
+  # Freeze backbone (transferable components) even without a pretrained checkpoint.
+  # Used for random-init linear probing baselines.
+  freeze_backbone: false
   # Reuse a WandB run ID derived from run.name.
   # Keeps dashboards continuous for preempted/relaunched runs with same name.
   resume_wandb_if_name_matches: false

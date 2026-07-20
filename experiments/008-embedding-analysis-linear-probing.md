@@ -75,14 +75,58 @@ features.
 ### Launch command
 
 ```bash
-# TBD — implement embedding extraction and linear probing scripts
+# --- Linear Probing (4 SLURM jobs: 2 tokenizers × 2 init modes) ---
+
+# Pretrained backbone conditions (2 jobs):
+uv run python main.py experiment=sleep_staging/poyo_kemp_linear_probe \
+    run.init_mode=pretrained -m
+
+# Random-init backbone conditions (2 jobs):
+uv run python main.py experiment=sleep_staging/poyo_kemp_linear_probe \
+    run.init_mode=random run.pretrained_checkpoint=null -m
+
+# --- Embedding Extraction (run after linear probe or independently) ---
+
+# Pretrained CWT-CNN:
+uv run python scripts/extract_embeddings.py \
+    experiment=sleep_staging/poyo_kemp_linear_probe \
+    model/tokenizer=per_channel_cwt_cnn \
+    run.init_mode=pretrained \
+    extract.output_dir=outputs/embeddings/008_pretrained_cwt_cnn \
+    extract.max_batches=200
+
+# Random CWT-CNN:
+uv run python scripts/extract_embeddings.py \
+    experiment=sleep_staging/poyo_kemp_linear_probe \
+    model/tokenizer=per_channel_cwt_cnn \
+    run.init_mode=random run.pretrained_checkpoint=null \
+    extract.output_dir=outputs/embeddings/008_random_cwt_cnn \
+    extract.max_batches=200
+
+# Pretrained ResampleCNN:
+uv run python scripts/extract_embeddings.py \
+    experiment=sleep_staging/poyo_kemp_linear_probe \
+    model/tokenizer=per_channel_resample_cnn \
+    run.init_mode=pretrained \
+    extract.output_dir=outputs/embeddings/008_pretrained_resample_cnn \
+    extract.max_batches=200
+
+# Random ResampleCNN:
+uv run python scripts/extract_embeddings.py \
+    experiment=sleep_staging/poyo_kemp_linear_probe \
+    model/tokenizer=per_channel_resample_cnn \
+    run.init_mode=random run.pretrained_checkpoint=null \
+    extract.output_dir=outputs/embeddings/008_random_resample_cnn \
+    extract.max_batches=200
 ```
 
 ### Key config overrides
 
-- `run.freeze_pretrained: true` (freeze entire backbone for linear probing)
+- `run.freeze_pretrained: true` (freeze transferred backbone when checkpoint loaded)
+- `run.freeze_backbone: true` (freeze backbone components for random-init condition)
 - Single fold (fold 0) only
-- New linear probe head replacing the full task head
+- Frozen components: tokenizer, backbone (PerceiverIO), rotary_emb, latent_emb
+- Trainable components: channel_emb, session_emb, task_emb, readout heads
 
 ## Results
 
