@@ -56,6 +56,23 @@ class POYOEEGModel(nn.Module):
     """
 
     SUPPORTED_MODALITIES = {"eeg", "ecog", "seeg", "ieeg"}
+    _TRANSFERABLE_COMPONENTS = (
+        "tokenizer",
+        "backbone",
+        "rotary_emb",
+        "latent_emb",
+    )
+
+    def transferable_components(self) -> tuple[str, ...]:
+        """Return the names of top-level submodules whose weights are shared
+        between pretraining and finetuning and should be transferred from a
+        pretrained checkpoint.
+
+        Dataset/task-specific components (``channel_emb``, ``session_emb``,
+        ``task_emb``, ``router``) are excluded by construction — they are
+        simply everything *not* listed here.
+        """
+        return self._TRANSFERABLE_COMPONENTS
 
     def __init__(
         self,

@@ -15,7 +15,7 @@ from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
 from foundry.data.datamodules.base import normalize_data_config
 from foundry.seed import set_seed
 from foundry.tools.stage_data import stage_data
-from foundry.training.pretrained import load_pretrained_weights
+from foundry.training.pretrained import TransferMode, load_pretrained_weights
 
 logger = logging.getLogger(__name__)
 
@@ -375,7 +375,13 @@ def main(cfg: DictConfig):
     )
     if pretrained_ckpt:
         freeze = OmegaConf.select(cfg, "run.freeze_pretrained", default=False)
-        load_pretrained_weights(model, pretrained_ckpt, freeze=freeze)
+        transfer_mode_str = OmegaConf.select(
+            cfg, "run.pretrained_transfer_mode", default="strict"
+        )
+        transfer_mode = TransferMode(transfer_mode_str)
+        load_pretrained_weights(
+            model, pretrained_ckpt, freeze=freeze, mode=transfer_mode
+        )
 
     compile_mode = OmegaConf.select(cfg, "run.compile", default=False)
     if compile_mode and torch.cuda.is_available():
