@@ -1,8 +1,0 @@
-_target_: foundry.training.FoundryModule
-
-learning_rate: ${hyperparameters.learning_rate}
-warmup_steps: ${hyperparameters.warmup_steps}
-hold_steps: ${hyperparameters.hold_steps}
-decay_steps: ${hyperparameters.decay_steps}
-weight_decay: ${hyperparameters.weight_decay}
-cwt_lr_multiplier: ${hyperparameters.cwt_lr_multiplier}

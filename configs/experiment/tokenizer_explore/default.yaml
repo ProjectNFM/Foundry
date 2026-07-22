@@ -1,6 +1,0 @@
-# @package _global_
-run:
-  name: default
-  group: DEFAULT
-  tags: [default]
-  log_level: INFO
