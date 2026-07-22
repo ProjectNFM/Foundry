@@ -40,22 +40,24 @@ class FoundryModule(L.LightningModule):
         learning_rate: float = 1e-4,
         weight_decay: float = 0.01,
         cwt_lr_multiplier: float = 1.0,
-        warmup_steps: int = 0,
-        hold_steps: int = 0,
-        decay_steps: int = 0,
+        warmup: int = 0,
+        hold: int = 0,
+        decay: int = 0,
         hold_scheduler_type: str = "cosine",
         min_lr_factor: float = 0.1,
+        scheduler_interval: str = "step",
     ):
         super().__init__()
         self.model = model
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.cwt_lr_multiplier = cwt_lr_multiplier
-        self.warmup_steps = warmup_steps
-        self.hold_steps = hold_steps
-        self.decay_steps = decay_steps
+        self.warmup = warmup
+        self.hold = hold
+        self.decay = decay
         self.hold_scheduler_type = hold_scheduler_type
         self.min_lr_factor = min_lr_factor
+        self.scheduler_interval = scheduler_interval
         self.save_hyperparameters(ignore=["model"])
 
         self._task_losses = nn.ModuleDict()
@@ -287,22 +289,22 @@ class FoundryModule(L.LightningModule):
         current_step = 0
         
         # Warmup phase
-        if self.warmup_steps > 0:
+        if self.warmup > 0:
             warmup = torch.optim.lr_scheduler.LinearLR(
                 optimizer,
                 start_factor=1e-4,
                 end_factor=1.0,
-                total_iters=self.warmup_steps,
+                total_iters=self.warmup,
             )
             schedulers.append(warmup)
-            current_step += self.warmup_steps
+            current_step += self.warmup
             milestones.append(current_step)
         
         # Hold phase
-        if self.hold_steps > 0:
+        if self.hold > 0:
             if self.hold_scheduler_type == "cosine":
                 hold = torch.optim.lr_scheduler.CosineAnnealingLR(
-                    optimizer, T_max=self.hold_steps, eta_min=self.min_lr_factor
+                    optimizer, T_max=self.hold, eta_min=self.min_lr_factor
                 )
             elif self.hold_scheduler_type == "constant":
                 hold = torch.optim.lr_scheduler.ConstantLR(
@@ -314,15 +316,15 @@ class FoundryModule(L.LightningModule):
                     f"Must be 'cosine' or 'constant'."
                 )
             schedulers.append(hold)
-            current_step += self.hold_steps
-            if self.decay_steps > 0:  # Only add milestone if there's a next phase
+            current_step += self.hold
+            if self.decay > 0:  # Only add milestone if there's a next phase
                 milestones.append(current_step)
         
         # Decay phase
-        if self.decay_steps > 0:
+        if self.decay > 0:
             def decay_lambda(step):
                 # Cosine decay from 1.0 to min_lr_factor
-                progress = float(step) / float(self.decay_steps)
+                progress = float(step) / float(self.decay)
                 cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
                 return self.min_lr_factor + (1.0 - self.min_lr_factor) * cosine_decay
             
@@ -345,7 +347,7 @@ class FoundryModule(L.LightningModule):
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "interval": "step",
+                "interval": self.scheduler_interval,
                 "frequency": 1,
             },
         }

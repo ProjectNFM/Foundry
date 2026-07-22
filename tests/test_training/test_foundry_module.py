@@ -297,9 +297,9 @@ def test_scheduler_warmup_only():
     model = _StubTaskModel({cfg.name: cfg})
     module = FoundryModule(
         model=model,
-        warmup_steps=100,
-        hold_steps=0,
-        decay_steps=0,
+        warmup=100,
+        hold=0,
+        decay=0,
     )
     
     # Mock trainer
@@ -330,9 +330,9 @@ def test_scheduler_hold_cosine_only():
     model = _StubTaskModel({cfg.name: cfg})
     module = FoundryModule(
         model=model,
-        warmup_steps=0,
-        hold_steps=100,
-        decay_steps=0,
+        warmup=0,
+        hold=100,
+        decay=0,
         hold_scheduler_type="cosine",
         min_lr_factor=0.1,
     )
@@ -365,9 +365,9 @@ def test_scheduler_hold_constant_only():
     model = _StubTaskModel({cfg.name: cfg})
     module = FoundryModule(
         model=model,
-        warmup_steps=0,
-        hold_steps=100,
-        decay_steps=0,
+        warmup=0,
+        hold=100,
+        decay=0,
         hold_scheduler_type="constant",
         min_lr_factor=0.1,
     )
@@ -399,9 +399,9 @@ def test_scheduler_decay_only():
     model = _StubTaskModel({cfg.name: cfg})
     module = FoundryModule(
         model=model,
-        warmup_steps=0,
-        hold_steps=0,
-        decay_steps=100,
+        warmup=0,
+        hold=0,
+        decay=100,
         min_lr_factor=0.1,
     )
     
@@ -434,9 +434,9 @@ def test_scheduler_warmup_hold_decay_sequential():
     model = _StubTaskModel({cfg.name: cfg})
     module = FoundryModule(
         model=model,
-        warmup_steps=50,
-        hold_steps=50,
-        decay_steps=50,
+        warmup=50,
+        hold=50,
+        decay=50,
         hold_scheduler_type="cosine",
         min_lr_factor=0.1,
     )
@@ -471,9 +471,9 @@ def test_scheduler_invalid_hold_type_raises():
     model = _StubTaskModel({cfg.name: cfg})
     module = FoundryModule(
         model=model,
-        warmup_steps=0,
-        hold_steps=100,
-        decay_steps=0,
+        warmup=0,
+        hold=100,
+        decay=0,
         hold_scheduler_type="invalid",  # Invalid type
     )
     
@@ -493,9 +493,9 @@ def test_scheduler_no_phases_uses_constant():
     model = _StubTaskModel({cfg.name: cfg})
     module = FoundryModule(
         model=model,
-        warmup_steps=0,
-        hold_steps=0,
-        decay_steps=0,
+        warmup=0,
+        hold=0,
+        decay=0,
     )
     
     from unittest.mock import MagicMock
