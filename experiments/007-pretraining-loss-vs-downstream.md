@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-07-17
 **Parent experiment:** [Tokenizer Architecture Comparison for Masked Pretraining](../experiments/005-tokenizer-comparison.md), [Kemp Sleep EDF — Tokenizer Baseline Comparison](../experiments/006-kemp-sleep-tokenizer-baseline.md)
-**Follow-up experiments:** [Embedding Analysis: t-SNE/PCA and Linear Probing](../experiments/008-embedding-analysis-linear-probing.md)
+**Follow-up experiments:** [Embedding Analysis: t-SNE/PCA and Linear Probing](../experiments/008-embedding-analysis-linear-probing.md), [Finetuning Hyperparameter Search](../experiments/009-finetuning-hyperparameter-search.md)
 
 ## Background
 

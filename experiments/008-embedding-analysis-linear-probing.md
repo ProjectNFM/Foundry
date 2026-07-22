@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-07-20
 **Parent experiment:** [Pretraining Loss vs Downstream Task Performance](../experiments/007-pretraining-loss-vs-downstream.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Finetuning Hyperparameter Search](../experiments/009-finetuning-hyperparameter-search.md)
 
 ## Background
 
