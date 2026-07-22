@@ -97,6 +97,8 @@ hydra:
     cpus_per_task: 6
     mem_gb: 32
     gres: gpu:l40s:1
+    timeout_min: 720
+    max_num_timeout: 5
     setup:
       - "set -a"
       - "source .env"
