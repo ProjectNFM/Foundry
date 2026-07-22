@@ -1,0 +1,19 @@
+defaults:
+  - tokenizer: spatial_session_cwt
+
+_target_: foundry.models.POYOEEGModel
+
+embed_dim: 256
+sequence_length: ${hyperparameters.sequence_length}
+latent_step: 0.1
+num_latents_per_step: 16
+depth: 4
+dim_head: 128
+cross_heads: 8
+self_heads: 8
+ffn_dropout: 0.2
+lin_dropout: 0.4
+atn_dropout: 0.2
+emb_init_scale: 0.02
+t_min: 1e-2
+t_max: 0.5

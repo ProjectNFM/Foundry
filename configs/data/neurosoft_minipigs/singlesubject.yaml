@@ -1,0 +1,29 @@
+# Per-subject data config for NeuroSoft minipigs.
+#
+# The ``subject`` field must be overridden (e.g. ``data.subject=sub-01``).
+# The resolver automatically collects all recording IDs for that subject
+# from the master list in ``multisess_raw.yaml``.
+#
+# Set ``split_type`` in the experiment config to control the evaluation
+# strategy (e.g. ``intersession``, ``intrasession``, ``intrasession-causal``).
+#
+# Subjects with ≥2 sessions (eligible for intersession):
+#   sub-01, sub-02, sub-03, sub-04, sub-05, sub-07
+
+_target_: foundry.data.datamodules.NeuralDataModule
+
+dataset_class: foundry.data.datasets.NeurosoftMinipigs2026
+
+root: ./data/processed/
+batch_size: ${hyperparameters.batch_size}
+num_workers: ${hyperparameters.num_workers}
+pin_memory: false
+sequence_length: ${hyperparameters.sequence_length}
+seed: 42
+
+split_type: ???
+subject: ???
+
+dataset_kwargs:
+  fold: ${hyperparameters.fold_number}
+  recording_ids: ${filter_config_list_by_prefix:configs/data/neurosoft_minipigs/multisess_raw.yaml,dataset_kwargs.recording_ids,${data.subject}_}

@@ -1,0 +1,44 @@
+# @package _global_
+
+# This experiment is used to test combining channels per session into a single token, either with MLP or Linear.
+
+defaults:
+  - override /model: poyo_eeg
+  - override /model/tokenizer: spatial_session_cwt # or session_mlp_per_timepoint
+  - override /data: ajile/multisess
+
+task_configs:
+  - ajile_active_behavior
+
+model:
+  zero_output_timestamps: true
+
+data:
+  task_type: behavior
+
+run:
+  name: enter_name
+  group: DEBUG
+  tags: [poyo_eeg, ajile, multisess, per_session]
+  log_level: INFO
+
+hyperparameters:
+  learning_rate: 0.0012
+  weight_decay: 0.09
+  batch_size: 100
+  sequence_length: 1.0
+  patch_duration: 0.1
+  sampling_rate: 500
+  fold_number: 0
+  num_workers: 8
+  session_configs: null
+  num_channels: null
+
+trainer:
+  devices: 1
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/ajile_active_behavior_f1
+      mode: max
+      patience: 20

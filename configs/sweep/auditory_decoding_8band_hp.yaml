@@ -1,0 +1,60 @@
+# WandB sweep template for auditory decoding hyperparameter tuning
+# Bayesian search over learning_rate and weight_decay (uniform ranges)
+#
+# IMPORTANT: This sweep expects to be run with an experiment that uses the
+# neurosoft_acoustic_stim_8band task. Example:
+#
+#   wandb sweep configs/sweep/auditory_decoding_hp.yaml
+#   wandb agent <sweep-id> -- main.py experiment=auditory_decoding/poyo_neurosoft_8band_hp_sweep
+#
+# The metric name must match the task: {task_name}_{metric_key}
+# Task: neurosoft_acoustic_stim_8band (from configs/tasks/)
+# Metric: f1 (from task's metric_summary_modes)
+
+defaults:
+  - default
+
+method: grid
+metric:
+  name: val/neurosoft_acoustic_stim_8band_f1  # Must match: val/{task_name}_{metric_key}
+  goal: maximize
+parameters:
+  trainer.gradient_clip_val:
+    values:
+      - 0.5
+      - 1.0
+  model/tokenizer:
+    values:
+      - per_channel_resample_cnn_add
+      - per_channel_resample_cnn
+      - per_channel_cwt_cnn
+  model.atn_dropout:
+    values:
+      - 0.2
+      - 0.4
+  data.split_type:
+    values:
+      - intrasession-block
+  hyperparameters.batch_size:
+    values:
+      - 128
+  hyperparameters.learning_rate: # max learning rate before decay
+    values:
+      - 2.75e-5
+      - 3.0e-5
+      - 2.5e-5
+  hyperparameters.weight_decay:
+    values:
+      - 0.08
+      - 0.1
+      - 0.3
+  hyperparameters.warmup_steps:
+    values:
+      - 0
+  hyperparameters.hold_steps:
+    values:
+      - 0
+  hyperparameters.decay_steps:
+    values:
+      - 0
+

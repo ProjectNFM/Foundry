@@ -1,0 +1,10 @@
+# @package _global_
+hydra:
+  run:
+    dir: /capstor/scratch/cscs/${oc.env:USER}/runs/${run.group}/${run.name}
+  sweep:
+    dir: /capstor/scratch/cscs/${oc.env:USER}/runs/${run.group}
+    subdir: ${run.name}
+
+data:
+  root: ${oc.env:PROJECT}/processed/

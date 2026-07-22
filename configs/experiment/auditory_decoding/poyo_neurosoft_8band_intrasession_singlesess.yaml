@@ -1,0 +1,70 @@
+# @package _global_
+#
+# POYO EEG classifier on a single NeuroSoft minipig session for 8-band acoustic
+# stimulus decoding.
+#
+# Usage:
+#   uv run python main.py experiment=auditory_decoding/poyo_neurosoft_8band_singlesess
+
+defaults:
+  - override /model: poyo_eeg
+  - override /model/tokenizer: per_channel_cwt_cnn
+  - override /data: neurosoft_minipigs/singlesess
+  - override /cluster: cscs
+
+task_configs:
+  - neurosoft_acoustic_stim_8band
+
+model:
+  zero_output_timestamps: true
+
+data:
+  split_type: intrasession-causal
+  task_type: acoustic_stim
+
+run:
+  project: auditory_decoding
+  name: ${hydra:runtime.choices.model}_neurosoft_8band_${data.dataset_kwargs.recording_ids.0}
+  group: NEUROSOFT_INTRASESSION_SINGLESESS
+  tags:
+    - neurosoft
+    - ${hydra:runtime.choices.model}
+    - training
+    - 8band
+    - minipigs
+    - hp-tuning
+  seed: 42
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 128
+  learning_rate: 2.5e-5
+  weight_decay: 0.5
+  sequence_length: 0.5
+  patch_duration: 0.1
+  fold_number: 0
+  num_workers: 4
+  sampling_rate: 2000
+
+trainer:
+  max_epochs: 1000
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/neurosoft_acoustic_stim_8band_f1
+      mode: max
+      patience: 500
+    model_checkpoint:
+      monitor: val/neurosoft_acoustic_stim_8band_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/neurosoft_acoustic_stim_8band_f1:.4f}"
+
+stage:
+  skip: true
+
+hydra:
+  sweeper:
+    max_batch_size: 1000
+    params:
+      data.dataset_kwargs.recording_ids: ${config_list_sweep_choices:configs/data/neurosoft_minipigs/multisess_raw.yaml,dataset_kwargs.recording_ids}

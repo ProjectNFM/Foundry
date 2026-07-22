@@ -1,0 +1,23 @@
+name: neurosoft_on_vs_off
+
+head:
+  _target_: foundry.tasks.heads.ReadoutHead
+  output_dim: 2
+
+target_extractor:
+  _target_: foundry.tasks.targets.TargetExtractor
+  timestamp_key: on_vs_off_trials.timestamps
+  value_key: on_vs_off_trials.behavior_ids
+
+loss:
+  _target_: foundry.tasks.losses.CrossEntropyTaskLoss
+
+metrics:
+  _target_: foundry.tasks.metrics.classification_metrics
+  num_classes: 2
+
+class_names: ["off", "on"]
+metric_summary_modes:
+  acc: max
+  auroc: max
+  loss: min

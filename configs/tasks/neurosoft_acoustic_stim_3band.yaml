@@ -1,0 +1,31 @@
+name: neurosoft_acoustic_stim_3band
+
+class_mapping:
+  mapping:
+    stim_500Hz: low
+    stim_800Hz: low
+    stim_1000Hz: medium
+    stim_2000Hz: medium
+    stim_5000Hz: high
+    stim_8000Hz: high
+  order: [low, medium, high]
+
+head:
+  _target_: foundry.tasks.heads.ReadoutHead
+
+target_extractor:
+  _target_: foundry.tasks.targets.TargetExtractor
+  timestamp_key: acoustic_stim_trials.timestamps
+  value_key: acoustic_stim_trials.behavior_labels
+
+loss:
+  _target_: foundry.tasks.losses.CrossEntropyTaskLoss
+
+metrics:
+  _target_: foundry.tasks.metrics.classification_metrics
+
+metric_summary_modes:
+  acc: max
+  f1: max
+  auroc: max
+  loss: min
