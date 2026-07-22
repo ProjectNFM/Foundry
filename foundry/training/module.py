@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 import lightning as L
+import math
 import torch
 import torch.nn as nn
 from hydra.utils import instantiate
@@ -39,14 +40,22 @@ class FoundryModule(L.LightningModule):
         learning_rate: float = 1e-4,
         weight_decay: float = 0.01,
         cwt_lr_multiplier: float = 1.0,
-        warmup_epochs: int = 0,
+        warmup_steps: int = 0,
+        hold_steps: int = 0,
+        decay_steps: int = 0,
+        hold_scheduler_type: str = "cosine",
+        min_lr_factor: float = 0.1,
     ):
         super().__init__()
         self.model = model
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.cwt_lr_multiplier = cwt_lr_multiplier
-        self.warmup_epochs = warmup_epochs
+        self.warmup_steps = warmup_steps
+        self.hold_steps = hold_steps
+        self.decay_steps = decay_steps
+        self.hold_scheduler_type = hold_scheduler_type
+        self.min_lr_factor = min_lr_factor
         self.save_hyperparameters(ignore=["model"])
 
         self._task_losses = nn.ModuleDict()
@@ -272,32 +281,71 @@ class FoundryModule(L.LightningModule):
     def configure_optimizers(self):
         param_groups = self._build_param_groups()
         optimizer = torch.optim.AdamW(param_groups)
-
-        max_epochs = self.trainer.max_epochs if self.trainer else 100
-        cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=max(1, max_epochs - self.warmup_epochs)
-        )
-
-        if self.warmup_epochs > 0:
+        
+        schedulers = []
+        milestones = []
+        current_step = 0
+        
+        # Warmup phase
+        if self.warmup_steps > 0:
             warmup = torch.optim.lr_scheduler.LinearLR(
                 optimizer,
                 start_factor=1e-4,
                 end_factor=1.0,
-                total_iters=self.warmup_epochs,
+                total_iters=self.warmup_steps,
             )
-            scheduler = torch.optim.lr_scheduler.SequentialLR(
-                optimizer,
-                schedulers=[warmup, cosine],
-                milestones=[self.warmup_epochs],
-            )
+            schedulers.append(warmup)
+            current_step += self.warmup_steps
+            milestones.append(current_step)
+        
+        # Hold phase
+        if self.hold_steps > 0:
+            if self.hold_scheduler_type == "cosine":
+                hold = torch.optim.lr_scheduler.CosineAnnealingLR(
+                    optimizer, T_max=self.hold_steps, eta_min=self.min_lr_factor
+                )
+            elif self.hold_scheduler_type == "constant":
+                hold = torch.optim.lr_scheduler.ConstantLR(
+                    optimizer, factor=1.0
+                )
+            else:
+                raise ValueError(
+                    f"Unknown hold_scheduler_type: {self.hold_scheduler_type}. "
+                    f"Must be 'cosine' or 'constant'."
+                )
+            schedulers.append(hold)
+            current_step += self.hold_steps
+            if self.decay_steps > 0:  # Only add milestone if there's a next phase
+                milestones.append(current_step)
+        
+        # Decay phase
+        if self.decay_steps > 0:
+            def decay_lambda(step):
+                # Cosine decay from 1.0 to min_lr_factor
+                progress = float(step) / float(self.decay_steps)
+                cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
+                return self.min_lr_factor + (1.0 - self.min_lr_factor) * cosine_decay
+            
+            decay = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=decay_lambda)
+            schedulers.append(decay)
+        
+        # If no schedulers are active, use a default constant scheduler
+        if not schedulers:
+            scheduler = torch.optim.lr_scheduler.ConstantLR(optimizer, factor=1.0)
+        elif len(schedulers) == 1:
+            # Single scheduler, no need for SequentialLR
+            scheduler = schedulers[0]
         else:
-            scheduler = cosine
-
+            # Multiple schedulers, use SequentialLR
+            scheduler = torch.optim.lr_scheduler.SequentialLR(
+                optimizer, schedulers=schedulers, milestones=milestones
+            )
+        
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "interval": "epoch",
+                "interval": "step",
                 "frequency": 1,
             },
         }
