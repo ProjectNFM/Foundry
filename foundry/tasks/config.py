@@ -25,7 +25,7 @@ class TaskConfig:
 
     name: str
     head: dict[str, Any]
-    target_extractor: dict[str, Any]
+    target_extractor: dict[str, Any] | None
     loss: dict[str, Any]
     metrics: dict[str, Any] | None = None
     class_names: list[str] | None = None
@@ -52,21 +52,36 @@ class TaskConfig:
         return self.class_names
 
     @property
-    def extractor(self) -> TargetExtractor:
-        """Fully-wired extractor instance. Mapping is injected automatically.
+    def extractor(self) -> TargetExtractor | None:
+        """Fully-wired extractor instance, or ``None`` for SSL tasks.
 
         Uses ``_target_`` from the YAML spec for polymorphism (so you can swap
         in a different TargetExtractor subclass), but consumers never need to
         worry about manually injecting the class_mapping.
         """
+        if self.target_extractor is None:
+            return None
+
         if self._extractor is None:
             from foundry.tasks.targets import TargetExtractor
 
-            kwargs = dict(self.target_extractor)
-            kwargs.pop("_target_", None)
+            ext_cfg = dict(self.target_extractor)
+            target_cls = ext_cfg.pop("_target_", None)
+
             if self.class_mapping is not None:
-                kwargs["class_mapping"] = self.class_mapping
-            object.__setattr__(self, "_extractor", TargetExtractor(**kwargs))
+                ext_cfg["class_mapping"] = self.class_mapping
+
+            if target_cls is not None and target_cls != (
+                "foundry.tasks.targets.TargetExtractor"
+            ):
+                from hydra.utils import get_class as hydra_get_class
+
+                cls = hydra_get_class(target_cls)
+                instance = cls(**ext_cfg)
+            else:
+                instance = TargetExtractor(**ext_cfg)
+
+            object.__setattr__(self, "_extractor", instance)
         return self._extractor
 
     @classmethod
@@ -96,7 +111,10 @@ class TaskConfig:
         elif metrics is not None:
             metrics = dict(metrics)
 
-        target_extractor = dict(data["target_extractor"])
+        raw_extractor = data.get("target_extractor")
+        target_extractor = (
+            dict(raw_extractor) if raw_extractor is not None else None
+        )
 
         return cls(
             name=data["name"],

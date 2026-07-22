@@ -1,0 +1,86 @@
+# @package _global_
+#
+# Pretraining tokenizer sweep: compare ResampleCNN, CWTCNN, and
+# PerTimestepPerChannel on masked reconstruction (fixed batch_size=100).
+#
+# Data staging is done once per node in the launcher's setup commands, before
+# any task starts. Each task then skips its own staging step (stage.skip: true)
+# and reads directly from the pre-staged path.
+#
+# Local dry-run (single tokenizer, no SLURM):
+#   uv run python main.py experiment=pretraining/poyo_pretrain_tokenizer_sweep model/tokenizer=per_channel_resample_cnn
+#
+# SLURM sweep (3 tokenizers in parallel):
+#   uv run python main.py experiment=pretraining/poyo_pretrain_tokenizer_sweep -m
+
+defaults:
+  - override /model: masked_poyo_eeg
+  - override /data: openneuro/multi_brainset
+  - override /hydra/launcher: slurm_default
+
+task_configs:
+  - masked_reconstruction
+
+model:
+  zero_output_timestamps: false
+  normalize_inputs: true
+  masking:
+    _target_: foundry.tasks.masking.TemporalBlockMasking
+    block_size: 10
+    mask_ratio: 0.5
+
+data:
+  root: ${oc.env:SLURM_TMPDIR}/brainsets/processed
+  split_type: intrasession
+  task_type: null
+
+module:
+  warmup_epochs: 0
+
+run:
+  name: pretrain_tokenizer_${hydra:runtime.choices.model/tokenizer}
+  project: foundry_pretraining
+  group: PRETRAIN_TOKENIZER_SWEEP
+  tags: [pretraining, mae, masked, tokenizer_sweep]
+  log_level: INFO
+  compile: default
+
+hyperparameters:
+  batch_size: 100
+  sequence_length: 2.0
+  patch_duration: null
+  sampling_rate: null
+  num_channels: null
+  fold_number: 0
+  num_workers: 6
+  learning_rate: 1e-4
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 200
+  precision: bf16-mixed
+  callbacks:
+    model_checkpoint:
+      monitor: val/loss
+      mode: min
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_loss_{val/loss:.4f}"
+
+stage:
+  skip: false
+
+hydra:
+  sweeper:
+    params:
+      model/tokenizer: per_channel_resample_cnn, per_channel_cwt_cnn
+  launcher:
+    tasks_per_node: 1
+    cpus_per_task: 6
+    mem_gb: 32
+    gres: gpu:l40s:1
+    setup:
+      - "set -a"
+      - "source .env"
+      - "set +a"
+      - "export RANK=0"
+      - "uv run python -m foundry.tools.stage_data --experiment pretraining/poyo_pretrain_tokenizer_sweep"

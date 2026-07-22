@@ -15,8 +15,11 @@ from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
 from foundry.data.datamodules.base import normalize_data_config
 from foundry.seed import set_seed
 from foundry.tools.stage_data import stage_data
+from foundry.training.pretrained import TransferMode, load_pretrained_weights
 
 logger = logging.getLogger(__name__)
+
+os.environ.setdefault("SLURM_TMPDIR", "/tmp")
 
 DEFAULT_SOURCE_ROOT = "../scratch/brainsets/processed"
 DEFAULT_COMPRESSED_ROOT = "../scratch/brainsets/compressed"
@@ -85,6 +88,30 @@ def _is_wandb_logger_enabled(cfg: DictConfig) -> bool:
     return "WandbLogger" in OmegaConf.select(cfg, "logger._target_", default="")
 
 
+def _log_output_destinations(
+    cfg: DictConfig,
+    output_dir: str,
+    checkpoint_dir: str,
+    using_wandb: bool,
+) -> None:
+    """Print a concise summary of where artifacts and metrics will be stored."""
+    lines = [
+        f"  Hydra output dir : {output_dir}",
+        f"  Checkpoints      : {checkpoint_dir}",
+    ]
+    if using_wandb:
+        project = OmegaConf.select(cfg, "logger.project", default="(default)")
+        lines.append(f"  WandB project    : {project}")
+        lines.append(
+            f"  WandB save dir   : {OmegaConf.select(cfg, 'logger.save_dir', default=output_dir)}"
+        )
+    else:
+        lines.append(
+            "  Logger           : (no WandB — metrics to console only)"
+        )
+    logger.info("Output destinations:\n%s", "\n".join(lines))
+
+
 def _finish_active_wandb_run() -> None:
     try:
         import wandb
@@ -103,8 +130,8 @@ def _finish_active_wandb_run() -> None:
 
 
 def _stage_data_if_needed(cfg: DictConfig) -> None:
-    slurm_tmpdir = os.environ.get("SLURM_TMPDIR")
-    if not slurm_tmpdir:
+    slurm_tmpdir = Path(os.environ.get("SLURM_TMPDIR", "/tmp"))
+    if not slurm_tmpdir.exists():
         return
 
     stage_cfg = OmegaConf.to_container(
@@ -234,10 +261,9 @@ def _build_model_and_data(cfg: DictConfig):
         if k != "_target_"
     }
     model = ModelClass(task_configs=task_configs, **model_kwargs)
+
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
-    normalize_data_config(cfg.data)
-    datamodule = instantiate(cfg.data, tokenizer=tokenizer)
-    datamodule._task_configs = task_configs
+    datamodule.set_tokenizer(tokenizer)
 
     return model, datamodule
 
@@ -300,6 +326,31 @@ def _get_resume_checkpoint_path(
     return None
 
 
+def _validate_checkpoint_policy(
+    resume_path: str | None,
+    pretrained_path: str | None,
+) -> None:
+    """Validate that resume and pretrained checkpoints don't conflict.
+
+    When resuming from a checkpoint, all trainer state (model weights,
+    optimizer, scheduler, epoch) is restored.  Pretrained transfer should
+    only apply when starting a *new* run, since resume already restores
+    the model weights that include previously transferred pretrained state.
+
+    Raises:
+        ValueError: If both resume and pretrained paths are specified.
+    """
+    if resume_path and pretrained_path:
+        raise ValueError(
+            f"Both resume checkpoint ({resume_path}) and pretrained checkpoint "
+            f"({pretrained_path}) are specified.  When resuming, all model "
+            f"state is restored from the resume checkpoint, making pretrained "
+            f"transfer redundant and potentially harmful.  Either remove "
+            f"run.pretrained_checkpoint when resuming, or remove the resume "
+            f"checkpoint to start fresh with pretrained initialization."
+        )
+
+
 # -- WandB -----------------------------------------------------------------
 
 
@@ -339,21 +390,6 @@ def main(cfg: DictConfig):
             )
         )
     )
-    # PyTorch 2.6+ defaults weights_only=True in torch.load, but Lightning's
-    # BatchSizeFinder saves/restores full checkpoints containing OmegaConf
-    # configs and UninitializedParameter, which fail the safe-globals check.
-    # All checkpoints are locally generated, so this is safe.
-    import torch.serialization as _ts
-
-    _orig_load = _ts.load
-
-    def _permissive_load(*args, **kwargs):
-        kwargs["weights_only"] = False
-        return _orig_load(*args, **kwargs)
-
-    _ts.load = _permissive_load
-    torch.load = _permissive_load
-
     set_seed(
         cfg.run.seed,
         deterministic=OmegaConf.select(cfg, "run.deterministic", default=False),
@@ -376,6 +412,10 @@ def main(cfg: DictConfig):
 
     output_dir, checkpoint_dir = _configure_output_paths(cfg)
     _configure_wandb(cfg, output_dir)
+
+    _log_output_destinations(
+        cfg, output_dir, checkpoint_dir, using_wandb_logger
+    )
     _stage_data_if_needed(cfg)
 
     # Eagerly resolve cfg.run so that ${data.subject} (and similar
@@ -384,6 +424,38 @@ def main(cfg: DictConfig):
     OmegaConf.resolve(cfg.run)
 
     model, datamodule = _build_model_and_data(cfg)
+
+    pretrained_ckpt = OmegaConf.select(
+        cfg, "run.pretrained_checkpoint", default=None
+    )
+    if pretrained_ckpt:
+        freeze = OmegaConf.select(cfg, "run.freeze_pretrained", default=False)
+        transfer_mode_str = OmegaConf.select(
+            cfg, "run.pretrained_transfer_mode", default="strict"
+        )
+        transfer_mode = TransferMode(transfer_mode_str)
+        load_pretrained_weights(
+            model, pretrained_ckpt, freeze=freeze, mode=transfer_mode
+        )
+    elif OmegaConf.select(cfg, "run.freeze_backbone", default=False):
+        if hasattr(model, "transferable_components"):
+            frozen_count = 0
+            for comp_name in model.transferable_components():
+                component = getattr(model, comp_name, None)
+                if component is not None:
+                    for param in component.parameters():
+                        param.requires_grad = False
+                        frozen_count += 1
+            logger.info(
+                "Froze %d backbone parameters (freeze_backbone=true, no checkpoint).",
+                frozen_count,
+            )
+
+    compile_mode = OmegaConf.select(cfg, "run.compile", default=False)
+    if compile_mode and torch.cuda.is_available():
+        logger.info("Compiling model with torch.compile(mode=%r)", compile_mode)
+        model = torch.compile(model, mode=str(compile_mode))
+
     lightning_module = _build_lightning_module(cfg, model, datamodule)
     trainer = _build_trainer(cfg)
 
@@ -392,6 +464,9 @@ def main(cfg: DictConfig):
     ckpt_path = _get_resume_checkpoint_path(
         cfg, checkpoint_dir, slurm_restart_count
     )
+
+    _validate_checkpoint_policy(ckpt_path, pretrained_ckpt)
+
     try:
         trainer.fit(
             lightning_module,

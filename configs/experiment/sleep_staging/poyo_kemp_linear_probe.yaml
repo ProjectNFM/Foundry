@@ -1,0 +1,107 @@
+# @package _global_
+#
+# Experiment 008: Linear probing for embedding quality analysis.
+#
+# Freezes the backbone (tokenizer, perceiver, rotary_emb, latent_emb) and
+# trains only dataset-specific components (channel_emb, session_emb, task_emb)
+# and the readout head.
+#
+# 4 conditions: 2 tokenizers × {pretrained, random-init}
+#
+# Launch all 4 conditions on SLURM:
+#   uv run python main.py experiment=sleep_staging/poyo_kemp_linear_probe \
+#       run.init_mode=pretrained -m
+#   uv run python main.py experiment=sleep_staging/poyo_kemp_linear_probe \
+#       run.init_mode=random run.pretrained_checkpoint=null -m
+#
+# Or launch a single condition locally:
+#   uv run python main.py experiment=sleep_staging/poyo_kemp_linear_probe \
+#       model/tokenizer=per_channel_resample_cnn \
+#       run.init_mode=pretrained
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: kemp_sleep_edf/allsess
+  - override /hydra/launcher: slurm_default
+
+task_configs:
+  - sleep_stage_5class
+
+pretrained_checkpoints:
+  per_channel_resample_cnn: ${oc.env:HOME}/Foundry/runs/runs/PRETRAIN_TOKENIZER_SWEEP/pretrain_tokenizer_per_channel_resample_cnn/checkpoints/best-epoch003-val_loss_0.1190.ckpt
+  per_channel_cwt_cnn: ${oc.env:HOME}/Foundry/runs/runs/PRETRAIN_TOKENIZER_SWEEP/pretrain_tokenizer_per_channel_cwt_cnn/checkpoints/best-epoch003-val_loss_0.0364.ckpt
+
+model:
+  zero_output_timestamps: true
+  normalize_inputs: true
+
+data:
+  root: ${oc.env:SLURM_TMPDIR}/brainsets/processed
+  split_type: intersubject
+  task_type: sleep_stage
+
+stage:
+  skip: true
+
+run:
+  name: kemp_linear_probe_${hydra:runtime.choices.model/tokenizer}_${run.init_mode}
+  group: KEMP_EMBEDDING_ANALYSIS
+  tags: [sleep_staging, poyo, kemp, linear_probe, exp008]
+  log_level: INFO
+  project: foundry_finetuning
+  compile: default
+  # Pretrained mode: load checkpoint and freeze transferred components
+  pretrained_checkpoint: ${pretrained_checkpoints.${hydra:runtime.choices.model/tokenizer}}
+  pretrained_transfer_mode: strict
+  freeze_pretrained: true
+  # Random mode: freeze backbone without checkpoint (set via CLI override)
+  freeze_backbone: true
+  init_mode: pretrained
+
+class_weights:
+  mode: auto
+  smoothing: 1.0
+
+hyperparameters:
+  batch_size: 512
+  sequence_length: 2.0
+  patch_duration: null
+  sampling_rate: null
+  fold_number: 0
+  num_workers: 6
+  num_channels: null
+  session_configs: null
+  learning_rate: 1e-3
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 100
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/sleep_stage_5class_f1
+      mode: max
+      patience: 10
+    model_checkpoint:
+      monitor: val/sleep_stage_5class_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/sleep_stage_5class_f1:.4f}"
+
+hydra:
+  sweeper:
+    params:
+      model/tokenizer: per_channel_resample_cnn, per_channel_cwt_cnn
+  launcher:
+    tasks_per_node: 1
+    cpus_per_task: 6
+    mem_gb: 32
+    gres: gpu:l40s:1
+    timeout_min: 720
+    max_num_timeout: 5
+    setup:
+      - "set -a"
+      - "source .env"
+      - "set +a"
+      - "export RANK=0"
+      - "uv run python -m foundry.tools.stage_data --experiment sleep_staging/poyo_kemp_linear_probe"

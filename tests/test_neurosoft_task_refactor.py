@@ -231,8 +231,9 @@ def test_foundry_module_training_step_binary():
     batch = collate([model.tokenize(data)])
 
     module = FoundryModule(model=model)
-    loss = module.training_step(batch, 0)
+    result = module.training_step(batch, 0)
 
+    loss = result["loss"]
     assert isinstance(loss, torch.Tensor)
     assert loss.requires_grad
     assert torch.isfinite(loss)
@@ -251,8 +252,9 @@ def test_foundry_module_training_step_multiclass():
     batch = collate([model.tokenize(data)])
 
     module = FoundryModule(model=model)
-    loss = module.training_step(batch, 0)
+    result = module.training_step(batch, 0)
 
+    loss = result["loss"]
     assert isinstance(loss, torch.Tensor)
     assert loss.requires_grad
     assert torch.isfinite(loss)

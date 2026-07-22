@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 import numpy as np
 
 from torch_brain.datasets import KempSleepEDF2013 as _TorchBrainKempSleepEDF2013
@@ -30,6 +32,38 @@ class KempSleepEDF2013(_TorchBrainKempSleepEDF2013):
             fold_type=split_type,
             **kwargs,
         )
+
+    def get_sampling_intervals(
+        self,
+        split: Literal["train", "valid", "test"] | None = None,
+    ):
+        """Return sampling intervals restricted to annotated stage periods.
+
+        The upstream implementation uses ``rec.domain`` for intersubject /
+        intersession splits, which spans the full recording including large
+        unannotated regions. Sampling from those regions yields windows with
+        no stage annotations, breaking target extraction. We override to
+        return ``rec.stages`` instead, which carries the ``names`` attribute
+        needed by ``_filter_intervals`` for class-mapping filtering.
+        """
+        if split is not None and self.fold_type in (
+            "intersubject",
+            "intersession",
+        ):
+            key = f"splits.{self.fold_type}_fold_{self.fold_number}_assignment"
+            fallback_key = f"splits.fold_{self.fold_number}_assignment"
+            result = {}
+            for rid in self.recording_ids:
+                rec = self.get_recording(rid)
+                try:
+                    assignment = str(rec.get_nested_attribute(key))
+                except (AttributeError, KeyError):
+                    assignment = str(rec.get_nested_attribute(fallback_key))
+                if assignment == split:
+                    result[rid] = rec.stages
+            return result
+
+        return super().get_sampling_intervals(split=split)
 
     def get_channel_ids(self) -> list[str]:
         all_ids: set[str] = set()
