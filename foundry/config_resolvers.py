@@ -10,9 +10,6 @@ SLURM jobs where buffered output is lost on crash.
 
 import glob as _glob
 import os
-import sys
-import traceback
-from functools import wraps
 from typing import List, Optional
 
 from omegaconf import OmegaConf
@@ -246,30 +243,6 @@ def _filter_config_list_by_prefix(
 def _get_suffix(s: str) -> str:
     """Last segment of an underscore-separated string, upper-cased."""
     return s.split("_")[-1].upper()
-
-
-def hydra_main_wrapper(func):
-    """Decorator that ensures exceptions are printed and streams flushed.
-
-    Hydra swallows tracebacks in certain failure modes (especially under
-    submitit). This wrapper guarantees the traceback reaches stderr and that
-    both stdout/stderr are flushed before the process exits.
-
-    See https://github.com/facebookresearch/hydra/issues/2664
-    """
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except BaseException:
-            traceback.print_exc(file=sys.stderr)
-            raise
-        finally:
-            sys.stdout.flush()
-            sys.stderr.flush()
-
-    return wrapper
 
 
 def register_resolvers() -> None:

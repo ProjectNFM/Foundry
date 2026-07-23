@@ -46,7 +46,7 @@ run:
   compile: default
 
 hyperparameters:
-  batch_size: 100
+  batch_size: 256
   sequence_length: 2.0
   patch_duration: null
   sampling_rate: null

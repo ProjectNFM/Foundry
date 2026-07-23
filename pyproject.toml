@@ -58,7 +58,7 @@ convention = "google"
 job_script_path = "scripts/job.sh"
 
 # Where to store job results by default.
-results_path = "$SCRATCH/logs/cluv"
+results_path = "$SCRATCH/runs"
 
 # On clusters, Cluv creates a symlink (a shortcut) in your project folder to the results_path dir.
 # This makes it easier to keep your project in $HOME and to see the results which are on $SCRATCH.

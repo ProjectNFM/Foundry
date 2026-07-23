@@ -2,6 +2,9 @@ import hashlib
 import logging
 import os
 from pathlib import Path
+import sys
+import traceback
+from functools import wraps
 
 import hydra
 import torch
@@ -11,7 +14,7 @@ from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
 from rich.logging import RichHandler
 
-from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
+from foundry.config_resolvers import register_resolvers
 from foundry.data.datamodules.base import normalize_data_config
 from foundry.seed import set_seed
 from foundry.tools.stage_data import stage_data
@@ -377,6 +380,28 @@ def _log_config_to_wandb(trainer, cfg: DictConfig):
 
 
 # -- Entry point ------------------------------------------------------------
+def hydra_main_wrapper(func):
+    """Decorator that ensures exceptions are printed and streams flushed.
+
+    Hydra swallows tracebacks in certain failure modes (especially under
+    submitit). This wrapper guarantees the traceback reaches stderr and that
+    both stdout/stderr are flushed before the process exits.
+
+    See https://github.com/facebookresearch/hydra/issues/2664
+    """
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except BaseException:
+            traceback.print_exc(file=sys.stderr)
+            raise
+        finally:
+            sys.stdout.flush()
+            sys.stderr.flush()
+
+    return wrapper
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
