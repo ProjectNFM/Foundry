@@ -44,7 +44,8 @@ class FoundryModule(L.LightningModule):
         hold: int = 0,
         decay: int = 0,
         hold_scheduler_type: str = "cosine",
-        min_lr_factor: float = 0.1,
+        end_lr_factor: float = 0.1,
+        start_lr_factor: float = 1e-4,
         scheduler_interval: str = "step",
     ):
         super().__init__()
@@ -56,7 +57,8 @@ class FoundryModule(L.LightningModule):
         self.hold = hold
         self.decay = decay
         self.hold_scheduler_type = hold_scheduler_type
-        self.min_lr_factor = min_lr_factor
+        self.end_lr_factor = end_lr_factor
+        self.start_lr_factor = start_lr_factor
         self.scheduler_interval = scheduler_interval
         self.save_hyperparameters(ignore=["model"])
 
@@ -159,17 +161,6 @@ class FoundryModule(L.LightningModule):
         self.log(
             f"{stage}/loss", total_loss, prog_bar=True, batch_size=batch_size
         )
-
-        if stage == "train" and getattr(self, "_trainer", None) is not None:
-            opt = self.optimizers()
-            if opt is not None:
-                current_lr = opt.param_groups[0]["lr"]
-                self.log(
-                    "train/lr",
-                    current_lr,
-                    prog_bar=False,
-                    batch_size=batch_size,
-                )
 
         metrics = self.train_metrics if stage == "train" else self.val_metrics
 
@@ -292,7 +283,7 @@ class FoundryModule(L.LightningModule):
         if self.warmup > 0:
             warmup = torch.optim.lr_scheduler.LinearLR(
                 optimizer,
-                start_factor=1e-4,
+                start_factor=self.start_lr_factor,
                 end_factor=1.0,
                 total_iters=self.warmup,
             )
@@ -304,7 +295,7 @@ class FoundryModule(L.LightningModule):
         if self.hold > 0:
             if self.hold_scheduler_type == "cosine":
                 hold = torch.optim.lr_scheduler.CosineAnnealingLR(
-                    optimizer, T_max=self.hold, eta_min=self.min_lr_factor
+                    optimizer, T_max=self.hold, eta_min=self.end_lr_factor
                 )
             elif self.hold_scheduler_type == "constant":
                 hold = torch.optim.lr_scheduler.ConstantLR(
@@ -324,12 +315,12 @@ class FoundryModule(L.LightningModule):
         if self.decay > 0:
 
             def decay_lambda(step):
-                # Cosine decay from 1.0 to min_lr_factor
+                # Cosine decay from 1.0 to end_lr_factor
                 progress = float(step) / float(self.decay)
                 cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
                 return (
-                    self.min_lr_factor
-                    + (1.0 - self.min_lr_factor) * cosine_decay
+                    self.end_lr_factor
+                    + (1.0 - self.end_lr_factor) * cosine_decay
                 )
 
             decay = torch.optim.lr_scheduler.LambdaLR(

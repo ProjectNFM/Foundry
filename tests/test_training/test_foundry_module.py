@@ -335,7 +335,7 @@ def test_scheduler_hold_cosine_only():
         hold=100,
         decay=0,
         hold_scheduler_type="cosine",
-        min_lr_factor=0.1,
+        end_lr_factor=0.1,
     )
 
     from unittest.mock import MagicMock
@@ -371,7 +371,7 @@ def test_scheduler_hold_constant_only():
         hold=100,
         decay=0,
         hold_scheduler_type="constant",
-        min_lr_factor=0.1,
+        end_lr_factor=0.1,
     )
 
     from unittest.mock import MagicMock
@@ -405,7 +405,7 @@ def test_scheduler_decay_only():
         warmup=0,
         hold=0,
         decay=100,
-        min_lr_factor=0.1,
+        end_lr_factor=0.1,
     )
 
     from unittest.mock import MagicMock
@@ -425,10 +425,10 @@ def test_scheduler_decay_only():
         scheduler.step()
 
     # With cosine decay, LR should decrease monotonically
-    # Start at high LR, end at min_lr_factor
+    # Start at high LR, end at end_lr_factor
     assert lrs[0] > lrs[-1]
     assert (
-        lrs[-1] >= module.min_lr_factor * module.learning_rate * 0.99
+        lrs[-1] >= module.end_lr_factor * module.learning_rate * 0.99
     )  # Allow small numerical error
 
 
@@ -444,7 +444,7 @@ def test_scheduler_warmup_hold_decay_sequential():
         hold=50,
         decay=50,
         hold_scheduler_type="cosine",
-        min_lr_factor=0.1,
+        end_lr_factor=0.1,
     )
 
     from unittest.mock import MagicMock
@@ -468,6 +468,50 @@ def test_scheduler_warmup_hold_decay_sequential():
     # Hold phase: LR should oscillate (cosine)
     # Decay phase: LR should decrease to min_lr_factor
     assert lrs[-1] < lrs[50]
+
+
+def test_scheduler_warmup_with_custom_start_lr_factor():
+    """Test scheduler warmup with custom start_lr_factor."""
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
+    model = _StubTaskModel({cfg.name: cfg})
+    custom_start_factor = 5e-3
+    custom_end_factor = 1e-3
+    custom_learning_rate = 1e-2
+    module = FoundryModule(
+        model=model,
+        learning_rate=custom_learning_rate,
+        warmup=100,
+        hold=0,
+        decay=10,
+        start_lr_factor=custom_start_factor,
+        end_lr_factor=custom_end_factor,
+    )
+
+    from unittest.mock import MagicMock
+
+    module.trainer = MagicMock()
+    module._trainer = MagicMock()
+
+    config = module.configure_optimizers()
+    scheduler = config["lr_scheduler"]["scheduler"]
+    optimizer = config["optimizer"]
+
+    assert scheduler is not None
+    # Record LR at different points
+    lrs = []
+    for _ in range(111):
+        lrs.append(optimizer.param_groups[0]["lr"])
+        scheduler.step()
+
+    # Check that warmup starts at custom_start_factor * base_lr
+    expected_start_lr = custom_start_factor * custom_learning_rate
+    assert lrs[0] == pytest.approx(expected_start_lr, rel=1e-5)
+    # Check that warmup ends near base_lr
+    assert lrs[-1] == pytest.approx(
+        custom_end_factor * custom_learning_rate, rel=1e-3
+    )
 
 
 def test_scheduler_invalid_hold_type_raises():
