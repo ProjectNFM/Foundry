@@ -3,7 +3,7 @@
 **Status:** In Progress
 **Date started:** 2026-07-22
 **Parent experiment:** [Pretraining Loss vs Downstream Task Performance](../experiments/007-pretraining-loss-vs-downstream.md), [Embedding Analysis: t-SNE/PCA and Linear Probing](../experiments/008-embedding-analysis-linear-probing.md)
-**Follow-up experiments:** [Discriminative LR Finetuning](../experiments/010-discriminative-lr-finetuning.md)
+**Follow-up experiments:** [Discriminative LR Finetuning](../experiments/010-discriminative-lr-finetuning.md), [Session Embedding Ablation](../experiments/011-session-embedding-ablation.md)
 
 ## Background
 

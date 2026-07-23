@@ -18,3 +18,4 @@ rotate_value: true
 emb_init_scale: 0.02
 t_min: 1e-2
 t_max: ${hyperparameters.sequence_length}
+disable_session_emb: false

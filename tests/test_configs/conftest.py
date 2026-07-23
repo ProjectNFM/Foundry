@@ -86,6 +86,7 @@ def instantiation_context() -> DictConfig:
                 "learning_rate": 1e-3,
                 "weight_decay": 0.01,
                 "cwt_lr_multiplier": 1.0,
+                "backbone_learning_rate": None,
                 "num_channels": 32,
                 "session_configs": {"sessionA": 16, "sessionB": 20},
             },

@@ -3,7 +3,7 @@
 **Status:** Draft
 **Date started:** 2026-07-23
 **Parent experiment:** [Finetuning Hyperparameter Search](../experiments/009-finetuning-hyperparameter-search.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Session Embedding Ablation](../experiments/011-session-embedding-ablation.md)
 
 ## Background
 
