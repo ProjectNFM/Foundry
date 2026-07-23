@@ -283,11 +283,11 @@ class FoundryModule(L.LightningModule):
     def configure_optimizers(self):
         param_groups = self._build_param_groups()
         optimizer = torch.optim.AdamW(param_groups)
-        
+
         schedulers = []
         milestones = []
         current_step = 0
-        
+
         # Warmup phase
         if self.warmup > 0:
             warmup = torch.optim.lr_scheduler.LinearLR(
@@ -299,7 +299,7 @@ class FoundryModule(L.LightningModule):
             schedulers.append(warmup)
             current_step += self.warmup
             milestones.append(current_step)
-        
+
         # Hold phase
         if self.hold > 0:
             if self.hold_scheduler_type == "cosine":
@@ -319,21 +319,29 @@ class FoundryModule(L.LightningModule):
             current_step += self.hold
             if self.decay > 0:  # Only add milestone if there's a next phase
                 milestones.append(current_step)
-        
+
         # Decay phase
         if self.decay > 0:
+
             def decay_lambda(step):
                 # Cosine decay from 1.0 to min_lr_factor
                 progress = float(step) / float(self.decay)
                 cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
-                return self.min_lr_factor + (1.0 - self.min_lr_factor) * cosine_decay
-            
-            decay = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=decay_lambda)
+                return (
+                    self.min_lr_factor
+                    + (1.0 - self.min_lr_factor) * cosine_decay
+                )
+
+            decay = torch.optim.lr_scheduler.LambdaLR(
+                optimizer, lr_lambda=decay_lambda
+            )
             schedulers.append(decay)
-        
+
         # If no schedulers are active, use a default constant scheduler
         if not schedulers:
-            scheduler = torch.optim.lr_scheduler.ConstantLR(optimizer, factor=1.0)
+            scheduler = torch.optim.lr_scheduler.ConstantLR(
+                optimizer, factor=1.0
+            )
         elif len(schedulers) == 1:
             # Single scheduler, no need for SequentialLR
             scheduler = schedulers[0]
@@ -342,7 +350,7 @@ class FoundryModule(L.LightningModule):
             scheduler = torch.optim.lr_scheduler.SequentialLR(
                 optimizer, schedulers=schedulers, milestones=milestones
             )
-        
+
         return {
             "optimizer": optimizer,
             "lr_scheduler": {

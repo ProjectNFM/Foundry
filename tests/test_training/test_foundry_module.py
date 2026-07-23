@@ -301,23 +301,24 @@ def test_scheduler_warmup_only():
         hold=0,
         decay=0,
     )
-    
+
     # Mock trainer
     from unittest.mock import MagicMock
+
     module.trainer = MagicMock()
     module._trainer = MagicMock()
-    
+
     config = module.configure_optimizers()
     scheduler = config["lr_scheduler"]["scheduler"]
     optimizer = config["optimizer"]
-    
+
     # Check that scheduler is configured
     assert scheduler is not None
     # Verify we can step through the scheduler
-    initial_lr = optimizer.param_groups[0]['lr']
+    initial_lr = optimizer.param_groups[0]["lr"]
     for _ in range(100):
         scheduler.step()
-    final_lr = optimizer.param_groups[0]['lr']
+    final_lr = optimizer.param_groups[0]["lr"]
     # After warmup, LR should be at or near base_lr
     assert final_lr > initial_lr
 
@@ -336,22 +337,23 @@ def test_scheduler_hold_cosine_only():
         hold_scheduler_type="cosine",
         min_lr_factor=0.1,
     )
-    
+
     from unittest.mock import MagicMock
+
     module.trainer = MagicMock()
     module._trainer = MagicMock()
-    
+
     config = module.configure_optimizers()
     scheduler = config["lr_scheduler"]["scheduler"]
     optimizer = config["optimizer"]
-    
+
     assert scheduler is not None
     # Record LR at different points
     lrs = []
     for _ in range(100):
-        lrs.append(optimizer.param_groups[0]['lr'])
+        lrs.append(optimizer.param_groups[0]["lr"])
         scheduler.step()
-    
+
     # With cosine annealing, LR should oscillate between min_lr_factor and 1.0 times base_lr
     # Check that LR varies (not constant)
     assert max(lrs) > min(lrs)
@@ -371,22 +373,23 @@ def test_scheduler_hold_constant_only():
         hold_scheduler_type="constant",
         min_lr_factor=0.1,
     )
-    
+
     from unittest.mock import MagicMock
+
     module.trainer = MagicMock()
     module._trainer = MagicMock()
-    
+
     config = module.configure_optimizers()
     scheduler = config["lr_scheduler"]["scheduler"]
     optimizer = config["optimizer"]
-    
+
     assert scheduler is not None
     # Record LR at different points
     lrs = []
     for _ in range(100):
-        lrs.append(optimizer.param_groups[0]['lr'])
+        lrs.append(optimizer.param_groups[0]["lr"])
         scheduler.step()
-    
+
     # With constant LR, all should be the same
     assert all(lr == lrs[0] for lr in lrs)
 
@@ -404,26 +407,29 @@ def test_scheduler_decay_only():
         decay=100,
         min_lr_factor=0.1,
     )
-    
+
     from unittest.mock import MagicMock
+
     module.trainer = MagicMock()
     module._trainer = MagicMock()
-    
+
     config = module.configure_optimizers()
     scheduler = config["lr_scheduler"]["scheduler"]
     optimizer = config["optimizer"]
-    
+
     assert scheduler is not None
     # Record LR at different points
     lrs = []
     for _ in range(100):
-        lrs.append(optimizer.param_groups[0]['lr'])
+        lrs.append(optimizer.param_groups[0]["lr"])
         scheduler.step()
-    
+
     # With cosine decay, LR should decrease monotonically
     # Start at high LR, end at min_lr_factor
     assert lrs[0] > lrs[-1]
-    assert lrs[-1] >= module.min_lr_factor * module.learning_rate * 0.99  # Allow small numerical error
+    assert (
+        lrs[-1] >= module.min_lr_factor * module.learning_rate * 0.99
+    )  # Allow small numerical error
 
 
 def test_scheduler_warmup_hold_decay_sequential():
@@ -440,22 +446,23 @@ def test_scheduler_warmup_hold_decay_sequential():
         hold_scheduler_type="cosine",
         min_lr_factor=0.1,
     )
-    
+
     from unittest.mock import MagicMock
+
     module.trainer = MagicMock()
     module._trainer = MagicMock()
-    
+
     config = module.configure_optimizers()
     scheduler = config["lr_scheduler"]["scheduler"]
     optimizer = config["optimizer"]
-    
+
     assert scheduler is not None
     # Record LR at different points
     lrs = []
     for _ in range(150):
-        lrs.append(optimizer.param_groups[0]['lr'])
+        lrs.append(optimizer.param_groups[0]["lr"])
         scheduler.step()
-    
+
     # Warmup phase: LR should increase from low to base_lr
     assert lrs[0] < lrs[25] < lrs[49]
     # Hold phase: LR should oscillate (cosine)
@@ -476,11 +483,12 @@ def test_scheduler_invalid_hold_type_raises():
         decay=0,
         hold_scheduler_type="invalid",  # Invalid type
     )
-    
+
     from unittest.mock import MagicMock
+
     module.trainer = MagicMock()
     module._trainer = MagicMock()
-    
+
     with pytest.raises(ValueError, match="Unknown hold_scheduler_type"):
         module.configure_optimizers()
 
@@ -497,22 +505,22 @@ def test_scheduler_no_phases_uses_constant():
         hold=0,
         decay=0,
     )
-    
+
     from unittest.mock import MagicMock
+
     module.trainer = MagicMock()
     module._trainer = MagicMock()
-    
+
     config = module.configure_optimizers()
     scheduler = config["lr_scheduler"]["scheduler"]
     optimizer = config["optimizer"]
-    
+
     assert scheduler is not None
     # Record LR at different points
     lrs = []
     for _ in range(10):
-        lrs.append(optimizer.param_groups[0]['lr'])
+        lrs.append(optimizer.param_groups[0]["lr"])
         scheduler.step()
-    
+
     # All LRs should be the same (constant)
     assert all(lr == lrs[0] for lr in lrs)
-
