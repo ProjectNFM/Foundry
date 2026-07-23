@@ -67,11 +67,10 @@ results_symlink = "logs"
 ## The path where the project should be replicated on remote clusters.
 # project_dir = "$HOME/<project_name>"
 
-## Where to read the data from when synchronizing data to all clusters.
-#data_source = "<cluster>:<dataset_path_on_the_cluster>"
+data_source = "mila:/network/scratch/s/sobralm/brainsets"
 
 ## Where the dataset should be replicated on all clusters.
-#datasets_path = "<path_to_copy_datasets_on_all_clusters>"
+datasets_path = "$SCRATCH/brainsets"
 
 [tool.cluv.env]
 # Environment variables applied when using Slurm commands on all clusters.
@@ -105,22 +104,19 @@ results_path = "$HOME/logs/cluv"
 [tool.cluv.clusters.vulcan]
 
 [tool.cluv.clusters.rorqual]
-sbatch_args = { account = "rrg-bengioy-ad" }
+sbatch_args = { account = "rrg-tyrell-ab" }
 
 [tool.cluv.clusters.fir]
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
-sbatch_args = { account = "rrg-bengioy-ad" }
+sbatch_args = { account = "rrg-tyrell-ab" }
 
 [tool.cluv.clusters.nibi]
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
-sbatch_args = { account = "rrg-bengioy-ad" }
+sbatch_args = { account = "rrg-tyrell-ab" }
 
 [tool.cluv.clusters.trillium]
-sbatch_args = { account = "rrg-bengioy-ad" }
+sbatch_args = { account = "rrg-tyrell-ab" }
 
 [tool.cluv.clusters.trillium-gpu]
-sbatch_args = { account = "rrg-bengioy-ad" }
-
-[tool.cluv.clusters.narval]
-# Mila doesn't have an allocation on Narval anymore.
-sbatch_args = { account = "def-bengioy" }
+sbatch_args = { account = "rrg-tyrell-ab" }
+## Where to read the data from when synchronizing data to all clusters.

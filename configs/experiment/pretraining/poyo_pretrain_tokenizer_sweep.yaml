@@ -77,5 +77,5 @@ hydra:
     tasks_per_node: 1
     cpus_per_task: 6
     mem_gb: 32
-    gres: gpu:l40s:1
+    gres: gpu:1
     cluster: fir
