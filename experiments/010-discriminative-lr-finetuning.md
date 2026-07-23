@@ -16,10 +16,10 @@ the −2 pp gap persisted.
 Two findings from 009 motivate a discriminative learning rate approach:
 
 1. **Pretrained val F1 peaks at epoch 0** and monotonically declines — continued
-   full-model finetuning destroys useful representations faster than it adapts
+  full-model finetuning destroys useful representations faster than it adapts
    the task head.
 2. **Exp 008 showed the frozen pretrained backbone contains real signal**
-   (linear probe F1 0.418 vs 0.267 random init, +15 pp). Full finetuning at
+  (linear probe F1 0.418 vs 0.267 random init, +15 pp). Full finetuning at
    uniform lr improves over the frozen backbone (0.543) but still trails scratch
    (0.563).
 
@@ -50,24 +50,28 @@ non-destructive updates to the pretrained backbone. This should:
 
 1. Beat exp 009 uniform-lr finetuning (0.5425) by reducing representation drift.
 2. Beat or match the from-scratch baseline (0.5629) by combining pretrained
-   feature quality with task-specific head adaptation.
+  feature quality with task-specific head adaptation.
 3. Show val F1 that improves or holds steady beyond epoch 0 (unlike exp 009's
-   immediate decline).
+  immediate decline).
+
+
 
 ## Experiment
+
+
 
 ### Setup
 
 - **Model:** POYOEEGModel with CWT-CNN tokenizer (per_channel_cwt_cnn),
-  embed_dim=256, depth=4, same architecture as experiments 005–009
+embed_dim=256, depth=4, same architecture as experiments 005–009
 - **Data:** KempSleepEDF2013, inter-subject split, fold 0 for search,
-  all 3 folds for final validation
+all 3 folds for final validation
 - **Task:** 5-class sleep staging (sleep_stage_5class), auto class weights
-  (smoothing=1.0)
+(smoothing=1.0)
 - **Pretrained checkpoint:** CWT-CNN from exp 005 (wandb: `wlmobz7y`,
-  val_loss=0.0364)
+val_loss=0.0364)
 - **Param groups:** backbone = {tokenizer, backbone, rotary_emb, latent_emb};
-  head = {channel_emb, session_emb, task_emb, readout heads}
+head = {channel_emb, session_emb, task_emb, readout heads}
 - **Hardware:** 1× L40S per run, 6 CPUs, 32 GB RAM, 6h wall time (SLURM)
 - **WandB:** project=foundry_finetuning, group=KEMP_DISCRIMINATIVE_LR_SEARCH
   - `kemp_discriminative_lr_bb3e-05_hd0.0001` (`k2d11xtp`)
@@ -79,19 +83,25 @@ non-destructive updates to the pretrained backbone. This should:
 
 **Sweep axes (Phase 1 grid):**
 
-| Hyperparameter | Values | Rationale |
-| --- | --- | --- |
-| Backbone LR | 1e-6, 1e-5, 3e-5 | Conservative range below exp 009 best uniform lr (1e-4) |
-| Head LR | 1e-4, 1e-3 | 1e-4 matches exp 009 scratch best; 1e-3 matches exp 008 linear probe |
-| Warmup | 0 (fixed) | Exp 009 showed warmup hurt; hold constant to isolate discriminative LR |
-| ES patience | 50 (fixed) | Same as exp 009 |
+
+| Hyperparameter | Values           | Rationale                                                              |
+| -------------- | ---------------- | ---------------------------------------------------------------------- |
+| Backbone LR    | 1e-6, 1e-5, 3e-5 | Conservative range below exp 009 best uniform lr (1e-4)                |
+| Head LR        | 1e-4, 1e-3       | 1e-4 matches exp 009 scratch best; 1e-3 matches exp 008 linear probe   |
+| Warmup         | 0 (fixed)        | Exp 009 showed warmup hurt; hold constant to isolate discriminative LR |
+| ES patience    | 50 (fixed)       | Same as exp 009                                                        |
+
 
 **Conditions:**
 
-| Phase | Condition | Group | Runs | Purpose |
-| --- | --- | --- | --- | --- |
-| 1a | Pretrained discriminative LR grid | KEMP_DISCRIMINATIVE_LR_SEARCH | 6 (3 bb_lr × 2 head_lr) | Find best backbone/head LR pair |
-| — | Scratch baselines (from exp 009) | KEMP_SCRATCH_HP_SEARCH | 12 | Reference from-scratch performance |
+
+| Phase | Condition                         | Group                         | Runs                    | Purpose                            |
+| ----- | --------------------------------- | ----------------------------- | ----------------------- | ---------------------------------- |
+| 1a    | Pretrained discriminative LR grid | KEMP_DISCRIMINATIVE_LR_SEARCH | 6 (3 bb_lr × 2 head_lr) | Find best backbone/head LR pair    |
+| —     | Scratch baselines (from exp 009)  | KEMP_SCRATCH_HP_SEARCH        | 12                      | Reference from-scratch performance |
+
+
+
 
 ### Launch command
 
@@ -99,6 +109,8 @@ non-destructive updates to the pretrained backbone. This should:
 # Phase 1a — Discriminative LR grid (6 SLURM jobs, fold 0):
 uv run python main.py experiment=sleep_staging/poyo_kemp_discriminative_lr -m
 ```
+
+
 
 ### Key config overrides
 
@@ -108,13 +120,17 @@ Uses new config
 Key differences from exp 009 config (`poyo_kemp_finetune_hp_search.yaml`):
 
 - **Discriminative LR** via `hyperparameters.backbone_learning_rate` (new) +
-  `hyperparameters.learning_rate` (head), implemented in
-  `FoundryModule._build_backbone_head_param_groups()`
+`hyperparameters.learning_rate` (head), implemented in
+`FoundryModule._build_backbone_head_param_groups()`
 - **No LR/warmup sweep** — warmup fixed at 0; only backbone_lr × head_lr swept
 - **Tokenizer fixed** to `per_channel_cwt_cnn`
 - **Patience** 50, same as exp 009
 
+
+
 ## Results
+
+
 
 ### Summary
 
@@ -139,34 +155,42 @@ training cannot recover from.
 
 **Phase 1a — Discriminative LR grid (fold 0):**
 
-| Backbone LR | Head LR | Val F1 | Run ID | Status |
-|-------------|---------|--------|--------|--------|
-| 1e-6 | 1e-4 | 0.5363 | `6q016g63` | finished |
-| 1e-6 | 1e-3 | 0.5166 | `o9ylo1dt` | finished |
-| 1e-5 | 1e-4 | 0.5416* | `cpl9mloq` | crashed |
-| 1e-5 | 1e-3 | 0.5401* | `rtbsydzp` | crashed |
-| 3e-5 | 1e-4 | **0.5406** | `k2d11xtp` | finished |
-| 3e-5 | 1e-3 | 0.5298 | `gtmtk25c` | finished |
+
+| Backbone LR | Head LR | Val F1     | Run ID     | Status   |
+| ----------- | ------- | ---------- | ---------- | -------- |
+| 1e-6        | 1e-4    | 0.5363     | `6q016g63` | finished |
+| 1e-6        | 1e-3    | 0.5166     | `o9ylo1dt` | finished |
+| 1e-5        | 1e-4    | 0.5416*    | `cpl9mloq` | crashed  |
+| 1e-5        | 1e-3    | 0.5401*    | `rtbsydzp` | crashed  |
+| 3e-5        | 1e-4    | **0.5406** | `k2d11xtp` | finished |
+| 3e-5        | 1e-3    | 0.5298     | `gtmtk25c` | finished |
+
 
 *Pre-crash best (early stopped by OOM/SLURM, not by training failure).
 
 **Baselines (from exp 009, KEMP_SCRATCH_HP_SEARCH, fold 0):**
 
-| Config | Val F1 |
-|--------|--------|
-| Scratch lr=1e-4, wu=0 | **0.5629** |
-| Scratch lr=1e-4, wu=5 | 0.5605 |
-| Scratch lr=5e-5, wu=5 | 0.5510 |
-| Scratch lr=1e-4, wu=10 | 0.5502 |
-| Pretrained uniform lr=1e-4 (exp 009) | 0.5425 |
+
+| Config                               | Val F1     |
+| ------------------------------------ | ---------- |
+| Scratch lr=1e-4, wu=0                | **0.5629** |
+| Scratch lr=1e-4, wu=5                | 0.5605     |
+| Scratch lr=5e-5, wu=5                | 0.5510     |
+| Scratch lr=1e-4, wu=10               | 0.5502     |
+| Pretrained uniform lr=1e-4 (exp 009) | 0.5425     |
+
 
 **Key comparison:**
 
-| Condition | Best Val F1 | Δ vs Scratch |
-|-----------|-------------|--------------|
-| Scratch best (exp 009) | 0.5629 | — |
-| Pretrained uniform (exp 009) | 0.5425 | −2.04 pp |
-| Discriminative LR best (exp 010) | 0.5406 | −2.23 pp |
+
+| Condition                        | Best Val F1 | Δ vs Scratch |
+| -------------------------------- | ----------- | ------------ |
+| Scratch best (exp 009)           | 0.5629      | —            |
+| Pretrained uniform (exp 009)     | 0.5425      | −2.04 pp     |
+| Discriminative LR best (exp 010) | 0.5406      | −2.23 pp     |
+
+
+
 
 ### Analysis
 
@@ -179,13 +203,11 @@ and `KEMP_SCRATCH_HP_SEARCH`.
 uv run python analysis/010_discriminative_lr.py
 ```
 
+
+
 ### Figures
 
-![Discriminative LR heatmap — Val F1 by (Backbone LR, Head LR)](../analysis/figures/010_discriminative_lr_heatmap.png)
-
-![Discriminative LR vs scratch baselines comparison](../analysis/figures/010_discriminative_lr_comparison.png)
-
-![Learning curves: discriminative LR (left) vs scratch (right)](../analysis/figures/010_discriminative_lr_curves.png)
+Discriminative LR heatmap — Val F1 by (Backbone LR, Head LR)Discriminative LR vs scratch baselines comparisonLearning curves: discriminative LR (left) vs scratch (right)
 
 ## Conclusions
 
@@ -217,15 +239,16 @@ with a pretrained backbone?" — addressed in experiment 011.
 ## Notes for future experiments
 
 - The epoch-0 peak + decline pattern in all pretrained finetuning runs
-  strongly implicates the **session embeddings** (and possibly channel
-  embeddings) as the source of instant overfitting. These are randomly
-  initialized even when the backbone is pretrained, and they may cause the
-  model to immediately overfit to embedding noise rather than learning
-  generalizable session/channel representations. This motivated
-  [experiment 011](../experiments/011-session-embedding-ablation.md).
+strongly implicates the **session embeddings** (and possibly channel
+embeddings) as the source of instant overfitting. These are randomly
+initialized even when the backbone is pretrained, and they may cause the
+model to immediately overfit to embedding noise rather than learning
+generalizable session/channel representations. This motivated
+[experiment 011](../experiments/011-session-embedding-ablation.md).
 - If session embedding ablation confirms the hypothesis, the fix may be
-  **freezing or removing session embeddings** during finetuning, or
-  **initializing them from pretrained statistics**.
+**freezing or removing session embeddings** during finetuning, or
+**initializing them from pretrained statistics**.
 - The crash of backbone_lr=1e-5 runs (likely SLURM OOM) suggests memory
-  pressure at intermediate backbone LRs — worth investigating if this
-  experiment is revisited.
+pressure at intermediate backbone LRs — worth investigating if this
+experiment is revisited.
+
