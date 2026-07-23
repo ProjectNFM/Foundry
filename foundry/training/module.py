@@ -39,6 +39,7 @@ class FoundryModule(L.LightningModule):
         learning_rate: float = 1e-4,
         weight_decay: float = 0.01,
         cwt_lr_multiplier: float = 1.0,
+        backbone_learning_rate: float | None = None,
         warmup_epochs: int = 0,
     ):
         super().__init__()
@@ -46,6 +47,7 @@ class FoundryModule(L.LightningModule):
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.cwt_lr_multiplier = cwt_lr_multiplier
+        self.backbone_learning_rate = backbone_learning_rate
         self.warmup_epochs = warmup_epochs
         self.save_hyperparameters(ignore=["model"])
 
@@ -218,6 +220,11 @@ class FoundryModule(L.LightningModule):
         )
 
     def _build_param_groups(self) -> list[dict]:
+        if self.backbone_learning_rate is not None and hasattr(
+            self.model, "transferable_components"
+        ):
+            return self._build_backbone_head_param_groups()
+
         if self.cwt_lr_multiplier == 1.0:
             return [
                 {
@@ -267,6 +274,53 @@ class FoundryModule(L.LightningModule):
                 f"base_lr={self.learning_rate:.2e} ({n_other} params)"
             )
 
+        return groups
+
+    def _build_backbone_head_param_groups(self) -> list[dict]:
+        component_prefixes = tuple(
+            f"{name}." for name in self.model.transferable_components()
+        )
+        backbone_params = []
+        head_params = []
+        for name, param in self.model.named_parameters():
+            if name.startswith(component_prefixes):
+                backbone_params.append(param)
+            else:
+                head_params.append(param)
+
+        groups = []
+        if backbone_params:
+            groups.append(
+                {
+                    "params": backbone_params,
+                    "lr": self.backbone_learning_rate,
+                    "weight_decay": self.weight_decay,
+                }
+            )
+        if head_params:
+            groups.append(
+                {
+                    "params": head_params,
+                    "lr": self.learning_rate,
+                    "weight_decay": self.weight_decay,
+                }
+            )
+
+        n_backbone = sum(
+            p.numel()
+            for p in backbone_params
+            if not p.__class__.__name__.startswith("Uninitialized")
+        )
+        n_head = sum(
+            p.numel()
+            for p in head_params
+            if not p.__class__.__name__.startswith("Uninitialized")
+        )
+        print(
+            f"Discriminative LR: backbone_lr={self.backbone_learning_rate:.2e} "
+            f"({n_backbone} params) | head_lr={self.learning_rate:.2e} "
+            f"({n_head} params)"
+        )
         return groups
 
     def configure_optimizers(self):

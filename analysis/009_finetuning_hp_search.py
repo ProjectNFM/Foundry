@@ -211,8 +211,8 @@ def plot_hp_heatmaps(df: pd.DataFrame) -> None:
 def plot_best_comparison(df: pd.DataFrame) -> None:
     """Bar chart: best pretrained vs best scratch vs exp 006/007 baselines."""
     best_per_condition = (
-        df.groupby("Condition")
-        .apply(lambda g: g.loc[g["best_val_f1"].idxmax()])
+        df.groupby("Condition", as_index=False)
+        .apply(lambda g: g.loc[g["best_val_f1"].idxmax()], include_groups=False)
         .reset_index(drop=True)
     )
 

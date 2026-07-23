@@ -19,6 +19,7 @@ hyperparameters:
   learning_rate: ???  
   weight_decay: ???
   cwt_lr_multiplier: 1.0
+  backbone_learning_rate: null
 
 extract:
   output_dir: outputs/embeddings/default

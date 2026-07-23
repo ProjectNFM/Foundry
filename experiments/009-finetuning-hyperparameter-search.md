@@ -1,9 +1,9 @@
 # Finetuning Hyperparameter Search
 
-**Status:** Draft
+**Status:** In Progress
 **Date started:** 2026-07-22
 **Parent experiment:** [Pretraining Loss vs Downstream Task Performance](../experiments/007-pretraining-loss-vs-downstream.md), [Embedding Analysis: t-SNE/PCA and Linear Probing](../experiments/008-embedding-analysis-linear-probing.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Discriminative LR Finetuning](../experiments/010-discriminative-lr-finetuning.md)
 
 ## Background
 
@@ -146,19 +146,85 @@ much stronger pretrained representations than ResampleCNN)
 
 ## Results
 
-
+Phases 1 and 2 completed (21/24 runs; 3 crashed). Phase 3 not yet launched.
+All results below are on **fold 0** only.
 
 ### Summary
 
-TBD
+The hyperparameter search **did not resolve negative transfer**. The best
+pretrained configuration (lr=1e-4, warmup=0) is identical to experiment 007's
+setup, and achieves val F1 0.5425 — within noise of exp 007 fold 0 (0.5419).
+The best from-scratch configuration uses the same lr and warmup and achieves
+val F1 0.5629, a **−2.0 pp gap** that matches the exp 006/007 pattern.
+
+Lower learning rates and warmup **hurt** pretrained performance rather than
+helping: the best pretrained run at lr=1e-4 is +7.5 pp F1 above the best
+lr=1e-5 run (0.4671). Across the full grid, pretrained models achieve lower
+mean train loss (0.347 vs 0.360) but lower mean val F1 (0.494 vs 0.532),
+confirming the train–val divergence observed in exp 007.
+
+Learning curves for the best runs show val F1 **peaking at epoch 0** for
+pretrained and epoch 1 for scratch, then monotonically degrading through epoch
+6. Increased patience (50 vs 20) allowed longer training but did not change the
+optimal stopping point — the best checkpoint is still reached within the first
+1–2 epochs.
 
 ### Metrics
 
-TBD
+**Phase 1 — Pretrained CWT-CNN HP search (fold 0, 10/12 runs finished):**
+
+| LR | Warmup | Val F1 | Train Loss | Best Epoch | WandB Run ID |
+|----|--------|--------|------------|------------|--------------|
+| 1e-4 | 0 | **0.5425** | 0.3076 | 0 | `txqx3q04` |
+| 3e-5 | 0 | 0.5068 | 0.3260 | 2 | `t1x3d7fi` |
+| 5e-5 | 0 | 0.5017 | 0.3192 | 2 | `3nuuhtf6` |
+| 3e-5 | 5 | 0.4970 | 0.3443 | 2 | `suz91i0d` |
+| 1e-4 | 10 | 0.4967 | 0.3382 | 0 | `hskjze2n` |
+| 5e-5 | 5 | 0.4928 | 0.3408 | 2 | `imiosm08` |
+| 5e-5 | 10 | 0.4927 | 0.3497 | 2 | `lopypey8` |
+| 3e-5 | 10 | 0.4874 | 0.3666 | 2 | `d1y2i48c` |
+| 1e-5 | 5 | 0.4671 | 0.3888 | 2 | `u5mu0pzg` |
+| 1e-5 | 10 | 0.4504 | 0.3893 | 2 | `5wsefsdm` |
+| 1e-5 | 0 | — | — | — | `jq0ft5t2` (crashed) |
+| 1e-4 | 5 | — | — | — | `t4ei9lki` (crashed) |
+
+**Phase 2 — From-scratch CWT-CNN HP search (fold 0, 11/12 runs finished):**
+
+| LR | Warmup | Val F1 | Train Loss | Best Epoch | WandB Run ID |
+|----|--------|--------|------------|------------|--------------|
+| 1e-4 | 0 | **0.5629** | 0.3176 | 1 | `3pk071u6` |
+| 1e-4 | 5 | 0.5605 | 0.3436 | 1 | `f8xx0ykv` |
+| 5e-5 | 5 | 0.5510 | 0.3355 | 1 | `f59sbb7t` |
+| 1e-4 | 10 | 0.5502 | 0.3363 | 1 | `3o9vieg1` |
+| 3e-5 | 0 | 0.5458 | 0.3205 | 1 | `b9sp9xwh` |
+| 3e-5 | 5 | 0.5338 | 0.3587 | 1 | `2aillwcy` |
+| 5e-5 | 10 | 0.5296 | 0.3683 | 1 | `xaka1w5r` |
+| 1e-5 | 0 | 0.5206 | 0.3676 | 1 | `ppgvram2` |
+| 3e-5 | 10 | 0.5148 | 0.3798 | 1 | `fj8w6qnu` |
+| 1e-5 | 5 | 0.5006 | 0.3965 | 1 | `zhi5ppoi` |
+| 1e-5 | 10 | 0.4773 | 0.4373 | 1 | `c26b53bo` |
+| 5e-5 | 0 | — | — | — | `9cklsfjc` (crashed) |
+
+**Best config comparison (fold 0):**
+
+| Condition | Best LR | Warmup | Val F1 | Δ vs Exp 006 fold 0 | WandB Run ID |
+|-----------|---------|--------|--------|-----------------------|--------------|
+| Exp 006 scratch (ref) | 1e-4 | 0 | 0.5612 | — | (exp 006) |
+| Exp 007 finetune (ref) | 1e-4 | 0 | 0.5419 | −1.9 pp | `inad6ohi` |
+| Exp 009 scratch | 1e-4 | 0 | 0.5629 | +0.2 pp | `3pk071u6` |
+| Exp 009 pretrained | 1e-4 | 0 | 0.5425 | −1.9 pp | `txqx3q04` |
+
+**Grid means (all completed runs per condition):**
+
+| Condition | Mean Train Loss | Mean Val F1 |
+|-----------|-----------------|-------------|
+| Pretrained | 0.347 | 0.494 |
+| Scratch | 0.360 | 0.532 |
 
 ### Analysis
 
-TBD
+Results extracted programmatically from WandB project `foundry_finetuning`
+groups `KEMP_FINETUNE_HP_SEARCH` and `KEMP_SCRATCH_HP_SEARCH`.
 
 **Analysis script:** `analysis/009_finetuning_hp_search.py`
 
@@ -166,32 +232,77 @@ TBD
 uv run python analysis/009_finetuning_hp_search.py
 ```
 
+Key observations from learning curves (best run per condition):
 
+- **Pretrained** (`txqx3q04`): val F1 peaks at epoch 0 (0.5425) and declines
+  monotonically to 0.473 by epoch 6. No later epoch recovers.
+- **Scratch** (`3pk071u6`): val F1 improves from 0.551 (epoch 0) to 0.563
+  (epoch 1), then declines to 0.531 by epoch 6.
 
 ### Figures
 
-TBD
+![HP search heatmap](../analysis/figures/009_hp_search_heatmap.png)
+
+![Best config comparison](../analysis/figures/009_best_comparison.png)
+
+![Learning curves — top 3 configs per condition](../analysis/figures/009_learning_curves_top3.png)
 
 ## Conclusions
 
-TBD
+1. **Hypothesis refuted.** Properly tuned hyperparameters do not enable
+   pretrained CWT-CNN to beat the from-scratch baseline. The HP grid's optimum
+   for finetuning is the same lr=1e-4, warmup=0 used in exp 007, and the
+   −2 pp gap persists.
+2. **The catastrophic-forgetting mitigation strategy failed.** Lower learning
+   rates and warmup were predicted to preserve pretrained features, but they
+   uniformly degraded val F1. The pretrained model is most sensitive to LR:
+   reducing from 1e-4 to 1e-5 drops val F1 by ~7.5 pp. This suggests the
+   problem is not large early gradients destroying features, but rather that
+   the pretrained representation manifold is a poor starting point for
+   classification — lower LR traps the model there without sufficient
+   adaptation.
+3. **Train–val divergence confirms a representation mismatch, not a tuning
+   problem.** Pretrained models fit training data better (lower mean train
+   loss across the grid) but generalize worse (lower mean val F1). At the best
+   configs, pretrained also has slightly lower train loss (0.308 vs 0.318) but
+   2 pp lower val F1. Combined with exp 008's linear probe result (+15 pp
+   pretrained advantage with frozen backbone), this points to a specific
+   failure mode: pretrained features contain sleep-stage information, but
+   full finetuning **destroys** it faster than it can adapt the head and
+   backbone jointly.
+4. **Early stopping is critical and insufficient.** Val F1 peaks at epoch 0–1
+   for both conditions; continued training only hurts. Patience=50 did not
+   help because the model never recovers after the initial decline. Even
+   stopping at the optimal epoch, pretrained (0.543) still trails scratch
+   (0.563).
+5. **Phase 3 is unlikely to change the conclusion.** Both conditions' best
+   configs use lr=1e-4, warmup=0 — the same HPs already validated across
+   3 folds in exp 006/007. Phase 3 would confirm error bars but is not
+   expected to reverse the ranking.
 
 ## Notes for future experiments
 
-- If the best pretrained config beats scratch but the margin is small,
-consider **discriminative (layerwise) learning rates** — lower LR for the
-pretrained backbone, higher LR for the new task head. This would require
-extending `FoundryModule._build_param_groups()` to split by
-`transferable_components()`.
-- **Gradual unfreezing** (freeze backbone for N epochs, then unfreeze) is
-another avenue if warmup alone is insufficient. Can be approximated by
-training a linear probe (exp 008 config) and then resuming with full
-finetuning from that checkpoint.
-- If no configuration beats scratch, the reconstruction pretraining objective
-may be fundamentally misaligned with sleep staging — pivot to contrastive
-or temporal prediction objectives.
-- **ResampleCNN:** This experiment focuses on CWT-CNN. If CWT-CNN finetuning
-succeeds, consider whether the same HP recipe helps ResampleCNN, though
-exp 008 showed its pretrained representations are much weaker (+2.2 pp
-linear probe vs +15.0 pp for CWT-CNN).
+- **Discriminative (layerwise) learning rates** are the most promising
+  remaining mitigation within the finetuning paradigm: freeze or use very low
+  LR for the pretrained backbone, higher LR for the task head. Exp 008 showed
+  the frozen backbone alone achieves F1 0.418; the challenge is adapting the
+  head without overwriting backbone features. Requires extending
+  `FoundryModule._build_param_groups()` to split by
+  `transferable_components()`.
+- **Gradual unfreezing / two-stage finetuning:** Train linear probe (exp 008
+  config) to convergence, then unfreeze backbone with very low LR. This
+  directly addresses the epoch-0 peak finding — the model may need a stable
+  head before backbone adaptation.
+- **Brief finetuning with aggressive early stopping:** Val F1 peaks at epoch
+  0 for pretrained. Consider stopping after 1–2 epochs or monitoring
+  backbone representation drift (e.g., CKA distance from pretrained checkpoint).
+- **Pivot pretraining objective:** If layerwise LR also fails, the
+  reconstruction objective is likely fundamentally misaligned with sleep
+  staging. Consider contrastive, temporal prediction, or multi-task objectives
+  that incorporate sleep-stage structure.
+- **ResampleCNN:** This experiment focuses on CWT-CNN. The same HP search on
+  ResampleCNN is lower priority given exp 008's weak linear probe (+2.2 pp).
+- **Re-run crashed grid points** (lr=1e-5/wu=0, lr=1e-4/wu=5 pretrained;
+  lr=5e-5/wu=0 scratch) if completeness matters, but the missing cells are
+  unlikely to change the best config.
 

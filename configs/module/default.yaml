@@ -3,4 +3,5 @@ _target_: foundry.training.FoundryModule
 learning_rate: ${hyperparameters.learning_rate}
 weight_decay: ${hyperparameters.weight_decay}
 cwt_lr_multiplier: ${hyperparameters.cwt_lr_multiplier}
+backbone_learning_rate: ${hyperparameters.backbone_learning_rate}
 warmup_epochs: 0

@@ -181,6 +181,39 @@ def test_cwt_lr_param_groups_separate_tokenizer_cwt_params():
     assert groups[1]["lr"] == pytest.approx(1e-1)
 
 
+def test_backbone_head_param_groups_use_transferable_components():
+    from foundry.training import FoundryModule
+
+    class _TransferModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.tokenizer = nn.Linear(2, 2)
+            self.backbone = nn.Linear(2, 2)
+            self.rotary_emb = nn.Linear(2, 2)
+            self.latent_emb = nn.Linear(2, 2)
+            self.channel_emb = nn.Linear(2, 2)
+            self.task_configs = {}
+
+        def transferable_components(self) -> tuple[str, ...]:
+            return ("tokenizer", "backbone", "rotary_emb", "latent_emb")
+
+        def forward(self, x):
+            return x
+
+    model = _TransferModel()
+    module = FoundryModule(
+        model=model,
+        learning_rate=1e-3,
+        backbone_learning_rate=1e-5,
+    )
+    groups = module._build_param_groups()
+
+    assert len(groups) == 2
+    assert groups[0]["lr"] == pytest.approx(1e-5)
+    assert groups[1]["lr"] == pytest.approx(1e-3)
+    assert len(groups[0]["params"]) > len(groups[1]["params"])
+
+
 def test_transfer_batch_to_device_converts_float64_to_float32():
     from foundry.training import FoundryModule
 
