@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any, Dict
 
 import lightning as L
-import math
 import torch
 import torch.nn as nn
 from hydra.utils import instantiate
