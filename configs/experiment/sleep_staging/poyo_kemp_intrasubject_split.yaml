@@ -1,0 +1,96 @@
+# @package _global_
+#
+# Experiment 012: Within-subject (intra-session) split control.
+#
+# Control experiment to determine whether the large train-val loss gap
+# (~0.94) observed in inter-subject sleep staging is due to model
+# overfitting or is an inherent property of inter-subject distribution
+# shift. Uses the same model/HP as the best scratch config from exp 009
+# but with an intrasession split (epochs within each subject are randomly
+# assigned to train/val, so all subjects appear in both sets).
+#
+# If the gap drops to near-zero, the model is not overfitting — the gap
+# reflects genuine subject-level variability. If it persists, the model
+# is memorizing patterns that don't even generalize within subjects.
+#
+# Launch on SLURM via submitit (1 run, fold 0):
+#   uv run python main.py experiment=sleep_staging/poyo_kemp_intrasubject_split -m
+#
+# Intersubject control (same config, for direct gap comparison):
+#   uv run python main.py experiment=sleep_staging/poyo_kemp_intrasubject_split \
+#       data.split_type=intersubject \
+#       'run.name=kemp_intersubject_control_scratch' \
+#       run.group=KEMP_INTRASUBJECT_SPLIT_CONTROLS \
+#       'run.tags=[sleep_staging,poyo,kemp,intersubject,control,exp012]' -m
+
+defaults:
+  - override /model: poyo_eeg
+  - override /model/tokenizer: per_channel_cwt_cnn
+  - override /data: kemp_sleep_edf/allsess
+  - override /hydra/launcher: slurm_default
+
+task_configs:
+  - sleep_stage_5class
+
+model:
+  zero_output_timestamps: true
+  normalize_inputs: true
+
+data:
+  split_type: intrasession
+  task_type: sleep_stage
+
+run:
+  name: kemp_intrasession_split_scratch
+  group: KEMP_INTRASUBJECT_SPLIT
+  tags: [sleep_staging, poyo, kemp, intrasession, exp012]
+  log_level: INFO
+  project: foundry_finetuning
+  compile: default
+  pretrained_checkpoint: null
+  freeze_pretrained: false
+  init_mode: scratch
+
+class_weights:
+  mode: auto
+  smoothing: 1.0
+
+hyperparameters:
+  batch_size: 512
+  sequence_length: 2.0
+  patch_duration: null
+  sampling_rate: null
+  fold_number: 0
+  num_workers: 6
+  num_channels: null
+  session_configs: null
+  learning_rate: 1e-4
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 1000
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/sleep_stage_5class_f1
+      mode: max
+      patience: 50
+    model_checkpoint:
+      monitor: val/sleep_stage_5class_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/sleep_stage_5class_f1:.4f}"
+
+hydra:
+  launcher:
+    tasks_per_node: 1
+    cpus_per_task: 6
+    mem_gb: 32
+    gres: gpu:l40s:1
+    timeout_min: 360
+    setup:
+      - "set -a"
+      - "source .env"
+      - "set +a"
+      - "export RANK=0"
+      - "uv run python -m foundry.tools.stage_data --experiment sleep_staging/poyo_kemp_intrasubject_split"
