@@ -1,0 +1,12 @@
+# Default WandB sweep configuration template
+# This defines the sweep structure, search method, and convergence criteria
+
+_target_: wandb.sweep
+method: bayes  # Search method: bayes, random, grid
+metric:
+  name: val_loss  # Metric to optimize (override per experiment)
+  goal: minimize  # minimize or maximize
+early_stopping:
+  patience: 10  # Stop if no improvement for N evaluations
+  min_iter: 5   # Minimum iterations before early stopping
+parameters: {}  # Override with experiment-specific search space
