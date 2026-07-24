@@ -10,7 +10,7 @@
 # Local dry-run (single tokenizer, no SLURM):
 #   uv run python main.py experiment=pretraining/poyo_pretrain_tokenizer_sweep model/tokenizer=per_channel_resample_cnn
 #
-# SLURM sweep (3 tokenizers in parallel):
+# SLURM sweep (2 tokenizers in parallel):
 #   uv run python main.py experiment=pretraining/poyo_pretrain_tokenizer_sweep -m
 
 defaults:

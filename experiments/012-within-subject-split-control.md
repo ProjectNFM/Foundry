@@ -3,7 +3,7 @@
 **Status:** Draft
 **Date started:** 2026-07-24
 **Parent experiment:** [Session Embedding Ablation](../experiments/011-session-embedding-ablation.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Intersubject Pretraining — Session Embedding Generalization](../experiments/013-pretrain-intersubject-session-embeddings.md)
 
 ## Background
 

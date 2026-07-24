@@ -3,7 +3,7 @@
 **Status:** Completed (Phase 1 partial — 7 epochs, timed out)
 **Date started:** 2026-07-23
 **Parent experiment:** [Finetuning Hyperparameter Search](../experiments/009-finetuning-hyperparameter-search.md), [Discriminative LR Finetuning](../experiments/010-discriminative-lr-finetuning.md)
-**Follow-up experiments:** [Within-Subject Split Control](../experiments/012-within-subject-split-control.md)
+**Follow-up experiments:** [Within-Subject Split Control](../experiments/012-within-subject-split-control.md), [Intersubject Pretraining — Session Embedding Generalization](../experiments/013-pretrain-intersubject-session-embeddings.md)
 
 ## Background
 
