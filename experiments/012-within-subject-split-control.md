@@ -42,38 +42,49 @@ evaluation is dominated by genuine subject-level variability rather than
 model overfitting. Concretely:
 
 - If the intrasession gap is near-zero (~0.05–0.15): the model generalizes
-  well within subjects, and the inter-subject gap is entirely due to
-  distribution shift. No amount of regularization will close it — more data
-  or domain adaptation is needed.
+well within subjects, and the inter-subject gap is entirely due to
+distribution shift. No amount of regularization will close it — more data
+or domain adaptation is needed.
 - If the intrasession gap remains large (>0.5): the model is truly
-  overfitting to temporal patterns within recordings, and regularization or
-  augmentation could help even in the inter-subject setting.
+overfitting to temporal patterns within recordings, and regularization or
+augmentation could help even in the inter-subject setting.
+
+
 
 ## Experiment
+
+
 
 ### Setup
 
 - **Model:** POYOEEGModel with CWT-CNN tokenizer (per_channel_cwt_cnn),
-  embed_dim=256, depth=4 — identical to experiments 009–011
+embed_dim=256, depth=4 — identical to experiments 009–011
 - **Data:** KempSleepEDF2013, **intrasession** split (random epoch-level
-  assignment within each recording), fold 0
+assignment within each recording), fold 0
 - **Task:** 5-class sleep staging (sleep_stage_5class), auto class weights
-  (smoothing=1.0)
+(smoothing=1.0)
 - **Training:** lr=1e-4, weight_decay=0.01, patience=50 — identical to best
-  scratch config from exp 009
+scratch config from exp 009
 - **Hardware:** 1× L40S, 6 CPUs, 32 GB RAM, 6h wall time (SLURM)
 - **WandB:** project=foundry_finetuning, group=KEMP_INTRASUBJECT_SPLIT
 
 **Conditions:**
 
-| Condition | Split Type | Group | Runs | Purpose |
-| --- | --- | --- | --- | --- |
-| Intrasession (primary) | intrasession | KEMP_INTRASUBJECT_SPLIT | 1 | Measure gap without subject shift |
-| Intersubject (control) | intersubject | KEMP_INTRASUBJECT_SPLIT_CONTROLS | 1 | Direct comparison under same config |
+
+| Condition                | Split Type   | Init       | Group                            | Runs | Purpose                                    |
+| ------------------------ | ------------ | ---------- | -------------------------------- | ---- | ------------------------------------------ |
+| Intrasession (primary)   | intrasession | scratch    | KEMP_INTRASUBJECT_SPLIT          | 1    | Measure gap without subject shift          |
+| Intersubject (control)   | intersubject | scratch    | KEMP_INTRASUBJECT_SPLIT_CONTROLS | 1    | Direct comparison under same config        |
+| Intrasession (pretrained)| intrasession | pretrained | KEMP_INTRASUBJECT_SPLIT          | 1    | Pretrained model gap on intrasession split |
+
 
 The intersubject control is optional — it replicates the exp 009 best scratch
 config (lr=1e-4, wu=0, fold 0) under this experiment's config file to ensure
 any differences are not due to config drift.
+
+The pretrained intrasession condition finetunes from the CWT-CNN SSL checkpoint
+(exp 005) on the same intrasession split to measure whether pretraining
+changes the train-val gap when subject shift is removed.
 
 ### Launch command
 
@@ -87,7 +98,16 @@ uv run python main.py experiment=sleep_staging/poyo_kemp_intrasubject_split \
     'run.name=kemp_intersubject_control_scratch' \
     run.group=KEMP_INTRASUBJECT_SPLIT_CONTROLS \
     'run.tags=[sleep_staging,poyo,kemp,intersubject,control,exp012]' -m
+
+# Pretrained intrasession (finetune from SSL checkpoint, intrasession split):
+uv run python main.py experiment=sleep_staging/poyo_kemp_intrasubject_split \
+    'run.pretrained_checkpoint=${pretrained_checkpoints.per_channel_cwt_cnn}' \
+    run.init_mode=pretrained \
+    'run.name=kemp_intrasession_split_pretrained' \
+    'run.tags=[sleep_staging,poyo,kemp,intrasession,pretrained,exp012]' -m
 ```
+
+
 
 ### Key config overrides
 
@@ -96,15 +116,20 @@ Uses new config
 
 Key difference from exp 009 config (`poyo_kemp_finetune_hp_search.yaml`):
 
-- **`data.split_type: intrasession`** — the only intervention. Changes from
-  inter-subject to within-subject epoch-level random split. All subjects
-  contribute to both train and val sets.
+- `data.split_type: intrasession` — the only intervention. Changes from
+inter-subject to within-subject epoch-level random split. All subjects
+contribute to both train and val sets.
 - **No LR/warmup sweep** — uses the best config from exp 009 (lr=1e-4, wu=0)
-  directly to minimise compute.
-- **No pretrained condition** — focuses exclusively on the scratch model to
-  isolate the overfitting question from the pretraining question.
+directly to minimise compute.
+- **Pretrained condition added** — finetunes from the CWT-CNN SSL checkpoint
+(exp 005) on the intrasession split to compare the train-val gap with vs
+without pretraining when subject shift is removed.
+
+
 
 ## Results
+
+
 
 ### Summary
 
@@ -124,6 +149,8 @@ TBD
 uv run python analysis/012_within_subject_split.py
 ```
 
+
+
 ### Figures
 
 TBD
@@ -135,13 +162,14 @@ TBD
 ## Notes for future experiments
 
 - If the intrasession gap is near-zero, the path forward is **not**
-  regularization but rather: more subjects, subject-adaptive normalization
-  (e.g., z-score per subject), or domain adaptation / test-time adaptation
-  techniques that align val subjects to the training distribution.
+regularization but rather: more subjects, subject-adaptive normalization
+(e.g., z-score per subject), or domain adaptation / test-time adaptation
+techniques that align val subjects to the training distribution.
 - If the gap persists within subjects, investigate temporal autocorrelation:
-  consecutive sleep epochs are highly correlated (30s windows in the same
-  stage). A **shuffled epoch** variant that breaks temporal order could
-  isolate whether the model exploits temporal structure vs. stage features.
+consecutive sleep epochs are highly correlated (30s windows in the same
+stage). A **shuffled epoch** variant that breaks temporal order could
+isolate whether the model exploits temporal structure vs. stage features.
 - Compare the absolute val F1 between splits: intrasession should be
-  substantially higher since the model "knows" each subject's patterns.
-  The difference quantifies the subject-level difficulty.
+substantially higher since the model "knows" each subject's patterns.
+The difference quantifies the subject-level difficulty.
+

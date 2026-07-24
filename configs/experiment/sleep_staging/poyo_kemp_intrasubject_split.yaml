@@ -22,12 +22,22 @@
 #       'run.name=kemp_intersubject_control_scratch' \
 #       run.group=KEMP_INTRASUBJECT_SPLIT_CONTROLS \
 #       'run.tags=[sleep_staging,poyo,kemp,intersubject,control,exp012]' -m
+#
+# Pretrained intrasession (finetune from SSL checkpoint, intrasession split):
+#   uv run python main.py experiment=sleep_staging/poyo_kemp_intrasubject_split \
+#       run.pretrained_checkpoint='${pretrained_checkpoints.per_channel_cwt_cnn}' \
+#       run.init_mode=pretrained \
+#       'run.name=kemp_intrasession_split_pretrained' \
+#       'run.tags=[sleep_staging,poyo,kemp,intrasession,pretrained,exp012]' -m
 
 defaults:
   - override /model: poyo_eeg
   - override /model/tokenizer: per_channel_cwt_cnn
   - override /data: kemp_sleep_edf/allsess
   - override /hydra/launcher: slurm_default
+
+pretrained_checkpoints:
+  per_channel_cwt_cnn: ${oc.env:HOME}/Foundry/runs/runs/PRETRAIN_TOKENIZER_SWEEP/pretrain_tokenizer_per_channel_cwt_cnn/checkpoints/best-epoch003-val_loss_0.0364.ckpt
 
 task_configs:
   - sleep_stage_5class
