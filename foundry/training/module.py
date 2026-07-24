@@ -31,6 +31,18 @@ class FoundryModule(L.LightningModule):
     entries on ``model.task_configs``. Sequence-weighted multitask loss aggregation,
     CWT LR param groups, and WandB metric summaries match the previous
     Classification/Regression module behavior.
+
+    Args:
+        learning_rate (float): Base learning rate for the optimizer.
+        weight_decay (float): Weight decay (L2 penalty) used in the optimizer.
+        cwt_lr_multiplier (float): Multiplier to apply to learning rate for CWT parameter groups.
+        warmup (int): Number of steps for the learning rate warmup phase.
+        start_lr_factor (float): Starting learning rate as a fraction of `learning_rate` during warmup.
+        hold (int): Number of steps to hold the learning rate after warmup.
+        hold_scheduler_type (str): Type of scheduler to use during the hold phase, e.g. "constant" or "cosine".
+        decay (int): Number of steps for cosine learning rate decay after the hold phase.
+        end_lr_factor (float): Fraction of `learning_rate` for the final learning rate at the end of decay.
+        scheduler_interval (str): Scheduler update interval (e.g. "step" or "epoch").
     """
 
     def __init__(
