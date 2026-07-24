@@ -1,6 +1,6 @@
 # Session Embedding Ablation for Inter-Subject Sleep Staging
 
-**Status:** Completed
+**Status:** Completed (Phase 1 partial — 7 epochs, timed out)
 **Date started:** 2026-07-23
 **Parent experiment:** [Finetuning Hyperparameter Search](../experiments/009-finetuning-hyperparameter-search.md), [Discriminative LR Finetuning](../experiments/010-discriminative-lr-finetuning.md)
 **Follow-up experiments:** [Within-Subject Split Control](../experiments/012-within-subject-split-control.md)
@@ -162,37 +162,51 @@ Key differences from exp 009 config (`poyo_kemp_finetune_hp_search.yaml`):
 
 ## Results
 
-Phase 1 completed: both scratch and pretrained LR sweeps with session
-embeddings disabled have finished. All runs are on **fold 0**.
+Phase 1 LR sweeps (scratch + pretrained, no session emb) all **timed out
+at epoch 7** (6h SLURM limit). None reached early stopping (patience 50).
+The analysis script includes these partial runs when they exceed
+`--min-epochs` (default 5); metrics are best-so-far from W&B summary.
+
+```bash
+uv run python analysis/011_session_emb_ablation.py
+# stricter threshold:
+uv run python analysis/011_session_emb_ablation.py --min-epochs 7
+```
+
+All runs are on **fold 0**.
 
 ### Summary
 
 Disabling session embeddings **does not make a large difference** to val F1
-for either scratch or pretrained models. The best no-session-emb runs perform
-within ~1 pp of the with-session-emb baselines from experiment 009 (same fold,
-same architecture, same LR grid). The hypothesis that session embeddings are
-the primary driver of the train-val gap and negative transfer is **not
-supported** — removing them neither closes the pretrained-vs-scratch gap nor
-substantially improves generalisation.
+for either scratch or pretrained models at epoch 7. The best no-session-emb
+runs perform within ~1–2 pp of the with-session-emb baselines from experiment
+009 (same fold, same architecture, same LR grid). The hypothesis that session
+embeddings are the primary driver of the train-val gap and negative transfer
+is **not supported** on this evidence — removing them neither closes the
+pretrained-vs-scratch gap nor substantially improves generalisation.
+
+**Caveat:** runs stopped at epoch 7; full convergence was not reached.
+Pretrained no-sess at lr=5e-5 looks slightly better than exp 009 (+1.6 pp)
+but this may not hold after longer training.
 
 ### Metrics
 
 Results are fetched dynamically from the wandb groups and compared against
 best runs from `KEMP_SCRATCH_HP_SEARCH` and `KEMP_FINETUNE_HP_SEARCH`
-(exp 009) on the same fold 0.
+(exp 009) on the same fold 0. Partial runs (failed/crashed) are included
+when `epochs_completed >= min_epochs`.
 
-Run the analysis script below for the full table with exact numbers and
-run IDs. The key finding is:
+| Condition | Session Emb | Best Val F1 | Best LR | Δ vs with-sess baseline |
+|-----------|-------------|-------------|---------|--------------------------|
+| Scratch | Disabled (exp 011, ep 7) | 0.5612 | 5e-5 | −0.2 pp |
+| Scratch | Enabled (exp 009) | 0.5629 | 1e-4 | — |
+| Pretrained | Disabled (exp 011, ep 7) | 0.5585 | 5e-5 | +1.6 pp |
+| Pretrained | Enabled (exp 009) | 0.5425 | 1e-4 | — |
 
-| Condition | Session Emb | Best Val F1 | Δ vs with-sess baseline |
-|-----------|-------------|-------------|--------------------------|
-| Scratch | Disabled (exp 011) | ~0.56 | ~0 pp |
-| Scratch | Enabled (exp 009) | 0.5629 | — |
-| Pretrained | Disabled (exp 011) | ~0.54 | ~0 pp |
-| Pretrained | Enabled (exp 009) | 0.5425 | — |
-
-The pretrained-vs-scratch gap (~2 pp) **persists regardless** of whether
-session embeddings are enabled or disabled.
+At epoch 7 with session emb disabled, scratch still leads pretrained by
+~0.3 pp (0.5612 vs 0.5585) — much smaller than the ~2 pp gap in exp 009
+with session emb enabled. Whether that gap re-opens with full training is
+unknown.
 
 ### Analysis
 
@@ -200,7 +214,8 @@ Results extracted programmatically from WandB. The analysis script fetches
 both the ablation runs (group `KEMP_SESSION_EMB_ABLATION`) and the baseline
 runs from previous experiments (groups `KEMP_SCRATCH_HP_SEARCH` and
 `KEMP_FINETUNE_HP_SEARCH`) on the same fold, ensuring an apples-to-apples
-comparison without hardcoded metric values.
+comparison without hardcoded metric values. Failed/crashed runs are included
+when they logged at least `--min-epochs` (default 5).
 
 **Analysis script:** `analysis/011_session_emb_ablation.py`
 
@@ -218,15 +233,16 @@ uv run python analysis/011_session_emb_ablation.py
 
 ## Conclusions
 
-1. **Hypothesis largely refuted.** Disabling session embeddings does not
-   meaningfully improve inter-subject generalisation. Both scratch and
-   pretrained models achieve similar val F1 with or without session embeddings,
-   indicating that session embeddings are not the primary source of the
-   train-val gap.
+1. **Hypothesis largely refuted (at epoch 7).** Disabling session embeddings
+   does not meaningfully improve inter-subject generalisation in these partial
+   runs. Both scratch and pretrained models achieve similar val F1 with or
+   without session embeddings, indicating that session embeddings are not the
+   primary source of the train-val gap at this training stage.
 
-2. **Session embeddings are not causing the −2 pp pretrained-vs-scratch gap.**
-   The gap persists with session embeddings removed, ruling out session-level
-   memorization as the explanation for negative transfer from pretraining.
+2. **Session embeddings are not clearly causing the −2 pp pretrained-vs-scratch gap.**
+   At epoch 7 with session emb disabled, the scratch–pretrained gap shrinks to
+   ~0.3 pp. The exp 009 gap with session emb enabled may be inflated by
+   session-level memorization, but partial runs prevent a definitive conclusion.
 
 3. **The train-val gap is not primarily driven by session identity leakage.**
    While the gap was hypothesized to stem from session embeddings encoding

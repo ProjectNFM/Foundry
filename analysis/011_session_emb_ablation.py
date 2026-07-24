@@ -8,11 +8,17 @@ Key analysis: compare val F1 and train-val loss gap with and without session
 embeddings to quantify how much session embeddings contribute to
 subject-level overfitting.
 
+Runs that timed out or crashed are included when they logged enough epochs
+(see ``--min-epochs``). Summary metrics use the best values seen so far.
+
 WandB project: foundry_finetuning
 
 Usage:
     uv run python analysis/011_session_emb_ablation.py
+    uv run python analysis/011_session_emb_ablation.py --min-epochs 5
 """
+
+import argparse
 
 import numpy as np
 import pandas as pd
@@ -39,6 +45,13 @@ BASELINE_GROUPS = {
 VAL_F1 = "val/sleep_stage_5class_f1"
 TRAIN_LOSS = "train/loss"
 VAL_LOSS = "val/loss"
+EPOCH_KEY = "epoch"
+
+# Accept partial runs that logged at least this many epochs (inclusive).
+DEFAULT_MIN_EPOCHS = 5
+
+# W&B states we treat as potentially usable when epoch threshold is met.
+USABLE_RUN_STATES = frozenset({"finished", "failed", "crashed", "killed"})
 
 FIGURES_DIR = figures_dir(__file__)
 
@@ -46,6 +59,28 @@ FIGURES_DIR = figures_dir(__file__)
 def _fetch_group_runs(group: str, api: wandb.Api) -> list:
     path = f"{WANDB_ENTITY}/{WANDB_PROJECT}" if WANDB_ENTITY else WANDB_PROJECT
     return list(api.runs(path, filters={"group": group}))
+
+
+def _epochs_completed(run) -> float | None:
+    epoch = unwrap_summary_value(run.summary.get(EPOCH_KEY), "max")
+    if isinstance(epoch, (int, float)) and not np.isnan(epoch):
+        return float(epoch)
+    return None
+
+
+def _is_usable_run(run, min_epochs: int) -> tuple[bool, str]:
+    """Return (include, reason) for a W&B run."""
+    if run.state not in USABLE_RUN_STATES:
+        return False, f"state={run.state}"
+
+    epochs = _epochs_completed(run)
+    if epochs is None:
+        return False, "no epoch logged"
+
+    if epochs < min_epochs:
+        return False, f"epoch={epochs:.0f} < min_epochs={min_epochs}"
+
+    return True, ""
 
 
 def _extract_from_run(run) -> dict:
@@ -67,6 +102,7 @@ def _extract_from_run(run) -> dict:
         if isinstance(train_loss, float) and isinstance(val_loss, float)
         else None
     )
+    epochs = _epochs_completed(run)
 
     return {
         "LR": hp.get("learning_rate"),
@@ -75,33 +111,72 @@ def _extract_from_run(run) -> dict:
         "Session Emb": "Disabled" if no_session_emb else "Enabled",
         "Run ID": run.id,
         "Run Name": run.name,
+        "State": run.state,
+        "epochs_completed": epochs,
         "best_val_f1": val_f1,
         "best_val_loss": val_loss,
         "final_train_loss": train_loss,
         "train_val_gap": gap,
-        "best_epoch": unwrap_summary_value(s.get("epoch"), "max"),
+        "best_epoch": unwrap_summary_value(s.get(EPOCH_KEY), "max"),
     }
 
 
-def fetch_ablation_runs(api: wandb.Api) -> pd.DataFrame:
+def _collect_group_runs(
+    runs: list,
+    *,
+    min_epochs: int,
+    fold: int | None = None,
+    source: str | None = None,
+) -> tuple[list[dict], int]:
+    rows: list[dict] = []
+    skipped = 0
+
+    for run in runs:
+        usable, reason = _is_usable_run(run, min_epochs)
+        if not usable:
+            print(f"    Skipping {run.id} ({reason})")
+            skipped += 1
+            continue
+
+        row = _extract_from_run(run)
+        if fold is not None and row["Fold"] != fold:
+            skipped += 1
+            continue
+        if source is not None:
+            row["Source"] = source
+        rows.append(row)
+
+        if run.state != "finished":
+            print(
+                f"    Including partial run {run.id} "
+                f"(state={run.state}, epochs={row['epochs_completed']:.0f})"
+            )
+
+    return rows, skipped
+
+
+def fetch_ablation_runs(
+    api: wandb.Api, min_epochs: int = DEFAULT_MIN_EPOCHS
+) -> pd.DataFrame:
     """Fetch runs from the session embedding ablation group."""
-    rows = []
     runs = _fetch_group_runs(ABLATION_GROUP, api)
     if not runs:
         print(f"  No runs found for group '{ABLATION_GROUP}'")
-        return pd.DataFrame(rows)
+        return pd.DataFrame()
 
-    print(f"  Found {len(runs)} runs in {ABLATION_GROUP}")
-    for run in runs:
-        if run.state != "finished":
-            print(f"    Skipping {run.id} (state={run.state})")
-            continue
-        rows.append(_extract_from_run(run))
-
+    print(
+        f"  Found {len(runs)} runs in {ABLATION_GROUP} "
+        f"(min_epochs={min_epochs})"
+    )
+    rows, _ = _collect_group_runs(runs, min_epochs=min_epochs)
     return pd.DataFrame(rows)
 
 
-def fetch_baseline_runs(api: wandb.Api, fold: int = 0) -> pd.DataFrame:
+def fetch_baseline_runs(
+    api: wandb.Api,
+    fold: int = 0,
+    min_epochs: int = DEFAULT_MIN_EPOCHS,
+) -> pd.DataFrame:
     """Fetch baseline runs from previous experiment groups, filtered to same fold."""
     rows = []
     for label, group in BASELINE_GROUPS.items():
@@ -109,16 +184,15 @@ def fetch_baseline_runs(api: wandb.Api, fold: int = 0) -> pd.DataFrame:
         if not runs:
             print(f"  No runs found for baseline group '{group}' — skipping.")
             continue
-        print(f"  Found {len(runs)} runs for baseline: {label} ({group})")
+        print(
+            f"  Found {len(runs)} runs for baseline: {label} ({group}) "
+            f"(min_epochs={min_epochs})"
+        )
 
-        for run in runs:
-            if run.state != "finished":
-                continue
-            row = _extract_from_run(run)
-            if row["Fold"] != fold:
-                continue
-            row["Source"] = label
-            rows.append(row)
+        group_rows, _ = _collect_group_runs(
+            runs, min_epochs=min_epochs, fold=fold, source=label
+        )
+        rows.extend(group_rows)
 
     return pd.DataFrame(rows)
 
@@ -140,7 +214,24 @@ def get_best_baselines(baseline_df: pd.DataFrame) -> dict:
     return best
 
 
+def _run_status_suffix(row: pd.Series) -> str:
+    if row.get("State") == "finished":
+        return f"({row['Run ID']})"
+    epochs = row.get("epochs_completed")
+    epoch_str = (
+        f", epoch={epochs:.0f}" if isinstance(epochs, (int, float)) else ""
+    )
+    return f"({row['Run ID']}, {row['State']}{epoch_str})"
+
+
 def print_results(ablation_df: pd.DataFrame, baselines: dict) -> None:
+    partial = ablation_df[ablation_df["State"] != "finished"]
+    if not partial.empty:
+        print(
+            f"\nNOTE: {len(partial)} ablation run(s) are partial "
+            f"(timed out / failed / crashed) but meet the epoch threshold."
+        )
+
     print(f"\n{'=' * 70}")
     print("  Session Embedding Ablation — LR Sweep (fold 0, no session emb)")
     print(f"{'=' * 70}")
@@ -162,7 +253,7 @@ def print_results(ablation_df: pd.DataFrame, baselines: dict) -> None:
                 f"val_loss={row['best_val_loss']:.4f}  "
                 f"gap={gap_str}  "
                 f"val_f1={row['best_val_f1']:.4f}  "
-                f"({row['Run ID']})"
+                f"{_run_status_suffix(row)}"
             )
 
     print(f"\n{'=' * 70}")
@@ -360,20 +451,40 @@ def plot_lr_sweep(ablation_df: pd.DataFrame, baselines: dict) -> None:
     plt.close()
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Analyse session embedding ablation runs from W&B."
+    )
+    parser.add_argument(
+        "--min-epochs",
+        type=int,
+        default=DEFAULT_MIN_EPOCHS,
+        help=(
+            "Minimum logged epochs required to include a run "
+            f"(default: {DEFAULT_MIN_EPOCHS})."
+        ),
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     api = wandb.Api()
 
     print("Fetching session embedding ablation runs...")
-    ablation_df = fetch_ablation_runs(api)
+    ablation_df = fetch_ablation_runs(api, min_epochs=args.min_epochs)
 
     if ablation_df.empty:
-        print("\nNo completed ablation runs found. Launch Phase 1 first.")
+        print(
+            f"\nNo usable ablation runs found (min_epochs={args.min_epochs}). "
+            "Launch Phase 1 first."
+        )
         return
 
-    print(f"\nTotal ablation runs: {len(ablation_df)}")
+    print(f"\nTotal usable ablation runs: {len(ablation_df)}")
 
     print("\nFetching baseline runs from previous experiments (fold 0)...")
-    baseline_df = fetch_baseline_runs(api, fold=0)
+    baseline_df = fetch_baseline_runs(api, fold=0, min_epochs=args.min_epochs)
     baselines = get_best_baselines(baseline_df)
 
     if not baselines:
