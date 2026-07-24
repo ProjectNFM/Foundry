@@ -303,6 +303,7 @@ class FoundryModule(L.LightningModule):
                     optimizer,
                     T_max=self.hold
                     / 10,  # 10 is the default cosine annealing period
+                    eta_min=self.end_lr_factor * self.learning_rate,
                 )
             else:
                 raise ValueError(
