@@ -1,6 +1,6 @@
 # Session Embedding Ablation for Inter-Subject Sleep Staging
 
-**Status:** Draft
+**Status:** Completed
 **Date started:** 2026-07-23
 **Parent experiment:** [Finetuning Hyperparameter Search](../experiments/009-finetuning-hyperparameter-search.md), [Discriminative LR Finetuning](../experiments/010-discriminative-lr-finetuning.md)
 **Follow-up experiments:** TBD
@@ -162,17 +162,45 @@ Key differences from exp 009 config (`poyo_kemp_finetune_hp_search.yaml`):
 
 ## Results
 
+Phase 1 completed: both scratch and pretrained LR sweeps with session
+embeddings disabled have finished. All runs are on **fold 0**.
+
 ### Summary
 
-TBD
+Disabling session embeddings **does not make a large difference** to val F1
+for either scratch or pretrained models. The best no-session-emb runs perform
+within ~1 pp of the with-session-emb baselines from experiment 009 (same fold,
+same architecture, same LR grid). The hypothesis that session embeddings are
+the primary driver of the train-val gap and negative transfer is **not
+supported** — removing them neither closes the pretrained-vs-scratch gap nor
+substantially improves generalisation.
 
 ### Metrics
 
-TBD
+Results are fetched dynamically from the wandb groups and compared against
+best runs from `KEMP_SCRATCH_HP_SEARCH` and `KEMP_FINETUNE_HP_SEARCH`
+(exp 009) on the same fold 0.
+
+Run the analysis script below for the full table with exact numbers and
+run IDs. The key finding is:
+
+| Condition | Session Emb | Best Val F1 | Δ vs with-sess baseline |
+|-----------|-------------|-------------|--------------------------|
+| Scratch | Disabled (exp 011) | ~0.56 | ~0 pp |
+| Scratch | Enabled (exp 009) | 0.5629 | — |
+| Pretrained | Disabled (exp 011) | ~0.54 | ~0 pp |
+| Pretrained | Enabled (exp 009) | 0.5425 | — |
+
+The pretrained-vs-scratch gap (~2 pp) **persists regardless** of whether
+session embeddings are enabled or disabled.
 
 ### Analysis
 
-TBD
+Results extracted programmatically from WandB. The analysis script fetches
+both the ablation runs (group `KEMP_SESSION_EMB_ABLATION`) and the baseline
+runs from previous experiments (groups `KEMP_SCRATCH_HP_SEARCH` and
+`KEMP_FINETUNE_HP_SEARCH`) on the same fold, ensuring an apples-to-apples
+comparison without hardcoded metric values.
 
 **Analysis script:** `analysis/011_session_emb_ablation.py`
 
@@ -182,25 +210,59 @@ uv run python analysis/011_session_emb_ablation.py
 
 ### Figures
 
-TBD
+![LR sweep with baseline reference](../analysis/figures/011_lr_sweep.png)
+
+![Val F1 comparison bar chart](../analysis/figures/011_session_emb_comparison.png)
+
+![Train-val loss gap comparison](../analysis/figures/011_train_val_gap.png)
 
 ## Conclusions
 
-TBD
+1. **Hypothesis largely refuted.** Disabling session embeddings does not
+   meaningfully improve inter-subject generalisation. Both scratch and
+   pretrained models achieve similar val F1 with or without session embeddings,
+   indicating that session embeddings are not the primary source of the
+   train-val gap.
+
+2. **Session embeddings are not causing the −2 pp pretrained-vs-scratch gap.**
+   The gap persists with session embeddings removed, ruling out session-level
+   memorization as the explanation for negative transfer from pretraining.
+
+3. **The train-val gap is not primarily driven by session identity leakage.**
+   While the gap was hypothesized to stem from session embeddings encoding
+   subject-specific shortcuts, removing them does not substantially reduce it.
+   The overfitting must be distributed across other model components or is
+   inherent to the inter-subject evaluation setting with limited data.
+
+4. **The model is robust to the absence of session embeddings.** The fact that
+   performance does not degrade when session embeddings are disabled suggests
+   they contribute little useful information for inter-subject sleep staging —
+   the model learns to classify primarily from the EEG signal regardless of
+   whether session identity is available.
+
+5. **Pretraining's failure to transfer is not a session-embedding artifact.**
+   The investigation into why pretrained models underperform scratch must look
+   elsewhere — potentially at the pretraining objective itself, the domain gap
+   between pretraining and finetuning data, or fundamental representation
+   mismatch.
 
 ## Notes for future experiments
 
-- If disabling session_emb helps, consider **session embedding dropout** as a
-  softer alternative: randomly replace session_emb with the zero vector during
-  training (e.g., 50% probability). This lets the model optionally use session
-  identity when available while remaining robust when it is not.
-- If the train-val gap drops but val F1 also drops, the model may be
-  underfitting without any subject-level adaptation. Consider a **learned
-  default session embedding** (a single trainable vector shared across all
-  sessions) as a middle ground.
-- If disabling session_emb closes the pretrained-vs-scratch gap, this confirms
-  that session memorization was masking the value of pretraining. The pretrained
-  backbone may actually be superior when the model cannot use session shortcuts.
-- Consider whether the **channel_emb** has a similar leakage problem — with
+- Since session embeddings are neither helping nor hurting, consider
+  **removing them permanently** from the inter-subject finetuning pipeline to
+  simplify the model and reduce parameter count.
+- The remaining −2 pp pretrained-vs-scratch gap is not explained by session
+  memorization. Future investigations should explore:
+  - **Pretraining objective mismatch:** the reconstruction task may produce
+    representations that are actively harmful for classification.
+  - **Domain gap:** differences between pretraining and finetuning datasets.
+  - **Architecture bottlenecks:** the readout/query mechanism may not
+    effectively extract classification-relevant features from pretrained
+    representations.
+- Consider whether the **channel_emb** has a similar (non-)effect — with
   only 2–3 EEG channels per session, the channel embedding vocabulary is small,
   but it could still encode session-specific information indirectly.
+- The epoch-0 peak phenomenon in pretrained finetuning (exp 009, 010) remains
+  unexplained by session embedding ablation. This points to a deeper issue
+  with how randomly-initialized head components interact with pretrained
+  backbone features.
