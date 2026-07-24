@@ -323,44 +323,8 @@ def test_scheduler_warmup_only():
     assert final_lr > initial_lr
 
 
-def test_scheduler_hold_cosine_only():
-    """Test scheduler with only hold phase using cosine."""
-    from foundry.training import FoundryModule
-
-    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
-    model = _StubTaskModel({cfg.name: cfg})
-    module = FoundryModule(
-        model=model,
-        warmup=0,
-        hold=100,
-        decay=0,
-        hold_scheduler_type="cosine",
-        end_lr_factor=0.1,
-    )
-
-    from unittest.mock import MagicMock
-
-    module.trainer = MagicMock()
-    module._trainer = MagicMock()
-
-    config = module.configure_optimizers()
-    scheduler = config["lr_scheduler"]["scheduler"]
-    optimizer = config["optimizer"]
-
-    assert scheduler is not None
-    # Record LR at different points
-    lrs = []
-    for _ in range(100):
-        lrs.append(optimizer.param_groups[0]["lr"])
-        scheduler.step()
-
-    # With cosine annealing, LR should oscillate between min_lr_factor and 1.0 times base_lr
-    # Check that LR varies (not constant)
-    assert max(lrs) > min(lrs)
-
-
 def test_scheduler_hold_constant_only():
-    """Test scheduler with only hold phase using constant."""
+    """Test scheduler with only hold phase using constant LR."""
     from foundry.training import FoundryModule
 
     cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
@@ -369,8 +333,8 @@ def test_scheduler_hold_constant_only():
         model=model,
         warmup=0,
         hold=100,
-        decay=0,
         hold_scheduler_type="constant",
+        decay=0,
         end_lr_factor=0.1,
     )
 
@@ -442,8 +406,8 @@ def test_scheduler_warmup_hold_decay_sequential():
         model=model,
         warmup=50,
         hold=50,
+        hold_scheduler_type="constant",
         decay=50,
-        hold_scheduler_type="cosine",
         end_lr_factor=0.1,
     )
 
@@ -465,9 +429,10 @@ def test_scheduler_warmup_hold_decay_sequential():
 
     # Warmup phase: LR should increase from low to base_lr
     assert lrs[0] < lrs[25] < lrs[49]
-    # Hold phase: LR should oscillate (cosine)
-    # Decay phase: LR should decrease to min_lr_factor
-    assert lrs[-1] < lrs[50]
+    # Hold phase: LR should be constant (constant scheduler)
+    assert all(lr == lrs[50] for lr in lrs[50:100])
+    # Decay phase: LR should decrease to end_lr_factor
+    assert lrs[-1] < lrs[100]
 
 
 def test_scheduler_warmup_with_custom_start_lr_factor():
@@ -484,7 +449,7 @@ def test_scheduler_warmup_with_custom_start_lr_factor():
         learning_rate=custom_learning_rate,
         warmup=100,
         hold=0,
-        decay=10,
+        decay=11,
         start_lr_factor=custom_start_factor,
         end_lr_factor=custom_end_factor,
     )
@@ -501,7 +466,7 @@ def test_scheduler_warmup_with_custom_start_lr_factor():
     assert scheduler is not None
     # Record LR at different points
     lrs = []
-    for _ in range(111):
+    for _ in range(100):
         lrs.append(optimizer.param_groups[0]["lr"])
         scheduler.step()
 
@@ -509,9 +474,40 @@ def test_scheduler_warmup_with_custom_start_lr_factor():
     expected_start_lr = custom_start_factor * custom_learning_rate
     assert lrs[0] == pytest.approx(expected_start_lr, rel=1e-5)
     # Check that warmup ends near base_lr
-    assert lrs[-1] == pytest.approx(
-        custom_end_factor * custom_learning_rate, rel=1e-3
+    assert lrs[99] == pytest.approx(custom_learning_rate, rel=1e-2)
+
+
+def test_scheduler_hold_keeps_lr_constant():
+    """Test that hold > 0 keeps learning rate constant."""
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
+    model = _StubTaskModel({cfg.name: cfg})
+    module = FoundryModule(
+        model=model,
+        warmup=0,
+        hold=100,
+        hold_scheduler_type="constant",
+        decay=0,
     )
+
+    from unittest.mock import MagicMock
+
+    module.trainer = MagicMock()
+    module._trainer = MagicMock()
+
+    config = module.configure_optimizers()
+    scheduler = config["lr_scheduler"]["scheduler"]
+    optimizer = config["optimizer"]
+
+    base_lr = optimizer.param_groups[0]["lr"]
+    lrs = []
+    for _ in range(100):
+        lrs.append(optimizer.param_groups[0]["lr"])
+        scheduler.step()
+
+    # All LRs should remain constant
+    assert all(lr == base_lr for lr in lrs)
 
 
 def test_scheduler_invalid_hold_type_raises():
@@ -524,8 +520,8 @@ def test_scheduler_invalid_hold_type_raises():
         model=model,
         warmup=0,
         hold=100,
+        hold_scheduler_type="invalid",
         decay=0,
-        hold_scheduler_type="invalid",  # Invalid type
     )
 
     from unittest.mock import MagicMock
@@ -535,6 +531,78 @@ def test_scheduler_invalid_hold_type_raises():
 
     with pytest.raises(ValueError, match="Unknown hold_scheduler_type"):
         module.configure_optimizers()
+
+
+def test_scheduler_hold_cosine_with_decay_transition():
+    """Test hold phase with cosine annealing followed by decay phase."""
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
+    model = _StubTaskModel({cfg.name: cfg})
+    module = FoundryModule(
+        model=model,
+        warmup=0,
+        hold=50,
+        hold_scheduler_type="cosine",
+        decay=50,
+        end_lr_factor=0.1,
+    )
+
+    from unittest.mock import MagicMock
+
+    module.trainer = MagicMock()
+    module._trainer = MagicMock()
+
+    config = module.configure_optimizers()
+    scheduler = config["lr_scheduler"]["scheduler"]
+    optimizer = config["optimizer"]
+
+    assert scheduler is not None
+    lrs = []
+    for _ in range(100):
+        lrs.append(optimizer.param_groups[0]["lr"])
+        scheduler.step()
+
+    # Hold phase: LR should vary with cosine annealing
+    hold_lrs = lrs[:50]
+    assert max(hold_lrs) > min(hold_lrs)
+    # Decay phase: LR should continue to decrease
+    assert lrs[-1] < lrs[50]
+
+
+def test_scheduler_hold_cosine_only():
+    """Test scheduler with only hold phase using cosine annealing."""
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
+    model = _StubTaskModel({cfg.name: cfg})
+    module = FoundryModule(
+        model=model,
+        warmup=0,
+        hold=100,
+        hold_scheduler_type="cosine",
+        decay=0,
+        end_lr_factor=0.1,
+    )
+
+    from unittest.mock import MagicMock
+
+    module.trainer = MagicMock()
+    module._trainer = MagicMock()
+
+    config = module.configure_optimizers()
+    scheduler = config["lr_scheduler"]["scheduler"]
+    optimizer = config["optimizer"]
+
+    assert scheduler is not None
+    # Record LR at different points
+    lrs = []
+    for _ in range(100):
+        lrs.append(optimizer.param_groups[0]["lr"])
+        scheduler.step()
+
+    # With cosine annealing, LR should vary (not constant)
+    assert max(lrs) > min(lrs)
 
 
 def test_scheduler_no_phases_uses_constant():

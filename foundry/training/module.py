@@ -41,11 +41,11 @@ class FoundryModule(L.LightningModule):
         weight_decay: float = 0.01,
         cwt_lr_multiplier: float = 1.0,
         warmup: int = 0,
-        hold: int = 0,
-        decay: int = 0,
-        hold_scheduler_type: str = "cosine",
-        end_lr_factor: float = 0.1,
         start_lr_factor: float = 1e-4,
+        hold: int = 0,
+        hold_scheduler_type: str = "constant",
+        decay: int = 0,
+        end_lr_factor: float = 0.1,
         scheduler_interval: str = "step",
     ):
         super().__init__()
@@ -55,8 +55,8 @@ class FoundryModule(L.LightningModule):
         self.cwt_lr_multiplier = cwt_lr_multiplier
         self.warmup = warmup
         self.hold = hold
-        self.decay = decay
         self.hold_scheduler_type = hold_scheduler_type
+        self.decay = decay
         self.end_lr_factor = end_lr_factor
         self.start_lr_factor = start_lr_factor
         self.scheduler_interval = scheduler_interval
@@ -293,18 +293,22 @@ class FoundryModule(L.LightningModule):
 
         # Hold phase
         if self.hold > 0:
-            if self.hold_scheduler_type == "cosine":
-                hold = torch.optim.lr_scheduler.CosineAnnealingLR(
-                    optimizer, T_max=self.hold, eta_min=self.end_lr_factor
-                )
-            elif self.hold_scheduler_type == "constant":
+            if self.hold_scheduler_type == "constant":
                 hold = torch.optim.lr_scheduler.ConstantLR(
-                    optimizer, factor=1.0
+                    optimizer,
+                    factor=1.0,
+                    total_iters=self.hold,
+                )
+            elif self.hold_scheduler_type == "cosine":
+                hold = torch.optim.lr_scheduler.CosineAnnealingLR(
+                    optimizer,
+                    T_max=self.hold
+                    / 10,  # 10 is the default cosine annealing period
                 )
             else:
                 raise ValueError(
                     f"Unknown hold_scheduler_type: {self.hold_scheduler_type}. "
-                    f"Must be 'cosine' or 'constant'."
+                    f"Must be 'constant' or 'cosine'."
                 )
             schedulers.append(hold)
             current_step += self.hold
@@ -313,19 +317,12 @@ class FoundryModule(L.LightningModule):
 
         # Decay phase
         if self.decay > 0:
-
-            def decay_lambda(step):
-                # Cosine decay from 1.0 to end_lr_factor
-                progress = float(step) / float(self.decay)
-                cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
-                return (
-                    self.end_lr_factor
-                    + (1.0 - self.end_lr_factor) * cosine_decay
-                )
-
-            decay = torch.optim.lr_scheduler.LambdaLR(
-                optimizer, lr_lambda=decay_lambda
+            decay = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=self.decay,
+                eta_min=self.end_lr_factor * self.learning_rate,
             )
+
             schedulers.append(decay)
 
         # If no schedulers are active, use a default constant scheduler
