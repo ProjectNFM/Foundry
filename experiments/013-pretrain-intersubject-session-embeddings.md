@@ -51,16 +51,18 @@ tokenizer choice.
 
 ## Experiment
 
+
+
 ### Setup
 
 - **Model:** MaskedPOYOEEGModel, embed_dim=256, depth=4, 8 cross/self heads,
-  dim_head=128, TemporalBlockMasking (block_size=10, mask_ratio=0.5),
-  `zero_output_timestamps: false`, `normalize_inputs: true`
+dim_head=128, TemporalBlockMasking (block_size=10, mask_ratio=0.5),
+`zero_output_timestamps: false`, `normalize_inputs: true`
 - **Data:** OpenNeuro multi-brainset (`klinzing_sleep_ds005555` and related
-  sessions), **intersubject** split, fold 0, sequence_length=2.0s
+sessions), **intersubject** split, fold 0, sequence_length=2.0s
 - **Task:** Masked reconstruction (MSE loss), mask_ratio=0.5
 - **Training:** batch_size=100, lr=1e-4, weight_decay=0.01, max_epochs=200,
-  bf16-mixed precision, warmup_epochs=0
+bf16-mixed precision, warmup_epochs=0
 - **Hardware:** 1× L40S per run, 6 CPUs, 32 GB RAM (SLURM)
 - **WandB:** project=foundry_pretraining, group=PRETRAIN_TOKENIZER_INTERSUBJECT
   - `pretrain_tokenizer_per_channel_resample_cnn` — run ID `znqri8rf`
@@ -68,10 +70,14 @@ tokenizer choice.
 
 **Conditions:**
 
-| Condition | Tokenizer              | Split Type   | Runs | Purpose                                      |
-| --------- | ---------------------- | ------------ | ---- | -------------------------------------------- |
-| ResampleCNN | per_channel_resample_cnn | intersubject | 1  | Baseline tokenizer, intersubject pretraining   |
-| CWT-CNN   | per_channel_cwt_cnn    | intersubject | 1    | Best exp-005 tokenizer, intersubject setting |
+
+| Condition   | Tokenizer                | Split Type   | Runs | Purpose                                      |
+| ----------- | ------------------------ | ------------ | ---- | -------------------------------------------- |
+| ResampleCNN | per_channel_resample_cnn | intersubject | 1    | Baseline tokenizer, intersubject pretraining |
+| CWT-CNN     | per_channel_cwt_cnn      | intersubject | 1    | Best exp-005 tokenizer, intersubject setting |
+
+
+
 
 ### Launch command
 
@@ -85,6 +91,8 @@ uv run python main.py experiment=pretraining/poyo_pretrain_tokenizer_sweep \
     -m
 ```
 
+
+
 ### Key config overrides
 
 Base config: `configs/experiment/pretraining/poyo_pretrain_tokenizer_sweep.yaml`
@@ -92,9 +100,9 @@ Base config: `configs/experiment/pretraining/poyo_pretrain_tokenizer_sweep.yaml`
 Non-default overrides applied for this experiment:
 
 - `data.split_type: intersubject` — subjects are disjoint between train and
-  val (vs `intrasession` in experiment 005)
+val (vs `intrasession` in experiment 005)
 - `run.group: PRETRAIN_TOKENIZER_INTERSUBJECT` — separate WandB group
-  from the intrasession sweep in exp 005
+from the intrasession sweep in exp 005
 - `run.name` suffix `_intersubject` — distinguish runs from exp 005 checkpoints
 
 Hydra sweeper varies `model/tokenizer` over:
@@ -105,6 +113,8 @@ Hydra sweeper varies `model/tokenizer` over:
 All other settings match experiment 005 (masking, hyperparameters, trainer).
 
 ## Results
+
+
 
 ### Summary
 
@@ -119,30 +129,38 @@ val loss tracks train loss down to 0.04–0.12.
 
 **Experiment 013 — Intersubject pretraining:**
 
-| Metric | ResampleCNN | CWT-CNN |
-|--------|-------------|---------|
-| Best val/loss | 0.4691 | 0.4246 |
-| Train loss at best val epoch | 0.1866 | 0.0405 |
-| Train-val gap at best val | 0.2825 | 0.3841 |
-| Epoch of best val | 0 | 2 |
-| Max epoch reached | 4 | 4 |
-| Run state | failed | failed |
+
+| Metric                       | ResampleCNN | CWT-CNN |
+| ---------------------------- | ----------- | ------- |
+| Best val/loss                | 0.4691      | 0.4246  |
+| Train loss at best val epoch | 0.1866      | 0.0405  |
+| Train-val gap at best val    | 0.2825      | 0.3841  |
+| Epoch of best val            | 0           | 2       |
+| Max epoch reached            | 4           | 4       |
+| Run state                    | failed      | failed  |
+
 
 **Experiment 005 — Intrasession pretraining (comparison):**
 
-| Metric | ResampleCNN | CWT-CNN |
-|--------|-------------|---------|
-| Best val/loss | 0.1201 | 0.0364 |
-| Train loss at best val epoch | 0.1173 | 0.0372 |
-| Train-val gap at best val | 0.0028 | −0.0008 |
-| Epoch of best val | 3 | 3 |
+
+| Metric                       | ResampleCNN | CWT-CNN |
+| ---------------------------- | ----------- | ------- |
+| Best val/loss                | 0.1201      | 0.0364  |
+| Train loss at best val epoch | 0.1173      | 0.0372  |
+| Train-val gap at best val    | 0.0028      | −0.0008 |
+| Epoch of best val            | 3           | 3       |
+
 
 **Gap magnification (intersubject / intrasession):**
 
-| Tokenizer | Intrasession gap | Intersubject gap | Ratio |
-|-----------|------------------|------------------|-------|
-| ResampleCNN | 0.003 | 0.283 | ~100x |
-| CWT-CNN | −0.001 | 0.384 | — (intrasession gap ≈ 0) |
+
+| Tokenizer   | Intrasession gap | Intersubject gap | Ratio                    |
+| ----------- | ---------------- | ---------------- | ------------------------ |
+| ResampleCNN | 0.003            | 0.283            | ~100x                    |
+| CWT-CNN     | −0.001           | 0.384            | — (intrasession gap ≈ 0) |
+
+
+
 
 ### Analysis
 
@@ -156,13 +174,11 @@ to get the gap at each epoch.
 uv run python analysis/013_intersubject_pretraining.py
 ```
 
+
+
 ### Figures
 
-![Gap comparison — intersubject vs intrasession](../analysis/figures/013_gap_comparison.png)
-
-![Learning curves — 2x2 grid showing train/val loss for both tokenizers and splits](../analysis/figures/013_learning_curves.png)
-
-![Train-val gap evolution by epoch](../analysis/figures/013_gap_evolution.png)
+Gap comparison — intersubject vs intrasessionLearning curves — 2x2 grid showing train/val loss for both tokenizers and splitsTrain-val gap evolution by epoch
 
 ## Conclusions
 
@@ -175,40 +191,39 @@ embeddings) rather than specific to the downstream sleep staging task.
 Key findings:
 
 1. **The gap is immediate and enormous.** For ResampleCNN, the gap is 0.28 at
-   epoch 0 and grows to 0.39 by epoch 3. For CWT-CNN, the gap starts at 0.31
+  epoch 0 and grows to 0.39 by epoch 3. For CWT-CNN, the gap starts at 0.31
    and reaches 0.41. In contrast, intrasession pretraining has essentially
    zero gap (0.003 and −0.001 respectively).
-
 2. **Train loss is comparable across splits.** Both intersubject and
-   intrasession runs achieve similar train loss levels (0.12–0.19 for
+  intrasession runs achieve similar train loss levels (0.12–0.19 for
    ResampleCNN, 0.03–0.04 for CWT-CNN), confirming that the model learns
    the reconstruction task equally well. The problem is entirely on the val
    side — unseen sessions cannot reconstruct because they lack learned
    session embeddings.
-
 3. **Val loss does not improve.** Intersubject val loss is essentially flat
-   (ResampleCNN) or only marginally decreasing (CWT-CNN) over 4 epochs, while
+  (ResampleCNN) or only marginally decreasing (CWT-CNN) over 4 epochs, while
    train loss drops substantially. The gap is growing, not closing.
-
 4. **Both tokenizers show the same pattern**, confirming the effect stems from
-   the shared POYO backbone and `InfiniteVocabEmbedding` mechanism, not from
+  the shared POYO backbone and `InfiniteVocabEmbedding` mechanism, not from
    tokenizer architecture.
-
 5. **The runs failed after ~4 epochs** (~2.8 hours), but the trend is already
-   unambiguous. Running to 200 epochs would only increase the gap further as
+  unambiguous. Running to 200 epochs would only increase the gap further as
    train loss continues to decrease.
+
+
 
 ## Notes for future experiments
 
-- The intersubject gap at pretraining (~0.3–0.4) is of similar magnitude to
-  the downstream finetuning gap (~0.94 from exp 009), confirming that session
-  embeddings are the root cause across both stages.
+- The intersubject gap at pretraining (~~0.3–0.4) is of similar magnitude to
+the downstream finetuning gap (~~0.94 from exp 009), confirming that session
+embeddings are the root cause across both stages.
 - A session-embedding ablation during pretraining (mirror of experiment 011)
-  would confirm whether removing session embeddings eliminates the pretraining
-  gap, but the current evidence is already strong.
+would confirm whether removing session embeddings eliminates the pretraining
+gap, but the current evidence is already strong.
 - Future work should focus on alternative embedding strategies that can
-  generalize to unseen subjects: shared embeddings, embedding prediction from
-  metadata, or removing session embeddings from the reconstruction pathway.
+generalize to unseen subjects: shared embeddings, embedding prediction from
+metadata, or removing session embeddings from the reconstruction pathway.
 - The fact that intrasession pretraining has near-zero gap means the model
-  architecture is capable of good reconstruction — the problem is purely about
-  session identity leakage through the embeddings.
+architecture is capable of good reconstruction — the problem is purely about
+session identity leakage through the embeddings.
+
