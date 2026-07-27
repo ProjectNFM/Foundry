@@ -85,6 +85,7 @@ class POYOEEGModel(nn.Module):
         return self._TRANSFERABLE_COMPONENTS
 
     _VALID_SESSION_EMB_MODES = ("static", "dynamic", "disabled")
+    _VALID_CHANNEL_EMB_MODES = ("static", "dynamic", "disabled")
 
     def __init__(
         self,
@@ -110,6 +111,7 @@ class POYOEEGModel(nn.Module):
         disable_session_emb: bool = False,
         session_emb_mode: str | None = None,
         dynamic_session_encoder: DynamicSessionEncoder | None = None,
+        channel_emb_mode: str = "static",
     ):
         super().__init__()
 
@@ -145,6 +147,18 @@ class POYOEEGModel(nn.Module):
 
         # backward compat: mirror the old flag
         self.disable_session_emb = self.session_emb_mode != "static"
+
+        # --- channel embedding mode ---
+        if channel_emb_mode not in self._VALID_CHANNEL_EMB_MODES:
+            raise ValueError(
+                f"channel_emb_mode must be one of "
+                f"{self._VALID_CHANNEL_EMB_MODES}, got '{channel_emb_mode}'"
+            )
+        if channel_emb_mode == "dynamic":
+            raise NotImplementedError(
+                "Dynamic channel embeddings are not yet implemented."
+            )
+        self.channel_emb_mode = channel_emb_mode
 
         self.router = build_readout_router(self._task_configs, embed_dim)
 
@@ -194,6 +208,28 @@ class POYOEEGModel(nn.Module):
         """Attach a :class:`SessionContextCache` for dynamic mode."""
         self._session_context_cache = cache
 
+    def _get_channel_emb_fn(self):
+        """Return the channel embedding callable for the current mode.
+
+        Static mode returns ``self.channel_emb`` (learned per-channel lookup).
+        Disabled mode returns a function that produces zeros with the correct
+        shape and dtype, preserving dimension compatibility for both ``add``
+        and ``concat`` channel fusion.
+        """
+        if self.channel_emb_mode == "disabled":
+            dim = self.tokenizer.channel_emb_dim
+
+            def _zero_channel_emb(indices: torch.Tensor) -> torch.Tensor:
+                return torch.zeros(
+                    *indices.shape,
+                    dim,
+                    device=indices.device,
+                    dtype=torch.float32,
+                )
+
+            return _zero_channel_emb
+        return self.channel_emb
+
     def _tokenize_and_add_session(
         self,
         input_values: torch.Tensor,
@@ -221,7 +257,7 @@ class POYOEEGModel(nn.Module):
             input_seq_len=input_seq_len,
             input_session_ids=input_session_ids,
             input_channel_counts=input_channel_counts,
-            channel_emb_fn=self.channel_emb,
+            channel_emb_fn=self._get_channel_emb_fn(),
         )
 
         session_emb = self._compute_session_embedding(
@@ -297,7 +333,7 @@ class POYOEEGModel(nn.Module):
             input_mask=flat_mask,
             input_sampling_rate=flat_sr,
             input_seq_len=flat_seq_len,
-            channel_emb_fn=self.channel_emb,
+            channel_emb_fn=self._get_channel_emb_fn(),
         )  # (B*W, N_tokens, D)
 
         N = context_tokens.shape[1]

@@ -132,7 +132,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         recon_channel_tokens = torch.gather(
             input_channel_index, 1, masked_channel_idx
         )
-        recon_channel_emb = self.channel_emb(recon_channel_tokens)
+        recon_channel_emb = self._get_channel_emb_fn()(recon_channel_tokens)
         if self.recon_channel_proj is not None:
             recon_channel_emb = self.recon_channel_proj(recon_channel_emb)
 
