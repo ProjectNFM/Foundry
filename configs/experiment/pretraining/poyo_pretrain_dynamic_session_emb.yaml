@@ -1,19 +1,19 @@
 # @package _global_
 #
-# Dynamic session embedding pretraining: replace static per-session learnable
-# embeddings with signal-conditioned embeddings computed from context windows.
-# Uses the balanced Klinzing subset for fast preliminary runs.
+# Session embedding mode comparison for intersubject pretraining (exp 014).
+# Sweeps over static / disabled / dynamic session embeddings to measure
+# impact on cross-subject generalization.  Uses the balanced Klinzing
+# subset for fast preliminary runs.
 #
-# Local dry-run (single config):
+# Local dry-run (single mode):
 #   uv run python main.py experiment=pretraining/poyo_pretrain_dynamic_session_emb \
-#     model.session_emb.session_context.num_context_windows=5 model.session_emb.session_context.context_source=random
+#     model/session_emb=disabled
 #
-# SLURM sweep (num_windows × context_source):
+# SLURM sweep (3 session_emb modes):
 #   uv run python main.py experiment=pretraining/poyo_pretrain_dynamic_session_emb -m
 
 defaults:
   - override /model: masked_poyo_eeg
-  - override /model/session_emb: dynamic
   - override /data: openneuro/sleep_brainset_small
   - override /hydra/launcher: slurm_default
 
@@ -37,15 +37,15 @@ module:
   warmup_epochs: 0
 
 run:
-  name: pretrain_dynamic_sessemb_w${model.session_emb.session_context.num_context_windows}_${model.session_emb.session_context.context_source}
+  name: pretrain_sessemb_${model.session_emb.session_emb_mode}
   project: foundry_pretraining
-  group: PRETRAIN_DYNAMIC_SESSION_EMB
-  tags: [pretraining, mae, masked, dynamic_session_emb, intersubject]
+  group: PRETRAIN_SESSION_EMB_COMPARISON
+  tags: [pretraining, mae, masked, session_emb_comparison, intersubject, exp014]
   log_level: INFO
   compile: default
 
 hyperparameters:
-  batch_size: 100
+  batch_size: 512
   sequence_length: 2.0
   patch_duration: null
   sampling_rate: null
@@ -71,8 +71,7 @@ stage:
 hydra:
   sweeper:
     params:
-      model.session_emb.session_context.num_context_windows: 1, 3, 5, 10
-      model.session_emb.session_context.context_source: random, start
+      model/session_emb: static, disabled, dynamic
   launcher:
     tasks_per_node: 1
     cpus_per_task: 6
