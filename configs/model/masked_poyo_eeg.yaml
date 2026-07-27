@@ -1,5 +1,6 @@
 defaults:
   - tokenizer: per_channel_resample_cnn
+  - session_emb: static
 
 _target_: foundry.models.MaskedPOYOEEGModel
 

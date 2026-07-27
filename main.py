@@ -280,7 +280,33 @@ def _build_model_and_data(cfg: DictConfig):
         for k, v in cfg.model.items()
         if k != "_target_"
     }
+    session_emb_cfg = model_kwargs.pop("session_emb", None)
+    if session_emb_cfg is not None:
+        if OmegaConf.is_config(session_emb_cfg):
+            session_emb_cfg = OmegaConf.to_container(
+                session_emb_cfg, resolve=True
+            )
+        # session_context is consumed later by set_context_cache(); keep it
+        # out of the constructor kwargs.
+        session_emb_cfg.pop("session_context", None)
+        model_kwargs.update(session_emb_cfg)
+
     model = ModelClass(task_configs=task_configs, **model_kwargs)
+
+    if getattr(model, "session_emb_mode", None) == "dynamic":
+        session_context_cfg = OmegaConf.select(
+            cfg, "model.session_emb.session_context", default=None
+        )
+        if session_context_cfg is not None:
+            from foundry.models.session_embedding import SessionContextCache
+
+            model.set_context_cache(
+                SessionContextCache(
+                    num_windows=session_context_cfg.num_context_windows,
+                    context_source=session_context_cfg.context_source,
+                    context_duration=session_context_cfg.context_duration,
+                )
+            )
 
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule.set_tokenizer(tokenizer)

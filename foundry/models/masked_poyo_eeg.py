@@ -192,9 +192,22 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         task_index: torch.Tensor,
         reconstruction_targets: Optional[torch.Tensor] = None,
         unpack_output: bool = False,
+        context_values: Optional[torch.Tensor] = None,
+        context_channel_index: Optional[torch.Tensor] = None,
+        context_mask: Optional[torch.Tensor] = None,
+        context_sampling_rate: Optional[torch.Tensor] = None,
     ) -> ModelOutput:
         del unpack_output
         self._validate_vocab_initialization()
+
+        context_kwargs = None
+        if self.session_emb_mode == "dynamic" and context_values is not None:
+            context_kwargs = {
+                "context_values": context_values,
+                "context_channel_index": context_channel_index,
+                "context_mask": context_mask,
+                "context_sampling_rate": context_sampling_rate,
+            }
 
         # 1. GPU tokenization
         inputs, session_emb = self._tokenize_and_add_session(
@@ -206,6 +219,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             input_seq_len=input_seq_len,
             input_session_ids=input_session_ids,
             input_channel_counts=input_channel_counts,
+            context_kwargs=context_kwargs,
         )
 
         B, num_tokens, D = inputs.shape
@@ -282,7 +296,10 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         # 7. Combine with downstream queries (shared helper) if present
         if output_timestamps.numel() > 0:
             ds_queries, ds_ts_emb = self._build_downstream_queries(
-                output_session_index, task_index, output_timestamps
+                output_session_index,
+                task_index,
+                output_timestamps,
+                session_emb=session_emb,
             )
             all_queries = torch.cat([recon_queries, ds_queries], dim=1)
             all_ts_emb = torch.cat([recon_ts_emb, ds_ts_emb], dim=1)
@@ -326,6 +343,9 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         signal (already length-normalized via :class:`PreparedSignal`) for
         reconstruction targets, ensuring encoder inputs and targets share
         the same signal contract.
+
+        When ``session_emb_mode == "dynamic"``, also retrieves cached
+        pretokenized context windows for the session.
         """
         result, prepared = self._tokenize_core(data)
 
@@ -345,5 +365,19 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             result["input_timestamps"] = pad2d(ts.reshape(C_pad, N))
 
         result["input_values"] = pad2d(result["input_values"])
+
+        if (
+            self.session_emb_mode == "dynamic"
+            and self._session_context_cache is not None
+        ):
+            session_id = str(data.session.id)
+            context = self._session_context_cache.get_or_build(
+                session_id=session_id,
+                data=data,
+                prepare_fn=self._prepare_signal,
+                pretokenize_fn=self.tokenizer.pretokenize,
+                channel_emb_tokenizer=self.channel_emb.tokenizer,
+            )
+            result.update(context)
 
         return result

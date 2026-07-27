@@ -1,0 +1,4 @@
+# Disabled session embedding.
+# Session embedding is replaced with zeros — equivalent to the old
+# `disable_session_emb: true` flag.
+session_emb_mode: disabled

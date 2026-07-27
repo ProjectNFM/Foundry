@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import logging
 from typing import Optional
 
 import numpy as np
@@ -8,6 +11,11 @@ from torch_brain.batching import chain, pad8
 from torch_brain.nn import InfiniteVocabEmbedding, RotaryTimeEmbedding
 from foundry.models.backbones import PerceiverIOBackbone
 from foundry.models.readout import build_readout_router
+from foundry.models.session_embedding import (
+    DynamicSessionEncoder,
+    SessionContextCache,
+    SessionEmbeddingCache,
+)
 from foundry.models.signal_preparation import (
     PreparedSignal,
     normalize_encoder_inputs,
@@ -16,6 +24,8 @@ from foundry.models.ssl_meta import ModelOutput
 from foundry.models.tokenizer import EEGTokenizer
 from foundry.tasks.config import TaskConfig
 from foundry.tasks.targets import extract_multitask_targets
+
+logger = logging.getLogger(__name__)
 
 
 class POYOEEGModel(nn.Module):
@@ -74,6 +84,8 @@ class POYOEEGModel(nn.Module):
         """
         return self._TRANSFERABLE_COMPONENTS
 
+    _VALID_SESSION_EMB_MODES = ("static", "dynamic", "disabled")
+
     def __init__(
         self,
         tokenizer: EEGTokenizer,
@@ -96,6 +108,8 @@ class POYOEEGModel(nn.Module):
         normalize_inputs: bool = False,
         rotate_value: bool = True,
         disable_session_emb: bool = False,
+        session_emb_mode: str | None = None,
+        dynamic_session_encoder: DynamicSessionEncoder | None = None,
     ):
         super().__init__()
 
@@ -106,7 +120,6 @@ class POYOEEGModel(nn.Module):
         self.num_latents_per_step = num_latents_per_step
         self.zero_output_timestamps = zero_output_timestamps
         self.normalize_inputs = normalize_inputs
-        self.disable_session_emb = disable_session_emb
         self._task_configs = TaskConfig.normalize_task_configs(task_configs)
         self._latent_index, self._latent_timestamps = (
             create_linspace_latent_tokens(
@@ -116,6 +129,22 @@ class POYOEEGModel(nn.Module):
                 num_latents_per_step=self.num_latents_per_step,
             )
         )
+
+        # --- session embedding mode ---
+        if session_emb_mode is not None:
+            if session_emb_mode not in self._VALID_SESSION_EMB_MODES:
+                raise ValueError(
+                    f"session_emb_mode must be one of "
+                    f"{self._VALID_SESSION_EMB_MODES}, got '{session_emb_mode}'"
+                )
+            self.session_emb_mode = session_emb_mode
+        elif disable_session_emb:
+            self.session_emb_mode = "disabled"
+        else:
+            self.session_emb_mode = "static"
+
+        # backward compat: mirror the old flag
+        self.disable_session_emb = self.session_emb_mode != "static"
 
         self.router = build_readout_router(self._task_configs, embed_dim)
 
@@ -148,6 +177,23 @@ class POYOEEGModel(nn.Module):
             t_max=t_max,
         )
 
+        # --- dynamic session encoder (when mode is "dynamic") ---
+        if self.session_emb_mode == "dynamic":
+            if dynamic_session_encoder is not None:
+                self.dynamic_session_encoder = dynamic_session_encoder
+            else:
+                self.dynamic_session_encoder = DynamicSessionEncoder(embed_dim)
+            self._session_context_cache: SessionContextCache | None = None
+            self._session_emb_cache = SessionEmbeddingCache()
+        else:
+            self.dynamic_session_encoder = None
+            self._session_context_cache = None
+            self._session_emb_cache = None
+
+    def set_context_cache(self, cache: SessionContextCache) -> None:
+        """Attach a :class:`SessionContextCache` for dynamic mode."""
+        self._session_context_cache = cache
+
     def _tokenize_and_add_session(
         self,
         input_values: torch.Tensor,
@@ -158,6 +204,7 @@ class POYOEEGModel(nn.Module):
         input_seq_len: Optional[torch.Tensor] = None,
         input_session_ids=None,
         input_channel_counts: Optional[torch.Tensor] = None,
+        context_kwargs: dict[str, torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """GPU tokenization + session embedding addition.
 
@@ -176,18 +223,104 @@ class POYOEEGModel(nn.Module):
             input_channel_counts=input_channel_counts,
             channel_emb_fn=self.channel_emb,
         )
-        if self.disable_session_emb:
-            session_emb = torch.zeros(
-                inputs.shape[0],
-                1,
-                self.embed_dim,
-                device=inputs.device,
-                dtype=inputs.dtype,
-            )
-        else:
-            session_emb = self.session_emb(input_session_index).unsqueeze(1)
+
+        session_emb = self._compute_session_embedding(
+            inputs, input_session_index, context_kwargs
+        )
+
+        if self.session_emb_mode != "disabled":
             inputs = inputs + session_emb
+
         return inputs, session_emb
+
+    def _compute_session_embedding(
+        self,
+        inputs: torch.Tensor,
+        input_session_index: torch.Tensor,
+        context_kwargs: dict[str, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        """Compute session embedding according to the current mode.
+
+        Returns:
+            ``(B, 1, D)`` session embedding tensor.
+        """
+        B = inputs.shape[0]
+        device = inputs.device
+        dtype = inputs.dtype
+
+        if self.session_emb_mode == "disabled":
+            return torch.zeros(B, 1, self.embed_dim, device=device, dtype=dtype)
+
+        if self.session_emb_mode == "static":
+            return self.session_emb(input_session_index).unsqueeze(1)
+
+        # --- dynamic mode ---
+        assert self.dynamic_session_encoder is not None
+
+        # Check inference cache first (all items in batch must be same session
+        # for cache hit; otherwise compute per-item)
+        if not self.training and self._session_emb_cache is not None:
+            idx = input_session_index[0].item()
+            if all(s.item() == idx for s in input_session_index):
+                cached = self._session_emb_cache.get(idx)
+                if cached is not None:
+                    return cached.to(device=device, dtype=dtype).expand(
+                        B, -1, -1
+                    )
+
+        if context_kwargs is None:
+            logger.warning(
+                "Dynamic session_emb_mode requires context_kwargs in forward; "
+                "falling back to zeros."
+            )
+            return torch.zeros(B, 1, self.embed_dim, device=device, dtype=dtype)
+
+        context_values = context_kwargs["context_values"]  # (B, W, C, T)
+        context_channel_index = context_kwargs[
+            "context_channel_index"
+        ]  # (B, W, C)
+        context_mask = context_kwargs["context_mask"]  # (B, W, C)
+        context_sr = context_kwargs["context_sampling_rate"]  # (B, W)
+
+        B, W, C, T = context_values.shape
+
+        flat_values = context_values.reshape(B * W, C, T)
+        flat_channel_idx = context_channel_index.reshape(B * W, C)
+        flat_mask = context_mask.reshape(B * W, C)
+        flat_sr = context_sr.reshape(B * W)
+
+        flat_seq_len = torch.full((B * W,), T, dtype=torch.long, device=device)
+
+        context_tokens = self.tokenizer(
+            flat_values,
+            input_channel_index=flat_channel_idx,
+            input_mask=flat_mask,
+            input_sampling_rate=flat_sr,
+            input_seq_len=flat_seq_len,
+            channel_emb_fn=self.channel_emb,
+        )  # (B*W, N_tokens, D)
+
+        N = context_tokens.shape[1]
+        context_tokens = context_tokens.view(B, W, N, self.embed_dim)
+
+        # Build per-token validity mask from channel mask
+        token_mask = (
+            flat_mask.unsqueeze(2)
+            .expand(B * W, C, N // C if C > 0 else 1)
+            .reshape(B * W, -1)[:, :N]
+        )
+        token_mask = token_mask.view(B, W, N)
+
+        session_emb = self.dynamic_session_encoder(
+            context_tokens, context_token_mask=token_mask
+        )
+
+        if not self.training and self._session_emb_cache is not None:
+            for i in range(B):
+                idx = input_session_index[i].item()
+                self._session_emb_cache.put(idx, session_emb[i : i + 1])
+
+        return session_emb
 
     # ------------------------------------------------------------------
     # Orchestration helpers – shared between base and masked forward
@@ -213,6 +346,7 @@ class POYOEEGModel(nn.Module):
         output_session_index: torch.Tensor,
         task_index: torch.Tensor,
         output_timestamps: torch.Tensor,
+        session_emb: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Construct downstream task queries and their rotary timestamp embeddings.
 
@@ -220,13 +354,23 @@ class POYOEEGModel(nn.Module):
         batch ``task_index`` uses 0 for padding and ``router_idx + 1`` for
         real tasks; the embedding table is indexed by the 0-based router index.
 
+        Args:
+            output_session_index: ``(B, n_out)`` session indices.
+            task_index: ``(B, n_out)`` padded task indices.
+            output_timestamps: ``(B, n_out)`` timestamps.
+            session_emb: Optional precomputed ``(B, 1, D)`` session embedding
+                for dynamic mode. When provided, it is broadcast-added to
+                queries instead of looking up ``session_emb``.
+
         Returns:
             ``(queries, ts_emb)`` with shapes ``(B, n_out, embed_dim)`` and
             the corresponding rotary pairs.
         """
         task_ids = (task_index - 1).clamp(min=0)
-        if self.disable_session_emb:
+        if self.session_emb_mode == "disabled":
             queries = self.task_emb(task_ids)
+        elif self.session_emb_mode == "dynamic" and session_emb is not None:
+            queries = session_emb + self.task_emb(task_ids)
         else:
             queries = self.session_emb(output_session_index) + self.task_emb(
                 task_ids
@@ -317,6 +461,10 @@ class POYOEEGModel(nn.Module):
         output_timestamps: torch.Tensor,
         task_index: torch.Tensor,
         unpack_output: bool = False,
+        context_values: Optional[torch.Tensor] = None,
+        context_channel_index: Optional[torch.Tensor] = None,
+        context_mask: Optional[torch.Tensor] = None,
+        context_sampling_rate: Optional[torch.Tensor] = None,
     ) -> ModelOutput:
         """Forward pass through the model.
 
@@ -334,6 +482,11 @@ class POYOEEGModel(nn.Module):
             output_timestamps: (B, n_out) timestamps for output predictions.
             task_index: (B, n_out) task/decoder indices.
             unpack_output: Whether to unpack outputs by batch sample.
+            context_values: (B, W, C, T) context windows for dynamic session
+                embedding. Only used when ``session_emb_mode == "dynamic"``.
+            context_channel_index: (B, W, C) channel tokens per context window.
+            context_mask: (B, W, C) channel validity per context window.
+            context_sampling_rate: (B, W) sampling rate per context window.
 
         Returns:
             :class:`ModelOutput` with task-specific predictions.
@@ -341,7 +494,16 @@ class POYOEEGModel(nn.Module):
         del unpack_output
         self._validate_vocab_initialization()
 
-        inputs, _session_emb = self._tokenize_and_add_session(
+        context_kwargs = None
+        if self.session_emb_mode == "dynamic" and context_values is not None:
+            context_kwargs = {
+                "context_values": context_values,
+                "context_channel_index": context_channel_index,
+                "context_mask": context_mask,
+                "context_sampling_rate": context_sampling_rate,
+            }
+
+        inputs, session_emb = self._tokenize_and_add_session(
             input_values,
             input_channel_index,
             input_session_index,
@@ -350,6 +512,7 @@ class POYOEEGModel(nn.Module):
             input_seq_len=input_seq_len,
             input_session_ids=input_session_ids,
             input_channel_counts=input_channel_counts,
+            context_kwargs=context_kwargs,
         )
         input_ts_emb = self.rotary_emb(input_timestamps)
 
@@ -357,7 +520,10 @@ class POYOEEGModel(nn.Module):
             latent_index, latent_timestamps
         )
         queries, query_ts_emb = self._build_downstream_queries(
-            output_session_index, task_index, output_timestamps
+            output_session_index,
+            task_index,
+            output_timestamps,
+            session_emb=session_emb,
         )
 
         latents = self._encode_and_process(
@@ -523,6 +689,10 @@ class POYOEEGModel(nn.Module):
         embedding concerns. Target extraction uses :class:`TargetExtractor`
         instances from the configured task configs.
 
+        When ``session_emb_mode == "dynamic"``, this also retrieves (or
+        builds) cached pretokenized context windows for the session and
+        attaches them to the result dict.
+
         Args:
             data: TemporalData object containing raw EEG/ECoG/sEEG signal.
 
@@ -531,6 +701,21 @@ class POYOEEGModel(nn.Module):
             metadata.
         """
         result, _prepared = self._tokenize_core(data)
+
+        if (
+            self.session_emb_mode == "dynamic"
+            and self._session_context_cache is not None
+        ):
+            session_id = str(data.session.id)
+            context = self._session_context_cache.get_or_build(
+                session_id=session_id,
+                data=data,
+                prepare_fn=self._prepare_signal,
+                pretokenize_fn=self.tokenizer.pretokenize,
+                channel_emb_tokenizer=self.channel_emb.tokenizer,
+            )
+            result.update(context)
+
         return result
 
     def initialize_vocabs(self, vocab_info: dict):

@@ -340,7 +340,7 @@ class TestTransformPassthrough:
 class TestHydraConfig:
     def test_config_loads(self):
         cfg = OmegaConf.load(
-            CONFIGS_ROOT / "data" / "openneuro" / "multi_brainset.yaml"
+            CONFIGS_ROOT / "data" / "openneuro" / "sleep_brainset.yaml"
         )
         assert cfg._target_ == "foundry.data.datamodules.NeuralDataModule"
         assert (
@@ -349,7 +349,7 @@ class TestHydraConfig:
 
     def test_dataset_kwargs_has_brainsets(self):
         cfg = OmegaConf.load(
-            CONFIGS_ROOT / "data" / "openneuro" / "multi_brainset.yaml"
+            CONFIGS_ROOT / "data" / "openneuro" / "sleep_brainset.yaml"
         )
         assert "brainsets" in cfg.dataset_kwargs
         brainsets = list(cfg.dataset_kwargs.brainsets)

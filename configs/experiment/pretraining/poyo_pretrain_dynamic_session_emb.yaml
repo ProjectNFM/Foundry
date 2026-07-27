@@ -1,0 +1,86 @@
+# @package _global_
+#
+# Dynamic session embedding pretraining: replace static per-session learnable
+# embeddings with signal-conditioned embeddings computed from context windows.
+# Uses the balanced Klinzing subset for fast preliminary runs.
+#
+# Local dry-run (single config):
+#   uv run python main.py experiment=pretraining/poyo_pretrain_dynamic_session_emb \
+#     model.session_emb.session_context.num_context_windows=5 model.session_emb.session_context.context_source=random
+#
+# SLURM sweep (num_windows × context_source):
+#   uv run python main.py experiment=pretraining/poyo_pretrain_dynamic_session_emb -m
+
+defaults:
+  - override /model: masked_poyo_eeg
+  - override /model/session_emb: dynamic
+  - override /data: openneuro/sleep_brainset_small
+  - override /hydra/launcher: slurm_default
+
+task_configs:
+  - masked_reconstruction
+
+model:
+  zero_output_timestamps: false
+  normalize_inputs: true
+  masking:
+    _target_: foundry.tasks.masking.TemporalBlockMasking
+    block_size: 10
+    mask_ratio: 0.5
+
+data:
+  split_type: intersubject
+  task_type: null
+  pin_memory: false
+
+module:
+  warmup_epochs: 0
+
+run:
+  name: pretrain_dynamic_sessemb_w${model.session_emb.session_context.num_context_windows}_${model.session_emb.session_context.context_source}
+  project: foundry_pretraining
+  group: PRETRAIN_DYNAMIC_SESSION_EMB
+  tags: [pretraining, mae, masked, dynamic_session_emb, intersubject]
+  log_level: INFO
+  compile: default
+
+hyperparameters:
+  batch_size: 100
+  sequence_length: 2.0
+  patch_duration: null
+  sampling_rate: null
+  num_channels: null
+  fold_number: 0
+  num_workers: 6
+  learning_rate: 1e-4
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 200
+  precision: bf16-mixed
+  callbacks:
+    model_checkpoint:
+      monitor: val/loss
+      mode: min
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_loss_{val/loss:.4f}"
+
+stage:
+  skip: false
+
+hydra:
+  sweeper:
+    params:
+      model.session_emb.session_context.num_context_windows: 1, 3, 5, 10
+      model.session_emb.session_context.context_source: random, start
+  launcher:
+    tasks_per_node: 1
+    cpus_per_task: 6
+    mem_gb: 32
+    gres: gpu:l40s:1
+    setup:
+      - "set -a"
+      - "source .env"
+      - "set +a"
+      - "export RANK=0"
+      - "uv run python -m foundry.tools.stage_data --experiment pretraining/poyo_pretrain_dynamic_session_emb"
