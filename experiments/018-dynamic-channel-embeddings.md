@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-07-28
 **Parent experiment:** [Channel Embedding Ablation](../experiments/016-channel-emb-ablation.md)
-**Follow-up experiments:** [Dynamic Channel Embedding Analysis](../experiments/019-dynamic-channel-embedding-analysis.md)
+**Follow-up experiments:** [Dynamic Channel Embedding Analysis](../experiments/019-dynamic-channel-embedding-analysis.md), [CWT CNN with Dynamic Channel Embeddings](../experiments/021-cwt-cnn-dynamic-channel-emb.md)
 
 ## Background
 
