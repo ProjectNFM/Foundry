@@ -3,7 +3,7 @@
 **Status:** Draft
 **Date started:** 2026-07-28
 **Parent experiment:** [Channel Embedding Ablation](../experiments/016-channel-emb-ablation.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Dynamic Channel Embedding Analysis](../experiments/019-dynamic-channel-embedding-analysis.md)
 
 ## Background
 
