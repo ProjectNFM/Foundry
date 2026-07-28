@@ -1,9 +1,9 @@
 # Channel Embedding Ablation for Intersubject Pretraining
 
-**Status:** Draft
+**Status:** Completed
 **Date started:** 2026-07-27
 **Parent experiment:** [Session Embedding Mode Comparison](../experiments/014-session-emb-mode-comparison.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** TBD (exp 017 full-dataset pretraining planned)
 
 ## Background
 
@@ -75,10 +75,10 @@ migrate into the channel embeddings?
 - **Hardware:** 1× L40S per run, 6 CPUs, 32 GB RAM (SLURM)
 - **WandB:** project=foundry_pretraining,
   group=PRETRAIN_CHANNEL_EMB_ABLATION
-  - `pretrain_chemb_sess-static_ch-static` — run ID `TBD`
-  - `pretrain_chemb_sess-static_ch-disabled` — run ID `TBD`
-  - `pretrain_chemb_sess-disabled_ch-static` — run ID `TBD`
-  - `pretrain_chemb_sess-disabled_ch-disabled` — run ID `TBD`
+  - `pretrain_chemb_sess-static_ch-static` — run ID `zftehsnf`
+  - `pretrain_chemb_sess-static_ch-disabled` — run ID `gp79rubc`
+  - `pretrain_chemb_sess-disabled_ch-static` — run ID `574sq9ay`
+  - `pretrain_chemb_sess-disabled_ch-disabled` — run ID `6htgoclv`
 
 **Conditions:**
 
@@ -122,21 +122,44 @@ Overrides:
 
 ### Summary
 
-TBD
+Disabling channel embeddings dramatically improves intersubject validation
+loss (0.399 vs 0.423–0.439) and eliminates the massive train-val gap
+observed with static channel embeddings. Session-scoped channel embeddings
+are the primary source of overfitting in this regime — the model memorizes
+session-specific patterns through channel vectors, making the session
+embedding ablation in exp 014 largely superficial.
+
+With channel embeddings disabled, session embeddings have virtually no
+effect (0.3990 vs 0.3984), confirming that once the channel-embedding
+leakage path is closed, session identity is truly removed. The ch-static
+runs finished early (epoch 16) due to early stopping triggered by
+escalating validation loss, while ch-disabled runs continued learning
+until SLURM timeout at epochs 44–45.
 
 ### Metrics
 
 | Metric                       | sess-S ch-S | sess-S ch-D | sess-D ch-S | sess-D ch-D |
 | ---------------------------- | ----------- | ----------- | ----------- | ----------- |
-| Best val/loss                | TBD         | TBD         | TBD         | TBD         |
-| Train loss at best val epoch | TBD         | TBD         | TBD         | TBD         |
-| Train-val gap at best val    | TBD         | TBD         | TBD         | TBD         |
-| Epoch of best val            | TBD         | TBD         | TBD         | TBD         |
-| Max epoch reached            | TBD         | TBD         | TBD         | TBD         |
+| Best val/loss                | 0.4385      | 0.3990      | 0.4226      | 0.3984      |
+| Train loss at best val epoch | 0.1631      | 0.4097      | 0.1683      | 0.4100      |
+| Train-val gap at best val    | 0.2754      | -0.0107     | 0.2543      | -0.0117     |
+| Epoch of best val            | 6           | 42          | 6           | 42          |
+| Max epoch reached            | 16          | 44          | 16          | 45          |
 
 ### Analysis
 
-TBD
+Results extracted programmatically from WandB. The ch-static runs
+(zftehsnf, 574sq9ay) have state=finished (early stopping at epoch 16),
+while ch-disabled runs (gp79rubc, 6htgoclv) have state=failed (SLURM
+timeout at 44–45 epochs, still improving).
+
+Key patterns:
+- **Channel embeddings dominate the overfitting signal:** Train-val gap
+  of 0.25–0.28 with ch-static vs ~-0.01 with ch-disabled.
+- **Session embeddings are redundant:** Within each channel mode, session
+  static vs disabled differ by only 0.0006–0.016 in val loss.
+- **ch-disabled enables continued learning:** Without channel overfitting,
+  the model keeps improving past epoch 40 (still trending downward).
 
 **Analysis script:** `analysis/016_channel_emb_ablation.py`
 
@@ -146,18 +169,47 @@ uv run python analysis/016_channel_emb_ablation.py
 
 ### Figures
 
-TBD
+![Grid comparison of best val loss and train-val gap](../analysis/figures/016_grid_comparison.png)
+
+![Validation loss overlay for all conditions](../analysis/figures/016_val_overlay.png)
+
+![Learning curves per condition](../analysis/figures/016_learning_curves.png)
 
 ## Conclusions
 
-TBD
+**Hypothesis 1 confirmed:** Disabling channel embeddings alone hurts
+reconstruction quality only in the narrow sense of *training* loss
+(0.41 vs 0.16) — the model cannot memorize per-channel patterns. But
+*validation* loss improves dramatically (0.399 vs 0.439), meaning the
+"reconstruction quality" from ch-static was illusory overfitting.
+
+**Hypothesis 2 strongly confirmed:** The exp 014 "disabled session"
+advantage (0.4226 vs 0.4385 here) completely disappears when channel
+embeddings are also disabled (0.3984 vs 0.3990, Δ=0.0006). This proves
+that session-specific information stored in session-scoped channel
+embeddings compensated for the disabled session embedding — the session
+ablation in exp 014 was superficial.
+
+**Hypothesis 3 N/A:** Since disabling channel embeddings improves
+generalization further than any session-only ablation, the question of
+whether session identity "genuinely hurts" is moot — it simply doesn't
+matter once the dominant leakage path (channel embeddings) is closed.
+
+**Critical finding:** The best intersubject val loss here (0.3984 with
+both disabled) improves upon exp 014's best (Disabled session at ~0.42)
+by 5%. Session-scoped channel embeddings were the hidden source of
+overfitting all along.
 
 ## Notes for future experiments
 
-- If channel embeddings do absorb session-specific information, consider
-  implementing dynamic channel embeddings that compute
-  electrode-position representations from signal characteristics rather
-  than a learned lookup table.
-- Results here inform whether `channel_emb_mode=disabled` should be
-  paired with `session_emb_mode=disabled` for maximum generalization
-  in experiment 017 (full dataset pretraining).
+- The ch-disabled runs were still improving at epoch 44–45. Rerunning
+  with longer allocation or from checkpoint would likely yield further
+  gains.
+- For exp 017 full-dataset pretraining, use `channel_emb_mode=disabled`
+  and `session_emb_mode=disabled` as the default configuration.
+- Consider implementing a **shared channel embedding** (e.g., bare
+  electrode name "Fpz" without session prefix) that provides electrode
+  identity without session-specific leakage.
+- Dynamic channel embeddings (signal-conditioned) could provide
+  electrode-specific calibration without memorization — worth
+  implementing as a follow-up.

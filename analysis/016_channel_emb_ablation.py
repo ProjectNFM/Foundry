@@ -6,11 +6,11 @@ Compares a 2×2 grid of session_emb (static, disabled) × channel_emb
 WandB project: foundry_pretraining
 Group: PRETRAIN_CHANNEL_EMB_ABLATION
 
-Runs (fill in after launch):
-  sess-static,  ch-static:   <TBD>
-  sess-static,  ch-disabled: <TBD>
-  sess-disabled, ch-static:  <TBD>
-  sess-disabled, ch-disabled:<TBD>
+Runs:
+  sess-static,  ch-static:   zftehsnf
+  sess-static,  ch-disabled: gp79rubc
+  sess-disabled, ch-static:  574sq9ay
+  sess-disabled, ch-disabled: 6htgoclv
 
 Usage:
     uv run python analysis/016_channel_emb_ablation.py
@@ -30,12 +30,11 @@ from analysis._wandb_utils import (
 WANDB_PROJECT = "foundry_pretraining"
 WANDB_ENTITY = default_entity()
 
-# TODO: fill in run IDs after launching
 RUNS = {
-    "sess-S ch-S": "<TBD>",
-    "sess-S ch-D": "<TBD>",
-    "sess-D ch-S": "<TBD>",
-    "sess-D ch-D": "<TBD>",
+    "sess-S ch-S": "zftehsnf",
+    "sess-S ch-D": "gp79rubc",
+    "sess-D ch-S": "574sq9ay",
+    "sess-D ch-D": "6htgoclv",
 }
 
 CONDITION_LABELS = {

@@ -7,10 +7,10 @@ splitting.  Mirrors the analysis from exp 014 but expects reversed ranking.
 WandB project: foundry_pretraining
 Group: PRETRAIN_SESSION_EMB_INTRASESSION
 
-Runs (fill in after launch):
-  pretrain_sessemb_intra_static:   <TBD>
-  pretrain_sessemb_intra_disabled: <TBD>
-  pretrain_sessemb_intra_dynamic:  <TBD>
+Runs:
+  pretrain_sessemb_intra_static:   2uwt0wso
+  pretrain_sessemb_intra_disabled: 047ibbdv
+  pretrain_sessemb_intra_dynamic:  d0pfka3a
 
 Usage:
     uv run python analysis/015_session_emb_intrasession.py
@@ -30,11 +30,10 @@ from analysis._wandb_utils import (
 WANDB_PROJECT = "foundry_pretraining"
 WANDB_ENTITY = default_entity()
 
-# TODO: fill in run IDs after launching
 RUNS = {
-    "Static": "<TBD>",
-    "Disabled": "<TBD>",
-    "Dynamic": "<TBD>",
+    "Static": "2uwt0wso",
+    "Disabled": "047ibbdv",
+    "Dynamic": "d0pfka3a",
 }
 
 TRAIN_LOSS = "train/loss"
