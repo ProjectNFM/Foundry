@@ -1,6 +1,6 @@
 # Full Dataset Pretraining — Embedding Mode Scaling
 
-**Status:** Draft
+**Status:** In Progress
 **Date started:** 2026-07-27
 **Parent experiment:** [Session Embedding Mode Comparison](../experiments/014-session-emb-mode-comparison.md), [Channel Embedding Ablation](../experiments/016-channel-emb-ablation.md)
 **Follow-up experiments:** TBD
@@ -64,7 +64,10 @@ full dataset with longer training?
 - **Hardware:** 1× L40S per run, 6 CPUs, 32 GB RAM (SLURM)
 - **WandB:** project=foundry_pretraining,
   group=PRETRAIN_FULL_DATASET_SCALING
-  - Run names and IDs TBD (depends on exp 014 + 016 results)
+  - `pretrain_full_sess-static_ch-disabled` / `qw6q86bw` — **only surviving run**
+  - `pretrain_full_sess-static_ch-static` — crashed during data staging
+  - `pretrain_full_sess-disabled_ch-static` — crashed during data staging
+  - `pretrain_full_sess-disabled_ch-disabled` — crashed during data staging
 
 **Conditions:**
 
@@ -114,15 +117,39 @@ Overrides:
 
 ### Summary
 
-TBD
+**3 of 4 runs crashed** before training started due to a race condition in
+the data staging step. Only `pretrain_full_sess-static_ch-disabled`
+(`qw6q86bw`) survived and completed ~4 epochs before hitting the 3h SLURM
+wall time. See [Failure Diagnosis](#failure-diagnosis) below.
+
+The surviving run (sess-static, ch-disabled on full dataset) reached a best
+validation loss of **0.4290** at epoch 3 in just ~2.7h of training time.
+For comparison, the same configuration on the small subset (exp 016,
+`gp79rubc`) reached **0.3990** at epoch 42 after ~45 epochs. At the same
+epoch count (~4 epochs), the small-subset run was at comparable val loss
+levels, suggesting the full-dataset run is on a similar learning trajectory.
 
 ### Metrics
 
-TBD (metrics table will be filled after runs complete)
+| Condition              | Dataset | Best Val | Train@BV | Gap     | BV Epoch | Max Ep | Run ID     |
+|------------------------|---------|----------|----------|---------|----------|--------|------------|
+| sess-S ch-D (exp 017)  | Full    | 0.4290   | 0.4500   | −0.0210 | 3        | 4      | `qw6q86bw` |
+| sess-S ch-S (exp 016)  | Small   | 0.4385   | 0.1631   | +0.2754 | 6        | 16     | `zftehsnf` |
+| sess-S ch-D (exp 016)  | Small   | 0.3990   | 0.4097   | −0.0107 | 42       | 44     | `gp79rubc` |
+| sess-D ch-S (exp 016)  | Small   | 0.4226   | 0.1683   | +0.2543 | 6        | 16     | `574sq9ay` |
+| sess-D ch-D (exp 016)  | Small   | 0.3984   | 0.4100   | −0.0117 | 42       | 45     | `6htgoclv` |
+
+Key observations:
+- After only 4 epochs on the full dataset, val loss (0.4290) is already
+  below the ch-static configurations on the small subset (0.4385 / 0.4226),
+  which trained for 16 epochs.
+- The train-val gap is **negative** (−0.021), meaning the model
+  generalizes better than it fits — consistent with ch-disabled removing
+  per-session overfitting pathways. This matches the small-subset pattern.
+- With more training time, the full-dataset run should continue improving
+  toward (or beyond) the small-subset asymptote of ~0.399.
 
 ### Analysis
-
-TBD
 
 **Analysis script:** `analysis/017_full_dataset_scaling.py`
 
@@ -132,19 +159,94 @@ uv run python analysis/017_full_dataset_scaling.py
 
 ### Figures
 
-TBD
+![Validation loss overlay — full vs small](../analysis/figures/017_val_overlay.png)
+
+![Learning curves — full vs small (sess-S ch-D)](../analysis/figures/017_learning_curves.png)
+
+![Bar comparison — best val loss](../analysis/figures/017_bar_comparison.png)
+
+## Failure Diagnosis
+
+### Root cause: archive race condition in `stage_data.py`
+
+All 4 SLURM array jobs started simultaneously on different nodes. Each
+job's setup step pre-stages data to the node-local `/tmp/` by:
+
+1. Copying a compressed archive of the **small** 28-recording subset
+   (`klinzing_sleep_ds005555_43dd40396a7b.tar`, 16 GB) — this succeeded
+   on all 4 nodes because the archive already existed on scratch.
+
+2. Finding that **228 of 256 recordings** were still missing (the full
+   dataset has 256 recordings, but the pre-existing archive only covered
+   the small 28-recording subset).
+
+3. Attempting to create a **new** 126 GB archive
+   (`klinzing_sleep_ds005555_365564bb03ce.tar`) from the full 256
+   recordings on the shared scratch filesystem.
+
+**The problem:** All 4 jobs concurrently wrote to the same temporary file
+(`...365564bb03ce.tmp`) on the shared `/network/scratch/` filesystem.
+Each spent ~4 minutes archiving 126 GB. The first job to finish renamed
+`.tmp` → `.tar` successfully. The remaining 3 jobs then crashed with:
+
+```
+FileNotFoundError: [Errno 2] No such file or directory:
+  '.../klinzing_sleep_ds005555_365564bb03ce.tmp' ->
+  '.../klinzing_sleep_ds005555_365564bb03ce.tar'
+```
+
+The `create_archive()` function in `foundry/tools/stage_data.py:175` uses
+`tmp_path.rename(archive_path)` which is not atomic across concurrent jobs.
+
+### Which run survived and why
+
+- **SLURM job 10226930_1** → `pretrain_full_sess-static_ch-disabled`
+  happened to schedule on a node (`cn-l069`) where the setup script
+  finished the archive step fastest (possibly better I/O throughput).
+  This job won the rename race and proceeded to train.
+
+- **SLURM jobs 10226930_0, _2, _3** → the other three conditions all
+  crashed at the same `tmp_path.rename()` line and exited immediately
+  with exit code 0 (submitit reported "Job completed successfully"
+  despite the traceback because the error handler caught the exception).
+
+### Fix for re-run
+
+Before re-running, either:
+1. Pre-create the full-dataset archive manually so all jobs find it, or
+2. Add file locking / atomic rename logic to `create_archive()`, or
+3. Run the `stage_data` setup step once (single job) before launching
+   the sweep.
 
 ## Conclusions
 
-TBD
+Preliminary (based on 1 of 4 conditions, 4 of 200 planned epochs):
+
+1. **Full-dataset training is viable** — the model trains and improves
+   steadily with no signs of instability.
+2. **ch-disabled on full dataset starts faster** than ch-static
+   configurations on the small subset — after 4 epochs, val loss (0.4290)
+   already beats the best ch-static small-subset results (0.4385/0.4226
+   at 6–16 epochs).
+3. **Negative train-val gap** confirms that ch-disabled avoids the
+   per-session overfitting seen with static channel embeddings (gap of
+   +0.25–0.27 in ch-static configs).
+4. **The experiment needs re-running** with the archive race condition
+   fixed and longer wall time (or checkpoint resumption) to get meaningful
+   scaling comparisons.
 
 ## Notes for future experiments
 
-- If full-dataset results confirm the small-subset findings, the best
-  embedding configuration can be adopted as the default for all future
-  intersubject pretraining.
+- **Fix the data staging race condition** before re-running. The simplest
+  approach: run `uv run python -m foundry.tools.stage_data --experiment
+  pretraining/poyo_pretrain_dynamic_session_emb` once as a separate SLURM
+  job with `data=openneuro/sleep_brainset` to pre-create the full-dataset
+  archive.
+- **Increase wall time or enable checkpoint resumption** — 3h was only
+  enough for ~4 epochs on the full dataset; the small-subset comparators
+  needed 40+ epochs to converge.
 - Consider downstream finetuning evaluation: does the best pretraining
   configuration also produce the best pretrained weights for sleep
   staging or other downstream tasks?
-- With the full dataset, training may need longer wall time or
-  checkpoint-based resumption to reach convergence.
+- The full dataset has 256 recordings vs 28 in the subset — each epoch
+  contains ~9× more data, so fewer epochs may be needed for convergence.
