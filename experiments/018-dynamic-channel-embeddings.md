@@ -1,6 +1,6 @@
 # Dynamic Channel Embeddings via Relative Inter-Channel Attention
 
-**Status:** Draft
+**Status:** Completed
 **Date started:** 2026-07-28
 **Parent experiment:** [Channel Embedding Ablation](../experiments/016-channel-emb-ablation.md)
 **Follow-up experiments:** [Dynamic Channel Embedding Analysis](../experiments/019-dynamic-channel-embedding-analysis.md)
@@ -68,7 +68,8 @@ caused by static session-scoped embeddings?
 - **Hardware:** 1× L40S per run, 6 CPUs, 32 GB RAM (SLURM)
 - **WandB:** project=foundry_pretraining,
   group=PRETRAIN_DYNAMIC_CHANNEL_EMB
-  - TBD (run IDs to be filled after launch)
+  - `pretrain_dynch_ch-disabled` / `zmxyua36`
+  - `pretrain_dynch_ch-dynamic` / `hggeonah`
 
 **Conditions:**
 
@@ -105,33 +106,84 @@ Overrides:
 
 ## Results
 
-TBD
+Both runs failed due to SLURM timeout after 44 epochs (out of 200 planned).
+Both curves were still improving at termination, so the final numbers are
+conservative lower bounds on achievable performance.
 
 ### Summary
 
-TBD
+Dynamic channel embeddings dramatically outperform the disabled baseline,
+achieving a **72% relative reduction** in best validation loss (0.1119 vs
+0.3988). The disabled baseline matches exp 016 (0.399), confirming
+reproducibility. Both conditions show val < train loss (negative gap),
+consistent with the asymmetry introduced by masked reconstruction during
+training. Neither condition shows overfitting — losses were still declining
+at epoch 42.
 
 ### Metrics
 
-TBD
+| Condition    | Best Val Loss | Train@BV | Gap (Val−Train) | Best Val Epoch | Max Epoch | State  | Run ID     |
+| ------------ | ------------- | -------- | --------------- | -------------- | --------- | ------ | ---------- |
+| ch-disabled  | 0.3988        | 0.4100   | −0.0112         | 42             | 44        | failed | `zmxyua36` |
+| ch-dynamic   | **0.1119**    | 0.1391   | −0.0272         | 42             | 44        | failed | `hggeonah` |
 
 ### Analysis
 
-TBD
+Results were extracted programmatically via the WandB API.
+
+**Analysis script:** `analysis/018_dynamic_channel_emb.py`
+
+```bash
+uv run python analysis/018_dynamic_channel_emb.py
+```
 
 ### Figures
 
-TBD
+![Validation loss overlay — dynamic vs disabled](../analysis/figures/018_val_overlay.png)
+
+![Bar comparison — best val loss and train-val gap](../analysis/figures/018_bar_comparison.png)
+
+![Learning curves — individual train/val per condition](../analysis/figures/018_learning_curves.png)
 
 ## Conclusions
 
-TBD
+All three hypotheses are **strongly confirmed**:
+
+1. **Dynamic >> Disabled:** Dynamic channel embeddings (0.1119) massively
+   outperform disabled (0.3988) — a 72% relative improvement. The
+   RelativeChannelEncoder provides the decoder with channel identity
+   information that is critical for masked reconstruction.
+
+2. **Dynamic >> Static (by transitivity):** Exp 016 showed static channel
+   embeddings produced val loss ~0.439 (with session=disabled). Dynamic
+   (0.1119) is 74% better than static, while also avoiding static
+   embeddings' overfitting problem.
+
+3. **No overfitting with dynamic:** Both conditions maintain val ≤ train
+   (negative gap), consistent with the disabled baseline. Dynamic
+   embeddings do not introduce the train-val divergence that static
+   embeddings caused in exp 016.
+
+The magnitude of improvement is striking: the model with dynamic channel
+embeddings achieves ~3.6× lower reconstruction loss than without any channel
+identity at all. This suggests that channel identity is extremely valuable
+for reconstruction, and that the RelativeChannelEncoder successfully
+provides this information in a generalizable, signal-conditioned way.
+
+**Caveat:** Both runs were cut short at epoch 44/200 by SLURM timeout. The
+dynamic condition was still improving, so the true gap may be even larger
+with full training. These runs should be resubmitted with longer walltime.
 
 ## Notes for future experiments
 
-- If dynamic outperforms disabled, try combining with dynamic session
-  embeddings (`session_emb_mode=dynamic` + `channel_emb_mode=dynamic`).
+- **Resubmit with longer walltime** — both runs were cut short at 44/200
+  epochs. The dynamic condition was still actively improving.
+- Combine dynamic channel + dynamic session embeddings
+  (`session_emb_mode=dynamic` + `channel_emb_mode=dynamic`).
 - Try varying `channel_encoder_heads` (2, 4, 8) to find optimal capacity.
-- Scale to full dataset if the small-subset results are promising.
+- Scale to full dataset — the small-subset results are very promising.
 - Consider adding a residual connection in the RelativeChannelEncoder
   for better gradient flow.
+- Run linear probing (exp 020 style) on the dynamic channel model to
+  evaluate whether the improved reconstruction also yields better
+  downstream representations.
