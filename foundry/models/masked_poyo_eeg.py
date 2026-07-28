@@ -97,6 +97,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         input_timestamps: torch.Tensor,
         N: int,
         masked_validity: torch.Tensor,
+        channel_emb_cache: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Build reconstruction queries at masked positions.
 
@@ -111,6 +112,9 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             input_timestamps: (B, C_pad*N) flattened timestamps.
             N: Number of time tokens per channel.
             masked_validity: (B, num_masked) boolean validity for masked positions.
+            channel_emb_cache: Optional (B, C_pad, D_ch) precomputed channel
+                embeddings from the dynamic encoder. When provided, used
+                instead of the static lookup.
 
         Returns:
             ``(queries, ts_emb, task_index)`` where *task_index* uses the
@@ -129,10 +133,21 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         )
 
         masked_channel_idx = mask_indices // N
-        recon_channel_tokens = torch.gather(
-            input_channel_index, 1, masked_channel_idx
-        )
-        recon_channel_emb = self._get_channel_emb_fn()(recon_channel_tokens)
+
+        if channel_emb_cache is not None:
+            recon_channel_emb = torch.gather(
+                channel_emb_cache,
+                1,
+                masked_channel_idx.unsqueeze(-1).expand(
+                    -1, -1, channel_emb_cache.shape[-1]
+                ),
+            )
+        else:
+            recon_channel_tokens = torch.gather(
+                input_channel_index, 1, masked_channel_idx
+            )
+            recon_channel_emb = self._get_channel_emb_fn()(recon_channel_tokens)
+
         if self.recon_channel_proj is not None:
             recon_channel_emb = self.recon_channel_proj(recon_channel_emb)
 
@@ -210,7 +225,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             }
 
         # 1. GPU tokenization
-        inputs, session_emb = self._tokenize_and_add_session(
+        inputs, session_emb, ch_emb_cache = self._tokenize_and_add_session(
             input_values,
             input_channel_index,
             input_session_index,
@@ -290,6 +305,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
                 input_timestamps,
                 N,
                 masked_validity,
+                channel_emb_cache=ch_emb_cache,
             )
         )
 

@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-07-27
 **Parent experiment:** [Session Embedding Mode Comparison](../experiments/014-session-emb-mode-comparison.md)
-**Follow-up experiments:** TBD (exp 017 full-dataset pretraining planned)
+**Follow-up experiments:** [Full Dataset Pretraining Scaling](../experiments/017-full-dataset-pretraining-scaling.md), [Dynamic Channel Embeddings](../experiments/018-dynamic-channel-embeddings.md)
 
 ## Background
 

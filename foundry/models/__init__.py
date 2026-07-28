@@ -33,6 +33,7 @@ from foundry.models.tokenizer import EEGTokenizer
 
 from foundry.models.poyo_eeg import POYOEEGModel
 from foundry.models.masked_poyo_eeg import MaskedPOYOEEGModel
+from foundry.models.relative_channel_encoder import RelativeChannelEncoder
 from foundry.models.session_embedding import (
     DynamicSessionEncoder,
     SessionContextCache,
@@ -82,6 +83,7 @@ __all__ = [
     "PerceiverProcessor",
     "patch_signal",
     "compute_patch_timestamps",
+    "RelativeChannelEncoder",
     "DynamicSessionEncoder",
     "SessionContextCache",
     "SessionEmbeddingCache",

@@ -360,8 +360,9 @@ class EEGTokenizer(nn.Module):
         input_mask: torch.Tensor | None = None,
         input_sampling_rate: torch.Tensor | None = None,
         channel_emb_fn: Callable | None = None,
+        channel_encoder: nn.Module | None = None,
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor | None]:
         """GPU-side embedding.
 
         Called from ``POYOEEGModel.forward()``.
@@ -373,9 +374,17 @@ class EEGTokenizer(nn.Module):
             input_sampling_rate: (B,) per-item sampling rate.
             channel_emb_fn: Maps channel token indices to embedding vectors.
                 Used by :class:`PerChannelStrategy` for channel identity.
+            channel_encoder: Optional :class:`RelativeChannelEncoder` for
+                dynamic channel embeddings. When provided, takes priority
+                over ``channel_emb_fn``.
 
         Returns:
-            (B, num_tokens, embed_dim)
+            When ``channel_encoder`` is provided:
+                ``(tokens, ch_emb)`` — tokens ``(B, num_tokens, embed_dim)``
+                and channel embeddings ``(B, C, channel_emb_dim)``.
+            Otherwise:
+                ``(tokens, None)`` — tokens ``(B, num_tokens, embed_dim)``
+                and ``None``.
         """
         B, C_in, T = input_values.shape
 
@@ -416,15 +425,17 @@ class EEGTokenizer(nn.Module):
         tokens = self.post_proj_norm(tokens)
 
         if self.uses_per_channel:
-            tokens = self._reassemble_per_channel(
+            tokens, ch_emb = self._reassemble_per_channel(
                 tokens,
                 B,
                 input_mask,
                 input_channel_index,
-                channel_emb_fn,
+                channel_emb_fn=channel_emb_fn,
+                channel_encoder=channel_encoder,
             )
+            return tokens, ch_emb
 
-        return tokens
+        return tokens, None
 
     def _reassemble_per_channel(
         self,
@@ -432,7 +443,8 @@ class EEGTokenizer(nn.Module):
         B,
         channel_mask,
         channel_index,
-        channel_emb_fn,
+        channel_emb_fn=None,
+        channel_encoder=None,
     ):
         """Reshape per-channel tokens and fuse channel identity embedding.
 
@@ -443,21 +455,30 @@ class EEGTokenizer(nn.Module):
             channel_mask: (B, C_pad) which channels are real.
             channel_index: (B, C_pad) channel token indices.
             channel_emb_fn: Maps channel indices to embedding vectors.
+            channel_encoder: Optional :class:`RelativeChannelEncoder`.
+                Takes priority over ``channel_emb_fn`` when provided.
 
         Returns:
-            (B, C_pad * N, embed_dim) with channel identity embeddings
-            fused (added or concatenated) and padded channels zeroed out.
+            ``(tokens, ch_emb)`` where tokens is
+            ``(B, C_pad * N, embed_dim)`` with channel identity embeddings
+            fused (added or concatenated) and padded channels zeroed out,
+            and ch_emb is ``(B, C, channel_emb_dim)`` or ``None``.
         """
         C = channel_mask.shape[1]
         N = tokens.shape[1]
 
         tokens = tokens.reshape(B, C, N, -1)
 
-        if channel_emb_fn is not None:
-            ch_emb = channel_emb_fn(channel_index)
+        ch_emb = None
+        if channel_encoder is not None:
+            ch_emb = channel_encoder(tokens, channel_mask)  # (B, C, D_ch)
+        elif channel_emb_fn is not None:
+            ch_emb = channel_emb_fn(channel_index)  # (B, C, D_ch)
+
+        if ch_emb is not None:
             if self.channel_fusion == "concat":
-                ch_emb = ch_emb.unsqueeze(2).expand(-1, -1, N, -1)
-                tokens = torch.cat([tokens, ch_emb], dim=-1)
+                ch_emb_expand = ch_emb.unsqueeze(2).expand(-1, -1, N, -1)
+                tokens = torch.cat([tokens, ch_emb_expand], dim=-1)
             else:
                 tokens = tokens + ch_emb.unsqueeze(2)
 
@@ -466,7 +487,7 @@ class EEGTokenizer(nn.Module):
         token_mask = channel_mask.unsqueeze(2).expand(B, C, N).reshape(B, C * N)
         tokens = tokens.masked_fill(~token_mask.unsqueeze(-1), 0.0)
 
-        return tokens
+        return tokens, ch_emb
 
 
 __all__ = ["EEGTokenizer"]

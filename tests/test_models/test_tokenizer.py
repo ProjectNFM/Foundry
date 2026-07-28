@@ -72,7 +72,7 @@ class TestMode1FixedChannelPatched:
         x = torch.randn(batch_size, 8, 250)
         fs = torch.full((batch_size,), 250.0)
 
-        out = tokenizer(x, input_sampling_rate=fs)
+        out, _ = tokenizer(x, input_sampling_rate=fs)
         assert out.shape == (batch_size, 10, embed_dim)
 
     def test_forward_gradient_flow(self):
@@ -80,7 +80,7 @@ class TestMode1FixedChannelPatched:
         x = torch.randn(1, 8, 250, requires_grad=True)
         fs = torch.full((1,), 250.0)
 
-        out = tokenizer(x, input_sampling_rate=fs)
+        out, _ = tokenizer(x, input_sampling_rate=fs)
         out.sum().backward()
         assert x.grad is not None
 
@@ -128,7 +128,7 @@ class TestMode2aPerChannelPatched:
         fs = torch.full((B,), 250.0)
 
         emb = torch.nn.Embedding(C, embed_dim)
-        out = tokenizer(
+        out, _ = tokenizer(
             x,
             input_mask=mask,
             input_channel_index=ch_idx,
@@ -177,7 +177,7 @@ class TestMode2aConcatPerChannelPatched:
         fs = torch.full((B,), 250.0)
 
         emb = torch.nn.Embedding(C, self.CHANNEL_EMB_DIM)
-        out = tokenizer(
+        out, _ = tokenizer(
             x,
             input_mask=mask,
             input_channel_index=ch_idx,
@@ -196,7 +196,7 @@ class TestMode2aConcatPerChannelPatched:
         fs = torch.full((B,), 250.0)
 
         emb = torch.nn.Embedding(C, self.CHANNEL_EMB_DIM)
-        out = tokenizer(
+        out, _ = tokenizer(
             x,
             input_mask=mask,
             input_channel_index=ch_idx,
@@ -215,7 +215,7 @@ class TestMode2aConcatPerChannelPatched:
         fs = torch.full((B,), 250.0)
 
         emb = torch.nn.Embedding(C, self.CHANNEL_EMB_DIM)
-        out = tokenizer(
+        out, _ = tokenizer(
             x,
             input_mask=mask,
             input_channel_index=ch_idx,
@@ -286,7 +286,7 @@ class TestMode2bSpatialProjectionPatched:
         x = torch.randn(batch_size, 64, 250)
         fs = torch.full((batch_size,), 250.0)
 
-        out = tokenizer(x, input_sampling_rate=fs)
+        out, _ = tokenizer(x, input_sampling_rate=fs)
         assert out.shape == (batch_size, 10, embed_dim)
 
 
@@ -327,7 +327,7 @@ class TestMode3aSpatialProjectionCWT:
         fs = torch.full((batch_size,), 250.0)
         seq_lens = torch.full((batch_size,), 250, dtype=torch.long)
 
-        out = tokenizer(x, input_sampling_rate=fs, input_seq_len=seq_lens)
+        out, _ = tokenizer(x, input_sampling_rate=fs, input_seq_len=seq_lens)
         assert out.shape == (batch_size, 32, embed_dim)
 
 
@@ -364,7 +364,7 @@ class TestMode3bSpatialProjectionPerTimepoint:
         x = torch.randn(batch_size, 64, 200)
         fs = torch.full((batch_size,), 250.0)
 
-        out = tokenizer(x, input_sampling_rate=fs)
+        out, _ = tokenizer(x, input_sampling_rate=fs)
         assert out.shape == (batch_size, 200, embed_dim)
 
 
@@ -392,7 +392,7 @@ class TestMode3cSpatialProjectionIdentityTemporal:
         x = torch.randn(batch_size, 64, 200)
         fs = torch.full((batch_size,), 250.0)
 
-        out = tokenizer(x, input_sampling_rate=fs)
+        out, _ = tokenizer(x, input_sampling_rate=fs)
         assert out.shape == (batch_size, 200, 8)
 
     def test_forward_raises_on_dim_mismatch(self):
@@ -437,7 +437,7 @@ class TestMode4PerChannelPerTimepoint:
         fs = torch.full((B,), 250.0)
 
         emb = torch.nn.Embedding(C, D)
-        out = tokenizer(
+        out, _ = tokenizer(
             x,
             input_mask=mask,
             input_channel_index=ch_idx,
@@ -456,7 +456,7 @@ class TestMode4PerChannelPerTimepoint:
         fs = torch.full((B,), 250.0)
 
         emb = torch.nn.Embedding(C, D)
-        out = tokenizer(
+        out, _ = tokenizer(
             x,
             input_mask=mask,
             input_channel_index=ch_idx,
@@ -540,7 +540,7 @@ class TestSpatialProjectionWithSessionConfig:
         x = torch.randn(B, C, T)
         fs = torch.full((B,), 250.0)
 
-        out = tokenizer(
+        out, _ = tokenizer(
             x,
             input_sampling_rate=fs,
             input_session_ids=["sessA", "sessB"],
@@ -562,7 +562,7 @@ class TestSpatialProjectionWithSessionConfig:
         fs = torch.full((B,), 250.0)
         seq_lens = torch.tensor([T, T])
 
-        out = tokenizer(
+        out, _ = tokenizer(
             x,
             input_sampling_rate=fs,
             input_seq_len=seq_lens,
@@ -581,7 +581,7 @@ class TestSpatialProjectionWithSessionConfig:
         x = torch.randn(B, C, T, requires_grad=True)
         fs = torch.full((B,), 250.0)
 
-        out = tokenizer(
+        out, _ = tokenizer(
             x,
             input_sampling_rate=fs,
             input_session_ids=["sessA"],
@@ -603,7 +603,7 @@ class TestSpatialProjectionWithSessionConfig:
         fs = torch.tensor([250.0, 500.0])
         seq_lens = torch.tensor([200, 300])
 
-        out = tokenizer(
+        out, _ = tokenizer(
             x,
             input_sampling_rate=fs,
             input_seq_len=seq_lens,
@@ -654,7 +654,7 @@ class TestPerceiverSpatialPatched:
         mask[:, 30:] = False
         fs = torch.full((B,), 250.0)
 
-        out = tokenizer(x, input_mask=mask, input_sampling_rate=fs)
+        out, _ = tokenizer(x, input_mask=mask, input_sampling_rate=fs)
         assert out.shape == (B, 10, embed_dim)
 
     def test_forward_gradient_flow(self):
@@ -663,7 +663,7 @@ class TestPerceiverSpatialPatched:
         mask = torch.ones(1, 64, dtype=torch.bool)
         fs = torch.full((1,), 250.0)
 
-        out = tokenizer(x, input_mask=mask, input_sampling_rate=fs)
+        out, _ = tokenizer(x, input_mask=mask, input_sampling_rate=fs)
         out.sum().backward()
         assert x.grad is not None
 
@@ -673,7 +673,7 @@ class TestPerceiverSpatialPatched:
         x = torch.randn(2, 64, 250)
         fs = torch.full((2,), 250.0)
 
-        out = tokenizer(x, input_sampling_rate=fs)
+        out, _ = tokenizer(x, input_sampling_rate=fs)
         assert out.shape == (2, 10, embed_dim)
 
 
