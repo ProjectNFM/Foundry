@@ -1,6 +1,6 @@
 # Linear Probing: Dynamic Channel Embeddings
 
-**Status:** Not Started
+**Status:** Completed
 **Date started:** 2026-07-28
 **Parent experiment:** [Dynamic Channel Embedding Analysis](../experiments/019-dynamic-channel-embedding-analysis.md)
 **Follow-up experiments:** TBD
@@ -102,34 +102,118 @@ channel mode for the pretrained runs.
   for linear probing)
 - Single fold (fold 0) only
 
+### WandB
+
+- **Project:** `foundry_finetuning`
+- **Group:** `KEMP_LINEAR_PROBE_DYNCH`
+
+| Condition              | Run name                             | Run ID     |
+| ---------------------- | ------------------------------------ | ---------- |
+| pretrained-ch-disabled | `kemp_lp_020_pretrained_ch_disabled` | `zmg07ep4` |
+| pretrained-ch-dynamic  | `kemp_lp_020_pretrained_ch_dynamic`  | `osqqcdrj` |
+| random-ch-disabled     | `kemp_lp_020_random_ch_disabled`     | `t54gr0yj` |
+| random-ch-dynamic      | `kemp_lp_020_random_ch_dynamic`      | `ip8xktxl` |
+
+Note: the two dynamic runs show `state=failed` (SLURM timeout) but completed
+enough epochs to reach early-stopping-quality results and are usable.
+
 ## Results
 
 ### Summary
 
-TBD
+The dynamic channel embedding model produces backbone representations with
+substantially more linearly separable sleep stage information than the disabled
+baseline. The pretrained dynamic condition achieves the highest linear probe
+F1 (0.472), beating pretrained disabled (0.399) by **+7.3 pp** — a wide margin
+for a linear probe comparison. The dynamic advantage holds even without
+pretraining: random dynamic (0.410) beats random disabled (0.369) by +4.1 pp.
+
+Pretraining also helps within each channel mode, but the dynamic channel
+embedding is the larger factor: the dynamic advantage (+7.3 pp pretrained,
++4.1 pp random) exceeds the pretraining advantage (+6.2 pp dynamic, +3.0 pp
+disabled).
 
 ### Metrics
 
-TBD
+| Condition              | Val F1 | Val Acc | Val Loss | Best F1 Epoch | Max Epoch | Run ID     |
+| ---------------------- | -----: | ------: | -------: | ------------: | --------: | ---------- |
+| pretrained-ch-dynamic  | 0.4724 |  0.6782 |   1.2356 |             7 |        17 | `osqqcdrj` |
+| random-ch-dynamic      | 0.4100 |  0.5829 |   1.3971 |            13 |        17 | `ip8xktxl` |
+| pretrained-ch-disabled | 0.3994 |  0.6319 |   1.5246 |             4 |        14 | `zmg07ep4` |
+| random-ch-disabled     | 0.3691 |  0.5550 |   1.4031 |             0 |        10 | `t54gr0yj` |
+
+**Pairwise F1 comparisons:**
+
+| Comparison                           | ΔF1 (pp) |
+| ------------------------------------ | -------: |
+| Dynamic vs Disabled (pretrained)     |    +7.3  |
+| Pretrained vs Random (dynamic)       |    +6.2  |
+| Dynamic vs Disabled (random)         |    +4.1  |
+| Pretrained vs Random (disabled)      |    +3.0  |
 
 ### Analysis
 
-TBD
+**Analysis script:** `analysis/020_linear_probe_dynamic_channel_emb.py`
+
+```bash
+uv run python analysis/020_linear_probe_dynamic_channel_emb.py
+```
 
 ### Figures
 
-TBD
+**F1 and accuracy comparison across all 4 conditions:**
+
+![Bar comparison](../analysis/figures/020_bar_comparison.png)
+
+**Validation F1 learning curves:**
+
+![F1 curves](../analysis/figures/020_f1_curves.png)
+
+**Dynamic channel embedding F1 advantage over disabled baseline:**
+
+![Dynamic advantage](../analysis/figures/020_dynamic_advantage.png)
+
+**Train/val loss curves per condition:**
+
+![Learning curves](../analysis/figures/020_learning_curves.png)
 
 ## Conclusions
 
-TBD
+**Hypothesis supported.** The dynamic channel embedding model's better
+reconstruction loss (0.11 vs 0.40 in exp 018) does translate into meaningfully
+better linear probe performance for downstream sleep staging. The pretrained
+dynamic backbone achieves 0.472 F1 versus 0.399 for pretrained disabled —
+a +7.3 pp advantage that confirms the dynamic model learns more discriminative
+features in its backbone, not just better channel-level signal reconstruction.
+
+This result resolves the ambiguity from experiment 019, where embedding
+visualizations showed more geometric structure in the dynamic model but
+inconclusive sleep-stage separability (and actually worse silhouette scores).
+The linear probe demonstrates that the dynamic model's representations are
+genuinely more useful for classification, even though this advantage is not
+easily visible in 2D projections.
+
+The fact that dynamic embeddings also help in the random-init condition
+(+4.1 pp) suggests that the `RelativeChannelEncoder` architecture itself
+provides a useful inductive bias for sleep staging — it is not purely a
+pretraining interaction effect.
 
 ## Notes for future experiments
 
-- If the dynamic pretrained backbone shows a clear advantage, consider
-  finetuning with progressive unfreezing to avoid catastrophic forgetting.
-- If neither pretrained condition outperforms random, the reconstruction
-  objective may need rethinking (e.g., adding a contrastive or classification
-  auxiliary loss during pretraining).
-- Compare with the CWT-CNN linear probe results from experiment 008 to
-  assess whether the tokenizer or the channel embedding mode matters more.
+- **Finetuning is the next step.** Now that linear probing confirms the
+  pretrained dynamic backbone captures discriminative features, full
+  finetuning (or progressive unfreezing) should amplify the advantage. The
+  +7.3 pp linear probe gap may translate into an even larger finetuned gap
+  if the dynamic model's features are better starting points for
+  gradient-based adaptation.
+- **Compare with CWT-CNN linear probe results from experiment 008.** That
+  experiment showed a +15 pp F1 advantage for CWT-CNN pretraining; the
+  dynamic channel embedding's +7.3 pp is smaller but uses a different
+  tokenizer (ResampleCNN). A direct comparison holding the tokenizer
+  constant would clarify whether the channel embedding or tokenizer
+  contributes more.
+- The dynamic advantage in the random-init condition (+4.1 pp) suggests the
+  `RelativeChannelEncoder` provides architectural benefits beyond what it
+  learns during pretraining — worth investigating whether the channel
+  encoder's cross-channel attention acts as an implicit data augmentation
+  or regularization mechanism.
