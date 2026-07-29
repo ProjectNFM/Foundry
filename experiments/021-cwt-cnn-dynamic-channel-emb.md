@@ -3,7 +3,7 @@
 **Status:** In Progress
 **Date started:** 2026-07-28
 **Parent experiment:** [Dynamic Channel Embeddings via Relative Inter-Channel Attention](../experiments/018-dynamic-channel-embeddings.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [KempSleep Baselines and Finetuning: CWT-CNN with Dynamic Channel Embeddings](../experiments/022-kemp-baselines-finetune-cwt-dynch.md)
 
 ## Background
 
@@ -149,8 +149,8 @@ uv run python scripts/extract_embeddings.py \
     model/tokenizer=per_channel_cwt_cnn \
     model.channel_emb_mode=disabled \
     model/session_emb=disabled \
-    'run.pretrained_checkpoint=<exp021_disabled_checkpoint>' \
-    run.pretrained_transfer_mode=permissive \
+    '++run.pretrained_checkpoint=/network/scratch/s/sobralm/runs/PRETRAIN_CWT_DYNAMIC_CHANNEL_EMB/pretrain_cwt_dynch_ch-disabled/checkpoints/last.ckpt' \
+    ++run.pretrained_transfer_mode=permissive \
     extract.output_dir=outputs/embeddings/021_disabled \
     extract.max_batches=200
 
@@ -160,10 +160,10 @@ uv run python scripts/extract_embeddings.py \
     model/tokenizer=per_channel_cwt_cnn \
     model.channel_emb_mode=dynamic \
     model/session_emb=disabled \
-    'run.pretrained_checkpoint=<exp021_dynamic_checkpoint>' \
-    run.pretrained_transfer_mode=permissive \
+    '++run.pretrained_checkpoint=/network/scratch/s/sobralm/runs/PRETRAIN_CWT_DYNAMIC_CHANNEL_EMB/pretrain_cwt_dynch_ch-dynamic/checkpoints/last.ckpt' \
+    ++run.pretrained_transfer_mode=permissive \
     extract.output_dir=outputs/embeddings/021_dynamic \
-    extract.extract_channel_emb=true \
+    +extract.extract_channel_emb=true \
     extract.max_batches=200
 
 # Visualization:
