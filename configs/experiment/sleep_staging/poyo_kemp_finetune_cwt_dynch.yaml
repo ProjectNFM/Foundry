@@ -1,16 +1,16 @@
 # @package _global_
 #
-# Experiment 022: KempSleep baselines (scratch) and finetuning from exp 021
-# pretrained CWT-CNN models with dynamic/disabled channel embeddings.
+# Experiment 022: KempSleep baselines (scratch) and finetuning from pretrained
+# models with dynamic/disabled channel embeddings × CWT-CNN/ResampleCNN.
 # Session embeddings disabled for all conditions.
 #
-# 4 conditions: 2 channel_emb_mode × {scratch, finetuned}
+# 8 conditions: 2 tokenizers × 2 channel_emb_mode × {scratch, finetuned}
 #
-# Scratch baselines (2 jobs: ch-disabled, ch-dynamic):
+# Scratch baselines (4 jobs):
 #   uv run python main.py experiment=sleep_staging/poyo_kemp_finetune_cwt_dynch \
 #       run.init_mode=scratch run.pretrained_checkpoint=null -m
 #
-# Finetuning from exp 021 pretrained checkpoints (2 jobs):
+# Finetuning from pretrained checkpoints (4 jobs):
 #   uv run python main.py experiment=sleep_staging/poyo_kemp_finetune_cwt_dynch \
 #       run.init_mode=finetuned -m
 
@@ -24,9 +24,15 @@ defaults:
 task_configs:
   - sleep_stage_5class
 
+# Checkpoint map: tokenizer → channel_emb_mode → checkpoint path
+# CWT-CNN checkpoints from exp 021; ResampleCNN checkpoints from exp 018
 pretrained_checkpoints:
-  disabled: /network/scratch/s/sobralm/runs/PRETRAIN_CWT_DYNAMIC_CHANNEL_EMB/pretrain_cwt_dynch_ch-disabled/checkpoints/last.ckpt
-  dynamic: /network/scratch/s/sobralm/runs/PRETRAIN_CWT_DYNAMIC_CHANNEL_EMB/pretrain_cwt_dynch_ch-dynamic/checkpoints/last.ckpt
+  per_channel_cwt_cnn:
+    disabled: /network/scratch/s/sobralm/runs/PRETRAIN_CWT_DYNAMIC_CHANNEL_EMB/pretrain_cwt_dynch_ch-disabled/checkpoints/last.ckpt
+    dynamic: /network/scratch/s/sobralm/runs/PRETRAIN_CWT_DYNAMIC_CHANNEL_EMB/pretrain_cwt_dynch_ch-dynamic/checkpoints/last.ckpt
+  per_channel_resample_cnn:
+    disabled: /network/scratch/s/sobralm/runs/PRETRAIN_DYNAMIC_CHANNEL_EMB/pretrain_dynch_ch-disabled/checkpoints/last.ckpt
+    dynamic: /network/scratch/s/sobralm/runs/PRETRAIN_DYNAMIC_CHANNEL_EMB/pretrain_dynch_ch-dynamic/checkpoints/last.ckpt
 
 model:
   zero_output_timestamps: true
@@ -39,16 +45,16 @@ data:
   task_type: sleep_stage
 
 stage:
-  skip: false
+  skip: true
 
 run:
-  name: kemp_022_${run.init_mode}_ch_${model.channel_emb_mode}
+  name: kemp_022_${run.init_mode}_${hydra:runtime.choices.model/tokenizer}_ch_${model.channel_emb_mode}
   group: KEMP_FINETUNE_CWT_DYNCH
-  tags: [sleep_staging, poyo, kemp, cwt_cnn, dynamic_channel_emb, exp022]
+  tags: [sleep_staging, poyo, kemp, dynamic_channel_emb, exp022]
   log_level: INFO
   project: foundry_finetuning
   compile: default
-  pretrained_checkpoint: ${pretrained_checkpoints.${model.channel_emb_mode}}
+  pretrained_checkpoint: ${pretrained_checkpoints.${hydra:runtime.choices.model/tokenizer}.${model.channel_emb_mode}}
   pretrained_transfer_mode: permissive
   freeze_pretrained: false
   init_mode: finetuned
@@ -86,6 +92,7 @@ trainer:
 hydra:
   sweeper:
     params:
+      model/tokenizer: per_channel_cwt_cnn, per_channel_resample_cnn
       model.channel_emb_mode: disabled, dynamic
   launcher:
     tasks_per_node: 1
