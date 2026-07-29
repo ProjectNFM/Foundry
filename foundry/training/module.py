@@ -31,6 +31,18 @@ class FoundryModule(L.LightningModule):
     entries on ``model.task_configs``. Sequence-weighted multitask loss aggregation,
     CWT LR param groups, and WandB metric summaries match the previous
     Classification/Regression module behavior.
+
+    Args:
+        learning_rate (float): Base learning rate for the optimizer.
+        weight_decay (float): Weight decay (L2 penalty) used in the optimizer.
+        cwt_lr_multiplier (float): Multiplier to apply to learning rate for CWT parameter groups.
+        warmup (int): Number of steps for the learning rate warmup phase.
+        start_lr_factor (float): Starting learning rate as a fraction of `learning_rate` during warmup.
+        hold (int): Number of steps to hold the learning rate after warmup.
+        hold_scheduler_type (str): Type of scheduler to use during the hold phase, e.g. "constant" or "cosine".
+        decay (int): Number of steps for cosine learning rate decay after the hold phase.
+        end_lr_factor (float): Fraction of `learning_rate` for the final learning rate at the end of decay.
+        scheduler_interval (str): Scheduler update interval (e.g. "step" or "epoch").
     """
 
     def __init__(
@@ -40,7 +52,13 @@ class FoundryModule(L.LightningModule):
         weight_decay: float = 0.01,
         cwt_lr_multiplier: float = 1.0,
         backbone_learning_rate: float | None = None,
-        warmup_epochs: int = 0,
+        warmup: int = 0,
+        start_lr_factor: float = 1e-4,
+        hold: int = 0,
+        hold_scheduler_type: str = "constant",
+        decay: int = 0,
+        end_lr_factor: float = 0.1,
+        scheduler_interval: str = "step",
     ):
         super().__init__()
         self.model = model
@@ -48,7 +66,13 @@ class FoundryModule(L.LightningModule):
         self.weight_decay = weight_decay
         self.cwt_lr_multiplier = cwt_lr_multiplier
         self.backbone_learning_rate = backbone_learning_rate
-        self.warmup_epochs = warmup_epochs
+        self.warmup = warmup
+        self.hold = hold
+        self.hold_scheduler_type = hold_scheduler_type
+        self.decay = decay
+        self.end_lr_factor = end_lr_factor
+        self.start_lr_factor = start_lr_factor
+        self.scheduler_interval = scheduler_interval
         self.save_hyperparameters(ignore=["model"])
 
         self._task_losses = nn.ModuleDict()
@@ -150,17 +174,6 @@ class FoundryModule(L.LightningModule):
         self.log(
             f"{stage}/loss", total_loss, prog_bar=True, batch_size=batch_size
         )
-
-        if stage == "train" and getattr(self, "_trainer", None) is not None:
-            opt = self.optimizers()
-            if opt is not None:
-                current_lr = opt.param_groups[0]["lr"]
-                self.log(
-                    "train/lr",
-                    current_lr,
-                    prog_bar=False,
-                    batch_size=batch_size,
-                )
 
         metrics = self.train_metrics if stage == "train" else self.val_metrics
 
@@ -327,31 +340,76 @@ class FoundryModule(L.LightningModule):
         param_groups = self._build_param_groups()
         optimizer = torch.optim.AdamW(param_groups)
 
-        max_epochs = self.trainer.max_epochs if self.trainer else 100
-        cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=max(1, max_epochs - self.warmup_epochs)
-        )
+        schedulers = []
+        milestones = []
+        current_step = 0
 
-        if self.warmup_epochs > 0:
+        # Warmup phase
+        if self.warmup > 0:
             warmup = torch.optim.lr_scheduler.LinearLR(
                 optimizer,
-                start_factor=1e-4,
+                start_factor=self.start_lr_factor,
                 end_factor=1.0,
-                total_iters=self.warmup_epochs,
+                total_iters=self.warmup,
             )
-            scheduler = torch.optim.lr_scheduler.SequentialLR(
+            schedulers.append(warmup)
+            current_step += self.warmup
+            milestones.append(current_step)
+
+        # Hold phase
+        if self.hold > 0:
+            if self.hold_scheduler_type == "constant":
+                hold = torch.optim.lr_scheduler.ConstantLR(
+                    optimizer,
+                    factor=1.0,
+                    total_iters=self.hold,
+                )
+            elif self.hold_scheduler_type == "cosine":
+                hold = torch.optim.lr_scheduler.CosineAnnealingLR(
+                    optimizer,
+                    T_max=self.hold
+                    / 10,  # 10 is the default cosine annealing period
+                    eta_min=self.end_lr_factor * self.learning_rate,
+                )
+            else:
+                raise ValueError(
+                    f"Unknown hold_scheduler_type: {self.hold_scheduler_type}. "
+                    f"Must be 'constant' or 'cosine'."
+                )
+            schedulers.append(hold)
+            current_step += self.hold
+            if self.decay > 0:  # Only add milestone if there's a next phase
+                milestones.append(current_step)
+
+        # Decay phase
+        if self.decay > 0:
+            decay = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
-                schedulers=[warmup, cosine],
-                milestones=[self.warmup_epochs],
+                T_max=self.decay,
+                eta_min=self.end_lr_factor * self.learning_rate,
             )
+
+            schedulers.append(decay)
+
+        # If no schedulers are active, use a default constant scheduler
+        if not schedulers:
+            scheduler = torch.optim.lr_scheduler.ConstantLR(
+                optimizer, factor=1.0
+            )
+        elif len(schedulers) == 1:
+            # Single scheduler, no need for SequentialLR
+            scheduler = schedulers[0]
         else:
-            scheduler = cosine
+            # Multiple schedulers, use SequentialLR
+            scheduler = torch.optim.lr_scheduler.SequentialLR(
+                optimizer, schedulers=schedulers, milestones=milestones
+            )
 
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "interval": "epoch",
+                "interval": self.scheduler_interval,
                 "frequency": 1,
             },
         }

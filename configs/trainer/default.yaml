@@ -9,7 +9,7 @@ gradient_clip_val: 1.0
 accelerator: auto
 devices: auto
 default_root_dir: .
-log_every_n_steps: 10
+log_every_n_steps: 1
 enable_progress_bar: true
 enable_model_summary: false
 num_sanity_val_steps: 2
@@ -54,3 +54,6 @@ callbacks:
     param_patterns: ["*cwt*"]
     log_every_n_steps: 10
     log_gradients: true
+  learning_rate_monitor:
+      _target_: lightning.pytorch.callbacks.LearningRateMonitor
+      logging_interval: step
