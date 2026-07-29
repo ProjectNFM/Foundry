@@ -93,6 +93,7 @@ def instantiation_context() -> DictConfig:
                 "end_lr_factor": 0.1,
                 "scheduler_interval": "step",
                 "cwt_lr_multiplier": 1.0,
+                "backbone_learning_rate": None,
                 "num_channels": 32,
                 "session_configs": {"sessionA": 16, "sessionB": 20},
             },

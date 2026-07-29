@@ -1,6 +1,8 @@
 import hashlib
 import logging
 import os
+import sys
+import traceback
 from pathlib import Path
 
 import hydra
@@ -112,7 +114,25 @@ def _log_output_destinations(
     logger.info("Output destinations:\n%s", "\n".join(lines))
 
 
-def _finish_active_wandb_run() -> None:
+def _clear_torchinductor_cache() -> None:
+    """Remove stale TorchInductor/Triton kernel caches.
+
+    Cached kernels compiled by a different PyTorch version can cause
+    ImportErrors (e.g. missing ``triton_helpers``) when ``torch.compile``
+    tries to reload them.  Clearing the cache forces a clean recompilation.
+    """
+    import shutil
+
+    cache_dir = os.path.join(
+        os.environ.get("TORCHINDUCTOR_CACHE_DIR", "/tmp"),
+        f"torchinductor_{os.environ.get('USER', 'unknown')}",
+    )
+    if os.path.isdir(cache_dir):
+        logger.info("Clearing stale TorchInductor cache at %s", cache_dir)
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+
+def _finish_active_wandb_run(exit_code: int = 0) -> None:
     try:
         import wandb
     except ImportError:
@@ -126,7 +146,7 @@ def _finish_active_wandb_run() -> None:
         wandb.run.id,
         wandb.run.name,
     )
-    wandb.finish()
+    wandb.finish(exit_code=exit_code)
 
 
 def _stage_data_if_needed(cfg: DictConfig) -> None:
@@ -453,6 +473,7 @@ def main(cfg: DictConfig):
 
     compile_mode = OmegaConf.select(cfg, "run.compile", default=False)
     if compile_mode and torch.cuda.is_available():
+        _clear_torchinductor_cache()
         logger.info("Compiling model with torch.compile(mode=%r)", compile_mode)
         model = torch.compile(model, mode=str(compile_mode))
 
@@ -467,6 +488,7 @@ def main(cfg: DictConfig):
 
     _validate_checkpoint_policy(ckpt_path, pretrained_ckpt)
 
+    train_failed = False
     try:
         trainer.fit(
             lightning_module,
@@ -474,9 +496,13 @@ def main(cfg: DictConfig):
             ckpt_path=ckpt_path,
             weights_only=False,
         )
+    except BaseException:
+        train_failed = True
+        traceback.print_exc(file=sys.stderr)
+        raise
     finally:
         if using_wandb_logger:
-            _finish_active_wandb_run()
+            _finish_active_wandb_run(exit_code=1 if train_failed else 0)
 
 
 if __name__ == "__main__":

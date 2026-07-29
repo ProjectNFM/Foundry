@@ -1,0 +1,115 @@
+# @package _global_
+#
+# Experiment 010: Discriminative (layerwise) LR finetuning.
+#
+# Splits optimizer param groups into pretrained backbone components
+# (tokenizer, backbone, rotary_emb, latent_emb) vs task-specific head
+# (channel_emb, session_emb, task_emb, readout heads).
+#
+# Phase 1 — Discriminative LR grid (fold 0, 6 runs):
+#   uv run python main.py experiment=sleep_staging/poyo_kemp_discriminative_lr -m
+#
+# Phase 1 controls (fold 0, 2 runs):
+#   # Frozen backbone (linear-probe-style, head only):
+#   uv run python main.py experiment=sleep_staging/poyo_kemp_discriminative_lr \
+#       run.freeze_pretrained=true hyperparameters.learning_rate=1e-3 \
+#       hyperparameters.backbone_learning_rate=null \
+#       'run.name=kemp_discriminative_lr_frozen_head' \
+#       run.group=KEMP_DISCRIMINATIVE_LR_CONTROLS \
+#       'run.tags=[sleep_staging,poyo,kemp,finetuning,discriminative_lr,control,exp010]'
+#
+#   # From-scratch uniform LR baseline:
+#   uv run python main.py experiment=sleep_staging/poyo_kemp_discriminative_lr \
+#       run.pretrained_checkpoint=null hyperparameters.backbone_learning_rate=null \
+#       hyperparameters.learning_rate=1e-4 \
+#       'run.name=kemp_discriminative_lr_scratch_uniform' \
+#       run.group=KEMP_DISCRIMINATIVE_LR_CONTROLS \
+#       'run.tags=[sleep_staging,poyo,kemp,scratch,discriminative_lr,control,exp010]'
+#
+# Phase 2 — 3-fold validation (fill in best backbone_lr and head_lr from Phase 1):
+#   uv run python main.py experiment=sleep_staging/poyo_kemp_discriminative_lr \
+#       hyperparameters.backbone_learning_rate=<best_bb_lr> \
+#       hyperparameters.learning_rate=<best_head_lr> \
+#       run.group=KEMP_DISCRIMINATIVE_LR_VALIDATION \
+#       'run.name=kemp_discriminative_lr_val_fold${hyperparameters.fold_number}' \
+#       'run.tags=[sleep_staging,poyo,kemp,finetuning,discriminative_lr,validation,exp010]' \
+#       'hyperparameters.fold_number=0,1,2' -m
+
+defaults:
+  - override /model: poyo_eeg
+  - override /model/tokenizer: per_channel_cwt_cnn
+  - override /data: kemp_sleep_edf/allsess
+  - override /hydra/launcher: slurm_default
+
+task_configs:
+  - sleep_stage_5class
+
+pretrained_checkpoints:
+  per_channel_cwt_cnn: ${oc.env:HOME}/Foundry/runs/runs/PRETRAIN_TOKENIZER_SWEEP/pretrain_tokenizer_per_channel_cwt_cnn/checkpoints/best-epoch003-val_loss_0.0364.ckpt
+
+model:
+  zero_output_timestamps: true
+  normalize_inputs: true
+
+data:
+  split_type: intersubject
+  task_type: sleep_stage
+
+run:
+  name: kemp_discriminative_lr_bb${hyperparameters.backbone_learning_rate}_hd${hyperparameters.learning_rate}
+  group: KEMP_DISCRIMINATIVE_LR_SEARCH
+  tags: [sleep_staging, poyo, kemp, finetuning, discriminative_lr, exp010]
+  log_level: INFO
+  project: foundry_finetuning
+  compile: default
+  pretrained_checkpoint: ${pretrained_checkpoints.per_channel_cwt_cnn}
+  freeze_pretrained: false
+
+class_weights:
+  mode: auto
+  smoothing: 1.0
+
+hyperparameters:
+  batch_size: 512
+  sequence_length: 2.0
+  patch_duration: null
+  sampling_rate: null
+  fold_number: 0
+  num_workers: 6
+  num_channels: null
+  session_configs: null
+  learning_rate: 1e-4
+  backbone_learning_rate: 1e-5
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 1000
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/sleep_stage_5class_f1
+      mode: max
+      patience: 50
+    model_checkpoint:
+      monitor: val/sleep_stage_5class_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/sleep_stage_5class_f1:.4f}"
+
+hydra:
+  sweeper:
+    params:
+      hyperparameters.backbone_learning_rate: 1e-6, 1e-5, 3e-5
+      hyperparameters.learning_rate: 1e-4, 1e-3
+  launcher:
+    tasks_per_node: 1
+    cpus_per_task: 6
+    mem_gb: 32
+    gres: gpu:l40s:1
+    timeout_min: 360
+    setup:
+      - "set -a"
+      - "source .env"
+      - "set +a"
+      - "export RANK=0"
+      - "uv run python -m foundry.tools.stage_data --experiment sleep_staging/poyo_kemp_discriminative_lr"

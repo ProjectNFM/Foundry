@@ -86,11 +86,19 @@ def fetch_metric_history(
     x_axis: str = "_step",
     samples: int = 10_000,
     api: Any | None = None,
+    aggregate_epoch: bool = False,
 ) -> pd.DataFrame:
     """Fetch metric history for a single run.
 
     Returns a ``DataFrame`` with *x_axis* and each requested metric as
     columns, rows with NaN metric values already dropped.
+
+    When *x_axis* is ``"epoch"`` and multiple metrics are requested,
+    each metric is fetched separately (W&B returns empty history when
+    ``train/loss`` and ``val/loss`` are requested together) and merged
+    on epoch.  Set *aggregate_epoch* to take the last value per epoch
+    before merging — useful for step-level train loss vs epoch-level
+    val loss.
 
     Raises ``MetricNotFoundError`` if any requested metric column is
     absent from the returned history.
@@ -99,6 +107,33 @@ def fetch_metric_history(
         metrics = [metrics]
 
     run = get_run(run_id, project, entity, api=api)
+
+    if x_axis == "epoch" and len(metrics) > 1:
+        frames: list[pd.DataFrame] = []
+        for metric in metrics:
+            history = run.history(
+                keys=[x_axis, metric], samples=samples, pandas=True
+            )
+            if metric not in history.columns:
+                raise MetricNotFoundError(
+                    f"Metric '{metric}' not found in run '{run_id}'. "
+                    f"Available columns: {sorted(history.columns.tolist())}"
+                )
+            history = history[[x_axis, metric]].dropna(subset=[metric])
+            if aggregate_epoch:
+                history = (
+                    history.groupby(x_axis, as_index=False)[metric]
+                    .last()
+                    .sort_values(x_axis)
+                )
+            frames.append(history)
+
+        merged = frames[0]
+        for frame in frames[1:]:
+            merged = merged.merge(frame, on=x_axis, how="outer")
+        merged = merged.sort_values(x_axis).reset_index(drop=True)
+        return merged.dropna(subset=metrics, how="all")
+
     keys = list(dict.fromkeys([x_axis] + metrics))
     history = run.history(keys=keys, samples=samples, pandas=True)
 
@@ -113,6 +148,13 @@ def fetch_metric_history(
     history = history[present_keys].dropna(
         subset=[m for m in metrics if m in history.columns]
     )
+    if aggregate_epoch and x_axis in history.columns:
+        history = (
+            history.groupby(x_axis, as_index=False)[metrics]
+            .last()
+            .sort_values(x_axis)
+            .reset_index(drop=True)
+        )
     return history.reset_index(drop=True)
 
 

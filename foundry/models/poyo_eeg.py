@@ -95,6 +95,7 @@ class POYOEEGModel(nn.Module):
         zero_output_timestamps: bool = False,
         normalize_inputs: bool = False,
         rotate_value: bool = True,
+        disable_session_emb: bool = False,
     ):
         super().__init__()
 
@@ -105,6 +106,7 @@ class POYOEEGModel(nn.Module):
         self.num_latents_per_step = num_latents_per_step
         self.zero_output_timestamps = zero_output_timestamps
         self.normalize_inputs = normalize_inputs
+        self.disable_session_emb = disable_session_emb
         self._task_configs = TaskConfig.normalize_task_configs(task_configs)
         self._latent_index, self._latent_timestamps = (
             create_linspace_latent_tokens(
@@ -174,8 +176,17 @@ class POYOEEGModel(nn.Module):
             input_channel_counts=input_channel_counts,
             channel_emb_fn=self.channel_emb,
         )
-        session_emb = self.session_emb(input_session_index).unsqueeze(1)
-        inputs = inputs + session_emb
+        if self.disable_session_emb:
+            session_emb = torch.zeros(
+                inputs.shape[0],
+                1,
+                self.embed_dim,
+                device=inputs.device,
+                dtype=inputs.dtype,
+            )
+        else:
+            session_emb = self.session_emb(input_session_index).unsqueeze(1)
+            inputs = inputs + session_emb
         return inputs, session_emb
 
     # ------------------------------------------------------------------
@@ -214,9 +225,12 @@ class POYOEEGModel(nn.Module):
             the corresponding rotary pairs.
         """
         task_ids = (task_index - 1).clamp(min=0)
-        queries = self.session_emb(output_session_index) + self.task_emb(
-            task_ids
-        )
+        if self.disable_session_emb:
+            queries = self.task_emb(task_ids)
+        else:
+            queries = self.session_emb(output_session_index) + self.task_emb(
+                task_ids
+            )
         ts_emb = self.rotary_emb(output_timestamps)
         return queries, ts_emb
 
