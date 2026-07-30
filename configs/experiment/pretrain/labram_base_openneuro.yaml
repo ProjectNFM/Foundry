@@ -1,0 +1,35 @@
+# @package _global_
+
+defaults:
+  - override /model: labram_base_pretrain
+  - override /data: openneuro/default
+  - override /module: labram_pretraining
+
+run:
+  name: labram_base_openneuro
+  group: PRETRAIN_LABRAM_BASE
+  tags: [labram_base, openneuro, stage2]
+  log_level: INFO
+
+hyperparameters:
+  batch_size: 32
+  sequence_length: 8.0
+  sampling_rate: 200
+  num_workers: 8
+  learning_rate: 5e-4
+  weight_decay: 1e-4
+
+trainer:
+  max_epochs: 50
+  precision: bf16-mixed
+  devices: 1
+  callbacks:
+    early_stopping:
+      monitor: val/loss
+      mode: min
+      patience: 10
+    model_checkpoint:
+      monitor: val/loss
+      mode: min
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_loss_{val/loss:.4f}"

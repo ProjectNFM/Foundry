@@ -1,0 +1,9 @@
+_target_: foundry.models.LaBraMForMaskedEEGModeling
+
+num_channels: ${hyperparameters.num_channels}
+num_samples: ${hyperparameters.num_samples}
+embed_dim: 200
+num_layers: 12
+num_heads: 10
+vocab_size: 8192
+drop_path_prob: 0.0

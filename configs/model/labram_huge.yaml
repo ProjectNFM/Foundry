@@ -1,0 +1,19 @@
+_target_: foundry.models.LaBraMEEGModel
+
+# LaBraM-Huge: pretrained on ~2500h EEG at 200 Hz, 128 standard 10-20 channels
+# Paper: Jiang et al., Large Brain Model for Learning Generic Representations with Tremendous EEG Data in BCI, ICLR 2024
+
+num_channels: ${hyperparameters.num_channels}
+num_samples: ${hyperparameters.num_samples}
+
+# Architecture
+patch_size: 200          # 1 second at 200 Hz
+embed_dim: 800
+num_layers: 48
+num_heads: 16
+conv_out_channels: 32
+drop_path_prob: 0.0
+
+# Pretrained weights
+pretrained: false
+pretrained_path: null

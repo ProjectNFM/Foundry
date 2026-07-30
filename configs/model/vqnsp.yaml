@@ -1,0 +1,8 @@
+_target_: foundry.models.VQNSPModel
+
+num_channels: ${hyperparameters.num_channels}
+num_samples: ${hyperparameters.num_samples}
+codebook_size: 8192
+codebook_dim: 32
+out_chans: 8
+pretrained_path: null
