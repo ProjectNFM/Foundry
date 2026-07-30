@@ -1,6 +1,6 @@
 # CWT CNN with Dynamic Channel Embeddings: Pretraining, Linear Probing, and Embedding Analysis
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-07-28
 **Parent experiment:** [Dynamic Channel Embeddings via Relative Inter-Channel Attention](../experiments/018-dynamic-channel-embeddings.md)
 **Follow-up experiments:** [KempSleep Baselines and Finetuning: CWT-CNN with Dynamic Channel Embeddings](../experiments/022-kemp-baselines-finetune-cwt-dynch.md)
@@ -170,36 +170,214 @@ uv run python scripts/extract_embeddings.py \
 uv run python analysis/021_cwt_dynamic_channel_emb_viz.py
 ```
 
+### WandB
+
+**Pretraining (Phase 1):**
+
+- **Project:** `foundry_pretraining`
+- **Group:** `PRETRAIN_CWT_DYNAMIC_CHANNEL_EMB`
+
+| Condition    | Run name                            | Run ID     |
+| ------------ | ----------------------------------- | ---------- |
+| ch-disabled  | `pretrain_cwt_dynch_ch-disabled`    | `v6yoko4h` |
+| ch-dynamic   | `pretrain_cwt_dynch_ch-dynamic`     | `i069k3tx` |
+
+**Linear Probe (Phase 2):**
+
+- **Project:** `foundry_finetuning`
+- **Group:** `KEMP_LINEAR_PROBE_DYNCH`
+
+| Condition              | Run name                             | Run ID     |
+| ---------------------- | ------------------------------------ | ---------- |
+| pretrained-ch-disabled | `kemp_lp_021_pretrained_ch_disabled` | `dzkfguc3` |
+| pretrained-ch-dynamic  | `kemp_lp_021_pretrained_ch_dynamic`  | `l3eafwx5` |
+| random-ch-disabled     | `kemp_lp_021_random_ch_disabled`     | `3pnhsc9j` |
+| random-ch-dynamic      | `kemp_lp_021_random_ch_dynamic`      | `fpso1m3b` |
+
+Note: several runs show `state=failed` (SLURM timeout) but completed
+enough epochs to reach early-stopping-quality results and are usable.
+
 ## Results
 
 ### Summary
 
-TBD
+**Phase 1 (Pretraining):** CWT-CNN dynamic achieves a 90.7% relative
+reduction in reconstruction loss over disabled (0.033 vs 0.354), an even
+larger improvement than the 71.9% seen with ResampleCNN in exp 018
+(0.112 vs 0.399). Both CWT-CNN conditions also outperform their
+ResampleCNN counterparts in absolute reconstruction loss.
+
+**Phase 2 (Linear Probe):** The CWT-CNN results reveal a **surprising
+reversal**: pretrained-disabled (F1=0.512) beats pretrained-dynamic
+(F1=0.481) by +3.1 pp — the opposite of the ResampleCNN result where
+dynamic won by +7.3 pp. The CWT-CNN pretrained-disabled model is the
+best linear probe model across both tokenizers, outperforming
+RCNN-pretrained-disabled (0.399) by +11.3 pp and even
+RCNN-pretrained-dynamic (0.472) by +4.0 pp. In the random-init
+condition, dynamic still helps (+3.2 pp), consistent with RCNN.
+
+**Phase 3 (Embedding Analysis):** CWT-CNN dynamic channel embeddings
+show similar structural patterns to ResampleCNN (exp 019): channels do
+not cluster by electrode type, and there is band-like sleep stage
+organization. However, the backbone silhouette score for dynamic
+(-0.007) is lower than disabled (0.045), consistent with the linear
+probe finding that the disabled backbone is more discriminative.
 
 ### Metrics
 
-TBD
+**Phase 1 — Pretraining loss:**
+
+| Condition     | Best Val Loss | Train@BV | Gap     | BV Epoch | Max Epoch | Run ID     |
+| ------------- | ------------: | -------: | ------: | -------: | --------: | ---------- |
+| CWT-disabled  |        0.3544 |   0.3517 | +0.0027 |       59 |        69 | `v6yoko4h` |
+| CWT-dynamic   |        0.0330 |   0.0362 | -0.0032 |      158 |       168 | `i069k3tx` |
+| RCNN-disabled |        0.3988 |   0.4100 | -0.0112 |       42 |        44 | `zmxyua36` |
+| RCNN-dynamic  |        0.1119 |   0.1391 | -0.0272 |       42 |        44 | `hggeonah` |
+
+**Dynamic improvement by tokenizer:**
+
+| Tokenizer | Disabled | Dynamic | Relative change |
+| --------- | -------: | ------: | --------------: |
+| CWT-CNN   |   0.3544 |  0.0330 |          -90.7% |
+| RCNN      |   0.3988 |  0.1119 |          -71.9% |
+
+**Phase 2 — Linear probe:**
+
+| Condition              | Val F1 | Val Acc | Val Loss | BF1 Ep | Max Ep | Run ID     |
+| ---------------------- | -----: | ------: | -------: | -----: | -----: | ---------- |
+| CWT-pretrained-disabled  | 0.5121 | 0.6670 |   1.1161 |      9 |     17 | `dzkfguc3` |
+| CWT-pretrained-dynamic   | 0.4809 | 0.6429 |   1.2206 |     12 |     22 | `l3eafwx5` |
+| CWT-random-disabled      | 0.4147 | 0.5262 |   1.3044 |     15 |     17 | `3pnhsc9j` |
+| CWT-random-dynamic       | 0.4465 | 0.6881 |   1.3955 |      4 |     14 | `fpso1m3b` |
+| RCNN-pretrained-disabled | 0.3994 | 0.6319 |   1.5246 |      4 |     14 | `zmg07ep4` |
+| RCNN-pretrained-dynamic  | 0.4724 | 0.6782 |   1.2356 |      7 |     17 | `osqqcdrj` |
+| RCNN-random-disabled     | 0.3691 | 0.5550 |   1.4031 |      0 |     10 | `t54gr0yj` |
+| RCNN-random-dynamic      | 0.4100 | 0.5829 |   1.3971 |     13 |     17 | `ip8xktxl` |
+
+**Pairwise F1 comparisons:**
+
+| Comparison                                    | ΔF1 (pp) |
+| --------------------------------------------- | -------: |
+| CWT disabled vs dynamic (pretrained)          |    +3.1  |
+| CWT disabled vs dynamic (random)              |    -3.2  |
+| RCNN disabled vs dynamic (pretrained)         |    -7.3  |
+| RCNN disabled vs dynamic (random)             |    -4.1  |
+| CWT vs RCNN pretrained disabled               |   +11.3  |
+| CWT vs RCNN pretrained dynamic                |    +0.8  |
+| CWT vs RCNN random disabled                   |    +4.6  |
+| CWT vs RCNN random dynamic                    |    +3.7  |
+
+**Phase 3 — Embedding analysis:**
+
+| Condition   | Silhouette (by stage) | n samples |
+| ----------- | --------------------: | --------: |
+| ch-disabled |               0.0449  |   102,400 |
+| ch-dynamic  |              -0.0069  |   102,400 |
+
+Channel embeddings: 204,800 vectors, dim=64, channels={EEG Fpz-Cz, EEG Pz-Oz}.
 
 ### Analysis
 
-TBD
+**Analysis scripts:**
+
+- `analysis/021_cwt_dynamic_channel_emb.py` — pretraining and linear probe
+- `analysis/021_cwt_dynamic_channel_emb_viz.py` — embedding visualization
+
+```bash
+uv run python analysis/021_cwt_dynamic_channel_emb.py
+uv run python analysis/021_cwt_dynamic_channel_emb_viz.py
+```
 
 ### Figures
 
-TBD
+**Pretraining validation loss — CWT-CNN vs ResampleCNN:**
+
+![Pretrain val overlay](../analysis/figures/021_pretrain_val_overlay.png)
+
+**Pretraining bar comparison (best val loss + train-val gap):**
+
+![Pretrain bar](../analysis/figures/021_pretrain_bar_comparison.png)
+
+**Linear probe F1 — CWT-CNN vs ResampleCNN (all 8 conditions):**
+
+![LP cross-tokenizer](../analysis/figures/021_lp_cross_tokenizer.png)
+
+**Linear probe F1 learning curves:**
+
+![LP F1 curves](../analysis/figures/021_lp_f1_curves.png)
+
+**Dynamic vs disabled F1 advantage (by tokenizer × init):**
+
+![LP dynamic advantage](../analysis/figures/021_lp_dynamic_advantage.png)
+
+**Pretraining advantage (pretrained vs random F1, by tokenizer × channel):**
+
+![LP pretrain advantage](../analysis/figures/021_lp_pretrain_advantage.png)
+
+**Backbone embeddings — disabled vs dynamic (by sleep stage):**
+
+![Backbone comparison](../analysis/figures/021_backbone_comparison.png)
+
+**Backbone embeddings — disabled vs dynamic (by session):**
+
+![Backbone by session](../analysis/figures/021_backbone_by_session.png)
+
+**Dynamic channel embeddings — combined view (channel, session, stage):**
+
+![Channel emb combined](../analysis/figures/021_channel_emb_combined.png)
 
 ## Conclusions
 
-TBD
+**Hypothesis 1 — PARTIALLY REFUTED.** The CWT-CNN dynamic channel embeddings
+show qualitatively similar structural patterns to ResampleCNN (channels do
+not cluster by electrode type, sleep stages show band-like organization).
+However, the quantitative behaviour is strikingly different: the CWT-CNN
+backbone silhouette score is negative for the dynamic condition (-0.007 vs
++0.045 for disabled), and the linear probe shows the pretrained-disabled
+model outperforming pretrained-dynamic — the exact opposite of the
+ResampleCNN result.
+
+**Hypothesis 2 — PARTIALLY SUPPORTED.** CWT-CNN strongly outperforms
+ResampleCNN for the disabled condition (+11.3 pp F1 in pretrained, +4.6 pp
+in random), consistent with exp 008. However, for the dynamic condition the
+CWT-CNN advantage is negligible (+0.8 pp pretrained, +3.7 pp random). The
+CWT-CNN pretrained-disabled model (F1=0.512) is the best overall, even
+beating RCNN-pretrained-dynamic (F1=0.472).
+
+**Hypothesis 3 — STRONGLY SUPPORTED (for reconstruction).** The dynamic
+channel embedding achieves a 90.7% relative reduction in reconstruction loss
+with CWT-CNN (0.033 vs 0.354), even larger than the 71.9% reduction with
+ResampleCNN. However, this massive reconstruction improvement does NOT
+translate into better linear probe performance — it actually hurts
+it (-3.1 pp F1).
+
+**Key insight:** The CWT-CNN tokenizer and the RelativeChannelEncoder are
+**partially redundant**. CWT-CNN's wavelet decomposition already captures
+frequency-domain channel characteristics, so the dynamic channel encoder's
+signal-statistics-based channel identity adds little downstream value and
+may even be detrimental. The dynamic encoder helps the decoder reconstruct
+signals better (by providing fine-grained channel identity), but this
+reconstruction benefit does not reflect what the backbone learns. In
+contrast, the ResampleCNN backbone relies on the dynamic encoder to learn
+channel-relevant features, so the reconstruction improvement translates
+directly into better backbone representations.
 
 ## Notes for future experiments
 
-- Compare reconstruction loss magnitude between CWT-CNN and ResampleCNN
-  for both disabled and dynamic conditions — the CWT-CNN disabled baseline
-  from exp 005 had much lower reconstruction loss (0.036 vs 0.119), so the
-  gap from dynamic may be different.
-- If CWT-CNN + dynamic shows strong linear probe results, combine with
-  full finetuning using gradual unfreezing (informed by exp 008 and 009
-  catastrophic forgetting findings).
-- Consider running a direct 4-way comparison: {CWT-CNN, ResampleCNN} ×
-  {disabled, dynamic} in a single linear probe experiment.
+- The CWT-CNN disabled pretrained model (F1=0.512) is the strongest
+  single linear probe result — consider using it as the backbone for
+  full finetuning on KempSleep and other downstream tasks.
+- The partial redundancy between CWT-CNN and dynamic channel embeddings
+  suggests investigating whether a simpler channel encoding (e.g., a
+  learned static embedding per channel type, not per session) could
+  complement CWT-CNN without the overhead of the RelativeChannelEncoder.
+- CWT-CNN's massive pretraining advantage for disabled (+11.3 pp over
+  RCNN) confirms that tokenizer choice is a larger factor than channel
+  embedding for this dataset and task.
+- The negative silhouette score for CWT-CNN dynamic suggests the dynamic
+  encoder may be pushing channel-specific information into the channel
+  embedding space rather than the backbone — investigate whether the
+  channel embeddings alone can predict sleep stage.
+- Consider whether the dynamic channel encoder's reconstruction benefit
+  (90.7% reduction) could be leveraged differently — e.g., using it only
+  during pretraining and discarding the channel encoder for downstream.

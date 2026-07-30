@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-07-28
 **Parent experiment:** [Dynamic Channel Embedding Analysis](../experiments/019-dynamic-channel-embedding-analysis.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [CWT CNN with Dynamic Channel Embeddings](../experiments/021-cwt-cnn-dynamic-channel-emb.md), [KempSleep Baselines and Finetuning](../experiments/022-kemp-baselines-finetune-cwt-dynch.md)
 
 ## Background
 

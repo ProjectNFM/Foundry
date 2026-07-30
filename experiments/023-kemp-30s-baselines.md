@@ -1,6 +1,6 @@
 # KempSleep 30s-Epoch From-Scratch Baselines
 
-**Status:** Draft
+**Status:** Completed
 **Date started:** 2026-07-29
 **Parent experiment:** [KempSleep Baselines and Finetuning: Dynamic Channel Embeddings × Tokenizer](../experiments/022-kemp-baselines-finetune-cwt-dynch.md)
 **Follow-up experiments:** TBD
@@ -135,19 +135,123 @@ uv run python main.py experiment=sleep_staging/eegnet_kemp_30s_baselines -m
 - `model/session_emb: disabled` for all POYO conditions
 - Hydra multirun sweeps `hyperparameters.fold_number` over 0, 1, 2
 
+### WandB
+
+- **Project:** `foundry_finetuning`
+- **Group:** `KEMP_30S_BASELINES`
+
+| Condition | Size | Fold | Run name | Run ID |
+| --------- | ---- | ---: | -------- | ------ |
+| EEGNet | 10% | 0 | `kemp_023_eegnet_smol_fold0` | `e1va37uj` |
+| EEGNet | 10% | 1 | `kemp_023_eegnet_smol_fold1` | `m0gecgmy` |
+| EEGNet | 10% | 2 | `kemp_023_eegnet_smol_fold2` | `m53rrd5l` |
+| POYO CWT disabled | 10% | 0 | `kemp_023_per_channel_cwt_cnn_ch-disabled_smol_fold0` | `jn0pjmtb` |
+| POYO CWT disabled | 10% | 1 | `kemp_023_per_channel_cwt_cnn_ch-disabled_smol_fold1` | `3fvmumdt` |
+| POYO CWT disabled | 10% | 2 | `kemp_023_per_channel_cwt_cnn_ch-disabled_smol_fold2` | `vwhc52ff` |
+| POYO CWT dynamic | 10% | 0 | `kemp_023_per_channel_cwt_cnn_ch-dynamic_smol_fold0` | `o6l4cv5d` |
+| POYO CWT dynamic | 10% | 1 | `kemp_023_per_channel_cwt_cnn_ch-dynamic_smol_fold1` | `xjhkx13o` |
+| POYO CWT dynamic | 10% | 2 | `kemp_023_per_channel_cwt_cnn_ch-dynamic_smol_fold2` | `hyhkgsic` |
+| POYO RCNN disabled | 10% | 0 | `kemp_023_per_channel_resample_cnn_ch-disabled_smol_fold0` | `l5yl7v99` |
+| POYO RCNN disabled | 10% | 1 | `kemp_023_per_channel_resample_cnn_ch-disabled_smol_fold1` | `j7939koc` |
+| POYO RCNN disabled | 10% | 2 | `kemp_023_per_channel_resample_cnn_ch-disabled_smol_fold2` | `cuhrejqv` |
+| POYO RCNN dynamic | 10% | 0 | `kemp_023_per_channel_resample_cnn_ch-dynamic_smol_fold0` | `egnt4itq` |
+| POYO RCNN dynamic | 10% | 1 | `kemp_023_per_channel_resample_cnn_ch-dynamic_smol_fold1` | `wx44epel` |
+| POYO RCNN dynamic | 10% | 2 | `kemp_023_per_channel_resample_cnn_ch-dynamic_smol_fold2` | `gevk12ti` |
+| EEGNet | 100% | 0 | `kemp_023_eegnet_fold0` | `9x4w789b` |
+| EEGNet | 100% | 1 | `kemp_023_eegnet_fold1` | `wxa14ec1` |
+| EEGNet | 100% | 2 | `kemp_023_eegnet_fold2` | `7un6237q` |
+| POYO CWT disabled | 100% | 0 | `kemp_023_per_channel_cwt_cnn_ch-disabled_fold0` | `9m98r3we` |
+| POYO CWT disabled | 100% | 1 | `kemp_023_per_channel_cwt_cnn_ch-disabled_fold1` | `bwjwtoq5` |
+| POYO CWT disabled | 100% | 2 | `kemp_023_per_channel_cwt_cnn_ch-disabled_fold2` | `aotuuq3s` |
+| POYO CWT dynamic | 100% | 0 | `kemp_023_per_channel_cwt_cnn_ch-dynamic_fold0` | `852zgx76` |
+| POYO CWT dynamic | 100% | 1 | `kemp_023_per_channel_cwt_cnn_ch-dynamic_fold1` | `th3g8zdv` |
+| POYO CWT dynamic | 100% | 2 | `kemp_023_per_channel_cwt_cnn_ch-dynamic_fold2` | `m4l9b5o4` |
+| POYO RCNN disabled | 100% | 0 | `kemp_023_per_channel_resample_cnn_ch-disabled_fold0` | `wzmcyafl` |
+| POYO RCNN disabled | 100% | 1 | `kemp_023_per_channel_resample_cnn_ch-disabled_fold1` | `tjz6nfp6` |
+| POYO RCNN disabled | 100% | 2 | `kemp_023_per_channel_resample_cnn_ch-disabled_fold2` | `bcr6otbd` |
+| POYO RCNN dynamic | 100% | 0 | `kemp_023_per_channel_resample_cnn_ch-dynamic_fold0` | `axnnllx6` |
+| POYO RCNN dynamic | 100% | 1 | `kemp_023_per_channel_resample_cnn_ch-dynamic_fold1` | `kxi0u259` |
+| POYO RCNN dynamic | 100% | 2 | `kemp_023_per_channel_resample_cnn_ch-dynamic_fold2` | `q0cz800r` |
+
+Note: POYO full-dataset runs and some small fold-2 runs show `state=failed`
+(SLURM timeout at 6–9 epochs), but all reached sufficient training to produce
+usable best-epoch results. EEGNet runs trained longer (26–114 epochs) and
+reached early stopping normally.
+
 ## Results
 
 ### Summary
 
-TBD
+Moving from 2s windows to 30s epochs produces a dramatic improvement of
+**+11.9 to +14.4 pp F1** across all POYO conditions — the single largest
+effect in the experiment series. The CWT-CNN tokenizer is the clear winner
+among POYO variants, outperforming ResampleCNN by +3.1 to +3.5 pp at the
+full dataset scale. Channel embedding mode (dynamic vs disabled) has
+minimal impact (+0.2 to +0.7 pp). EEGNet is competitive at full scale
+but shows the largest fold variance and the strongest data hunger.
+
+**Key results (100% train, 3-fold mean ± std):**
+
+| Condition | F1 | Acc |
+| --------- | --: | --: |
+| POYO CWT Dynamic | 0.730 ± 0.004 | 0.853 ± 0.008 |
+| POYO CWT Disabled | 0.728 ± 0.004 | 0.856 ± 0.009 |
+| POYO RCNN Dynamic | 0.699 ± 0.013 | 0.833 ± 0.007 |
+| POYO RCNN Disabled | 0.693 ± 0.012 | 0.839 ± 0.013 |
+| EEGNet | 0.692 ± 0.024 | 0.844 ± 0.013 |
 
 ### Metrics
 
-TBD
+**Full dataset (100% train) — per-fold breakdown:**
+
+| Condition | Fold 0 | Fold 1 | Fold 2 | Mean | Std |
+| --------- | -----: | -----: | -----: | ---: | --: |
+| POYO CWT Dynamic | 0.7338 | 0.7249 | 0.7315 | 0.730 | 0.004 |
+| POYO CWT Disabled | 0.7323 | 0.7298 | 0.7220 | 0.728 | 0.004 |
+| POYO RCNN Dynamic | 0.7145 | 0.7018 | 0.6818 | 0.699 | 0.013 |
+| POYO RCNN Disabled | 0.7011 | 0.7017 | 0.6753 | 0.693 | 0.012 |
+| EEGNet | 0.6590 | 0.7032 | 0.7128 | 0.692 | 0.024 |
+
+**Small dataset (10% train) — per-fold breakdown:**
+
+| Condition | Fold 0 | Fold 1 | Fold 2 | Mean | Std |
+| --------- | -----: | -----: | -----: | ---: | --: |
+| POYO CWT Disabled | 0.6971 | 0.6971 | 0.6704 | 0.688 | 0.013 |
+| POYO CWT Dynamic | 0.6927 | 0.6798 | 0.6828 | 0.685 | 0.006 |
+| POYO RCNN Dynamic | 0.6352 | 0.6581 | 0.6093 | 0.634 | 0.020 |
+| POYO RCNN Disabled | 0.6394 | 0.6568 | 0.5943 | 0.630 | 0.026 |
+| EEGNet | 0.5359 | 0.6042 | 0.6617 | 0.601 | 0.051 |
+
+**30s vs 2s comparison (fold 0, from scratch, full dataset):**
+
+| Condition | 2s (exp 022) | 30s (exp 023) | Δ (pp) |
+| --------- | -----------: | ------------: | -----: |
+| CWT-CNN Disabled | 0.589 | 0.732 | +14.3 |
+| CWT-CNN Dynamic | 0.590 | 0.734 | +14.4 |
+| RCNN Disabled | 0.582 | 0.701 | +11.9 |
+| RCNN Dynamic | 0.590 | 0.715 | +12.5 |
+
+**Data scaling (10% → 100% train, 3-fold mean):**
+
+| Condition | 10% F1 | 100% F1 | Δ (pp) | Relative |
+| --------- | -----: | ------: | -----: | -------: |
+| EEGNet | 0.601 | 0.692 | +9.1 | +15.2% |
+| RCNN Dynamic | 0.634 | 0.699 | +6.5 | +10.3% |
+| RCNN Disabled | 0.630 | 0.693 | +6.3 | +9.9% |
+| CWT Dynamic | 0.685 | 0.730 | +4.5 | +6.6% |
+| CWT Disabled | 0.688 | 0.728 | +4.0 | +5.8% |
+
+**Effect summary (full dataset, 3-fold means):**
+
+| Effect | Δ F1 (pp) |
+| ------ | --------: |
+| 30s vs 2s (POYO, fold 0) | +11.9 to +14.4 |
+| CWT-CNN vs RCNN (disabled) | +3.5 |
+| CWT-CNN vs RCNN (dynamic) | +3.1 |
+| Dynamic vs Disabled (CWT) | +0.2 |
+| Dynamic vs Disabled (RCNN) | +0.7 |
 
 ### Analysis
-
-TBD
 
 **Analysis script:** `analysis/023_kemp_30s_baselines.py`
 
@@ -157,24 +261,118 @@ uv run python analysis/023_kemp_30s_baselines.py
 
 ### Figures
 
-TBD
+**Main results — all conditions × dataset sizes (3-fold mean ± std):**
+
+![Main results](../analysis/figures/023_main_results.png)
+
+**30s vs 2s window length comparison (fold 0, from scratch):**
+
+![30s vs 2s](../analysis/figures/023_30s_vs_2s.png)
+
+**Data scaling — how each model benefits from 10× more training data:**
+
+![Data scaling](../analysis/figures/023_data_scaling.png)
+
+**Tokenizer × channel embedding interaction (full dataset):**
+
+![Tokenizer × channel emb](../analysis/figures/023_tokenizer_channel_emb.png)
+
+**Cross-fold variance — individual fold results:**
+
+![Fold variance](../analysis/figures/023_fold_variance.png)
+
+**Validation F1 learning curves (fold 0):**
+
+![F1 curves](../analysis/figures/023_f1_curves.png)
 
 ## Conclusions
 
-TBD
+### Hypothesis 1 — STRONGLY SUPPORTED: 30s epochs dramatically improve F1
+
+The switch from 2s windows (exp 022) to 30s epochs produces **+11.9 to
++14.4 pp F1** improvement across all POYO conditions at fold 0 — by far
+the single largest factor explored in this experiment series. This confirms
+that the ~0.59 F1 ceiling observed in exp 022 was primarily a window-length
+limitation, not a model capacity or training issue. The CWT-CNN models
+benefit more (+14.3–14.4 pp) than ResampleCNN (+11.9–12.5 pp), suggesting
+CWT-CNN's wavelet features extract more useful information from the
+longer temporal context.
+
+### Hypothesis 2 — PARTIALLY SUPPORTED: EEGNet is competitive at full scale
+
+EEGNet achieves 0.692 ± 0.024 F1 at full scale, matching RCNN-disabled
+(0.693 ± 0.012) but trailing CWT-CNN models (0.728–0.730) by ~3.5 pp.
+At 10% data, EEGNet is the weakest model (0.601 ± 0.051) with by far
+the largest fold variance. So EEGNet is a reasonable baseline at full
+scale but not truly competitive with the best POYO variant.
+
+### Hypothesis 3 — REFUTED: Dynamic channel embeddings provide negligible benefit at 30s
+
+Dynamic vs disabled shows only +0.2 pp (CWT) and +0.7 pp (RCNN) at full
+scale — both well within the cross-fold standard deviation. This contrasts
+with the +4.1 pp random-init advantage seen in exp 020 at 2s windows.
+The 30s temporal context appears to provide the discriminative information
+that dynamic channel embeddings were supplying at 2s — making them
+redundant. The `RelativeChannelEncoder` adds architectural complexity
+without meaningful benefit when the sequence is long enough.
+
+### Hypothesis 4 — PARTIALLY SUPPORTED: CWT-CNN and ResampleCNN differ meaningfully at 30s
+
+Unlike exp 022 (2s) where tokenizer had no effect (+0.2 pp), at 30s the
+CWT-CNN consistently outperforms ResampleCNN by **+3.1 to +3.5 pp F1**.
+This suggests that CWT-CNN's wavelet decomposition provides genuinely
+better temporal-frequency features when given a full 30s epoch to
+process. The architectural differences that were invisible at 2s become
+meaningful with proper temporal context.
+
+### Hypothesis 5 — SUPPORTED: Cross-fold variance is moderate for POYO, high for EEGNet
+
+POYO CWT models show remarkably low variance across folds (std = 0.004),
+confirming that single-fold estimates from prior experiments are
+representative for this architecture. POYO RCNN has moderate variance
+(std = 0.012–0.013). EEGNet shows the highest variance (std = 0.024–0.051),
+especially at 10% data, indicating it is more sensitive to the specific
+subject split.
+
+### Hypothesis 6 — PARTIALLY SUPPORTED: Scaling behaviour depends on model
+
+EEGNet benefits most from additional data (+9.1 pp, +15.2% relative),
+followed by RCNN (+6.3–6.5 pp, ~10%), with CWT-CNN gaining least
+(+4.0–4.5 pp, ~6%). However, this is partly because CWT-CNN already
+performs well at 10% — it has a higher floor rather than a lower ceiling.
+The models do not clearly separate into "scales well" vs "plateaus early"
+as hypothesised; rather, CWT-CNN has a stronger inductive bias for EEG
+that provides a head start. All models continue to improve with 10× data,
+suggesting none have truly plateaued.
+
+### Overall ranking
+
+The final ordering for 5-class KempSleep sleep staging from scratch is:
+
+1. **POYO CWT-CNN (±dynamic):** 0.728–0.730 F1 — best overall, minimal
+   fold variance, works well even at 10% data
+2. **POYO RCNN (±dynamic):** 0.693–0.699 F1 — 3+ pp behind CWT-CNN
+3. **EEGNet:** 0.692 F1 — matches RCNN at full data but with higher
+   variance and stronger data dependence
 
 ## Notes for future experiments
 
-- If 30s epochs show substantial improvement, revisit whether 2s results from
-  prior experiments (exp 006, 008, 020, 022) need reinterpretation.
-- Once baselines are established, compare against finetuned models (using
-  pretrained checkpoints from exp 018/021) at 30s to quantify pretraining
-  benefit on proper epochs.
-- The `session_pct` mechanism can be reused for any dataset to create quick
-  iteration subsets — consider creating small configs for OpenNeuro/Klinzing
-  as well.
-- If dynamic channel embedding advantage persists at 30s, it confirms the
-  `RelativeChannelEncoder` provides a genuine architectural benefit beyond
-  what longer context can provide.
-- Consider adding DeepSleepNet or U-Sleep baselines for comparison against
-  the sleep staging literature.
+- The 30s results confirm that the 2s window was the primary bottleneck in
+  exp 006/008/020/022. All prior conclusions about tokenizer and channel
+  embedding effects at 2s should be reinterpreted — at proper epoch
+  lengths, CWT-CNN's advantage is real (unlike at 2s where it vanished).
+- Dynamic channel embeddings are not worth the complexity at 30s. Future
+  experiments should default to `channel_emb_mode=disabled` unless working
+  with very short windows or many heterogeneous channels.
+- The CWT-CNN POYO model at 30s (0.73 F1) is now a strong baseline. Next
+  step: finetune from pretrained checkpoints at 30s to see if pretraining
+  helps more at proper epoch length (unlike at 2s where it was negligible).
+- EEGNet's high data sensitivity suggests it would benefit most from data
+  augmentation or multi-dataset training.
+- POYO full-dataset runs were limited to 6–9 epochs by SLURM timeout.
+  Longer training may further improve results — consider increasing the
+  time budget or using checkpointing to resume.
+- The 0.73 F1 is approaching but not yet matching state-of-the-art sleep
+  staging (typically 0.78–0.82 F1 for 5-class on KempSleep with dedicated
+  models like U-Sleep). Consider architectural enhancements: more depth,
+  temporal convolution layers, or multi-scale attention.
