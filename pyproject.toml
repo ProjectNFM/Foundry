@@ -19,11 +19,14 @@ dependencies = [
     "wandb>=0.24.0",
     "auditorydecoding",
     "optuna>=4.8.0",
+    "braindecode>=0.9",
+    "torchaudio>=2.0.0",
 ]
 
 [dependency-groups]
 dev = ["pre-commit>=4.5.1", "pytest>=8.0.0", "ruff>=0.14.14"]
 notebook = ["ipykernel>=7.2.0", "seaborn>=0.13.2"]
+nfm_baselines = ["braindecode[hub]"]
 
 [tool.uv.sources]
 torch-brain = { git = "https://github.com/neuro-galaxy/torch_brain", branch = "main" }

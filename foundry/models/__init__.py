@@ -33,9 +33,23 @@ from foundry.models.baselines import (
     ShallowConvNet,
     EEGNetEncoder,
 )
+from foundry.models.labram import LaBraMEEGModel
+from foundry.models.vqnsp import NormEMAVectorQuantizer, VQNSPModel
+from foundry.models.labram_pretrain import (
+    LaBraMForMaskedEEGModeling,
+    apply_masking,
+)
+from foundry.models.patch_utils import extract_labram_patches
+from braindecode.models.labram import LABRAM_CHANNEL_ORDER
 
 __all__ = [
     "POYOEEGModel",
+    "LaBraMEEGModel",
+    "VQNSPModel",
+    "NormEMAVectorQuantizer",
+    "LaBraMForMaskedEEGModeling",
+    "apply_masking",
+    "extract_labram_patches",
     "EEGTokenizer",
     "TemporalConvAvgPool",
     "Linear",
@@ -63,4 +77,5 @@ __all__ = [
     "PerceiverProcessor",
     "patch_signal",
     "compute_patch_timestamps",
+    "LABRAM_CHANNEL_ORDER",
 ]
