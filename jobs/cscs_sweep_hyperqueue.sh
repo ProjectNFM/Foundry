@@ -4,11 +4,11 @@
 # This script uses HyperQueue as a meta-scheduler to efficiently run multiple wandb agents
 #
 # Usage:
-#   sbatch sweep_hyperqueue.sh <num_agents> [sweep_id] [experiment]
+#   sbatch cscs_sweep_hyperqueue.sh <num_agents> [sweep_id] [experiment]
 #
 # Example:
-#   sbatch --gpus-per-node=4 sweep_hyperqueue.sh 4
-#   sbatch --gpus-per-node=8 sweep_hyperqueue.sh 8 user/project/sweep123 auditory_decoding/my_sweep
+#   sbatch --gpus-per-node=4 cscs_sweep_hyperqueue.sh 4
+#   sbatch --gpus-per-node=8 cscs_sweep_hyperqueue.sh 8 user/project/sweep123 auditory_decoding/my_sweep
 
 #SBATCH --account=a0091
 #SBATCH --partition=normal
@@ -61,7 +61,7 @@ PROJECT_DIR="${FOUNDRY_ROOT:-${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[
 cd "${PROJECT_DIR}" || exit 1
 export FOUNDRY_ROOT="${PROJECT_DIR}"
 
-TASK_SCRIPT="${PROJECT_DIR}/jobs/task_wandb_agent.sh"
+TASK_SCRIPT="${PROJECT_DIR}/jobs/cscs_task_wandb_agent.sh"
 if [[ ! -f "${TASK_SCRIPT}" ]]; then
     echo "[$(date)] ERROR: task script not found at ${TASK_SCRIPT}"
     echo "Submit from the Foundry repo root, or set FOUNDRY_ROOT."
@@ -80,7 +80,7 @@ GPUS_AVAILABLE="${SLURM_GPUS_ON_NODE:-${SLURM_GPUS_PER_NODE:-1}}"
 if [[ "${NUM_AGENTS}" -gt "${GPUS_AVAILABLE}" ]]; then
     echo "[$(date)] ERROR: ${NUM_AGENTS} agents requested but only ${GPUS_AVAILABLE} GPU(s) allocated."
     echo "Submit with matching GPUs, e.g.:"
-    echo "  sbatch --gpus-per-node=${NUM_AGENTS} sweep_hyperqueue.sh ${NUM_AGENTS} ..."
+    echo "  sbatch --gpus-per-node=${NUM_AGENTS} cscs_sweep_hyperqueue.sh ${NUM_AGENTS} ..."
     exit 1
 fi
 echo "GPUs allocated: ${GPUS_AVAILABLE}, agents: ${NUM_AGENTS}"
