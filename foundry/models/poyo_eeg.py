@@ -127,6 +127,7 @@ class POYOEEGModel(nn.Module):
         self.num_latents_per_step = num_latents_per_step
         self.zero_output_timestamps = zero_output_timestamps
         self.normalize_inputs = normalize_inputs
+        self.disable_session_emb = disable_session_emb
         self._task_configs = TaskConfig.normalize_task_configs(task_configs)
         self._latent_index, self._latent_timestamps = (
             create_linspace_latent_tokens(

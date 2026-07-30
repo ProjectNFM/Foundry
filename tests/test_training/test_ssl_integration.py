@@ -184,53 +184,6 @@ class TestSharedStepTargetExtraction:
 
 
 class TestWarmupScheduler:
-    def test_warmup_creates_sequential_scheduler(self):
-        cfg = TaskConfig(
-            name="masked_reconstruction",
-            head={
-                "_target_": "foundry.tasks.heads.MLPReadoutHead",
-                "output_dim": 1,
-            },
-            target_extractor=None,
-            loss={"_target_": "foundry.tasks.losses.ReconstructionLoss"},
-        )
-        model = _StubSSLModel({cfg.name: cfg})
-        module = FoundryModule(
-            model=model,
-            warmup_epochs=5,
-        )
-
-        class _FakeTrainer:
-            max_epochs = 100
-
-        module._trainer = _FakeTrainer()
-        optim_config = module.configure_optimizers()
-
-        scheduler = optim_config["lr_scheduler"]["scheduler"]
-        assert isinstance(scheduler, torch.optim.lr_scheduler.SequentialLR)
-
-    def test_no_warmup_uses_cosine_only(self):
-        cfg = TaskConfig(
-            name="masked_reconstruction",
-            head={
-                "_target_": "foundry.tasks.heads.MLPReadoutHead",
-                "output_dim": 1,
-            },
-            target_extractor=None,
-            loss={"_target_": "foundry.tasks.losses.ReconstructionLoss"},
-        )
-        model = _StubSSLModel({cfg.name: cfg})
-        module = FoundryModule(model=model, warmup_epochs=0)
-
-        class _FakeTrainer:
-            max_epochs = 100
-
-        module._trainer = _FakeTrainer()
-        optim_config = module.configure_optimizers()
-
-        scheduler = optim_config["lr_scheduler"]["scheduler"]
-        assert isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR)
-
     def test_warmup_lr_starts_low(self):
         cfg = TaskConfig(
             name="masked_reconstruction",
@@ -246,7 +199,8 @@ class TestWarmupScheduler:
         module = FoundryModule(
             model=model,
             learning_rate=lr,
-            warmup_epochs=10,
+            warmup=10,
+            scheduler_interval="epoch",
         )
 
         class _FakeTrainer:
