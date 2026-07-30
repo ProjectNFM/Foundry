@@ -10,6 +10,7 @@ task_configs:
 
 model:
   zero_output_timestamps: true
+  normalize_inputs: true
 
 data:
   split_type: intrasession
@@ -20,21 +21,22 @@ run:
   group: SLEEP_STAGING
   tags: [sleep_staging, poyo, cwt, kemp, singlesess]
   log_level: INFO
+  project: foundry_finetuning
 
 class_weights:
-  mode: null
-  smoothing: 0.1
+  mode: auto
+  smoothing: 1.0
 
 hyperparameters:
-  batch_size: 64
-  sequence_length: 30.0
+  batch_size: 512 
+  sequence_length: 2.0
   patch_duration: 0.1
   sampling_rate: 100
   fold_number: 0
   num_workers: 4
   num_channels: 2
   session_configs: null
-  learning_rate: 1e-5
+  learning_rate: 5e-4
   weight_decay: 0.01
 
 trainer:

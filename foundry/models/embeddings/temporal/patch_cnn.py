@@ -2,9 +2,11 @@ import torch
 import torch.nn as nn
 
 from foundry.models.embeddings.activations import get_activation
+from foundry.models.embeddings.temporal.base import TemporalEmbedding
+from foundry.models.signal_preparation import compute_num_patches
 
 
-class PatchCNNEmbedding(nn.Module):
+class PatchCNNEmbedding(TemporalEmbedding):
     """Convert patched EEG signal to embeddings via 1D CNN.
 
     Treats channels as Conv1d input channels and convolves over the time
@@ -64,6 +66,18 @@ class PatchCNNEmbedding(nn.Module):
             elif isinstance(module, nn.Linear):
                 nn.init.xavier_uniform_(module.weight, gain=1.0)
                 nn.init.zeros_(module.bias)
+
+    def get_num_time_tokens(
+        self, sequence_length: float, sampling_rate: float
+    ) -> int:
+        num_samples = round(sampling_rate * sequence_length)
+        return compute_num_patches(
+            num_samples, self.patch_samples, self.patch_samples
+        )
+
+    @property
+    def has_fixed_token_count(self) -> bool:
+        return True
 
     def forward(self, patches: torch.Tensor, **kwargs) -> torch.Tensor:
         """

@@ -1,0 +1,53 @@
+# @package _global_
+
+defaults:
+  - override /model: masked_poyo_eeg
+  - override /data: openneuro/multi_brainset
+
+task_configs:
+  - masked_reconstruction
+
+model:
+  zero_output_timestamps: false
+  normalize_inputs: true
+  masking:
+    _target_: foundry.tasks.masking.TemporalBlockMasking
+    block_size: 10
+    mask_ratio: 0.5
+
+data:
+  split_type: intrasession
+  task_type: null
+
+module:
+  warmup_epochs: 0
+
+run:
+  name: poyo_multi_dataset_pretrain
+  project: foundry_pretraining
+  group: PRETRAINING
+  tags: [pretraining, mae, masked, multi_dataset]
+  log_level: INFO
+  compile: default
+
+hyperparameters:
+  batch_size: 100
+  sequence_length: 2.0
+  patch_duration: null
+  sampling_rate: null
+  num_channels: null
+  fold_number: 0
+  num_workers: 6
+  learning_rate: 1e-4
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 200
+  precision: bf16-mixed
+  callbacks:
+    model_checkpoint:
+      monitor: val/loss
+      mode: min
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_loss_{val/loss:.4f}"
+      

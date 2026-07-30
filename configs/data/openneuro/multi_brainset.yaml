@@ -5,7 +5,7 @@ dataset_class: foundry.data.datasets.OpenNeuroMultiBrainset
 root: ./data/processed/
 batch_size: ${hyperparameters.batch_size}
 num_workers: ${hyperparameters.num_workers}
-pin_memory: false
+pin_memory: true
 sequence_length: ${hyperparameters.sequence_length}
 seed: ${run.seed}
 
@@ -15,5 +15,4 @@ task_type: ???
 dataset_kwargs:
   brainsets:
     - klinzing_sleep_ds005555
-    - shirazi_hbnr1_ds005505
   split_type: ${..split_type}

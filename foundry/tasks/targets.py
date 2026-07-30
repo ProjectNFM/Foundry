@@ -100,6 +100,9 @@ def extract_multitask_targets(
     for name in sorted_names:
         cfg = task_configs[name]
 
+        if cfg.extractor is None:
+            continue
+
         targets = cfg.extractor(data)
         timestamps = targets["timestamps"]
         if timestamps is None or len(timestamps) == 0:
@@ -112,7 +115,20 @@ def extract_multitask_targets(
         target_weights[name] = np.ones_like(timestamps, dtype=np.float32)
 
     if not all_timestamps:
-        raise ValueError("No targets extracted from data for configured tasks")
+        has_any_extractor = any(
+            cfg.extractor is not None for cfg in task_configs.values()
+        )
+        if has_any_extractor:
+            raise ValueError(
+                "No targets extracted from data for configured tasks. "
+                "Check that your data contains the expected fields."
+            )
+        return (
+            torch.zeros(0, dtype=torch.float32),
+            {},
+            torch.zeros(0, dtype=torch.long),
+            {},
+        )
 
     if len(all_timestamps) == 1:
         output_timestamps = torch.as_tensor(all_timestamps[0])

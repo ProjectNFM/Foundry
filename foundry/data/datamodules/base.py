@@ -6,7 +6,7 @@ model-specific preprocessing.
 """
 
 import logging
-from typing import TYPE_CHECKING, Callable, Literal, Optional
+from typing import TYPE_CHECKING, Callable, Literal, Optional, Type
 
 import torch
 from hydra.utils import get_class
@@ -17,6 +17,7 @@ from torch_brain.samplers import RandomFixedWindowSampler
 from lightning import LightningDataModule
 from torch_brain.transforms import Compose
 
+from foundry.data.samplers import FastRandomFixedWindowSampler
 from foundry.tasks.class_weights import compute_class_weights_for_tasks
 from foundry.tasks.classification_mapping import (
     filter_intervals_by_mapping,
@@ -109,6 +110,7 @@ class NeuralDataModule(LightningDataModule):
         fold: Optional[int] = None,
         recording_ids: Optional[list[str]] = None,
         task_configs: Optional[dict[str, "TaskConfig"]] = None,
+        sampler_class: Optional[Type[RandomFixedWindowSampler]] = None,
     ):
         super().__init__()
         if isinstance(dataset_class, str):
@@ -121,6 +123,11 @@ class NeuralDataModule(LightningDataModule):
         self.sequence_length = sequence_length
         self.seed = seed
         self.dataset_kwargs = dict(dataset_kwargs or {})
+        self.sampler_class: Type[RandomFixedWindowSampler] = (
+            sampler_class
+            if sampler_class is not None
+            else FastRandomFixedWindowSampler
+        )
         self._task_configs = task_configs
 
         for key, val in (
@@ -134,7 +141,8 @@ class NeuralDataModule(LightningDataModule):
 
         self.task_type = self.dataset_kwargs.get("task_type")
 
-        # Build transform pipeline
+        self._tokenizer = tokenizer
+
         transform_list = transforms or []
         if tokenizer is not None:
             transform_list = list(transform_list) + [tokenizer]
@@ -171,6 +179,33 @@ class NeuralDataModule(LightningDataModule):
         if self._task_configs:
             validate_task_mappings(self._task_configs, self.dataset)
 
+    def set_tokenizer(self, tokenizer: Optional[Callable]) -> None:
+        """Replace the tokenizer in the transform pipeline.
+
+        Can be called before or after :meth:`setup`.  When the dataset
+        already exists, its transform is rebuilt in-place.
+        """
+        old = self._tokenizer
+        self._tokenizer = tokenizer
+
+        base = [t for t in (self.transform or []) if t is not old]
+        if tokenizer is not None:
+            base = list(base) + [tokenizer]
+        self.transform = base if base else None
+
+        if self.dataset is not None:
+            transform_list = list(self.transform) if self.transform else []
+            if self.task_type is not None and hasattr(
+                self.dataset_class, "get_required_transforms"
+            ):
+                required = self.dataset_class.get_required_transforms(
+                    self.task_type
+                )
+                transform_list = list(required) + transform_list
+            self.dataset.transform = (
+                Compose(transform_list) if transform_list else None
+            )
+
     def compute_class_weights(
         self, smoothing: float = 1.0
     ) -> dict[str, list[float]]:
@@ -196,7 +231,7 @@ class NeuralDataModule(LightningDataModule):
         if not self._task_configs:
             return sampling_intervals
         for name, cfg in self._task_configs.items():
-            if cfg.class_mapping is None:
+            if cfg.class_mapping is None or cfg.target_extractor is None:
                 continue
             value_field = cfg.target_extractor["value_key"].split(".")[-1]
             sampling_intervals = {
@@ -224,7 +259,7 @@ class NeuralDataModule(LightningDataModule):
         sampling_intervals = self._filter_intervals(sampling_intervals)
 
         split_seed = self.seed + self._SPLIT_SEED_OFFSETS[split]
-        sampler = RandomFixedWindowSampler(
+        sampler = self.sampler_class(
             sampling_intervals=sampling_intervals,
             window_length=self.sequence_length,
             drop_short=True,

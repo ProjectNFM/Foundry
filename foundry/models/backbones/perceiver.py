@@ -50,6 +50,7 @@ class PerceiverEncoder(nn.Module):
         cross_heads: int = 1,
         ffn_dropout: float = 0.2,
         atn_dropout: float = 0.0,
+        rotate_value: bool = True,
     ):
         super().__init__()
         self.embed_dim = embed_dim
@@ -59,7 +60,7 @@ class PerceiverEncoder(nn.Module):
             heads=cross_heads,
             dropout=atn_dropout,
             dim_head=dim_head,
-            rotate_value=True,
+            rotate_value=rotate_value,
         )
         self.ffn = nn.Sequential(
             nn.LayerNorm(embed_dim),
@@ -102,6 +103,7 @@ class PerceiverProcessor(nn.Module):
         ffn_dropout: float = 0.2,
         lin_dropout: float = 0.4,
         atn_dropout: float = 0.0,
+        rotate_value: bool = True,
     ):
         super().__init__()
         self.embed_dim = embed_dim
@@ -117,7 +119,7 @@ class PerceiverProcessor(nn.Module):
                             heads=self_heads,
                             dropout=atn_dropout,
                             dim_head=dim_head,
-                            rotate_value=True,
+                            rotate_value=rotate_value,
                         ),
                         nn.Sequential(
                             nn.LayerNorm(embed_dim),
@@ -203,6 +205,7 @@ class PerceiverIOBackbone(nn.Module):
         ffn_dropout: float = 0.2,
         lin_dropout: float = 0.4,
         atn_dropout: float = 0.0,
+        rotate_value: bool = True,
     ):
         super().__init__()
         self.embed_dim = embed_dim
@@ -213,6 +216,7 @@ class PerceiverIOBackbone(nn.Module):
             cross_heads=cross_heads,
             ffn_dropout=ffn_dropout,
             atn_dropout=atn_dropout,
+            rotate_value=rotate_value,
         )
 
         self.processor = PerceiverProcessor(
@@ -223,6 +227,7 @@ class PerceiverIOBackbone(nn.Module):
             ffn_dropout=ffn_dropout,
             lin_dropout=lin_dropout,
             atn_dropout=atn_dropout,
+            rotate_value=rotate_value,
         )
 
         self.decoder = PerceiverDecoder(

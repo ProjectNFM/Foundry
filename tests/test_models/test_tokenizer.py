@@ -355,7 +355,7 @@ class TestMode3bSpatialProjectionPerTimepoint:
         signal = np.random.randn(200, 30).astype(np.float32)
         tokens = np.arange(30)
 
-        result = tokenizer.pretokenize(signal, tokens, 250.0, 1.0)
+        result = tokenizer.pretokenize(signal, tokens, 250.0, 0.8)
         assert result["input_timestamps"].shape == (200,)
 
     def test_forward_shape(self, batch_size):
@@ -422,7 +422,7 @@ class TestMode4PerChannelPerTimepoint:
         signal = np.random.randn(100, 4).astype(np.float32)
         tokens = np.arange(4)
 
-        result = tokenizer.pretokenize(signal, tokens, 250.0, 1.0)
+        result = tokenizer.pretokenize(signal, tokens, 250.0, 0.4)
 
         assert result["input_values"].shape == (16, 100)
         assert result["input_timestamps"].shape == (16 * 100,)

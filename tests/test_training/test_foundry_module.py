@@ -181,6 +181,39 @@ def test_cwt_lr_param_groups_separate_tokenizer_cwt_params():
     assert groups[1]["lr"] == pytest.approx(1e-1)
 
 
+def test_backbone_head_param_groups_use_transferable_components():
+    from foundry.training import FoundryModule
+
+    class _TransferModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.tokenizer = nn.Linear(2, 2)
+            self.backbone = nn.Linear(2, 2)
+            self.rotary_emb = nn.Linear(2, 2)
+            self.latent_emb = nn.Linear(2, 2)
+            self.channel_emb = nn.Linear(2, 2)
+            self.task_configs = {}
+
+        def transferable_components(self) -> tuple[str, ...]:
+            return ("tokenizer", "backbone", "rotary_emb", "latent_emb")
+
+        def forward(self, x):
+            return x
+
+    model = _TransferModel()
+    module = FoundryModule(
+        model=model,
+        learning_rate=1e-3,
+        backbone_learning_rate=1e-5,
+    )
+    groups = module._build_param_groups()
+
+    assert len(groups) == 2
+    assert groups[0]["lr"] == pytest.approx(1e-5)
+    assert groups[1]["lr"] == pytest.approx(1e-3)
+    assert len(groups[0]["params"]) > len(groups[1]["params"])
+
+
 def test_transfer_batch_to_device_converts_float64_to_float32():
     from foundry.training import FoundryModule
 
@@ -287,3 +320,352 @@ def test_default_module_yaml_instantiates_foundry_module():
         module_cfg, model=_StubTaskModel({task_cfg.name: task_cfg})
     )
     assert isinstance(module, FoundryModule)
+
+
+def test_scheduler_warmup_only():
+    """Test scheduler with only warmup phase."""
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
+    model = _StubTaskModel({cfg.name: cfg})
+    module = FoundryModule(
+        model=model,
+        warmup=100,
+        hold=0,
+        decay=0,
+    )
+
+    # Mock trainer
+    from unittest.mock import MagicMock
+
+    module.trainer = MagicMock()
+    module._trainer = MagicMock()
+
+    config = module.configure_optimizers()
+    scheduler = config["lr_scheduler"]["scheduler"]
+    optimizer = config["optimizer"]
+
+    # Check that scheduler is configured
+    assert scheduler is not None
+    # Verify we can step through the scheduler
+    initial_lr = optimizer.param_groups[0]["lr"]
+    for _ in range(100):
+        scheduler.step()
+    final_lr = optimizer.param_groups[0]["lr"]
+    # After warmup, LR should be at or near base_lr
+    assert final_lr > initial_lr
+
+
+def test_scheduler_hold_constant_only():
+    """Test scheduler with only hold phase using constant LR."""
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
+    model = _StubTaskModel({cfg.name: cfg})
+    module = FoundryModule(
+        model=model,
+        warmup=0,
+        hold=100,
+        hold_scheduler_type="constant",
+        decay=0,
+        end_lr_factor=0.1,
+    )
+
+    from unittest.mock import MagicMock
+
+    module.trainer = MagicMock()
+    module._trainer = MagicMock()
+
+    config = module.configure_optimizers()
+    scheduler = config["lr_scheduler"]["scheduler"]
+    optimizer = config["optimizer"]
+
+    assert scheduler is not None
+    # Record LR at different points
+    lrs = []
+    for _ in range(100):
+        lrs.append(optimizer.param_groups[0]["lr"])
+        scheduler.step()
+
+    # With constant LR, all should be the same
+    assert all(lr == lrs[0] for lr in lrs)
+
+
+def test_scheduler_decay_only():
+    """Test scheduler with only decay phase."""
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
+    model = _StubTaskModel({cfg.name: cfg})
+    module = FoundryModule(
+        model=model,
+        warmup=0,
+        hold=0,
+        decay=100,
+        end_lr_factor=0.1,
+    )
+
+    from unittest.mock import MagicMock
+
+    module.trainer = MagicMock()
+    module._trainer = MagicMock()
+
+    config = module.configure_optimizers()
+    scheduler = config["lr_scheduler"]["scheduler"]
+    optimizer = config["optimizer"]
+
+    assert scheduler is not None
+    # Record LR at different points
+    lrs = []
+    for _ in range(100):
+        lrs.append(optimizer.param_groups[0]["lr"])
+        scheduler.step()
+
+    # With cosine decay, LR should decrease monotonically
+    # Start at high LR, end at end_lr_factor
+    assert lrs[0] > lrs[-1]
+    assert (
+        lrs[-1] >= module.end_lr_factor * module.learning_rate * 0.99
+    )  # Allow small numerical error
+
+
+def test_scheduler_warmup_hold_decay_sequential():
+    """Test scheduler with all three phases sequentially."""
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
+    model = _StubTaskModel({cfg.name: cfg})
+    module = FoundryModule(
+        model=model,
+        warmup=50,
+        hold=50,
+        hold_scheduler_type="constant",
+        decay=50,
+        end_lr_factor=0.1,
+    )
+
+    from unittest.mock import MagicMock
+
+    module.trainer = MagicMock()
+    module._trainer = MagicMock()
+
+    config = module.configure_optimizers()
+    scheduler = config["lr_scheduler"]["scheduler"]
+    optimizer = config["optimizer"]
+
+    assert scheduler is not None
+    # Record LR at different points
+    lrs = []
+    for _ in range(150):
+        lrs.append(optimizer.param_groups[0]["lr"])
+        scheduler.step()
+
+    # Warmup phase: LR should increase from low to base_lr
+    assert lrs[0] < lrs[25] < lrs[49]
+    # Hold phase: LR should be constant (constant scheduler)
+    assert all(lr == lrs[50] for lr in lrs[50:100])
+    # Decay phase: LR should decrease to end_lr_factor
+    assert lrs[-1] < lrs[100]
+
+
+def test_scheduler_warmup_with_custom_start_lr_factor():
+    """Test scheduler warmup with custom start_lr_factor."""
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
+    model = _StubTaskModel({cfg.name: cfg})
+    custom_start_factor = 5e-3
+    custom_end_factor = 1e-3
+    custom_learning_rate = 1e-2
+    module = FoundryModule(
+        model=model,
+        learning_rate=custom_learning_rate,
+        warmup=100,
+        hold=0,
+        decay=11,
+        start_lr_factor=custom_start_factor,
+        end_lr_factor=custom_end_factor,
+    )
+
+    from unittest.mock import MagicMock
+
+    module.trainer = MagicMock()
+    module._trainer = MagicMock()
+
+    config = module.configure_optimizers()
+    scheduler = config["lr_scheduler"]["scheduler"]
+    optimizer = config["optimizer"]
+
+    assert scheduler is not None
+    # Record LR at different points
+    lrs = []
+    for _ in range(100):
+        lrs.append(optimizer.param_groups[0]["lr"])
+        scheduler.step()
+
+    # Check that warmup starts at custom_start_factor * base_lr
+    expected_start_lr = custom_start_factor * custom_learning_rate
+    assert lrs[0] == pytest.approx(expected_start_lr, rel=1e-5)
+    # Check that warmup ends near base_lr
+    assert lrs[99] == pytest.approx(custom_learning_rate, rel=1e-2)
+
+
+def test_scheduler_hold_keeps_lr_constant():
+    """Test that hold > 0 keeps learning rate constant."""
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
+    model = _StubTaskModel({cfg.name: cfg})
+    module = FoundryModule(
+        model=model,
+        warmup=0,
+        hold=100,
+        hold_scheduler_type="constant",
+        decay=0,
+    )
+
+    from unittest.mock import MagicMock
+
+    module.trainer = MagicMock()
+    module._trainer = MagicMock()
+
+    config = module.configure_optimizers()
+    scheduler = config["lr_scheduler"]["scheduler"]
+    optimizer = config["optimizer"]
+
+    base_lr = optimizer.param_groups[0]["lr"]
+    lrs = []
+    for _ in range(100):
+        lrs.append(optimizer.param_groups[0]["lr"])
+        scheduler.step()
+
+    # All LRs should remain constant
+    assert all(lr == base_lr for lr in lrs)
+
+
+def test_scheduler_invalid_hold_type_raises():
+    """Test that invalid hold_scheduler_type raises ValueError."""
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
+    model = _StubTaskModel({cfg.name: cfg})
+    module = FoundryModule(
+        model=model,
+        warmup=0,
+        hold=100,
+        hold_scheduler_type="invalid",
+        decay=0,
+    )
+
+    from unittest.mock import MagicMock
+
+    module.trainer = MagicMock()
+    module._trainer = MagicMock()
+
+    with pytest.raises(ValueError, match="Unknown hold_scheduler_type"):
+        module.configure_optimizers()
+
+
+def test_scheduler_hold_cosine_with_decay_transition():
+    """Test hold phase with cosine annealing followed by decay phase."""
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
+    model = _StubTaskModel({cfg.name: cfg})
+    module = FoundryModule(
+        model=model,
+        warmup=0,
+        hold=50,
+        hold_scheduler_type="cosine",
+        decay=50,
+        end_lr_factor=0.1,
+    )
+
+    from unittest.mock import MagicMock
+
+    module.trainer = MagicMock()
+    module._trainer = MagicMock()
+
+    config = module.configure_optimizers()
+    scheduler = config["lr_scheduler"]["scheduler"]
+    optimizer = config["optimizer"]
+
+    assert scheduler is not None
+    lrs = []
+    for _ in range(100):
+        lrs.append(optimizer.param_groups[0]["lr"])
+        scheduler.step()
+
+    # Hold phase: LR should vary with cosine annealing
+    hold_lrs = lrs[:50]
+    assert max(hold_lrs) > min(hold_lrs)
+    # Decay phase: LR should continue to decrease
+    assert lrs[-1] < lrs[50]
+
+
+def test_scheduler_hold_cosine_only():
+    """Test scheduler with only hold phase using cosine annealing."""
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
+    model = _StubTaskModel({cfg.name: cfg})
+    module = FoundryModule(
+        model=model,
+        warmup=0,
+        hold=100,
+        hold_scheduler_type="cosine",
+        decay=0,
+        end_lr_factor=0.1,
+    )
+
+    from unittest.mock import MagicMock
+
+    module.trainer = MagicMock()
+    module._trainer = MagicMock()
+
+    config = module.configure_optimizers()
+    scheduler = config["lr_scheduler"]["scheduler"]
+    optimizer = config["optimizer"]
+
+    assert scheduler is not None
+    # Record LR at different points
+    lrs = []
+    for _ in range(100):
+        lrs.append(optimizer.param_groups[0]["lr"])
+        scheduler.step()
+
+    # With cosine annealing, LR should vary (not constant)
+    assert max(lrs) > min(lrs)
+
+
+def test_scheduler_no_phases_uses_constant():
+    """Test that no phases configured uses constant scheduler."""
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
+    model = _StubTaskModel({cfg.name: cfg})
+    module = FoundryModule(
+        model=model,
+        warmup=0,
+        hold=0,
+        decay=0,
+    )
+
+    from unittest.mock import MagicMock
+
+    module.trainer = MagicMock()
+    module._trainer = MagicMock()
+
+    config = module.configure_optimizers()
+    scheduler = config["lr_scheduler"]["scheduler"]
+    optimizer = config["optimizer"]
+
+    assert scheduler is not None
+    # Record LR at different points
+    lrs = []
+    for _ in range(10):
+        lrs.append(optimizer.param_groups[0]["lr"])
+        scheduler.step()
+
+    # All LRs should be the same (constant)
+    assert all(lr == lrs[0] for lr in lrs)

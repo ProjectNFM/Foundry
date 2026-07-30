@@ -61,7 +61,7 @@ class TestShortenSessionId:
 
 
 class TestSessionMetricsCallbackLifecycle:
-    """SessionMetricsCallback initializes buffers, computes, and resets."""
+    """SessionMetricsCallback owns its own buffers and accumulates from StepOutput."""
 
     def _make_module(self):
         from foundry.training import FoundryModule
@@ -84,36 +84,44 @@ class TestSessionMetricsCallbackLifecycle:
         module = FoundryModule(model=model)
         return module, cfg
 
-    def test_on_fit_start_creates_buffers(self):
+    def test_on_fit_start_creates_buffers_on_callback(self):
         module, _ = self._make_module()
         callback = SessionMetricsCallback()
         trainer = MagicMock()
 
         callback.on_fit_start(trainer, module)
 
-        assert hasattr(module, "_val_session_buffers")
-        assert module._val_session_buffers == {}
+        assert callback._val_session_buffers == {}
+
+    def test_module_has_no_session_buffers(self):
+        """After refactor, FoundryModule should not have _val_session_buffers."""
+        module, _ = self._make_module()
+        assert not hasattr(module, "_val_session_buffers")
 
     def test_accumulate_session_preds_groups_by_session(self):
         module, cfg = self._make_module()
-        module._val_session_buffers = {}
+        callback = SessionMetricsCallback()
+        callback._val_session_buffers = {}
 
         task_name = cfg.name
         router_idx = module.model.router.get_task_index_by_name(task_name) + 1
 
-        # 4 batch items: 2 from session A, 2 from session B.
-        # Each item has 2 output positions for this task.
         task_index = torch.full((4, 2), router_idx)
         session_id = ["sessA", "sessB", "sessA", "sessB"]
 
         preds = torch.randn(8, 3)
         target = torch.tensor([0, 1, 2, 0, 1, 2, 0, 1])
 
-        module._accumulate_session_preds(
-            task_name, preds, target, task_index, session_id
+        callback._accumulate_session_preds(
+            task_name,
+            preds,
+            target,
+            task_index,
+            session_id,
+            module.model.router,
         )
 
-        buf = module._val_session_buffers[task_name]
+        buf = callback._val_session_buffers[task_name]
         assert set(buf.keys()) == {"sessA", "sessB"}
         assert len(buf["sessA"]["preds"]) == 2
         assert len(buf["sessB"]["preds"]) == 2
@@ -125,30 +133,33 @@ class TestSessionMetricsCallbackLifecycle:
 
         a_targets = torch.cat(buf["sessA"]["targets"])
         b_targets = torch.cat(buf["sessB"]["targets"])
-        # Item 0 (sessA) -> [0,1], Item 2 (sessA) -> [1,2]
         assert torch.equal(a_targets, torch.tensor([0, 1, 1, 2]))
-        # Item 1 (sessB) -> [2,0], Item 3 (sessB) -> [0,1]
         assert torch.equal(b_targets, torch.tensor([2, 0, 0, 1]))
 
     def test_accumulate_skips_empty_items(self):
         module, cfg = self._make_module()
-        module._val_session_buffers = {}
+        callback = SessionMetricsCallback()
+        callback._val_session_buffers = {}
 
         task_name = cfg.name
         router_idx = module.model.router.get_task_index_by_name(task_name) + 1
 
-        # Item 0 has 2 preds, item 1 has 0 preds (padding)
         task_index = torch.tensor([[router_idx, router_idx], [0, 0]])
         session_id = ["sessA", "sessB"]
 
         preds = torch.randn(2, 3)
         target = torch.tensor([0, 1])
 
-        module._accumulate_session_preds(
-            task_name, preds, target, task_index, session_id
+        callback._accumulate_session_preds(
+            task_name,
+            preds,
+            target,
+            task_index,
+            session_id,
+            module.model.router,
         )
 
-        buf = module._val_session_buffers[task_name]
+        buf = callback._val_session_buffers[task_name]
         assert "sessA" in buf
         assert "sessB" not in buf
 
@@ -156,7 +167,8 @@ class TestSessionMetricsCallbackLifecycle:
         module, cfg = self._make_module()
         task_name = cfg.name
 
-        module._val_session_buffers = {
+        callback = SessionMetricsCallback()
+        callback._val_session_buffers = {
             task_name: {
                 "sessA": {
                     "preds": [torch.tensor([[5.0, -5.0, -5.0]] * 3)],
@@ -174,7 +186,6 @@ class TestSessionMetricsCallbackLifecycle:
         trainer.logger = mock_logger
         trainer.current_epoch = 5
 
-        callback = SessionMetricsCallback()
         callback.on_validation_epoch_end(trainer, module)
 
         mock_logger.log_metrics.assert_called_once()
@@ -187,18 +198,18 @@ class TestSessionMetricsCallbackLifecycle:
         for v in logged.values():
             assert isinstance(v, float)
 
-        assert module._val_session_buffers == {}
+        assert callback._val_session_buffers == {}
 
     def test_on_validation_epoch_end_skips_empty_buffers(self):
         module, _ = self._make_module()
-        module._val_session_buffers = {}
+        callback = SessionMetricsCallback()
+        callback._val_session_buffers = {}
 
         mock_logger = MagicMock()
         trainer = MagicMock()
         trainer.logger = mock_logger
         trainer.current_epoch = 0
 
-        callback = SessionMetricsCallback()
         callback.on_validation_epoch_end(trainer, module)
 
         mock_logger.log_metrics.assert_not_called()
@@ -207,8 +218,8 @@ class TestSessionMetricsCallbackLifecycle:
         module, cfg = self._make_module()
         task_name = cfg.name
 
-        # Mix valid (0, 1) and invalid (-1) targets
-        module._val_session_buffers = {
+        callback = SessionMetricsCallback()
+        callback._val_session_buffers = {
             task_name: {
                 "sessA": {
                     "preds": [
@@ -230,7 +241,6 @@ class TestSessionMetricsCallbackLifecycle:
         trainer.logger = mock_logger
         trainer.current_epoch = 0
 
-        callback = SessionMetricsCallback()
         callback.on_validation_epoch_end(trainer, module)
 
         mock_logger.log_metrics.assert_called_once()
@@ -238,19 +248,22 @@ class TestSessionMetricsCallbackLifecycle:
         acc_key = [k for k in logged if "acc" in k and "balanced" not in k][0]
         assert logged[acc_key] == pytest.approx(1.0)
 
-    def test_works_without_buffers_attribute(self):
-        """Module without _val_session_buffers should not crash."""
+    def test_works_without_step_output(self):
+        """Callback receiving None outputs should not crash."""
         module, _ = self._make_module()
+        callback = SessionMetricsCallback()
         trainer = MagicMock()
 
-        callback = SessionMetricsCallback()
+        callback.on_validation_batch_end(
+            trainer, module, outputs=None, batch=None, batch_idx=0
+        )
         callback.on_validation_epoch_end(trainer, module)
 
         trainer.logger.log_metrics.assert_not_called()
 
 
 class TestSessionMetricsEndToEnd:
-    """Test the full accumulation + callback pipeline with _shared_step."""
+    """Test the full accumulation + callback pipeline with _shared_step + callback."""
 
     def _make_single_task_module(self):
         from foundry.training import FoundryModule
@@ -271,10 +284,69 @@ class TestSessionMetricsEndToEnd:
         )
         model = _StubTaskModel({cfg.name: cfg}, embed_dim=4)
         module = FoundryModule(model=model)
-        module._val_session_buffers = {}
         return module, cfg
 
-    def test_shared_step_accumulates_when_buffers_present(self):
+    def test_callback_accumulates_from_step_output(self):
+        module, cfg = self._make_single_task_module()
+        callback = SessionMetricsCallback()
+        callback._val_session_buffers = {}
+
+        task_name = cfg.name
+        router_idx = module.model.router.get_task_index_by_name(task_name) + 1
+
+        batch = {
+            "output_embs": torch.randn(4, 4),
+            "task_index": torch.full((2, 2), router_idx),
+            "target_values": {task_name: torch.tensor([0, 1, 0, 1])},
+            "target_weights": {task_name: 1.0},
+            "session_id": ["sess_A", "sess_B"],
+        }
+
+        module.log = MagicMock()
+        module.log_dict = MagicMock()
+
+        step_output = module._shared_step("val", batch)
+        outputs = {"loss": step_output.loss, "step_output": step_output}
+
+        trainer = MagicMock()
+        callback.on_validation_batch_end(
+            trainer, module, outputs=outputs, batch=None, batch_idx=0
+        )
+
+        assert task_name in callback._val_session_buffers
+        assert "sess_A" in callback._val_session_buffers[task_name]
+        assert "sess_B" in callback._val_session_buffers[task_name]
+
+    def test_callback_does_not_accumulate_without_session_id(self):
+        module, cfg = self._make_single_task_module()
+        callback = SessionMetricsCallback()
+        callback._val_session_buffers = {}
+
+        task_name = cfg.name
+        router_idx = module.model.router.get_task_index_by_name(task_name) + 1
+
+        batch = {
+            "output_embs": torch.randn(4, 4),
+            "task_index": torch.full((2, 2), router_idx),
+            "target_values": {task_name: torch.tensor([0, 1, 0, 1])},
+            "target_weights": {task_name: 1.0},
+        }
+
+        module.log = MagicMock()
+        module.log_dict = MagicMock()
+
+        step_output = module._shared_step("val", batch)
+        outputs = {"loss": step_output.loss, "step_output": step_output}
+
+        trainer = MagicMock()
+        callback.on_validation_batch_end(
+            trainer, module, outputs=outputs, batch=None, batch_idx=0
+        )
+
+        assert callback._val_session_buffers == {}
+
+    def test_shared_step_does_not_accumulate_on_module(self):
+        """_shared_step no longer accumulates on the module itself."""
         module, cfg = self._make_single_task_module()
         task_name = cfg.name
         router_idx = module.model.router.get_task_index_by_name(task_name) + 1
@@ -292,26 +364,4 @@ class TestSessionMetricsEndToEnd:
 
         module._shared_step("val", batch)
 
-        assert task_name in module._val_session_buffers
-        assert "sess_A" in module._val_session_buffers[task_name]
-        assert "sess_B" in module._val_session_buffers[task_name]
-
-    def test_shared_step_does_not_accumulate_on_train(self):
-        module, cfg = self._make_single_task_module()
-        task_name = cfg.name
-        router_idx = module.model.router.get_task_index_by_name(task_name) + 1
-
-        batch = {
-            "output_embs": torch.randn(4, 4),
-            "task_index": torch.full((2, 2), router_idx),
-            "target_values": {task_name: torch.tensor([0, 1, 0, 1])},
-            "target_weights": {task_name: 1.0},
-            "session_id": ["sess_A", "sess_B"],
-        }
-
-        module.log = MagicMock()
-        module.log_dict = MagicMock()
-
-        module._shared_step("train", batch)
-
-        assert module._val_session_buffers == {}
+        assert not hasattr(module, "_val_session_buffers")

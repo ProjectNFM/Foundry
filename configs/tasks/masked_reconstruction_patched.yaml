@@ -1,0 +1,10 @@
+name: masked_reconstruction
+head:
+  _target_: foundry.tasks.heads.MLPReadoutHead
+  output_dim: ${patch_samples:${hyperparameters.patch_duration},${hyperparameters.sampling_rate}}
+  num_layers: 2
+target_extractor: null
+loss:
+  _target_: foundry.tasks.losses.ReconstructionLoss
+metrics:
+  _target_: foundry.tasks.metrics.ssl_metrics

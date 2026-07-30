@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from foundry.tasks.losses import (
     CrossEntropyTaskLoss,
     MSETaskLoss,
+    ReconstructionLoss,
 )
 
 
@@ -90,3 +91,77 @@ class TestMSETaskLoss:
         assert torch.allclose(
             loss_fn(predictions, targets, sample_weights), expected
         )
+
+
+class TestReconstructionLoss:
+    def test_scalar_weights_matches_plain_mse(self):
+        torch.manual_seed(10)
+        predictions = torch.randn(8, 1)
+        targets = torch.randn(8, 1)
+
+        loss_fn = ReconstructionLoss()
+        expected = F.mse_loss(predictions, targets)
+
+        assert torch.allclose(loss_fn(predictions, targets, 1.0), expected)
+
+    def test_validity_mask_excludes_padded_positions(self):
+        torch.manual_seed(11)
+        predictions = torch.randn(6, 1)
+        targets = torch.randn(6, 1)
+        weights = torch.tensor([1.0, 1.0, 1.0, 0.0, 0.0, 0.0])
+
+        loss_fn = ReconstructionLoss()
+        result = loss_fn(predictions, targets, weights)
+
+        valid_pred = predictions[:3]
+        valid_targ = targets[:3]
+        expected = F.mse_loss(valid_pred, valid_targ)
+
+        assert torch.allclose(result, expected)
+
+    def test_weighted_average_over_valid_positions(self):
+        predictions = torch.tensor([[1.0], [2.0], [3.0]])
+        targets = torch.tensor([[0.0], [0.0], [0.0]])
+        weights = torch.tensor([1.0, 2.0, 0.0])
+
+        loss_fn = ReconstructionLoss()
+        result = loss_fn(predictions, targets, weights)
+
+        # valid entries: pred=[1,2], targ=[0,0], weights=[1,2]
+        # MSE per sample: [1, 4]
+        # weighted: (1*1 + 4*2) / (1+2) = 9/3 = 3.0
+        assert torch.allclose(result, torch.tensor(3.0))
+
+    def test_all_invalid_returns_zero(self):
+        predictions = torch.randn(4, 1)
+        targets = torch.randn(4, 1)
+        weights = torch.zeros(4)
+
+        loss_fn = ReconstructionLoss()
+        result = loss_fn(predictions, targets, weights)
+
+        assert result.item() == 0.0
+
+    def test_multidim_output_reduces_last_dim(self):
+        torch.manual_seed(12)
+        predictions = torch.randn(5, 3)
+        targets = torch.randn(5, 3)
+        weights = torch.tensor([1.0, 1.0, 0.0, 1.0, 0.0])
+
+        loss_fn = ReconstructionLoss()
+        result = loss_fn(predictions, targets, weights)
+
+        valid = weights > 0
+        per_sample = F.mse_loss(
+            predictions[valid], targets[valid], reduction="none"
+        ).mean(dim=-1)
+        expected = (per_sample * weights[valid]).sum() / weights[valid].sum()
+
+        assert torch.allclose(result, expected)
+
+    def test_conforms_to_loss_interface(self):
+        """ReconstructionLoss has the same (pred, target, weights) -> scalar signature."""
+        loss_fn = ReconstructionLoss()
+        assert hasattr(loss_fn, "forward")
+        result = loss_fn(torch.randn(3, 1), torch.randn(3, 1))
+        assert result.dim() == 0

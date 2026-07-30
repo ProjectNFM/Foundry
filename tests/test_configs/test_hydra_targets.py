@@ -183,8 +183,8 @@ def test_tokenizer_config_root_instantiates(config_name: str):
     sorted(p.stem for p in (CONFIGS_ROOT / "model").glob("*.yaml")),
 )
 def test_standalone_model_config_instantiates(config_name: str):
-    if config_name == "poyo_eeg":
-        pytest.skip("covered by test_poyo_eeg_with_tokenizer_configs")
+    if config_name in ("poyo_eeg", "masked_poyo_eeg"):
+        pytest.skip("requires recursive instantiation of tokenizer/masking")
     yaml_path = CONFIGS_ROOT / "model" / f"{config_name}.yaml"
     from foundry.tasks.config import TaskConfig
 

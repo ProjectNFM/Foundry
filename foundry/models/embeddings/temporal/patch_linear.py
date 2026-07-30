@@ -1,8 +1,11 @@
 import torch
 import torch.nn as nn
 
+from foundry.models.embeddings.temporal.base import TemporalEmbedding
+from foundry.models.signal_preparation import compute_num_patches
 
-class PatchLinearEmbedding(nn.Module):
+
+class PatchLinearEmbedding(TemporalEmbedding):
     """Convert patched EEG signal to embeddings via linear projection.
 
     Flattens the (channels, time) dimensions and projects to ``embed_dim``.
@@ -25,6 +28,18 @@ class PatchLinearEmbedding(nn.Module):
         )
         nn.init.xavier_uniform_(self.projection.weight, gain=1.0)
         nn.init.zeros_(self.projection.bias)
+
+    def get_num_time_tokens(
+        self, sequence_length: float, sampling_rate: float
+    ) -> int:
+        num_samples = round(sampling_rate * sequence_length)
+        return compute_num_patches(
+            num_samples, self.patch_samples, self.patch_samples
+        )
+
+    @property
+    def has_fixed_token_count(self) -> bool:
+        return True
 
     def forward(self, patches: torch.Tensor, **kwargs) -> torch.Tensor:
         """

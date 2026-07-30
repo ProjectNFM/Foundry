@@ -275,7 +275,12 @@ class TestGetChannelIds:
             ),
         ):
             result = ds.get_channel_ids()
-            assert result == ["ch_a", "ch_b", "ch_c"]
+            assert result == [
+                "klinzing_sleep_ds005555/ch_a",
+                "klinzing_sleep_ds005555/ch_b",
+                "shirazi_hbnr1_ds005505/ch_b",
+                "shirazi_hbnr1_ds005505/ch_c",
+            ]
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +354,6 @@ class TestHydraConfig:
         assert "brainsets" in cfg.dataset_kwargs
         brainsets = list(cfg.dataset_kwargs.brainsets)
         assert "klinzing_sleep_ds005555" in brainsets
-        assert "shirazi_hbnr1_ds005505" in brainsets
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,13 @@ from foundry.tasks.heads import MLPReadoutHead, ReadoutHead
 from foundry.tasks.losses import (
     CrossEntropyTaskLoss,
     MSETaskLoss,
+    ReconstructionLoss,
+)
+from foundry.tasks.masking import (
+    MaskingStrategy,
+    RandomTokenMasking,
+    TemporalBlockMasking,
+    ChannelMasking,
 )
 from foundry.tasks.metrics import (
     classification_metrics,
@@ -22,6 +29,7 @@ __all__ = [
     "CrossEntropyTaskLoss",
     "MLPReadoutHead",
     "MSETaskLoss",
+    "ReconstructionLoss",
     "ReadoutHead",
     "TargetExtractor",
     "extract_multitask_targets",
@@ -30,4 +38,8 @@ __all__ = [
     "validate_task_mappings",
     "regression_metrics",
     "ssl_metrics",
+    "MaskingStrategy",
+    "RandomTokenMasking",
+    "TemporalBlockMasking",
+    "ChannelMasking",
 ]
