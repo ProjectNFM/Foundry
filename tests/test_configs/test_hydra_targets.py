@@ -20,12 +20,14 @@ from tests.test_configs.conftest import (
 _SKIP_PREFIXES = (
     "hydra/",
     "experiment/",
+    "sweep/",
 )
 
 _SKIP_TARGET_PATHS = {
     ("model/poyo_eeg.yaml", ""),
     ("trainer/default.yaml", ""),
     ("data/neurosoft_minipigs/singlesubject.yaml", ""),
+    ("data/neurosoft_monkeys/singlesubject.yaml", ""),
 }
 
 
