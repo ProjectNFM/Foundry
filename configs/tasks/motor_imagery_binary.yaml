@@ -1,0 +1,27 @@
+name: motor_imagery_binary
+
+class_mapping:
+  mapping:
+    left_hand: Left Hand
+    right_hand: Right Hand
+  order: [Left Hand, Right Hand]
+
+head:
+  _target_: foundry.tasks.heads.ReadoutHead
+
+target_extractor:
+  _target_: foundry.tasks.targets.TargetExtractor
+  timestamp_key: motor_imagery_trials.timestamps
+  value_key: motor_imagery_trials.movements
+
+loss:
+  _target_: foundry.tasks.losses.CrossEntropyTaskLoss
+
+metrics:
+  _target_: foundry.tasks.metrics.classification_metrics
+
+metric_summary_modes:
+  acc: max
+  f1: max
+  auroc: max
+  loss: min
