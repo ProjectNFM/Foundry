@@ -68,6 +68,18 @@ class MaskedPOYOEEGModel(POYOEEGModel):
     RECONSTRUCTION_TASK_NAME: str = "masked_reconstruction"
 
     def __init__(self, *args, masking: MaskingStrategy, **kwargs):
+        """Initialize the masked pretraining model.
+
+        Args:
+            *args: Positional arguments forwarded to :class:`POYOEEGModel`.
+            masking: Masking strategy that determines which tokens are masked.
+                Must be compatible with :class:`PerChannelStrategy` (spatial
+                projection is not supported).
+            **kwargs: Keyword arguments forwarded to :class:`POYOEEGModel`.
+
+        Raises:
+            ValueError: If the tokenizer does not use :class:`PerChannelStrategy`.
+        """
         super().__init__(*args, **kwargs)
         self.masking = masking
 
@@ -97,6 +109,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         input_timestamps: torch.Tensor,
         N: int,
         masked_validity: torch.Tensor,
+        channel_emb_cache: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Build reconstruction queries at masked positions.
 
@@ -111,6 +124,9 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             input_timestamps: (B, C_pad*N) flattened timestamps.
             N: Number of time tokens per channel.
             masked_validity: (B, num_masked) boolean validity for masked positions.
+            channel_emb_cache: Optional (B, C_pad, D_ch) precomputed channel
+                embeddings from the dynamic encoder. When provided, used
+                instead of the static lookup.
 
         Returns:
             ``(queries, ts_emb, task_index)`` where *task_index* uses the
@@ -129,10 +145,21 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         )
 
         masked_channel_idx = mask_indices // N
-        recon_channel_tokens = torch.gather(
-            input_channel_index, 1, masked_channel_idx
-        )
-        recon_channel_emb = self.channel_emb(recon_channel_tokens)
+
+        if channel_emb_cache is not None:
+            recon_channel_emb = torch.gather(
+                channel_emb_cache,
+                1,
+                masked_channel_idx.unsqueeze(-1).expand(
+                    -1, -1, channel_emb_cache.shape[-1]
+                ),
+            )
+        else:
+            recon_channel_tokens = torch.gather(
+                input_channel_index, 1, masked_channel_idx
+            )
+            recon_channel_emb = self._get_channel_emb_fn()(recon_channel_tokens)
+
         if self.recon_channel_proj is not None:
             recon_channel_emb = self.recon_channel_proj(recon_channel_emb)
 
@@ -192,12 +219,71 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         task_index: torch.Tensor,
         reconstruction_targets: Optional[torch.Tensor] = None,
         unpack_output: bool = False,
+        context_values: Optional[torch.Tensor] = None,
+        context_channel_index: Optional[torch.Tensor] = None,
+        context_mask: Optional[torch.Tensor] = None,
+        context_sampling_rate: Optional[torch.Tensor] = None,
     ) -> ModelOutput:
+        """MAE-style masked forward pass.
+
+        Extends the base :meth:`POYOEEGModel.forward` with masking,
+        reconstruction queries, and target gathering:
+
+        1. GPU-tokenize all input tokens.
+        2. Build a token validity mask and apply the masking strategy to
+           split tokens into visible and masked sets (fixed count per sample).
+        3. Run encoder + processor on visible tokens only.
+        4. Build reconstruction queries at masked positions using channel
+           and task embeddings.
+        5. Optionally combine with downstream task queries.
+        6. Decode all queries via cross-attention from processed latents.
+        7. Route through the :class:`ReadoutRouter`.
+        8. Gather z-scored reconstruction targets at masked positions.
+
+        Args:
+            input_values: (B, C, T) raw signal, padded to max T in batch.
+            input_timestamps: (B, C_pad*N) or (B, C_pad, N) flattened timestamps.
+            input_channel_index: (B, C_pad) channel identity tokens.
+            input_session_index: (B,) session index for each sample.
+            input_mask: (B, C_pad) boolean channel validity mask.
+            input_sampling_rate: (B,) per-item sampling rate in Hz.
+            input_seq_len: (B,) true sample count per item (variable-length mode).
+            input_session_ids: Per-item session string IDs (for dynamic mode).
+            input_channel_counts: (B,) number of real channels per item.
+            latent_index: (B, n_latent) indices for latent tokens.
+            latent_timestamps: (B, n_latent) timestamps for latent tokens.
+            output_session_index: (B, n_out) session indices for downstream outputs.
+            output_timestamps: (B, n_out) timestamps for downstream predictions.
+            task_index: (B, n_out) padded task indices for downstream queries.
+            reconstruction_targets: (B, C_pad*N) or (B, C_pad, N) z-scored targets.
+                ``None`` during inference (no target gathering).
+            unpack_output: Unused (kept for API compatibility with base class).
+            context_values: (B, W, C, T) context windows for dynamic session
+                embedding. Only used when ``session_emb_mode == "dynamic"``.
+            context_channel_index: (B, W, C) channel tokens per context window.
+            context_mask: (B, W, C) channel validity per context window.
+            context_sampling_rate: (B, W) sampling rate per context window.
+
+        Returns:
+            :class:`ModelOutput` containing ``task_outputs`` (per-task prediction
+            dicts), ``ssl_meta`` (:class:`SSLTaskMeta` with reconstruction targets
+            and validity weights, or ``None`` at inference), and ``viz``
+            (:class:`ReconstructionVizMeta` for visualization).
+        """
         del unpack_output
         self._validate_vocab_initialization()
 
+        context_kwargs = None
+        if self.session_emb_mode == "dynamic" and context_values is not None:
+            context_kwargs = {
+                "context_values": context_values,
+                "context_channel_index": context_channel_index,
+                "context_mask": context_mask,
+                "context_sampling_rate": context_sampling_rate,
+            }
+
         # 1. GPU tokenization
-        inputs, session_emb = self._tokenize_and_add_session(
+        inputs, session_emb, ch_emb_cache = self._tokenize_and_add_session(
             input_values,
             input_channel_index,
             input_session_index,
@@ -206,6 +292,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             input_seq_len=input_seq_len,
             input_session_ids=input_session_ids,
             input_channel_counts=input_channel_counts,
+            context_kwargs=context_kwargs,
         )
 
         B, num_tokens, D = inputs.shape
@@ -276,13 +363,17 @@ class MaskedPOYOEEGModel(POYOEEGModel):
                 input_timestamps,
                 N,
                 masked_validity,
+                channel_emb_cache=ch_emb_cache,
             )
         )
 
         # 7. Combine with downstream queries (shared helper) if present
         if output_timestamps.numel() > 0:
             ds_queries, ds_ts_emb = self._build_downstream_queries(
-                output_session_index, task_index, output_timestamps
+                output_session_index,
+                task_index,
+                output_timestamps,
+                session_emb=session_emb,
             )
             all_queries = torch.cat([recon_queries, ds_queries], dim=1)
             all_ts_emb = torch.cat([recon_ts_emb, ds_ts_emb], dim=1)
@@ -326,6 +417,9 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         signal (already length-normalized via :class:`PreparedSignal`) for
         reconstruction targets, ensuring encoder inputs and targets share
         the same signal contract.
+
+        When ``session_emb_mode == "dynamic"``, also retrieves cached
+        pretokenized context windows for the session.
         """
         result, prepared = self._tokenize_core(data)
 
@@ -345,5 +439,19 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             result["input_timestamps"] = pad2d(ts.reshape(C_pad, N))
 
         result["input_values"] = pad2d(result["input_values"])
+
+        if (
+            self.session_emb_mode == "dynamic"
+            and self._session_context_cache is not None
+        ):
+            session_id = str(data.session.id)
+            context = self._session_context_cache.get_or_build(
+                session_id=session_id,
+                data=data,
+                prepare_fn=self._prepare_signal,
+                pretokenize_fn=self.tokenizer.pretokenize,
+                channel_vocab_fn=self.channel_emb.tokenizer,
+            )
+            result.update(context)
 
         return result

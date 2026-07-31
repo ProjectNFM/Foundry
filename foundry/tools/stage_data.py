@@ -148,12 +148,87 @@ def _run_with_progress(
         raise subprocess.CalledProcessError(proc.returncode, cmd)
 
 
+_LOCK_POLL_INTERVAL = 10  # seconds between polls when waiting for a lock
+_LOCK_TIMEOUT = 1800  # 30 min — generous for very large archives
+_LOCK_STALE_THRESHOLD = 600  # consider a lock stale if no progress for 10 min
+
+
+def _acquire_lock(lock_path: Path) -> bool:
+    """Try to atomically create a lock file. Returns True if acquired."""
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, f"{os.getpid()}\n".encode())
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+
+
+def _wait_for_archive(
+    archive_path: Path,
+    lock_path: Path,
+    timeout: float = _LOCK_TIMEOUT,
+) -> None:
+    """Wait for another process to finish creating an archive.
+
+    Watches both the lock file and the final archive path. If the lock
+    disappears without the archive appearing, or if no progress is made
+    for ``_LOCK_STALE_THRESHOLD`` seconds, raises so the caller can retry.
+    """
+    logger.info(
+        "Another process is creating %s — waiting (timeout %ds)...",
+        archive_path.name,
+        timeout,
+    )
+    start = time.monotonic()
+    last_change = start
+
+    while time.monotonic() - start < timeout:
+        if archive_path.exists():
+            logger.info("Archive appeared: %s", archive_path)
+            return
+
+        if not lock_path.exists():
+            raise RuntimeError(
+                f"Lock {lock_path} disappeared but archive {archive_path} "
+                "was not created — the creating process may have crashed."
+            )
+
+        try:
+            mtime = lock_path.stat().st_mtime
+            if mtime > last_change:
+                last_change = mtime
+        except FileNotFoundError:
+            continue
+
+        if time.monotonic() - last_change > _LOCK_STALE_THRESHOLD:
+            logger.warning(
+                "Lock file %s appears stale (no update for %ds), removing.",
+                lock_path,
+                _LOCK_STALE_THRESHOLD,
+            )
+            lock_path.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"Stale lock removed for {archive_path}; caller should retry."
+            )
+
+        time.sleep(_LOCK_POLL_INTERVAL)
+
+    raise TimeoutError(
+        f"Timed out after {timeout}s waiting for {archive_path} to be created."
+    )
+
+
 def create_archive(
     filepaths: dict[str, Path],
     archive_path: Path,
     compress: bool = False,
 ) -> None:
     """Create a tar archive from the given h5 files using system tar.
+
+    Safe for concurrent invocations: uses a per-process temp file and an
+    exclusive lock file so only one process archives at a time.  If the
+    archive already exists when we finish, our copy is discarded.
 
     When *compress* is True, uses zstd (level 1) for a good
     speed/ratio trade-off on already-partially-compressed h5 data.
@@ -164,7 +239,8 @@ def create_archive(
     source_dir = next(iter(filepaths.values())).parent
     file_names = sorted(p.name for p in filepaths.values())
 
-    tmp_path = archive_path.with_suffix(".tmp")
+    suffix = f".tmp.{os.getpid()}.{os.urandom(4).hex()}"
+    tmp_path = archive_path.with_suffix(suffix)
     tar_cmd = ["tar", "cf", str(tmp_path)]
     if compress:
         tar_cmd += ["-I", "zstd -1 -T0"]
@@ -172,7 +248,27 @@ def create_archive(
 
     try:
         _run_with_progress(tar_cmd, tmp_path, total_bytes, "Archiving")
-        tmp_path.rename(archive_path)
+
+        if archive_path.exists():
+            logger.info(
+                "Archive %s was created by another process while we were "
+                "archiving — discarding our copy.",
+                archive_path,
+            )
+            tmp_path.unlink(missing_ok=True)
+            return
+
+        try:
+            tmp_path.rename(archive_path)
+        except OSError:
+            if archive_path.exists():
+                logger.info(
+                    "Archive %s appeared during rename — discarding our copy.",
+                    archive_path,
+                )
+                tmp_path.unlink(missing_ok=True)
+                return
+            raise
     except BaseException:
         tmp_path.unlink(missing_ok=True)
         raise
@@ -270,13 +366,27 @@ def stage_data(
         archive_src = compressed_root / archive_name
 
         if not archive_src.exists():
-            logger.info(
-                "Archive not found at %s — creating from %d files in %s",
-                archive_src,
-                len(missing),
-                source_dir,
-            )
-            create_archive(missing, archive_src, compress=compress)
+            lock_path = archive_src.with_suffix(archive_src.suffix + ".lock")
+            if _acquire_lock(lock_path):
+                try:
+                    if archive_src.exists():
+                        logger.info(
+                            "Archive appeared after lock acquired: %s",
+                            archive_src,
+                        )
+                    else:
+                        logger.info(
+                            "Archive not found at %s — creating from %d "
+                            "files in %s",
+                            archive_src,
+                            len(missing),
+                            source_dir,
+                        )
+                        create_archive(missing, archive_src, compress=compress)
+                finally:
+                    lock_path.unlink(missing_ok=True)
+            else:
+                _wait_for_archive(archive_src, lock_path)
         else:
             logger.info("Reusing existing archive %s", archive_src)
 

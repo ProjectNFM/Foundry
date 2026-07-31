@@ -15,7 +15,7 @@
 
 defaults:
   - override /model: masked_poyo_eeg
-  - override /data: openneuro/multi_brainset
+  - override /data: openneuro/sleep_brainset
   - override /hydra/launcher: slurm_default
 
 task_configs:

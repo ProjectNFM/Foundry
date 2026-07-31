@@ -266,6 +266,15 @@ def _apply_auto_class_weights(
 
 
 def _build_model_and_data(cfg: DictConfig):
+    """Construct the model and data module from the Hydra config.
+
+    Handles hyperparameter auto-population from the dataset, task config
+    loading, class weight computation, session embedding config unpacking,
+    and context cache attachment for dynamic session embedding mode.
+
+    Returns:
+        ``(model, datamodule)`` tuple ready for the Lightning trainer.
+    """
     _populate_data_driven_hyperparams(cfg)
 
     task_configs = _load_task_configs(cfg)
@@ -280,7 +289,33 @@ def _build_model_and_data(cfg: DictConfig):
         for k, v in cfg.model.items()
         if k != "_target_"
     }
+    session_emb_cfg = model_kwargs.pop("session_emb", None)
+    if session_emb_cfg is not None:
+        if OmegaConf.is_config(session_emb_cfg):
+            session_emb_cfg = OmegaConf.to_container(
+                session_emb_cfg, resolve=True
+            )
+        # session_context is consumed later by set_context_cache(); keep it
+        # out of the constructor kwargs.
+        session_emb_cfg.pop("session_context", None)
+        model_kwargs.update(session_emb_cfg)
+
     model = ModelClass(task_configs=task_configs, **model_kwargs)
+
+    if getattr(model, "session_emb_mode", None) == "dynamic":
+        session_context_cfg = OmegaConf.select(
+            cfg, "model.session_emb.session_context", default=None
+        )
+        if session_context_cfg is not None:
+            from foundry.models.session_embedding import SessionContextCache
+
+            model.set_context_cache(
+                SessionContextCache(
+                    num_windows=session_context_cfg.num_context_windows,
+                    context_source=session_context_cfg.context_source,
+                    context_duration=session_context_cfg.context_duration,
+                )
+            )
 
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule.set_tokenizer(tokenizer)
@@ -289,10 +324,15 @@ def _build_model_and_data(cfg: DictConfig):
 
 
 def _build_lightning_module(cfg: DictConfig, model, datamodule):
+    """Instantiate the :class:`FoundryModule` Lightning wrapper from config."""
     return instantiate(cfg.module, model=model)
 
 
 def _build_trainer(cfg: DictConfig):
+    """Instantiate the Lightning :class:`Trainer` from config.
+
+    Converts callback dicts to lists when Hydra composes them as a mapping.
+    """
     if OmegaConf.is_dict(cfg.trainer.get("callbacks")):
         cfg.trainer.callbacks = list(cfg.trainer.callbacks.values())
     return instantiate(cfg.trainer)
@@ -306,6 +346,12 @@ def _get_resume_checkpoint_path(
     checkpoint_dir: str,
     slurm_restart_count: int,
 ) -> str | None:
+    """Resolve the checkpoint path for resuming training, if any.
+
+    Priority: SLURM restart (automatic resume) > config flag
+    ``run.resume_if_checkpoint_exists``.  Returns ``None`` when no
+    resume is appropriate.
+    """
     last_ckpt = Path(checkpoint_dir) / "last.ckpt"
     if not last_ckpt.exists():
         if slurm_restart_count > 0:
@@ -443,6 +489,12 @@ def _inject_sweep_hyperparams(cfg: DictConfig) -> None:
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 @hydra_main_wrapper
 def main(cfg: DictConfig):
+    """Hydra entry point: configure, build, and run a training session.
+
+    Orchestrates logging setup, SLURM resume detection, WandB configuration,
+    data staging, model/data construction, optional pretrained weight
+    transfer, ``torch.compile``, and ``trainer.fit()``.
+    """
     setup_logging(cfg.run.log_level)
     torch.set_float32_matmul_precision(
         str(
