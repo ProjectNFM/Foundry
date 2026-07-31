@@ -1,5 +1,6 @@
 defaults:
   - tokenizer: per_channel_resample_cnn
+  - session_emb: static
 
 _target_: foundry.models.MaskedPOYOEEGModel
 
@@ -18,6 +19,7 @@ rotate_value: true
 emb_init_scale: 0.02
 t_min: 1e-2
 t_max: 0.5
+channel_emb_mode: static
 masking:
   _target_: foundry.tasks.masking.RandomTokenMasking
   mask_ratio: 0.5

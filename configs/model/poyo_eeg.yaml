@@ -1,5 +1,6 @@
 defaults:
   - tokenizer: spatial_session_cwt
+  - session_emb: static
 
 _target_: foundry.models.POYOEEGModel
 
@@ -19,3 +20,4 @@ emb_init_scale: 0.02
 t_min: 1e-2
 t_max: ${hyperparameters.sequence_length}
 disable_session_emb: false
+channel_emb_mode: static

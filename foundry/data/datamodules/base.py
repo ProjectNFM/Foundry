@@ -6,6 +6,7 @@ model-specific preprocessing.
 """
 
 import logging
+import math
 from typing import TYPE_CHECKING, Callable, Literal, Optional, Type
 
 import torch
@@ -111,7 +112,34 @@ class NeuralDataModule(LightningDataModule):
         recording_ids: Optional[list[str]] = None,
         task_configs: Optional[dict[str, "TaskConfig"]] = None,
         sampler_class: Optional[Type[RandomFixedWindowSampler]] = None,
+        session_pct: Optional[dict[str, float]] = None,
     ):
+        """Initialize the data module.
+
+        Args:
+            dataset_class: Dataset class (or importable string) to instantiate.
+            root: Root directory for the dataset files.
+            batch_size: Samples per batch.
+            num_workers: Number of data-loading worker processes.
+            pin_memory: Whether to pin GPU memory in the DataLoader.
+            sequence_length: Duration of each sampling window in seconds.
+            transforms: Optional list of transforms applied before tokenization.
+            tokenizer: Optional tokenizer callable (e.g. ``model.tokenize``)
+                appended to the transform pipeline.
+            seed: Random seed for reproducible sampling.
+            dataset_kwargs: Extra keyword arguments forwarded to the dataset
+                constructor (e.g. ``dirname``, ``split_type``).
+            task_type: Convenience shortcut merged into ``dataset_kwargs``.
+            split_type: Convenience shortcut merged into ``dataset_kwargs``.
+            fold: Cross-validation fold index merged into ``dataset_kwargs``.
+            recording_ids: Explicit list of recording IDs to use.
+            task_configs: Per-task :class:`TaskConfig` dicts used for class
+                mapping validation and class weight computation.
+            sampler_class: Sampler class for windowed sampling. Defaults to
+                :class:`FastRandomFixedWindowSampler`.
+            session_pct: Per-split fraction of sessions to keep, e.g.
+                ``{"train": 0.5, "valid": 1.0}``.
+        """
         super().__init__()
         if isinstance(dataset_class, str):
             dataset_class = get_class(dataset_class)
@@ -140,6 +168,17 @@ class NeuralDataModule(LightningDataModule):
                 self.dataset_kwargs[key] = val
 
         self.task_type = self.dataset_kwargs.get("task_type")
+
+        raw_pct = session_pct or self.dataset_kwargs.pop("session_pct", None)
+        self._session_pct: dict[str, float] = {}
+        if raw_pct is not None:
+            for split_name in ("train", "valid", "test"):
+                pct = float(raw_pct.get(split_name, 1.0))
+                if not 0.0 < pct <= 1.0:
+                    raise ValueError(
+                        f"session_pct.{split_name} must be in (0, 1], got {pct}"
+                    )
+                self._session_pct[split_name] = pct
 
         self._tokenizer = tokenizer
 
@@ -209,6 +248,18 @@ class NeuralDataModule(LightningDataModule):
     def compute_class_weights(
         self, smoothing: float = 1.0
     ) -> dict[str, list[float]]:
+        """Compute inverse-frequency class weights for classification tasks.
+
+        Args:
+            smoothing: Smoothing factor for the weight computation.
+
+        Returns:
+            Dict mapping task name to a list of per-class weight floats.
+
+        Raises:
+            RuntimeError: If :meth:`setup` has not been called.
+            ValueError: If ``task_configs`` was not provided at init.
+        """
         if self.dataset is None:
             raise RuntimeError("Call setup() before compute_class_weights()")
         if not self._task_configs:
@@ -221,13 +272,24 @@ class NeuralDataModule(LightningDataModule):
         )
 
     def get_recording_ids(self) -> list[str]:
+        """Return sorted list of all recording IDs in the dataset."""
         return sorted(self.dataset.recording_ids)
 
     def get_channel_ids(self) -> list[str]:
+        """Return sorted list of unique channel IDs across the dataset."""
         return sorted(set(self.dataset.get_channel_ids()))
 
     def _filter_intervals(self, sampling_intervals):
-        """Remove intervals containing labels that the mapping excludes."""
+        """Remove intervals whose labels are excluded by task class mappings.
+
+        Args:
+            sampling_intervals: Dict mapping recording ID to interval lists.
+
+        Returns:
+            Filtered copy of *sampling_intervals* with unmapped intervals
+            removed.  Returned unchanged when no task configs have class
+            mappings.
+        """
         if not self._task_configs:
             return sampling_intervals
         for name, cfg in self._task_configs.items():
@@ -244,6 +306,43 @@ class NeuralDataModule(LightningDataModule):
 
     _SPLIT_SEED_OFFSETS: dict[str, int] = {"train": 0, "valid": 1, "test": 2}
 
+    def _subsample_sessions(
+        self,
+        sampling_intervals: dict,
+        split: Literal["train", "valid", "test"],
+    ) -> dict:
+        """Deterministically keep a fraction of recordings for *split*.
+
+        Uses a seeded shuffle so the subset is reproducible but independent
+        across splits. Always keeps at least one recording.
+        """
+        pct = self._session_pct.get(split, 1.0)
+        if pct >= 1.0:
+            return sampling_intervals
+
+        rids = sorted(sampling_intervals.keys())
+        n_keep = max(1, math.ceil(len(rids) * pct))
+        if n_keep >= len(rids):
+            return sampling_intervals
+
+        rng = torch.Generator().manual_seed(
+            self.seed + self._SPLIT_SEED_OFFSETS[split] + 1000
+        )
+        perm = torch.randperm(len(rids), generator=rng).tolist()
+        keep = set(rids[i] for i in perm[:n_keep])
+
+        logger.info(
+            "session_pct[%s]=%.2f: keeping %d / %d recordings",
+            split,
+            pct,
+            n_keep,
+            len(rids),
+        )
+
+        return {
+            rid: ivl for rid, ivl in sampling_intervals.items() if rid in keep
+        }
+
     def _create_dataloader(
         self, split: Literal["train", "valid", "test"]
     ) -> DataLoader:
@@ -257,6 +356,10 @@ class NeuralDataModule(LightningDataModule):
         """
         sampling_intervals = self.dataset.get_sampling_intervals(split=split)
         sampling_intervals = self._filter_intervals(sampling_intervals)
+        if self._session_pct:
+            sampling_intervals = self._subsample_sessions(
+                sampling_intervals, split
+            )
 
         split_seed = self.seed + self._SPLIT_SEED_OFFSETS[split]
         sampler = self.sampler_class(

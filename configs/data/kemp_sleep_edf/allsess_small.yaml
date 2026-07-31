@@ -1,0 +1,10 @@
+# ~1/10 training subset for fast iteration.
+# Uses session_pct to deterministically keep 10% of training recordings
+# while preserving 100% of validation/test recordings.
+defaults:
+  - kemp_sleep_edf/allsess@_here_
+
+session_pct:
+  train: 0.1
+  valid: 1.0
+  test: 1.0

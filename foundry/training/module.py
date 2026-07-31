@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict
 
 import lightning as L
@@ -13,6 +14,8 @@ from foundry.models.ssl_meta import ModelOutput
 from foundry.tasks.config import TaskConfig
 from foundry.training.confusion_matrix import ConfusionMatrixTracker
 from foundry.training.step_output import StepOutput
+
+logger = logging.getLogger(__name__)
 
 
 def _squeeze_scalar_predictions(
@@ -102,6 +105,7 @@ class FoundryModule(L.LightningModule):
     def _metric_summary_mode(
         self, task_name: str, metric_name: str, cfg: Any
     ) -> str:
+        """Resolve the WandB summary mode (``"min"``/``"max"``) for a metric."""
         short_name = metric_name.removeprefix(
             f"train/{task_name}_"
         ).removeprefix(f"val/{task_name}_")
@@ -113,6 +117,7 @@ class FoundryModule(L.LightningModule):
         predictions: torch.Tensor,
         targets: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Convert raw logits to the format expected by torchmetrics."""
         if cfg.kind == "multiclass":
             return torch.softmax(predictions, dim=-1), targets
         if cfg.kind == "binary":
@@ -120,6 +125,7 @@ class FoundryModule(L.LightningModule):
         return _squeeze_scalar_predictions(predictions, targets), targets
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
+        """Move batch tensors to *device*, casting float64 to float32."""
         from lightning_utilities.core.apply_func import apply_to_collection
 
         def _move_and_convert(tensor):
@@ -137,16 +143,33 @@ class FoundryModule(L.LightningModule):
     def training_step(
         self, batch: Dict[str, Any], batch_idx: int
     ) -> Dict[str, Any]:
+        """Lightning training step — delegates to :meth:`_shared_step`."""
         step_output = self._shared_step("train", batch)
         return {"loss": step_output.loss, "step_output": step_output}
 
     def validation_step(
         self, batch: Dict[str, Any], batch_idx: int
     ) -> Dict[str, Any]:
+        """Lightning validation step — delegates to :meth:`_shared_step`."""
         step_output = self._shared_step("val", batch)
         return {"loss": step_output.loss, "step_output": step_output}
 
     def _shared_step(self, stage: str, batch: Dict[str, Any]) -> StepOutput:
+        """Run a single training or validation step.
+
+        Unpacks the batch, runs the model forward pass, computes the
+        sequence-weighted multitask loss, updates per-task metrics, and
+        optionally tracks confusion matrices for classification tasks.
+
+        Args:
+            stage: ``"train"`` or ``"val"``.
+            batch: Collated batch dict containing model inputs, target
+                values/weights, task indices, and metadata.
+
+        Returns:
+            :class:`StepOutput` with the total loss, per-task outputs,
+            targets, weights, and optional SSL/reconstruction metadata.
+        """
         model_inputs, target_values, target_weights, task_index, session_id = (
             self._unpack_batch(batch)
         )
@@ -233,6 +256,21 @@ class FoundryModule(L.LightningModule):
         )
 
     def _build_param_groups(self) -> list[dict]:
+        """Build optimizer parameter groups with per-component learning rates.
+
+        Three strategies, selected by constructor arguments:
+
+        1. **Backbone/head split** — when ``backbone_learning_rate`` is set and
+           the model exposes ``transferable_components()``, backbone parameters
+           get ``backbone_learning_rate`` and all other (head) parameters get
+           ``learning_rate``.
+        2. **CWT split** — when ``cwt_lr_multiplier != 1.0``, parameters whose
+           names contain ``".cwt."`` are grouped with a scaled learning rate.
+        3. **Uniform** — all parameters share ``learning_rate``.
+
+        Returns:
+            List of param-group dicts suitable for :class:`torch.optim.AdamW`.
+        """
         if self.backbone_learning_rate is not None and hasattr(
             self.model, "transferable_components"
         ):
@@ -281,15 +319,28 @@ class FoundryModule(L.LightningModule):
                 for p in other_params
                 if not p.__class__.__name__.startswith("Uninitialized")
             )
-            print(
-                f"CWT LR multiplier: {self.cwt_lr_multiplier}x "
-                f"(cwt_lr={cwt_lr:.2e}, {n_cwt} params) | "
-                f"base_lr={self.learning_rate:.2e} ({n_other} params)"
+            logger.info(
+                "CWT LR multiplier: %sx (cwt_lr=%.2e, %d params) | "
+                "base_lr=%.2e (%d params)",
+                self.cwt_lr_multiplier,
+                cwt_lr,
+                n_cwt,
+                self.learning_rate,
+                n_other,
             )
 
         return groups
 
     def _build_backbone_head_param_groups(self) -> list[dict]:
+        """Build param groups splitting backbone (transferable) from head params.
+
+        Backbone parameters (matched by ``model.transferable_components()``)
+        receive ``backbone_learning_rate``; remaining head parameters receive
+        ``learning_rate``.
+
+        Returns:
+            List of one or two param-group dicts.
+        """
         component_prefixes = tuple(
             f"{name}." for name in self.model.transferable_components()
         )
@@ -329,14 +380,22 @@ class FoundryModule(L.LightningModule):
             for p in head_params
             if not p.__class__.__name__.startswith("Uninitialized")
         )
-        print(
-            f"Discriminative LR: backbone_lr={self.backbone_learning_rate:.2e} "
-            f"({n_backbone} params) | head_lr={self.learning_rate:.2e} "
-            f"({n_head} params)"
+        logger.info(
+            "Discriminative LR: backbone_lr=%.2e (%d params) | "
+            "head_lr=%.2e (%d params)",
+            self.backbone_learning_rate,
+            n_backbone,
+            self.learning_rate,
+            n_head,
         )
         return groups
 
     def configure_optimizers(self):
+        """Build AdamW optimizer and multi-phase LR scheduler.
+
+        Constructs a :class:`SequentialLR` with up to three phases: linear
+        warmup, constant/cosine hold, and cosine decay.
+        """
         param_groups = self._build_param_groups()
         optimizer = torch.optim.AdamW(param_groups)
 
@@ -418,6 +477,7 @@ class FoundryModule(L.LightningModule):
         self._configure_wandb_metric_summaries()
 
     def _configure_wandb_metric_summaries(self):
+        """Register per-task metric summary modes (min/max) with WandB."""
         from lightning.pytorch.loggers import WandbLogger
 
         if not isinstance(self.logger, WandbLogger):
@@ -452,6 +512,17 @@ class FoundryModule(L.LightningModule):
                     )
 
     def _unpack_batch(self, batch: Dict[str, Any]):
+        """Separate target/metadata keys from model-input keys in the batch.
+
+        Pops ``target_values``, ``target_weights``, ``session_id``,
+        ``absolute_start``, and ``eval_mask`` from *batch* (mutating it
+        in-place) so that the remaining dict can be passed directly as
+        ``**model_inputs``.
+
+        Returns:
+            ``(model_inputs, target_values, target_weights, task_index,
+            session_id)`` where *model_inputs* is the modified *batch*.
+        """
         target_values = batch.pop("target_values")
         target_weights = batch.pop("target_weights")
         session_id = batch.pop("session_id", None)
@@ -469,6 +540,26 @@ class FoundryModule(L.LightningModule):
         task_index: torch.Tensor,
         ssl_task_names: set[str] | None = None,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """Compute sequence-weighted multitask loss.
+
+        Each task's loss is weighted by the number of sequences in the batch
+        that contain that task (determined from ``task_index``).  SSL tasks
+        (e.g. masked reconstruction) bypass the task-index lookup and use
+        the full batch size as their sequence count.
+
+        Args:
+            outputs: Per-task prediction tensors from the model.
+            target_values: Per-task ground-truth tensors.
+            target_weights: Per-task sample weights (tensor or scalar).
+            task_index: (B, n_out) padded task indices (0 = padding).
+            ssl_task_names: Task names injected by the SSL head, which use
+                batch-level weighting instead of per-sequence counting.
+
+        Returns:
+            ``(total_loss, taskwise_loss)`` where *total_loss* is the
+            sequence-weighted mean and *taskwise_loss* maps task name to
+            its individual (unweighted) loss scalar.
+        """
         multitask_loss = torch.tensor(
             0.0, device=self.device, dtype=torch.float32
         )

@@ -1,0 +1,3 @@
+# Static session embedding (default / current behavior).
+# Uses InfiniteVocabEmbedding for per-session learned embeddings.
+session_emb_mode: static

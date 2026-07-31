@@ -181,16 +181,19 @@ class PackedSubmititLauncher(BaseSubmititLauncher):
             *list(_batch(jps, tasks_per_node) for jps in zip(*job_params)),
         )
 
-        results = []
-        for j in jobs:
-            if j.state != "DONE":
-                try:
-                    j.wait()
-                except Exception as e:
-                    log.error("Job %s failed: %s", j.job_id, e)
-                    raise
-            results.extend(j.results())
-        return results
+        job_ids = [j.job_id for j in jobs]
+        log.info(
+            "Submitted %d Slurm job(s): %s",
+            len(job_ids),
+            ", ".join(str(jid) for jid in job_ids),
+        )
+        log.info(
+            "Logs directory: %s",
+            self.params["submitit_folder"],
+        )
+        # Return immediately without waiting for jobs to finish.
+        # Slurm jobs persist independently of this process.
+        return []
 
 
 class SlurmLauncher(PackedSubmititLauncher):

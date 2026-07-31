@@ -78,6 +78,13 @@ def _configure_wandb(cfg: DictConfig, output_dir: str) -> None:
     if OmegaConf.select(cfg, "logger.id") is not None:
         return
 
+    # Attach to the run created by the wandb sweep agent (WANDB_RUN_ID).
+    if _is_sweep_mode():
+        sweep_run_id = os.environ.get("WANDB_RUN_ID")
+        if sweep_run_id:
+            OmegaConf.update(cfg, "logger.id", sweep_run_id)
+            return
+
     resume_wandb_if_name_matches = OmegaConf.select(
         cfg, "run.resume_wandb_if_name_matches", default=False
     )
@@ -224,13 +231,6 @@ def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
         )
 
 
-def _resolve_dataset_class(cfg: DictConfig):
-    dataset_class = cfg.data.dataset_class
-    if isinstance(dataset_class, str):
-        dataset_class = get_class(dataset_class)
-    return dataset_class
-
-
 _TASKS_DIR = Path(__file__).resolve().parent / "configs" / "tasks"
 
 
@@ -266,6 +266,15 @@ def _apply_auto_class_weights(
 
 
 def _build_model_and_data(cfg: DictConfig):
+    """Construct the model and data module from the Hydra config.
+
+    Handles hyperparameter auto-population from the dataset, task config
+    loading, class weight computation, session embedding config unpacking,
+    and context cache attachment for dynamic session embedding mode.
+
+    Returns:
+        ``(model, datamodule)`` tuple ready for the Lightning trainer.
+    """
     _populate_data_driven_hyperparams(cfg)
 
     task_configs = _load_task_configs(cfg)
@@ -280,7 +289,33 @@ def _build_model_and_data(cfg: DictConfig):
         for k, v in cfg.model.items()
         if k != "_target_"
     }
+    session_emb_cfg = model_kwargs.pop("session_emb", None)
+    if session_emb_cfg is not None:
+        if OmegaConf.is_config(session_emb_cfg):
+            session_emb_cfg = OmegaConf.to_container(
+                session_emb_cfg, resolve=True
+            )
+        # session_context is consumed later by set_context_cache(); keep it
+        # out of the constructor kwargs.
+        session_emb_cfg.pop("session_context", None)
+        model_kwargs.update(session_emb_cfg)
+
     model = ModelClass(task_configs=task_configs, **model_kwargs)
+
+    if getattr(model, "session_emb_mode", None) == "dynamic":
+        session_context_cfg = OmegaConf.select(
+            cfg, "model.session_emb.session_context", default=None
+        )
+        if session_context_cfg is not None:
+            from foundry.models.session_embedding import SessionContextCache
+
+            model.set_context_cache(
+                SessionContextCache(
+                    num_windows=session_context_cfg.num_context_windows,
+                    context_source=session_context_cfg.context_source,
+                    context_duration=session_context_cfg.context_duration,
+                )
+            )
 
     tokenizer = model.tokenize if hasattr(model, "tokenize") else None
     datamodule.set_tokenizer(tokenizer)
@@ -289,10 +324,15 @@ def _build_model_and_data(cfg: DictConfig):
 
 
 def _build_lightning_module(cfg: DictConfig, model, datamodule):
+    """Instantiate the :class:`FoundryModule` Lightning wrapper from config."""
     return instantiate(cfg.module, model=model)
 
 
 def _build_trainer(cfg: DictConfig):
+    """Instantiate the Lightning :class:`Trainer` from config.
+
+    Converts callback dicts to lists when Hydra composes them as a mapping.
+    """
     if OmegaConf.is_dict(cfg.trainer.get("callbacks")):
         cfg.trainer.callbacks = list(cfg.trainer.callbacks.values())
     return instantiate(cfg.trainer)
@@ -306,6 +346,12 @@ def _get_resume_checkpoint_path(
     checkpoint_dir: str,
     slurm_restart_count: int,
 ) -> str | None:
+    """Resolve the checkpoint path for resuming training, if any.
+
+    Priority: SLURM restart (automatic resume) > config flag
+    ``run.resume_if_checkpoint_exists``.  Returns ``None`` when no
+    resume is appropriate.
+    """
     last_ckpt = Path(checkpoint_dir) / "last.ckpt"
     if not last_ckpt.exists():
         if slurm_restart_count > 0:
@@ -396,12 +442,59 @@ def _log_config_to_wandb(trainer, cfg: DictConfig):
     )
 
 
+def _is_sweep_mode() -> bool:
+    """Check if running under WandB sweep."""
+    return "WANDB_SWEEP_ID" in os.environ
+
+
+def _inject_sweep_hyperparams(cfg: DictConfig) -> None:
+    """Inject hyperparameters from WandB sweep config into Hydra config.
+
+    When running as a WandB sweep agent, the sweep system populates
+    wandb.config with the current trial's hyperparameters. This function
+    injects those into the Hydra config so they override defaults/CLI args.
+    """
+    try:
+        import wandb
+    except ImportError:
+        logger.warning("wandb not available; skipping sweep param injection")
+        return
+
+    if not _is_sweep_mode():
+        return
+
+    if wandb.run is None:
+        return
+
+    # Pull all wandb.config values and inject into cfg
+    sweep_config = dict(wandb.config)
+    logger.info("Injecting %d sweep hyperparameters", len(sweep_config))
+
+    for key, value in sweep_config.items():
+        try:
+            OmegaConf.update(cfg, key, value, force_add=True)
+            logger.debug("Injected sweep param: %s = %s", key, value)
+        except Exception as e:
+            logger.warning(
+                "Failed to inject sweep param %s = %s: %s",
+                key,
+                value,
+                e,
+            )
+
+
 # -- Entry point ------------------------------------------------------------
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 @hydra_main_wrapper
 def main(cfg: DictConfig):
+    """Hydra entry point: configure, build, and run a training session.
+
+    Orchestrates logging setup, SLURM resume detection, WandB configuration,
+    data staging, model/data construction, optional pretrained weight
+    transfer, ``torch.compile``, and ``trainer.fit()``.
+    """
     setup_logging(cfg.run.log_level)
     torch.set_float32_matmul_precision(
         str(
@@ -432,6 +525,9 @@ def main(cfg: DictConfig):
 
     output_dir, checkpoint_dir = _configure_output_paths(cfg)
     _configure_wandb(cfg, output_dir)
+
+    # Inject WandB sweep hyperparameters if running under sweep
+    _inject_sweep_hyperparams(cfg)
 
     _log_output_destinations(
         cfg, output_dir, checkpoint_dir, using_wandb_logger

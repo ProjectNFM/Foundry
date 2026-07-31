@@ -1,0 +1,15 @@
+# Dynamic session embedding: signal-conditioned via context windows.
+# Reuses the shared EEGTokenizer to handle variable channels/rates,
+# then pools tokenized context into a session embedding vector.
+session_emb_mode: dynamic
+
+dynamic_session_encoder:
+  _target_: foundry.models.session_embedding.DynamicSessionEncoder
+  embed_dim: ${model.embed_dim}
+  pool_mode: mean
+
+# Context window sampling configuration (used by SessionContextCache)
+session_context:
+  num_context_windows: 5
+  context_source: random    # random | start
+  context_duration: 2.0     # seconds per context window

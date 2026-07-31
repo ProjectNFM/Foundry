@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-07-24
 **Parent experiment:** [Session Embedding Ablation](../experiments/011-session-embedding-ablation.md), [Within-Subject Split Control](../experiments/012-within-subject-split-control.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Session Embedding Mode Comparison](../experiments/014-session-emb-mode-comparison.md)
 
 ## Background
 
