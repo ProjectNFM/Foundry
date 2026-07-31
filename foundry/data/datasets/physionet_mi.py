@@ -140,6 +140,7 @@ class PhysionetMI(Dataset):
             data.channels.id = np_string_prefix(
                 f"{data.session.id}/", data.channels.id
             )
+
         super().get_recording_hook(data)
 
     @classmethod

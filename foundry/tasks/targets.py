@@ -54,7 +54,14 @@ class TargetExtractor:
     class_mapping: ClassificationMapping | None = None
 
     def __call__(self, data: Data) -> dict:
-        timestamps = data.get_nested_attribute(self.timestamp_key)
+        try:
+            timestamps = data.get_nested_attribute(self.timestamp_key)
+        except AttributeError:
+            parent_key = ".".join(self.timestamp_key.split(".")[:-1])
+            parent = data.get_nested_attribute(parent_key)
+            start = np.asarray(parent.start)
+            end = np.asarray(parent.end)
+            timestamps = (start + end) / 2.0
         values = data.get_nested_attribute(self.value_key)
 
         if self.class_mapping is not None:

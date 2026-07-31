@@ -88,15 +88,26 @@ class BrainInvadersP300(Dataset):
                 for rid in self.recording_ids
             }
 
-        key = f"splits.{self.fold_type}_fold_{self.fold_number}_assignment"
-        fallback_key = f"splits.fold_{self.fold_number}_assignment"
+        key = f"splits.SubjectSplit_fold{self.fold_number}"
+        fallback_keys = [
+            f"splits.{self.fold_type}_fold_{self.fold_number}_assignment",
+            f"splits.fold_{self.fold_number}_assignment",
+        ]
         result = {}
         for rid in self.recording_ids:
             rec = self.get_recording(rid)
-            try:
-                assignment = str(rec.get_nested_attribute(key))
-            except (AttributeError, KeyError):
-                assignment = str(rec.get_nested_attribute(fallback_key))
+            assignment = None
+            for k in [key] + fallback_keys:
+                try:
+                    assignment = str(rec.get_nested_attribute(k))
+                    break
+                except (AttributeError, KeyError):
+                    continue
+            if assignment is None:
+                raise AttributeError(
+                    f"Could not find intersubject split assignment for "
+                    f"recording '{rid}'. Tried keys: {[key] + fallback_keys}"
+                )
             if assignment == split:
                 result[rid] = rec.p300_trials
         return result
@@ -115,6 +126,7 @@ class BrainInvadersP300(Dataset):
             data.channels.id = np_string_prefix(
                 f"{data.session.id}/", data.channels.id
             )
+
         super().get_recording_hook(data)
 
     @classmethod

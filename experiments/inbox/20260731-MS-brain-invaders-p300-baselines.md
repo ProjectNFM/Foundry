@@ -1,9 +1,9 @@
 # Brain Invaders P300 From-Scratch Baselines
 
-**Status:** Draft
+**Status:** Completed
 **Date started:** 2026-07-31
 **Parent experiment:** [KempSleep 30s-Epoch From-Scratch Baselines](../_legacy/023-kemp-30s-baselines.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Brain Invaders P300 HP Search](20260731-MS-brain-invaders-p300-hp-search.md)
 **Tags:** p300, brain_invaders, baseline, from_scratch, eegnet, poyo, cwt_cnn, resample_cnn
 
 ## Background
@@ -96,12 +96,85 @@ uv run python main.py experiment=p300/eegnet_brain_invaders_baselines -m
 
 ## Results
 
-TBD
+### Summary
+
+All 15 runs (5 conditions × 3 folds) completed. Performance is poor across
+the board, with EEGNet essentially failing completely and POYO models only
+marginally above trivial baselines.
+
+### Metrics
+
+| Condition | Mean F1 | Std | Fold 0 | Fold 1 | Fold 2 |
+|-----------|---------|-----|--------|--------|--------|
+| EEGNet | 0.046 | 0.005 | 0.040 | 0.045 | 0.053 |
+| CWT Disabled | 0.347 | 0.029 | 0.350 | 0.310 | 0.381 |
+| CWT Dynamic | 0.340 | 0.027 | 0.355 | 0.303 | 0.362 |
+| RCNN Disabled | 0.308 | 0.033 | 0.276 | 0.293 | 0.354 |
+| RCNN Dynamic | 0.309 | 0.032 | 0.286 | 0.288 | 0.354 |
+
+**Tokenizer comparison:**
+- CWT-CNN > ResampleCNN by +3.9pp (disabled ch. emb) and +3.1pp (dynamic)
+
+**Channel embedding effect:**
+- Negligible: −0.7pp for CWT-CNN, +0.1pp for ResampleCNN
+
+**EEGNet failure analysis:** Confusion matrix shows [[2734, 0], [550, 0]] —
+the model predicts ALL samples as NonTarget. Zero recall, zero precision on
+Target class. AUROC=0.56 (barely above chance). Early stopped at epoch 2.
+
+**POYO CWT-CNN (best model):** Confusion matrix [[2234, 500], [356, 194]].
+Detects some Targets (recall≈0.35, precision≈0.28) but with many false
+positives. AUROC=0.68.
+
+### Analysis
+
+```bash
+uv run python analysis/024_brain_invaders_p300_baselines.py
+```
+
+### Figures
+
+- ![Main results](../../analysis/figures/024_bi_p300_main_results.png)
+- ![F1 curves](../../analysis/figures/024_bi_p300_f1_curves.png)
+- ![Fold variance](../../analysis/figures/024_bi_p300_fold_variance.png)
 
 ## Conclusions
 
-TBD
+1. **Hypothesis 1 (EEGNet competitive) — REFUTED.** EEGNet completely
+   collapsed on P300. It converged to predicting all-NonTarget within 2
+   epochs. The default hyperparameters (lr=1e-4, kernel_length=64) are
+   clearly unsuitable for this task/dataset.
+
+2. **Hypothesis 2 (CWT > RCNN) — CONFIRMED.** CWT-CNN outperforms
+   ResampleCNN by ~3.5pp consistently across both channel embedding modes.
+
+3. **Hypothesis 3 (dynamic ch. emb matters more for P300) — REFUTED.**
+   Channel embeddings have negligible effect (< 1pp), similar to the sleep
+   staging findings. The 16-channel P300 montage doesn't provide enough
+   spatial diversity to benefit from dynamic embeddings.
+
+4. **Hypothesis 4 (class imbalance is a factor) — CONFIRMED.** The ~83/17
+   NonTarget/Target imbalance dominates. EEGNet collapsed entirely into
+   majority-class prediction. Even with class-weighted loss, models struggle
+   to learn the minority class.
+
+**Overall:** All models underperform substantially. The best result (CWT-CNN
+at 0.35 F1) is far below literature baselines for Brain Invaders P300
+(typically 0.5–0.7 F1). The default hyperparameters from sleep staging do not
+transfer to this task. A hyperparameter search is needed, particularly:
+learning rate, weight decay, class weight smoothing, and model-specific
+parameters (EEGNet kernel_length, POYO embed_dim/depth).
 
 ## Notes for future experiments
 
-TBD
+- EEGNet needs much more aggressive hyperparameter tuning for P300 — the
+  default lr=1e-4 with patience=20 leads to immediate collapse on imbalanced
+  short-window tasks.
+- Consider higher learning rates (1e-3), different class weight smoothing,
+  or focal loss for the imbalance problem.
+- POYO models may benefit from smaller architectures (fewer layers/heads)
+  given the short 1s window and simple binary task.
+- The ResampleCNN tokenizer consistently underperforms CWT-CNN — may not be
+  worth including in HP search unless we test different resampling configs.
+- Data augmentation (time jitter, channel dropout) could help with the small
+  effective dataset size per class.
