@@ -266,6 +266,15 @@ def _apply_auto_class_weights(
 
 
 def _build_model_and_data(cfg: DictConfig):
+    """Construct the model and data module from the Hydra config.
+
+    Handles hyperparameter auto-population from the dataset, task config
+    loading, class weight computation, session embedding config unpacking,
+    and context cache attachment for dynamic session embedding mode.
+
+    Returns:
+        ``(model, datamodule)`` tuple ready for the Lightning trainer.
+    """
     _populate_data_driven_hyperparams(cfg)
 
     task_configs = _load_task_configs(cfg)
@@ -315,10 +324,15 @@ def _build_model_and_data(cfg: DictConfig):
 
 
 def _build_lightning_module(cfg: DictConfig, model, datamodule):
+    """Instantiate the :class:`FoundryModule` Lightning wrapper from config."""
     return instantiate(cfg.module, model=model)
 
 
 def _build_trainer(cfg: DictConfig):
+    """Instantiate the Lightning :class:`Trainer` from config.
+
+    Converts callback dicts to lists when Hydra composes them as a mapping.
+    """
     if OmegaConf.is_dict(cfg.trainer.get("callbacks")):
         cfg.trainer.callbacks = list(cfg.trainer.callbacks.values())
     return instantiate(cfg.trainer)
@@ -332,6 +346,12 @@ def _get_resume_checkpoint_path(
     checkpoint_dir: str,
     slurm_restart_count: int,
 ) -> str | None:
+    """Resolve the checkpoint path for resuming training, if any.
+
+    Priority: SLURM restart (automatic resume) > config flag
+    ``run.resume_if_checkpoint_exists``.  Returns ``None`` when no
+    resume is appropriate.
+    """
     last_ckpt = Path(checkpoint_dir) / "last.ckpt"
     if not last_ckpt.exists():
         if slurm_restart_count > 0:
@@ -428,6 +448,12 @@ def _log_config_to_wandb(trainer, cfg: DictConfig):
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 @hydra_main_wrapper
 def main(cfg: DictConfig):
+    """Hydra entry point: configure, build, and run a training session.
+
+    Orchestrates logging setup, SLURM resume detection, WandB configuration,
+    data staging, model/data construction, optional pretrained weight
+    transfer, ``torch.compile``, and ``trainer.fit()``.
+    """
     setup_logging(cfg.run.log_level)
     torch.set_float32_matmul_precision(
         str(

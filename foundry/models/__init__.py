@@ -1,3 +1,11 @@
+"""Foundry models package.
+
+Re-exports the core model classes (:class:`POYOEEGModel`,
+:class:`MaskedPOYOEEGModel`), the :class:`EEGTokenizer`, backbone components,
+channel/temporal embedding strategies, session/channel encoders, and baseline
+architectures.
+"""
+
 from foundry.models.backbones import (
     PerceiverDecoder,
     PerceiverEncoder,
@@ -12,10 +20,12 @@ from foundry.models.embeddings import (
     PatchCNNEmbedding,
     ContinuousCWTLayer,
     CWTEmbedding,
+    CWTCNNEmbedding,
     PatchMLPEmbedding,
     PatchLinearEmbedding,
     PerTimepointLinearEmbedding,
     PerTimepointIdentityEmbedding,
+    ResampleCNNEmbedding,
     LinearSpatialProjector,
     PerceiverSpatialProjector,
     SessionSpatialProjector,
@@ -87,4 +97,6 @@ __all__ = [
     "DynamicSessionEncoder",
     "SessionContextCache",
     "SessionEmbeddingCache",
+    "ResampleCNNEmbedding",
+    "CWTCNNEmbedding",
 ]

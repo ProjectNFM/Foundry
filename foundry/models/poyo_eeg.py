@@ -1,6 +1,16 @@
+"""POYO-style EEG model with Perceiver IO backbone.
+
+Central model module that composes an :class:`EEGTokenizer` (channel strategy +
+temporal embedding + optional GPU patching) with a :class:`PerceiverIOBackbone`
+(encoder/processor/decoder) and a :class:`ReadoutRouter` for multitask
+predictions.  Supports static, dynamic, and disabled session/channel embedding
+modes.
+"""
+
 from __future__ import annotations
 
 import logging
+import warnings
 from typing import Optional
 
 import numpy as np
@@ -52,8 +62,8 @@ class POYOEEGModel(nn.Module):
         lin_dropout: Dropout rate for linear layers in processor.
         atn_dropout: Dropout rate for attention layers.
         emb_init_scale: Initialization scale for embeddings.
-        t_min: Minimum time value for rotary encoding.
-        t_max: Maximum time value for rotary encoding.
+        t_min: Minimum time value for rotary time embedding.
+        t_max: Maximum time value for rotary time embedding.
         zero_output_timestamps: If True, replaces all output query timestamps
             with zeros before decoder cross-attention. This is useful for
             window-level classification tasks where labels are not tied to a
@@ -147,6 +157,12 @@ class POYOEEGModel(nn.Module):
                 )
             self.session_emb_mode = session_emb_mode
         elif disable_session_emb:
+            warnings.warn(
+                "disable_session_emb is deprecated; use "
+                "session_emb_mode='disabled' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             self.session_emb_mode = "disabled"
         else:
             self.session_emb_mode = "static"
@@ -665,6 +681,20 @@ class POYOEEGModel(nn.Module):
     def _infer_sampling_rate_from_timestamps(
         self, timestamps: np.ndarray
     ) -> float:
+        """Infer sampling rate from the median inter-sample interval.
+
+        Falls back to this when the signal source does not expose an
+        explicit ``sampling_rate`` attribute.
+
+        Args:
+            timestamps: 1-D array of sample timestamps.
+
+        Returns:
+            Estimated sampling rate in Hz.
+
+        Raises:
+            ValueError: If no valid positive inter-sample deltas exist.
+        """
         sample_deltas = np.diff(timestamps).astype(np.float64)
 
         valid_deltas = sample_deltas[
@@ -677,6 +707,11 @@ class POYOEEGModel(nn.Module):
         return 1.0 / float(np.median(valid_deltas))
 
     def _extract_targets(self, data: Data):
+        """Extract multitask targets from the data sample.
+
+        Delegates to :func:`extract_multitask_targets` using the model's
+        task configs.
+        """
         return extract_multitask_targets(self._task_configs, data)
 
     def _tokenize_core(self, data: Data) -> tuple[dict, PreparedSignal]:
@@ -766,7 +801,7 @@ class POYOEEGModel(nn.Module):
                 data=data,
                 prepare_fn=self._prepare_signal,
                 pretokenize_fn=self.tokenizer.pretokenize,
-                channel_emb_tokenizer=self.channel_emb.tokenizer,
+                channel_vocab_fn=self.channel_emb.tokenizer,
             )
             result.update(context)
 

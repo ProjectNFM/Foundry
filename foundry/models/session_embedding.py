@@ -167,7 +167,7 @@ class SessionContextCache:
         data: "Data",
         prepare_fn: Callable,
         pretokenize_fn: Callable,
-        channel_emb_tokenizer: Callable,
+        channel_vocab_fn: Callable,
     ) -> dict[str, torch.Tensor]:
         """Return cached context or build it from *data*.
 
@@ -178,8 +178,9 @@ class SessionContextCache:
             prepare_fn: ``_prepare_signal``-like callable producing a
                 :class:`PreparedSignal`.
             pretokenize_fn: ``tokenizer.pretokenize`` callable.
-            channel_emb_tokenizer: ``channel_emb.tokenizer`` callable mapping
-                channel string IDs to integer tokens.
+            channel_vocab_fn: Vocabulary mapping callable (e.g.
+                ``channel_emb.tokenizer``) that converts channel string
+                IDs to integer token indices.
 
         Returns:
             Dict with keys ``context_values``, ``context_channel_index``,
@@ -190,7 +191,7 @@ class SessionContextCache:
             return self._cache[session_id]
 
         context = self._build_context(
-            data, prepare_fn, pretokenize_fn, channel_emb_tokenizer
+            data, prepare_fn, pretokenize_fn, channel_vocab_fn
         )
         self._cache[session_id] = context
         return context
@@ -200,7 +201,7 @@ class SessionContextCache:
         data: "Data",
         prepare_fn: Callable,
         pretokenize_fn: Callable,
-        channel_emb_tokenizer: Callable,
+        channel_vocab_fn: Callable,
     ) -> dict[str, torch.Tensor]:
         """Sample context windows and pretokenize them."""
         starts = self._sample_window_starts(data)
@@ -216,7 +217,7 @@ class SessionContextCache:
             channel_ids = window_data.channels.id[
                 prepared.modality_mask
             ].astype(str)
-            channel_tokens = np.asarray(channel_emb_tokenizer(channel_ids))
+            channel_tokens = np.asarray(channel_vocab_fn(channel_ids))
 
             pretok = pretokenize_fn(
                 signal=prepared.signal,
@@ -272,6 +273,7 @@ class SessionContextCache:
         self._cache.clear()
 
     def __len__(self) -> int:
+        """Return the number of cached sessions."""
         return len(self._cache)
 
 
@@ -292,16 +294,21 @@ class SessionEmbeddingCache:
         self._cache: dict[int, torch.Tensor] = {}
 
     def get(self, session_index: int) -> torch.Tensor | None:
+        """Return the cached embedding for *session_index*, or ``None``."""
         return self._cache.get(session_index)
 
     def put(self, session_index: int, embedding: torch.Tensor) -> None:
+        """Store a detached copy of *embedding* for *session_index*."""
         self._cache[session_index] = embedding.detach()
 
     def clear(self) -> None:
+        """Remove all cached embeddings."""
         self._cache.clear()
 
     def __len__(self) -> int:
+        """Return the number of cached sessions."""
         return len(self._cache)
 
     def __contains__(self, session_index: int) -> bool:
+        """Check whether *session_index* has a cached embedding."""
         return session_index in self._cache

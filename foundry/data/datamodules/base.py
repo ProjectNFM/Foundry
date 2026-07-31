@@ -114,6 +114,32 @@ class NeuralDataModule(LightningDataModule):
         sampler_class: Optional[Type[RandomFixedWindowSampler]] = None,
         session_pct: Optional[dict[str, float]] = None,
     ):
+        """Initialize the data module.
+
+        Args:
+            dataset_class: Dataset class (or importable string) to instantiate.
+            root: Root directory for the dataset files.
+            batch_size: Samples per batch.
+            num_workers: Number of data-loading worker processes.
+            pin_memory: Whether to pin GPU memory in the DataLoader.
+            sequence_length: Duration of each sampling window in seconds.
+            transforms: Optional list of transforms applied before tokenization.
+            tokenizer: Optional tokenizer callable (e.g. ``model.tokenize``)
+                appended to the transform pipeline.
+            seed: Random seed for reproducible sampling.
+            dataset_kwargs: Extra keyword arguments forwarded to the dataset
+                constructor (e.g. ``dirname``, ``split_type``).
+            task_type: Convenience shortcut merged into ``dataset_kwargs``.
+            split_type: Convenience shortcut merged into ``dataset_kwargs``.
+            fold: Cross-validation fold index merged into ``dataset_kwargs``.
+            recording_ids: Explicit list of recording IDs to use.
+            task_configs: Per-task :class:`TaskConfig` dicts used for class
+                mapping validation and class weight computation.
+            sampler_class: Sampler class for windowed sampling. Defaults to
+                :class:`FastRandomFixedWindowSampler`.
+            session_pct: Per-split fraction of sessions to keep, e.g.
+                ``{"train": 0.5, "valid": 1.0}``.
+        """
         super().__init__()
         if isinstance(dataset_class, str):
             dataset_class = get_class(dataset_class)
@@ -222,6 +248,18 @@ class NeuralDataModule(LightningDataModule):
     def compute_class_weights(
         self, smoothing: float = 1.0
     ) -> dict[str, list[float]]:
+        """Compute inverse-frequency class weights for classification tasks.
+
+        Args:
+            smoothing: Smoothing factor for the weight computation.
+
+        Returns:
+            Dict mapping task name to a list of per-class weight floats.
+
+        Raises:
+            RuntimeError: If :meth:`setup` has not been called.
+            ValueError: If ``task_configs`` was not provided at init.
+        """
         if self.dataset is None:
             raise RuntimeError("Call setup() before compute_class_weights()")
         if not self._task_configs:
@@ -234,13 +272,24 @@ class NeuralDataModule(LightningDataModule):
         )
 
     def get_recording_ids(self) -> list[str]:
+        """Return sorted list of all recording IDs in the dataset."""
         return sorted(self.dataset.recording_ids)
 
     def get_channel_ids(self) -> list[str]:
+        """Return sorted list of unique channel IDs across the dataset."""
         return sorted(set(self.dataset.get_channel_ids()))
 
     def _filter_intervals(self, sampling_intervals):
-        """Remove intervals containing labels that the mapping excludes."""
+        """Remove intervals whose labels are excluded by task class mappings.
+
+        Args:
+            sampling_intervals: Dict mapping recording ID to interval lists.
+
+        Returns:
+            Filtered copy of *sampling_intervals* with unmapped intervals
+            removed.  Returned unchanged when no task configs have class
+            mappings.
+        """
         if not self._task_configs:
             return sampling_intervals
         for name, cfg in self._task_configs.items():

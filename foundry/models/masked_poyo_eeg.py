@@ -68,6 +68,18 @@ class MaskedPOYOEEGModel(POYOEEGModel):
     RECONSTRUCTION_TASK_NAME: str = "masked_reconstruction"
 
     def __init__(self, *args, masking: MaskingStrategy, **kwargs):
+        """Initialize the masked pretraining model.
+
+        Args:
+            *args: Positional arguments forwarded to :class:`POYOEEGModel`.
+            masking: Masking strategy that determines which tokens are masked.
+                Must be compatible with :class:`PerChannelStrategy` (spatial
+                projection is not supported).
+            **kwargs: Keyword arguments forwarded to :class:`POYOEEGModel`.
+
+        Raises:
+            ValueError: If the tokenizer does not use :class:`PerChannelStrategy`.
+        """
         super().__init__(*args, **kwargs)
         self.masking = masking
 
@@ -212,6 +224,52 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         context_mask: Optional[torch.Tensor] = None,
         context_sampling_rate: Optional[torch.Tensor] = None,
     ) -> ModelOutput:
+        """MAE-style masked forward pass.
+
+        Extends the base :meth:`POYOEEGModel.forward` with masking,
+        reconstruction queries, and target gathering:
+
+        1. GPU-tokenize all input tokens.
+        2. Build a token validity mask and apply the masking strategy to
+           split tokens into visible and masked sets (fixed count per sample).
+        3. Run encoder + processor on visible tokens only.
+        4. Build reconstruction queries at masked positions using channel
+           and task embeddings.
+        5. Optionally combine with downstream task queries.
+        6. Decode all queries via cross-attention from processed latents.
+        7. Route through the :class:`ReadoutRouter`.
+        8. Gather z-scored reconstruction targets at masked positions.
+
+        Args:
+            input_values: (B, C, T) raw signal, padded to max T in batch.
+            input_timestamps: (B, C_pad*N) or (B, C_pad, N) flattened timestamps.
+            input_channel_index: (B, C_pad) channel identity tokens.
+            input_session_index: (B,) session index for each sample.
+            input_mask: (B, C_pad) boolean channel validity mask.
+            input_sampling_rate: (B,) per-item sampling rate in Hz.
+            input_seq_len: (B,) true sample count per item (variable-length mode).
+            input_session_ids: Per-item session string IDs (for dynamic mode).
+            input_channel_counts: (B,) number of real channels per item.
+            latent_index: (B, n_latent) indices for latent tokens.
+            latent_timestamps: (B, n_latent) timestamps for latent tokens.
+            output_session_index: (B, n_out) session indices for downstream outputs.
+            output_timestamps: (B, n_out) timestamps for downstream predictions.
+            task_index: (B, n_out) padded task indices for downstream queries.
+            reconstruction_targets: (B, C_pad*N) or (B, C_pad, N) z-scored targets.
+                ``None`` during inference (no target gathering).
+            unpack_output: Unused (kept for API compatibility with base class).
+            context_values: (B, W, C, T) context windows for dynamic session
+                embedding. Only used when ``session_emb_mode == "dynamic"``.
+            context_channel_index: (B, W, C) channel tokens per context window.
+            context_mask: (B, W, C) channel validity per context window.
+            context_sampling_rate: (B, W) sampling rate per context window.
+
+        Returns:
+            :class:`ModelOutput` containing ``task_outputs`` (per-task prediction
+            dicts), ``ssl_meta`` (:class:`SSLTaskMeta` with reconstruction targets
+            and validity weights, or ``None`` at inference), and ``viz``
+            (:class:`ReconstructionVizMeta` for visualization).
+        """
         del unpack_output
         self._validate_vocab_initialization()
 
@@ -392,7 +450,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
                 data=data,
                 prepare_fn=self._prepare_signal,
                 pretokenize_fn=self.tokenizer.pretokenize,
-                channel_emb_tokenizer=self.channel_emb.tokenizer,
+                channel_vocab_fn=self.channel_emb.tokenizer,
             )
             result.update(context)
 

@@ -1,3 +1,12 @@
+"""Composable EEG tokenizer orchestrating channel, temporal, and patching strategies.
+
+Defines the :class:`EEGTokenizer` module that combines three independent
+concerns — channel strategy (spatial transform), optional GPU-side signal
+patching, and temporal embedding — into a single ``nn.Module`` used by
+:class:`~foundry.models.poyo_eeg.POYOEEGModel` for both CPU-side
+pretokenization and GPU-side forward embedding.
+"""
+
 from __future__ import annotations
 
 from typing import Callable, Literal
@@ -118,6 +127,11 @@ class EEGTokenizer(nn.Module):
 
     @property
     def uses_per_channel(self) -> bool:
+        """Whether the channel strategy is :class:`PerChannelStrategy`.
+
+        When ``True``, the tokenizer processes each channel independently
+        and requires channel identity embeddings for reassembly.
+        """
         return isinstance(self.channel_strategy, PerChannelStrategy)
 
     def get_patch_samples(self, sampling_rate: float) -> int:
