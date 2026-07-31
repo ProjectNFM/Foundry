@@ -85,7 +85,8 @@ class MOABBPipeline(BrainsetPipeline):
         for subject_id in dataset.subject_list:
             rows.append(
                 {
-                    "subject_id": str(subject_id),
+                    "subject_id": f"sub{subject_id:03d}",
+                    "subject_num": subject_id,
                 }
             )
         return pd.DataFrame(rows).set_index("subject_id")
@@ -94,24 +95,55 @@ class MOABBPipeline(BrainsetPipeline):
     # Download
     # ------------------------------------------------------------------
 
-    def download(self, manifest_item) -> dict[str, Any]:
+    def download(self, manifest_item) -> dict[str, Any] | None:
+        subject_id = int(manifest_item.subject_num)
+
+        if not self.args.redownload and not self.args.reprocess:
+            existing = list(
+                self.processed_dir.glob(f"sub{subject_id:03d}_*.h5")
+            )
+            if existing:
+                logging.info(
+                    f"Subject {subject_id}: {len(existing)} processed file(s) "
+                    "found, skipping. Use --redownload or --reprocess to force."
+                )
+                return None
+
         self.update_status("DOWNLOADING")
-        subject_id = int(manifest_item.Index)
         dataset = self.moabb_dataset_cls()
         paradigm = self.moabb_paradigm_cls()
 
-        raw_dict = dataset.get_data(subjects=[subject_id])
+        try:
+            raw_dict = dataset.get_data(subjects=[subject_id])
+        except FileNotFoundError:
+            # MOABB checks for directory existence (not file existence) to
+            # decide whether to extract downloaded zips.  Stale empty
+            # directories from interrupted runs cause it to skip extraction.
+            # Remove them and retry.
+            self._remove_empty_subject_dirs()
+            raw_dict = dataset.get_data(subjects=[subject_id])
+
         return {
             "subject_id": subject_id,
             "raw_dict": raw_dict,
             "paradigm": paradigm,
         }
 
+    def _remove_empty_subject_dirs(self) -> None:
+        """Remove empty ``subject_*`` directories under *raw_dir* so MOABB
+        re-extracts downloaded zip archives on the next attempt."""
+        for p in self.raw_dir.rglob("subject_*"):
+            if p.is_dir() and not any(p.iterdir()):
+                logging.info(f"Removing stale empty directory: {p}")
+                p.rmdir()
+
     # ------------------------------------------------------------------
     # Process
     # ------------------------------------------------------------------
 
-    def process(self, download_output: dict[str, Any]) -> None:
+    def process(self, download_output: dict[str, Any] | None) -> None:
+        if download_output is None:
+            return
         self.update_status("PROCESSING")
         subject_id = download_output["subject_id"]
         raw_dict = download_output["raw_dict"]
