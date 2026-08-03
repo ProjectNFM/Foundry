@@ -1,9 +1,9 @@
 # PhysioNet Motor Imagery Hyperparameter Search
 
-**Status:** Draft
+**Status:** Completed
 **Date started:** 2026-07-31
 **Parent experiment:** [PhysioNet Motor Imagery From-Scratch Baselines](20260731-MS-physionet-mi-baselines.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [PhysioNet MI POYO Collation Fix + HP Tuning](20260803-MS-physionet-mi-poyo-collation-fix.md)
 **Tags:** motor_imagery, physionet, hp_search, eegnet, poyo, cwt_cnn
 
 ## Background
@@ -97,12 +97,57 @@ uv run python main.py experiment=motor_imagery/physionet_hp_search_eegnet -m
 
 ## Results
 
-TBD
+### Summary
+
+- **EEGNet:** 50 runs finished (group `PHYSIONET_MI_HP_SEARCH_EEGNET`). Best F1 = **0.924** (baseline was 0.873, +5.9% improvement).
+- **POYO CWT-CNN:** All 12 runs **crashed** before training with `RuntimeError: Trying to resize storage that is not resizable` in the DataLoader collate function. This is a tensor batching issue (not OOM) — the collation fails because samples have variable-size tensors that can't be stacked.
+
+### EEGNet Metrics (Top 10 by Val F1)
+
+| Config | Val F1 | Val AUROC | Val Acc | Epochs |
+|--------|--------|-----------|---------|--------|
+| lr=1e-4, wd=0.0, cw=none, F1=8 | 0.924 | 0.974 | 0.925 | 291 |
+| lr=5e-4, wd=0.0, cw=none, F1=16 | 0.924 | 0.976 | 0.926 | 205 |
+| lr=1e-4, wd=0.01, cw=none, F1=16 | 0.924 | 0.973 | 0.924 | 305 |
+| lr=5e-4, wd=0.0, cw=none, F1=8 | 0.924 | 0.977 | 0.922 | 213 |
+| lr=5e-4, wd=0.01, cw=auto, F1=16 | 0.923 | 0.975 | 0.922 | 177 |
+| lr=1e-3, wd=0.01, cw=none, F1=8 | 0.922 | 0.973 | 0.922 | 99 |
+| lr=1e-4, wd=0.0, cw=none, F1=16 | 0.922 | 0.973 | 0.922 | 305 |
+| lr=1e-4, wd=0.0, cw=auto, F1=16 | 0.922 | 0.972 | 0.922 | 295 |
+| lr=5e-4, wd=0.1, cw=none, F1=8 | 0.922 | 0.975 | 0.922 | 162 |
+| lr=5e-4, wd=0.0, cw=auto, F1=16 | 0.921 | 0.973 | 0.922 | 120 |
+
+### HP Sensitivity
+
+The performance landscape is **very flat** — all 50 configs score between 0.914–0.924 F1:
+- **Learning rate:** 5e-4 marginally best (mean 0.921), followed by 1e-3 and 1e-4 (both ~0.918)
+- **Weight decay:** negligible effect (0.0 vs 0.01 vs 0.1 all ~0.919)
+- **Class weights:** none slightly better than auto (0.921 vs 0.918)
+- **F1 filters:** 16 marginally better than 8 (0.920 vs 0.918)
+
+### Analysis
+
+```bash
+uv run python analysis/027_physionet_mi_hp_search.py
+```
+
+### Figures
+
+![HP Heatmap](../../analysis/figures/027_physionet_mi_hp_heatmap.png)
+![Class Weights Effect](../../analysis/figures/027_physionet_mi_hp_class_weights.png)
+![Top Configs vs Baseline](../../analysis/figures/027_physionet_mi_hp_top_configs.png)
 
 ## Conclusions
 
-TBD
+**Hypothesis 1 (EEGNet ~0.90 F1): CONFIRMED.** EEGNet reaches 0.924 F1 with tuning, exceeding the 0.90 target. The improvement over baseline (+5.9%) came primarily from increased patience (allowing convergence to epoch 200–300) rather than any single HP change.
+
+**Hypothesis 2 (POYO will run with reduced batch_size): REFUTED.** All POYO runs crashed with a collation error unrelated to memory. The issue is that `torch_brain`'s collate function cannot batch variable-size tensors from this dataset. Needs a code fix, not just HP tuning.
+
+**Hypothesis 3 (Higher LR speeds convergence): PARTIALLY CONFIRMED.** lr=5e-4 and lr=1e-3 converge faster (99–205 epochs vs 291–305 at lr=1e-4) with similar final F1.
 
 ## Notes for future experiments
 
-TBD
+- Fix the POYO collation bug in `torch_brain/batching/collate.py` for variable-size tensor handling, then re-run the POYO sweep
+- EEGNet is near-saturated on this task — further gains likely require data augmentation or ensemble methods
+- Best config for multi-fold validation: lr=5e-4, wd=0.0, cw=none, F1=16 (good balance of speed and performance)
+- Consider lr=5e-4 with no class weights as the default for future MI experiments

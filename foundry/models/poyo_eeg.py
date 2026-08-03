@@ -17,7 +17,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch_brain.data import Data
-from torch_brain.batching import chain, pad8
+from torch_brain.batching import chain, pad2d, pad8
 from torch_brain.nn import InfiniteVocabEmbedding, RotaryTimeEmbedding
 from foundry.models.backbones import PerceiverIOBackbone
 from foundry.models.readout import build_readout_router
@@ -790,6 +790,8 @@ class POYOEEGModel(nn.Module):
             metadata.
         """
         result, _prepared = self._tokenize_core(data)
+
+        result["input_values"] = pad2d(result["input_values"])
 
         if (
             self.session_emb_mode == "dynamic"
