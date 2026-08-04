@@ -93,6 +93,54 @@ class BrainInvadersP300(Dataset):
             **kwargs,
         )
 
+    def _ensure_normalized(self) -> None:
+        """Pre-normalize EEG signals in-place in the data cache.
+
+        Called lazily on first data access. Modifies ``_data_objects`` so
+        that every subsequent access already contains the normalized signal.
+        """
+        if getattr(self, "_signals_normalized", False):
+            return
+        self._signals_normalized = True
+
+        if not hasattr(self, "_data_objects"):
+            self._data_objects = {}
+            import h5py
+
+            for rid in self.recording_ids:
+                fpath = self._filepaths[rid]
+                self._data_objects[rid] = Data.from_hdf5(h5py.File(fpath))
+
+        for rid, data in self._data_objects.items():
+            if not (hasattr(data, "eeg") and hasattr(data.eeg, "signal")):
+                continue
+            ch_types = np.array([str(t) for t in data.channels.type])
+            eeg_mask = np.isin(np.char.lower(ch_types), ["eeg"])
+            sig = np.asarray(data.eeg.signal, dtype=np.float64)
+            eeg_sig = sig[:, eeg_mask]
+            mean, std = float(eeg_sig.mean()), float(eeg_sig.std())
+            if std > 0:
+                sig[:, eeg_mask] = (eeg_sig - mean) / std
+            data.eeg.signal = sig.astype(np.float32)
+
+    def __getitem__(self, index):
+        """Optimized item access that avoids deep-copying the full recording.
+
+        The base class deep-copies the entire cached recording (~57 MB) for
+        every sample.  Instead we slice directly from the cache — ``slice()``
+        already returns a new ``Data`` object without mutating the original —
+        then apply the recording hook to the (small) slice.
+        """
+        self._ensure_normalized()
+        data = self._data_objects[index.recording_id]
+        sample = data.slice(index.start, index.end)
+        self.get_recording_hook(sample)
+        if index._namespace:
+            self.apply_namespace(sample, index._namespace + "/")
+        if self.transform is not None:
+            sample = self.transform(sample)
+        return sample
+
     def get_sampling_intervals(
         self,
         split: Literal["train", "valid", "test"] | None = None,
@@ -103,6 +151,7 @@ class BrainInvadersP300(Dataset):
         discrete, non-contiguous events.  Intervals are extended to
         ``epoch_duration`` so the sampler doesn't drop short trials.
         """
+        self._ensure_normalized()
         if split is None:
             return {
                 rid: self._extend_to_epoch_duration(
@@ -168,4 +217,42 @@ class BrainInvadersP300(Dataset):
 
     @classmethod
     def get_required_transforms(cls, task_type: str) -> list:
+        if task_type == "p300":
+            return [_keep_anchor_trial]
         return []
+
+
+def _keep_anchor_trial(data: Data) -> Data:
+    """Keep only the anchor trial (earliest onset) in a windowed sample.
+
+    Each sampling window is centered on a single stimulus onset, but
+    ``epoch_duration`` may be long enough to overlap with subsequent
+    stimuli.  Retaining all of them forces the model to produce
+    contradictory predictions from the same feature vector (e.g. one
+    Target and two NonTargets), which prevents learning entirely.
+
+    This transform keeps only the trial whose onset is closest to the
+    start of the window (the anchor trial) so the model sees exactly
+    one classification target per window.
+    """
+    if not hasattr(data, "p300_trials"):
+        return data
+
+    trials = data.p300_trials
+    n = len(trials.start) if hasattr(trials, "start") else 0
+    if n <= 1:
+        return data
+
+    idx = int(np.argmin(np.asarray(trials.start)))
+    extra = {}
+    for key in trials.keys():
+        if key in ("start", "end"):
+            continue
+        extra[key] = np.asarray(getattr(trials, key))[idx : idx + 1]
+
+    data.p300_trials = Interval(
+        start=trials.start[idx : idx + 1],
+        end=trials.end[idx : idx + 1],
+        **extra,
+    )
+    return data

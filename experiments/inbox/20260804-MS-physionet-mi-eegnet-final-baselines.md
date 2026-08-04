@@ -1,6 +1,6 @@
 # PhysioNet MI EEGNet Final Baselines (Best HPs × 3 Folds)
 
-**Status:** Draft
+**Status:** Completed
 **Date started:** 2026-08-04
 **Parent experiment:** [PhysioNet Motor Imagery HP Search](20260731-MS-physionet-mi-hp-search.md)
 **Follow-up experiments:** TBD
@@ -90,12 +90,85 @@ uv run python main.py experiment=motor_imagery/eegnet_physionet_final_3fold -m
 
 ## Results
 
-TBD
+### Summary
+
+All 3 runs (1 condition × 3 folds) completed successfully. SLURM job array
+10282876, WandB group `PHYSIONET_MI_EEGNET_FINAL_3FOLD`.
+
+Fold 0 exactly reproduces the HP search result (0.924 F1). Folds 1 and 2
+score lower at 0.866 and 0.870, giving a 3-fold mean of 0.887 ± 0.027. The
+≥0.90 threshold is not met in aggregate, though the cross-fold variance is
+modest compared to the POYO conditions.
+
+### Metrics
+
+| Fold   | Val F1 | Val Acc | Val AUROC | Epochs |
+| ------ | ------ | ------- | --------- | ------ |
+| Fold 0 | 0.9241 | 0.9271 | 0.9725    | 291    |
+| Fold 1 | 0.8657 | 0.8634 | 0.9367    | —      |
+| Fold 2 | 0.8696 | 0.8711 | 0.9443    | —      |
+| **Mean** | **0.8865** | **0.8872** | **0.9512** | — |
+| **Std**  | **0.0266** | — | — | — |
+
+**Comparison with baseline experiment** (suboptimal HPs, patience=20):
+- Baseline mean F1: 0.873 ± 0.020
+- Final mean F1: 0.887 ± 0.027
+- Δ: +1.4 pp (driven mainly by fold 0: 0.873→0.924)
+
+**Comparison with POYO conditions** (from [POYO Final Baselines](20260804-MS-physionet-mi-poyo-final-baselines.md)):
+
+| Condition     | Mean F1 | Std    |
+| ------------- | ------- | ------ |
+| **EEGNet**    | **0.8865** | **0.0266** |
+| CWT Disabled  | 0.8840  | 0.0330 |
+| CWT Dynamic   | 0.8764  | 0.0402 |
+| RCNN Disabled | 0.8802  | 0.0365 |
+| RCNN Dynamic  | 0.8733  | 0.0424 |
+
+EEGNet achieves the highest mean F1 and lowest cross-fold variance of all 5
+conditions, though the margin is negligible (−0.2 pp vs best POYO).
+
+### Analysis
+
+Script: `analysis/030_physionet_mi_final_baselines.py`
+
+```bash
+uv run python analysis/030_physionet_mi_final_baselines.py
+```
+
+### Figures
+
+![Main Results — bar chart with error bars](analysis/figures/030_physionet_mi_final_main_results.png)
+
+![F1 Learning Curves — fold 0](analysis/figures/030_physionet_mi_final_f1_curves.png)
+
+![Cross-Fold Variance — strip plot](analysis/figures/030_physionet_mi_final_fold_variance.png)
 
 ## Conclusions
 
-TBD
+**Fold 0 reproduced; cross-fold generalization weaker than hypothesized.**
+
+1. **H1 (fold 0 reproduces ~0.924): Confirmed.** Fold 0 achieved exactly 0.924
+   F1, matching the HP search result.
+2. **H2 (all folds ≥0.90): Not met.** Folds 1 (0.866) and 2 (0.870) fall
+   below 0.90, though they improve over the baseline's corresponding folds.
+3. **H3 (mean ~0.91–0.93): Not met.** The mean is 0.887, below the predicted
+   range. The cross-fold variance (std=0.027) is comparable to the baseline
+   (std=0.020), so the HP-tuned settings did not reduce fold sensitivity.
+
+EEGNet with tuned HPs is the best-performing model overall on PhysioNet MI,
+though all 5 architectures (including 4 POYO conditions) fall within a narrow
+1.3 pp band (0.873–0.887 mean F1). EEGNet's advantage is primarily its lower
+cross-fold variance.
 
 ## Notes for future experiments
 
-TBD
+- **Pretraining POYO before fine-tuning** — from-scratch POYO matches EEGNet
+  but does not surpass it. Pretraining on a large multi-dataset corpus may
+  unlock the architectural advantage of POYO's flexible tokenization.
+- **Test on other MI datasets** — verify whether the EEGNet ≈ POYO equivalence
+  holds on datasets with different channel counts, subject pools, or paradigms
+  (e.g., BCI Competition IV 2a, Lee2019).
+- **Investigate why dynamic channel embeddings hurt POYO** — possible
+  overfitting with PhysioNet's 64-channel array. Understanding this may reveal
+  how to better leverage spatial information in POYO.

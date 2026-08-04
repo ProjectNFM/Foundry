@@ -15,4 +15,4 @@ task_type: ???
 dataset_kwargs:
   fold: ${hyperparameters.fold_number}
   recording_ids:
-    - "S001_sess-0"
+    - "sub001_0_0"
