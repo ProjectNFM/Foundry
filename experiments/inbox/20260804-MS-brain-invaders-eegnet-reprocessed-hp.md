@@ -3,7 +3,7 @@
 **Status:** Running
 **Date started:** 2026-08-04
 **Parent experiment:** [Brain Invaders P300 HP Search](20260731-MS-brain-invaders-p300-hp-search.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [EEGNet Reprocessed — Long Training](20260804-MS-brain-invaders-eegnet-reprocessed-long.md)
 **Tags:** p300, brain_invaders, hp_search, eegnet, reprocessed
 
 ## Background
