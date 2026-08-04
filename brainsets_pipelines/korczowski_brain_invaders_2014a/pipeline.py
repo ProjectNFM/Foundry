@@ -39,15 +39,15 @@ class Pipeline(MOABBPipeline):
 
     trial_attr_name = "p300_trials"
     _event_id_mapping = _EVENT_ID_MAPPING
-    max_trial_duration = 1.0
+    epoch_duration = 1.0
 
     @property
     def brainset_description(self) -> BrainsetDescription:
         return BrainsetDescription(
             id=self.brainset_id,
             origin_version="1.0.0",
-            derived_version="1.0.0",
-            source="https://hal.archives-ouvertes.fr/hal-01098562",
+            derived_version="2.0.0",
+            source="https://moabb.neurotechx.com/docs/generated/moabb.datasets.BI2014a.html#moabb.datasets.BI2014a",
             description=(
                 "Brain Invaders 2014a P300 dataset. 64 subjects performing a "
                 "P300-based BCI task with 16-channel EEG."

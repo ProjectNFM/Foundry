@@ -57,7 +57,14 @@ class MOABBPipeline(BrainsetPipeline):
         - ``trial_attr_name``          – name for trial intervals on ``Data`` (e.g. ``"motor_imagery_trials"``)
         - ``_event_id_mapping``        – dict mapping raw MNE event descriptions to canonical label strings
         - ``brainset_description``     – ``BrainsetDescription`` instance
-        - ``max_trial_duration``       – optional cap on trial length (seconds)
+        - ``max_trial_duration``       – optional cap on trial length (seconds); used when
+          ``epoch_duration`` is *not* set to truncate inter-event-based trial boundaries.
+        - ``epoch_duration``           – optional fixed epoch length (seconds) from stimulus
+          onset.  When set, every trial becomes ``[onset, onset + epoch_duration]``
+          regardless of when the next event occurs.  This is the correct mode for
+          rapid-stimulus ERP paradigms (e.g. P300) where successive stimuli are much
+          closer together than the desired epoch length, producing overlapping epochs.
+          Mutually exclusive with ``max_trial_duration``.
     """
 
     parser = _parser
@@ -67,6 +74,7 @@ class MOABBPipeline(BrainsetPipeline):
     trial_attr_name: str
     _event_id_mapping: dict[str, str]
     max_trial_duration: float | None = None
+    epoch_duration: float | None = None
 
     @property
     @abstractmethod
@@ -217,10 +225,27 @@ class MOABBPipeline(BrainsetPipeline):
     def _extract_trials(self, raw, eeg) -> Interval:
         """Extract event-based trials from MNE Raw annotations.
 
-        Uses the ``_event_id_mapping`` to filter and label events. Trial end
-        times are estimated from inter-event gaps but capped at
-        ``max_trial_duration`` to avoid abnormally long final trials.
+        Uses the ``_event_id_mapping`` to filter and label events.
+
+        Two modes of operation controlled by subclass attributes:
+
+        * **epoch_duration** (for rapid-stimulus ERP paradigms like P300):
+          Every event produces a fixed ``[onset, onset + epoch_duration]``
+          trial.  Epochs may overlap, which is standard for ERP analysis.
+          Trials whose epoch would extend past the recording end are dropped.
+
+        * **max_trial_duration** (for motor-imagery and similar paradigms):
+          Trial end is set to the next event onset (or recording end) and
+          then capped at ``max_trial_duration``.
         """
+        if (
+            self.epoch_duration is not None
+            and self.max_trial_duration is not None
+        ):
+            raise ValueError(
+                "Set either epoch_duration or max_trial_duration, not both."
+            )
+
         annotations = raw.annotations
         recording_duration = raw.n_times / raw.info["sfreq"]
 
@@ -245,22 +270,40 @@ class MOABBPipeline(BrainsetPipeline):
                 event_onsets.append(onset)
                 event_labels_raw.append(desc)
 
+        n_dropped = 0
         for i, (onset, desc) in enumerate(zip(event_onsets, event_labels_raw)):
             label = self._event_id_mapping[desc]
-
             start = onset
-            if i + 1 < len(event_onsets):
-                end = event_onsets[i + 1]
-            else:
-                end = recording_duration
 
-            if self.max_trial_duration is not None:
-                end = min(end, start + self.max_trial_duration)
+            if self.epoch_duration is not None:
+                # Fixed-epoch mode (e.g. P300): each trial gets up to
+                # ``epoch_duration`` seconds, but is truncated at the next
+                # event onset to keep stored intervals non-overlapping
+                # (required by torch_brain Interval.sort/slice).
+                # The full epoch_duration window is restored at sampling time
+                # by the dataset's get_sampling_intervals().
+                if i + 1 < len(event_onsets):
+                    end = min(start + self.epoch_duration, event_onsets[i + 1])
+                else:
+                    end = min(start + self.epoch_duration, recording_duration)
+                if end <= start:
+                    n_dropped += 1
+                    continue
+            else:
+                if i + 1 < len(event_onsets):
+                    end = event_onsets[i + 1]
+                else:
+                    end = recording_duration
+                if self.max_trial_duration is not None:
+                    end = min(end, start + self.max_trial_duration)
 
             starts.append(start)
             ends.append(end)
             labels.append(label)
             label_ids.append(label_to_id[label])
+
+        if n_dropped:
+            logging.info(f"Dropped {n_dropped} trial(s) at recording boundary.")
 
         if not starts:
             raise ValueError("No matching trial events found in annotations.")

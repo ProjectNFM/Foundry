@@ -1,0 +1,85 @@
+# Brain Invaders EEGNet HP Search (Reprocessed Data)
+
+**Status:** Running
+**Date started:** 2026-08-04
+**Parent experiment:** [Brain Invaders P300 HP Search](20260731-MS-brain-invaders-p300-hp-search.md)
+**Follow-up experiments:** TBD
+**Tags:** p300, brain_invaders, hp_search, eegnet, reprocessed
+
+## Background
+
+The [parent HP search](20260731-MS-brain-invaders-p300-hp-search.md) swept
+learning rate, class weights, and model parameters across EEGNet and POYO on
+Brain Invaders P300. The best EEGNet result was F1=0.328 (lr=1e-3,
+class_weights=auto, F1=16), far below literature targets (~0.5–0.7 F1).
+
+The root cause was identified as a **data pipeline issue**: with
+`sequence_length=1.0s` and `drop_short=True`, 90% of trials were dropped
+because inter-stimulus intervals (0.2–0.5s) produced stored trial intervals
+shorter than 1s. No HP configuration could overcome training on only ~6,700
+of ~69,000 trials.
+
+The data has now been **reprocessed** to fix this issue. This experiment
+runs a focused EEGNet HP search on the reprocessed data to establish what
+performance level the corrected pipeline achieves.
+
+## Question
+
+With the reprocessed Brain Invaders data (fixing the trial dropout issue),
+what F1 can EEGNet achieve with tuned hyperparameters?
+
+## Hypothesis
+
+With access to the full ~69,000 trials instead of ~6,700, EEGNet should
+substantially exceed the previous best of F1=0.328, potentially reaching
+the literature range of 0.5–0.7 F1. The learning rate remains the most
+important hyperparameter, but the optimal value may shift with the larger
+dataset.
+
+## Experiment
+
+### Setup
+
+- **Model:** EEGNet (F1=8, D=2, F2=16, kernel_length=128, dropout=0.5)
+- **Data:** BrainInvadersP300 (`brain_invaders_p300/allsess`), reprocessed, intersubject split
+- **Task:** Binary P300 classification (Target vs NonTarget)
+- **Fold:** 0 only (HP search phase; best config re-run on all 3 folds later)
+- **Class weights:** auto (smoothing=1.0) — previous results showed EEGNet needs class rebalancing
+- **Hardware:** 1× L40S per run, 6 CPUs, 32 GB RAM (SLURM)
+- **WandB:** project=foundry_finetuning, group=BI_P300_HP_EEGNET_REPROCESSED
+
+**Hyperparameter grid (5 jobs):**
+
+| Parameter | Values |
+|-----------|--------|
+| learning_rate | 1e-3, 5e-4, 1e-4, 5e-5, 1e-5 |
+| class_weights.mode | auto (smoothing=1.0) |
+| trainer.callbacks.early_stopping.patience | 50 |
+| trainer.max_epochs | 500 |
+
+### Launch command
+
+```bash
+uv run python main.py experiment=p300/brain_invaders_hp_eegnet_reprocessed -m
+```
+
+### Key config overrides
+
+- Config: `configs/experiment/p300/brain_invaders_hp_eegnet_reprocessed.yaml`
+- Based on previous `brain_invaders_hp_search_eegnet.yaml` with narrowed grid
+- class_weights.mode fixed to `auto` (EEGNet needs rebalancing)
+- LR range extended downward (5e-5, 1e-5) to test if larger dataset benefits from slower learning
+- Patience=50, max_epochs=500 carried over from parent experiment
+- Fold 0 only
+
+## Results
+
+TBD
+
+## Conclusions
+
+TBD
+
+## Notes for future experiments
+
+TBD

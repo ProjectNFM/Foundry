@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-07-31
 **Parent experiment:** [Brain Invaders P300 From-Scratch Baselines](20260731-MS-brain-invaders-p300-baselines.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Brain Invaders EEGNet HP Search (Reprocessed Data)](20260804-MS-brain-invaders-eegnet-reprocessed-hp.md)
 **Tags:** p300, brain_invaders, hp_search, eegnet, poyo, cwt_cnn, resample_cnn
 
 ## Background

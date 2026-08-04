@@ -6,7 +6,7 @@ from typing import Literal, get_args
 
 import numpy as np
 
-from torch_brain.data import Data
+from torch_brain.data import Data, Interval
 from torch_brain.datasets.dataset import Dataset
 
 FoldType = Literal["intrasession", "intersubject", "intersession"]
@@ -18,6 +18,12 @@ class BrainInvadersP300(Dataset):
 
     Translates Foundry's ``fold`` / ``split_type`` conventions to
     torch_brain's ``fold_number`` / ``fold_type``.
+
+    The ``epoch_duration`` parameter controls how trial intervals are extended
+    for sampling.  P300 trials are stored as short non-overlapping markers
+    (onset → next-event-onset) to satisfy torch_brain's disjoint-interval
+    constraint.  At sampling time, each marker is extended to
+    ``[onset, onset + epoch_duration]`` so the full ERP window is captured.
     """
 
     def __init__(
@@ -32,6 +38,7 @@ class BrainInvadersP300(Dataset):
         transform: Callable | None = None,
         uniquify_channel_ids: bool = True,
         dirname: str = "korczowski_brain_invaders_2014a",
+        epoch_duration: float = 1.0,
         **kwargs,
     ):
         if root is None:
@@ -48,6 +55,7 @@ class BrainInvadersP300(Dataset):
         )
 
         self.uniquify_channel_ids = uniquify_channel_ids
+        self.epoch_duration = epoch_duration
 
         if fold is None or not (0 <= fold < 3):
             raise ValueError(
@@ -61,6 +69,30 @@ class BrainInvadersP300(Dataset):
                 f"Invalid split_type '{split_type}'. Must be one of {VALID_FOLD_TYPES}."
             )
 
+    def _extend_to_epoch_duration(self, intervals: Interval) -> Interval:
+        """Extend trial markers to full ``epoch_duration`` windows for sampling.
+
+        HDF5 stores short, non-overlapping trial markers (onset → next onset).
+        This method extends each marker to ``[onset, onset + epoch_duration]``
+        so the sampler creates windows that capture the full ERP response.
+        The returned intervals may overlap, which is fine — the sampler only
+        iterates over ``(start, end)`` pairs without checking disjointness.
+        """
+        if self.epoch_duration is None:
+            return intervals
+
+        extended_end = intervals.start + self.epoch_duration
+        kwargs = {}
+        for key in intervals.keys():
+            if key not in ("start", "end"):
+                kwargs[key] = getattr(intervals, key)
+
+        return Interval(
+            start=intervals.start.copy(),
+            end=extended_end,
+            **kwargs,
+        )
+
     def get_sampling_intervals(
         self,
         split: Literal["train", "valid", "test"] | None = None,
@@ -68,11 +100,14 @@ class BrainInvadersP300(Dataset):
         """Return trial-level sampling intervals.
 
         Always returns ``p300_trials`` intervals since P300 trials are
-        discrete, non-contiguous events.
+        discrete, non-contiguous events.  Intervals are extended to
+        ``epoch_duration`` so the sampler doesn't drop short trials.
         """
         if split is None:
             return {
-                rid: self.get_recording(rid).p300_trials
+                rid: self._extend_to_epoch_duration(
+                    self.get_recording(rid).p300_trials
+                )
                 for rid in self.recording_ids
             }
 
@@ -84,7 +119,9 @@ class BrainInvadersP300(Dataset):
         if self.fold_type == "intrasession":
             key = f"splits.fold_{self.fold_number}.{split}"
             return {
-                rid: self.get_recording(rid).get_nested_attribute(key)
+                rid: self._extend_to_epoch_duration(
+                    self.get_recording(rid).get_nested_attribute(key)
+                )
                 for rid in self.recording_ids
             }
 
@@ -109,7 +146,7 @@ class BrainInvadersP300(Dataset):
                     f"recording '{rid}'. Tried keys: {[key] + fallback_keys}"
                 )
             if assignment == split:
-                result[rid] = rec.p300_trials
+                result[rid] = self._extend_to_epoch_duration(rec.p300_trials)
         return result
 
     def get_channel_ids(self) -> list[str]:
