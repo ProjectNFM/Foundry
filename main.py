@@ -7,7 +7,9 @@ from pathlib import Path
 
 import hydra
 import torch
+import torch.multiprocessing
 from hydra.core.hydra_config import HydraConfig
+
 from hydra.utils import get_class, instantiate
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
@@ -19,6 +21,7 @@ from foundry.seed import set_seed
 from foundry.tools.stage_data import stage_data
 from foundry.training.pretrained import TransferMode, load_pretrained_weights
 
+torch.multiprocessing.set_sharing_strategy("file_system")
 logger = logging.getLogger(__name__)
 
 os.environ.setdefault("SLURM_TMPDIR", "/tmp")

@@ -84,8 +84,9 @@ hydra:
     timeout_min: 720
     max_num_timeout: 5
     setup:
+      - "ulimit -n 65536"
       - "set -a"
-      - "source .env"
+      - "source .env || true"
       - "set +a"
       - "export RANK=0"
       - "uv run python -m foundry.tools.stage_data --experiment motor_imagery/physionet_poyo_baselines_3fold"
