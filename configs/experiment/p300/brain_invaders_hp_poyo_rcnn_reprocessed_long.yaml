@@ -1,15 +1,18 @@
 # @package _global_
 #
-# EEGNet on reprocessed Brain Invaders P300 — long training, no early stopping.
+# POYO ResampleCNN HP search on reprocessed Brain Invaders P300 data.
+# Long training (1000 epochs, no early stopping) to push through plateaus.
 #
-# Same LR sweep as parent but trains for 1000 epochs without early stopping
-# to allow the model to push through loss plateaus.
+# Sweeps learning rate with other settings fixed.
+# Single fold (fold 0) — best config to be re-run on all 3 folds.
 #
 # Launch all 5 jobs on SLURM (5 lr values):
-#   uv run python main.py experiment=p300/brain_invaders_eegnet_reprocessed_long -m
+#   uv run python main.py experiment=p300/brain_invaders_hp_poyo_rcnn_reprocessed_long -m
 
 defaults:
-  - override /model: eegnet
+  - override /model: poyo_eeg
+  - override /model/tokenizer: per_channel_resample_cnn
+  - override /model/session_emb: disabled
   - override /data: brain_invaders_p300/allsess
   - override /hydra/launcher: slurm_default
 
@@ -17,10 +20,11 @@ task_configs:
   - p300_binary
 
 model:
-  num_samples: 512
-  F1: 8
-  kernel_length: 128
-  dropout_rate: 0.5
+  zero_output_timestamps: true
+  normalize_inputs: true
+  channel_emb_mode: dynamic
+  embed_dim: 256
+  depth: 4
 
 data:
   split_type: intersubject
@@ -30,23 +34,26 @@ stage:
   skip: true
 
 run:
-  name: bi_p300_eegnet_reproc_long_lr${hyperparameters.learning_rate}
-  group: BI_P300_EEGNET_REPROC_LONG
-  tags: [p300, brain_invaders, eegnet, reprocessed, long_training]
+  name: bi_p300_poyo_rcnn_reproc_long_lr${hyperparameters.learning_rate}
+  group: BI_P300_POYO_RCNN_REPROC_LONG
+  tags: [p300, brain_invaders, hp_search, poyo, resample_cnn, reprocessed, long_training]
   log_level: INFO
   project: foundry_finetuning
+  compile: default
 
 class_weights:
   mode: auto
   smoothing: 1.0
 
 hyperparameters:
-  batch_size: 512
+  batch_size: 64
   sequence_length: 1.0
-  patch_duration: 0.1
+  patch_duration: null
   sampling_rate: 512
   fold_number: 0
-  num_workers: 8
+  num_workers: 6
+  num_channels: null
+  session_configs: null
   learning_rate: 1e-4
   weight_decay: 0.01
 
@@ -80,4 +87,4 @@ hydra:
       - "source .env"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment p300/brain_invaders_eegnet_reprocessed_long"
+      - "uv run python -m foundry.tools.stage_data --experiment p300/brain_invaders_hp_poyo_rcnn_reprocessed_long"
