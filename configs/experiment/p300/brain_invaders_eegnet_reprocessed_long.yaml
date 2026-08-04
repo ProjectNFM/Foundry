@@ -41,7 +41,7 @@ class_weights:
   smoothing: 1.0
 
 hyperparameters:
-  batch_size: 64
+  batch_size: 512
   sequence_length: 1.0
   patch_duration: 0.1
   sampling_rate: 512
@@ -54,6 +54,7 @@ trainer:
   max_epochs: 1000
   precision: bf16-mixed
   callbacks:
+    early_stopping: null
     model_checkpoint:
       monitor: val/p300_binary_f1
       mode: max
