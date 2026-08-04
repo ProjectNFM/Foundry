@@ -1,9 +1,9 @@
 # Brain Invaders EEGNet Reprocessed — Long Training (No Early Stopping)
 
-**Status:** Draft
+**Status:** Completed
 **Date started:** 2026-08-04
 **Parent experiment:** [Brain Invaders EEGNet HP Search (Reprocessed Data)](20260804-MS-brain-invaders-eegnet-reprocessed-hp.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Brain Invaders P300 Reprocessed 3-Fold Baselines](20260804-MS-brain-invaders-p300-reprocessed-3fold.md)
 **Tags:** p300, brain_invaders, eegnet, reprocessed, long_training
 
 ## Background
@@ -81,12 +81,70 @@ uv run python main.py experiment=p300/brain_invaders_eegnet_reprocessed_long -m
 
 ## Results
 
-TBD
+### Summary
+
+All 5 LR configurations ran for ~94 epochs before being manually cancelled
+due to clear overfitting. WandB group: `BI_P300_EEGNET_REPROC_LONG`.
+
+Long training did help EEGNet escape the plateau that caused early stopping
+in the parent experiment (patience=50), improving best val F1 from 0.287 to
+0.337 (+5pp). However, performance remains far below literature targets
+(0.5–0.7 F1).
+
+### Metrics
+
+| LR    | Val F1 | AUROC  | Train F1 | Overfit Gap | Epochs | Train Loss | Val Loss |
+|-------|--------|--------|----------|-------------|--------|------------|----------|
+| 1e-3  | 0.337  | 0.638  | 0.387    | +0.050      | 94     | 0.546      | 0.665    |
+| 5e-4  | 0.324  | 0.615  | 0.388    | +0.063      | 93     | 0.530      | 0.675    |
+| 1e-4  | 0.313  | 0.600  | 0.352    | +0.039      | 94     | 0.584      | 0.683    |
+| 5e-5  | 0.278  | 0.514  | 0.270    | −0.008      | 94     | 0.595      | 0.693    |
+| 1e-5  | 0.263  | 0.497  | 0.267    | +0.004      | 91     | 0.604      | 0.694    |
+
+**Best config: lr=1e-3, val F1=0.337, AUROC=0.638.**
+
+### Comparison with parent (patience=50)
+
+| Experiment | Best Val F1 | Best LR | Epochs |
+|-----------|-------------|---------|--------|
+| Parent (V2, patience=50) | 0.287 | 1e-3 | 54 |
+| Long (1000 epochs) | 0.337 | 1e-3 | 94 |
+| Delta | +0.050 | — | +40 |
+
+Long training allowed EEGNet to push through the initial plateau and learn
+some Target-class features, but the gain is modest.
+
+### Analysis
+
+```bash
+uv run python analysis/031_brain_invaders_reproc_long_hp.py
+```
+
+### Figures
+
+![EEGNet LR Comparison](../../analysis/figures/031_bi_reproc_long_eegnet_long_lr_comparison.png)
+![Model Comparison](../../analysis/figures/031_bi_reproc_long_model_comparison.png)
 
 ## Conclusions
 
-TBD
+**Hypothesis partially confirmed.** Long training did improve EEGNet beyond
+the patience=50 results (0.287 → 0.337 F1), confirming that the plateau
+issue was real and early stopping was premature. However, no LR configuration
+reached the target of F1 ≥ 0.5. The best result (0.337) is only marginally
+better than the original pre-reprocessing HP search (0.328), suggesting
+that the data pipeline fixes (normalization + anchor-trial filtering) had
+limited impact for EEGNet at the intersubject level.
+
+The model shows mild overfitting at higher LRs (gap of +0.05 to +0.06 at
+lr=1e-3 and 5e-4) but not catastrophic — EEGNet's smaller capacity prevents
+the extreme memorization seen with POYO.
+
+**Best HP for follow-up: lr=1e-3** with class_weights=auto (smoothing=1.0).
 
 ## Notes for future experiments
 
-TBD
+- CWT-CNN may outperform ResampleCNN on this task (it did in the original
+  baselines by +3.5pp F1). The 3-fold experiment will test this.
+- Try intrasession splits first to verify EEGNet can learn P300 at all on
+  this data when train/val share the same subjects — poor intersubject
+  performance may reflect cross-subject variability rather than model failure.

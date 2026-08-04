@@ -1,6 +1,6 @@
 # Brain Invaders EEGNet HP Search (Reprocessed Data)
 
-**Status:** Running
+**Status:** Completed
 **Date started:** 2026-08-04
 **Parent experiment:** [Brain Invaders P300 HP Search](20260731-MS-brain-invaders-p300-hp-search.md)
 **Follow-up experiments:** [EEGNet Reprocessed — Long Training](20260804-MS-brain-invaders-eegnet-reprocessed-long.md)
@@ -90,12 +90,50 @@ the 64 reprocessed `sub*_0_0.h5` files. Re-running as group
 
 ## Results
 
-TBD
+### Summary
+
+All 5 runs finished (patience=50 early stopping). WandB group:
+`BI_P300_HP_EEGNET_REPROCESSED_V2`.
+
+All configurations converged to near-identical performance (~0.287 F1),
+with zero recall and zero precision — meaning the model predicts all
+NonTarget (majority class). The patience=50 early stopping triggers before
+the model escapes the plateau where it hasn't yet learned to predict the
+minority Target class.
+
+### Metrics
+
+| LR    | Val F1 | AUROC  | Train F1 | Epochs | State    |
+|-------|--------|--------|----------|--------|----------|
+| 1e-3  | 0.287  | 0.521  | 0.278    | 54     | finished |
+| 5e-5  | 0.287  | 0.505  | 0.282    | 72     | finished |
+| 5e-4  | 0.287  | 0.519  | 0.280    | 54     | finished |
+| 1e-5  | 0.286  | 0.504  | 0.282    | 137    | finished |
+| 1e-4  | 0.286  | 0.515  | 0.281    | 72     | finished |
+
+All configurations are within 0.1pp F1 of each other — the model is stuck
+at the majority-class baseline regardless of LR.
+
+### Analysis
+
+```bash
+uv run python analysis/031_brain_invaders_reproc_long_hp.py
+```
 
 ## Conclusions
 
-TBD
+**Hypothesis refuted.** Even with the full reprocessed dataset (fixing the
+90% trial dropout), EEGNet with patience=50 early stopping cannot exceed
+0.287 F1. The model fails to learn any Target-class features before early
+stopping triggers. This is because the training dynamics show a prolonged
+plateau where F1 stays at the majority-class baseline.
+
+The [long training follow-up](20260804-MS-brain-invaders-eegnet-reprocessed-long.md)
+showed that disabling early stopping helps somewhat (0.337 F1 at ~94 epochs),
+confirming that the plateau is the issue, not the data.
 
 ## Notes for future experiments
 
-TBD
+- Patience=50 is insufficient for this task/dataset combo — the model needs
+  more epochs to escape the majority-class plateau.
+- The long training experiment achieved 0.337 F1 but still far below literature.
