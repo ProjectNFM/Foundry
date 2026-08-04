@@ -30,8 +30,8 @@ stage:
   skip: true
 
 run:
-  name: bi_p300_eegnet_reproc_lr${hyperparameters.learning_rate}
-  group: BI_P300_HP_EEGNET_REPROCESSED
+  name: bi_p300_eegnet_reproc_v2_lr${hyperparameters.learning_rate}
+  group: BI_P300_HP_EEGNET_REPROCESSED_V2
   tags: [p300, brain_invaders, hp_search, eegnet, reprocessed]
   log_level: INFO
   project: foundry_finetuning

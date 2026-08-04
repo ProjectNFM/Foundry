@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-07-31
 **Parent experiment:** [PhysioNet Motor Imagery From-Scratch Baselines](20260731-MS-physionet-mi-baselines.md)
-**Follow-up experiments:** [PhysioNet MI POYO Collation Fix + HP Tuning](20260803-MS-physionet-mi-poyo-collation-fix.md)
+**Follow-up experiments:** [PhysioNet MI POYO Collation Fix + HP Tuning](20260803-MS-physionet-mi-poyo-collation-fix.md), [PhysioNet MI EEGNet Final Baselines](20260804-MS-physionet-mi-eegnet-final-baselines.md)
 **Tags:** motor_imagery, physionet, hp_search, eegnet, poyo, cwt_cnn
 
 ## Background
