@@ -437,6 +437,13 @@ def _log_config_to_wandb(trainer, cfg: DictConfig):
         for key in loggable_keys
         if key in cfg
     }
+    slurm_job_id = os.environ.get("SLURM_JOB_ID")
+    if slurm_job_id:
+        config_to_log["slurm_job_id"] = slurm_job_id
+        array_task_id = os.environ.get("SLURM_ARRAY_TASK_ID")
+        if array_task_id:
+            config_to_log["slurm_array_task_id"] = array_task_id
+
     trainer.logger.experiment.config.update(
         config_to_log, allow_val_change=True
     )

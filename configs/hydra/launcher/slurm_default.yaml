@@ -2,6 +2,7 @@ defaults:
   - submitit_slurm
 
 _target_: hydra_plugins.foundry_launcher.packed_launcher.SlurmLauncher
+name: ${run.name}
 submitit_folder: ${hydra.sweep.dir}/slurm_logs/%j
 stderr_to_stdout: true
 timeout_min: 180
