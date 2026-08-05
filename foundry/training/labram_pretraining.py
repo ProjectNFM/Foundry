@@ -1,18 +1,17 @@
 """Lightning modules for LaBraM pre-training stages."""
 
 from typing import Any, Dict, Optional
-import warnings
 
 import lightning as L
 import torch
 import torch.nn as nn
-from torch_brain.batching import chain
 
 from foundry.models.vqnsp import VQNSPModel
-from foundry.models.labram_pretrain import (
-    LaBraMForMaskedEEGModeling,
+from foundry.models.masked_labram import (
+    MaskedLaBram,
     apply_masking,
 )
+from foundry.tasks.masking import MaskingStrategy
 
 
 class VQNSPPretrainingModule(L.LightningModule):
@@ -123,16 +122,16 @@ class VQNSPPretrainingModule(L.LightningModule):
 
 
 class LaBraMPretrainingModule(L.LightningModule):
-    """Lightning module for Stage 2: LaBraM masked EEG modeling.
+    """Lightning module for Stage 2: MaskedLaBram pretraining.
 
-    Pre-trains the Neural Transformer to predict VQ-NSP codebook token IDs
+    Pre-trains MaskedLaBram to predict VQ-NSP codebook token IDs
     at masked positions in EEG patches. Uses BEiT-v2 symmetric masking
     (two forward passes with complementary masks).
 
     Args:
-        model: LaBraMForMaskedEEGModeling instance.
+        model: MaskedLaBram instance.
         vqnsp_ckpt_path: Path to VQNSPModel checkpoint (for frozen tokenizer).
-        masking_ratio: Fraction of patches to mask (default: 0.5).
+        masking: MaskingStrategy to use (default: RandomTokenMasking(0.5)).
         symmetric_masking: If True, use symmetric masking (default: True).
         learning_rate: Learning rate (default: 5e-4).
         weight_decay: Weight decay (default: 1e-4).
@@ -140,9 +139,9 @@ class LaBraMPretrainingModule(L.LightningModule):
 
     def __init__(
         self,
-        model: LaBraMForMaskedEEGModeling,
+        model: MaskedLaBram,
         vqnsp_ckpt_path: str,
-        masking_ratio: float = 0.5,
+        masking: Optional[MaskingStrategy] = None,
         symmetric_masking: bool = True,
         learning_rate: float = 5e-4,
         weight_decay: float = 1e-4,
@@ -150,11 +149,11 @@ class LaBraMPretrainingModule(L.LightningModule):
         super().__init__()
         self.model = model
         self.vqnsp_ckpt_path = vqnsp_ckpt_path
-        self.masking_ratio = masking_ratio
+        self.masking = masking
         self.symmetric_masking = symmetric_masking
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
-        self.save_hyperparameters(ignore=["model"])
+        self.save_hyperparameters(ignore=["model", "masking"])
 
         self.vqnsp_model: Optional[VQNSPModel] = None
         self.criterion = nn.CrossEntropyLoss()
@@ -214,7 +213,7 @@ class LaBraMPretrainingModule(L.LightningModule):
 
         masked_patches, bool_mask = apply_masking(
             input_patches,
-            mask_ratio=self.masking_ratio,
+            masking=self.masking,
             symmetric=self.symmetric_masking,
         )
 
@@ -249,7 +248,7 @@ class LaBraMPretrainingModule(L.LightningModule):
 
             masked_patches, bool_mask = apply_masking(
                 input_patches,
-                mask_ratio=self.masking_ratio,
+                masking=self.masking,
                 symmetric=self.symmetric_masking,
             )
 

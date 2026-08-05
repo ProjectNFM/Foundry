@@ -20,13 +20,17 @@ import torch
 import torch.nn as nn
 from torch_brain.data import Data
 from torch_brain.batching import chain, pad8, pad2d
-import torchaudio.functional as F
 
 from braindecode.models.labram import Labram
 from foundry.models.patch_utils import (
     labram_index_tensor_to_names,
     labram_names_to_index_tensor,
+    prepare_labram_continuous_signal,
     resolve_labram_channels,
+)
+from foundry.models.signal_preparation import (
+    infer_sampling_rate_from_timestamps,
+    resolve_signal_source,
 )
 from foundry.models.readout import build_readout_router
 from foundry.tasks.config import TaskConfig
@@ -149,47 +153,13 @@ class LaBraMEEGModel(nn.Module):
             ) from e
 
     def _resolve_signal_source(self, data: Data) -> tuple[Any, str, float]:
-        """Find the signal source, default modality type, and sampling rate.
-
-        Returns:
-            Tuple of (signal_source, default_type, sampling_rate).
-        """
-        for modality in ["eeg", "ecog", "seeg"]:
-            signal = getattr(data, modality, None)
-            if signal is not None:
-                if (
-                    hasattr(signal, "sampling_rate")
-                    and signal.sampling_rate is not None
-                ):
-                    sampling_rate = float(signal.sampling_rate)
-                else:
-                    sampling_rate = self._infer_sampling_rate_from_timestamps(
-                        signal.timestamps
-                    )
-                return signal, modality.upper(), sampling_rate
-
-        raise ValueError("Data must have an 'eeg', 'ecog', or 'seeg' field")
+        """Find the signal source, default modality type, and sampling rate (shared impl)."""
+        return resolve_signal_source(data)
 
     def _infer_sampling_rate_from_timestamps(
         self, timestamps: np.ndarray
     ) -> float:
-        """Infer sampling rate from timestamp deltas.
-
-        Args:
-            timestamps: Timestamp array.
-
-        Returns:
-            Estimated sampling rate in Hz.
-        """
-        sample_deltas = np.diff(timestamps).astype(np.float64)
-        valid_deltas = sample_deltas[
-            np.isfinite(sample_deltas) & (sample_deltas > 0)
-        ]
-        if valid_deltas.size == 0:
-            raise ValueError(
-                "Could not infer a valid sampling rate from timestamps."
-            )
-        return 1.0 / float(np.median(valid_deltas))
+        return infer_sampling_rate_from_timestamps(timestamps)
 
     def _extract_targets(self, data: Data):
         """Extract multitask targets from data.
@@ -225,35 +195,9 @@ class LaBraMEEGModel(nn.Module):
             - session_id: Session identifier
             - absolute_start: Segment start timestamp
         """
-        signal_source, default_type, sampling_rate = (
-            self._resolve_signal_source(data)
+        signal, ch_names = prepare_labram_continuous_signal(
+            data, self.num_channels, self.num_samples, self.TARGET_SAMPLING_RATE
         )
-        modality_field = (
-            data.channels.type.astype(str)
-            if hasattr(data.channels, "type")
-            else np.array([default_type] * len(data.channels)).astype(str)
-        )
-        modality_mask = np.isin(
-            np.char.lower(modality_field), list(self.SUPPORTED_MODALITIES)
-        )
-
-        signal = signal_source.signal[:, modality_mask]
-        signal = np.asarray(signal, dtype=np.float32)
-
-        if sampling_rate != self.TARGET_SAMPLING_RATE:
-            signal_tensor = torch.from_numpy(signal.T).unsqueeze(0)
-            signal_tensor = F.resample(
-                signal_tensor,
-                orig_freq=int(sampling_rate),
-                new_freq=self.TARGET_SAMPLING_RATE,
-            )
-            signal = signal_tensor.squeeze(0).T.numpy()
-
-        signal = np.where(~np.isfinite(signal), 0.0, signal)
-
-        channel_ids = data.channels.id[modality_mask].astype(str)
-        keep_indices, ch_names = resolve_labram_channels(channel_ids)
-        signal = signal[:, keep_indices]
         channel_index = labram_names_to_index_tensor(ch_names)
 
         x = torch.from_numpy(signal)

@@ -1,18 +1,18 @@
 # @package _global_
 
 defaults:
-  - override /model: vqnsp
-  - override /data: openneuro/default
-  - override /module: vqnsp_pretraining
+  - override /model: masked_labram_base
+  - override /data: openneuro/multi_brainset
+  - override /module: labram_pretraining
 
 run:
-  name: vqnsp_openneuro
-  group: PRETRAIN_VQNSP
-  tags: [vqnsp, openneuro, stage1]
+  name: labram_base_openneuro
+  group: PRETRAIN_LABRAM_BASE
+  tags: [labram_base, openneuro, stage2]
   log_level: INFO
 
 hyperparameters:
-  batch_size: 64
+  batch_size: 32
   sequence_length: 8.0
   sampling_rate: 200
   num_workers: 8

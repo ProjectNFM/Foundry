@@ -1,8 +1,8 @@
 # @package _global_
 
 defaults:
-  - override /model: labram_large_pretrain
-  - override /data: openneuro/default
+  - override /model: masked_labram_large
+  - override /data: openneuro/multi_brainset
   - override /module: labram_pretraining
 
 run:

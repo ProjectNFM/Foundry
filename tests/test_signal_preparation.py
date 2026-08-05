@@ -18,9 +18,11 @@ import torch
 from foundry.models.signal_preparation import (
     PreparedSignal,
     compute_num_patches,
+    infer_sampling_rate_from_timestamps,
     normalize_encoder_inputs,
     normalize_reconstruction_targets,
     normalize_signal_length,
+    resolve_signal_source,
 )
 from foundry.models.embeddings.channel import PerChannelStrategy
 from foundry.models.embeddings.temporal import (
@@ -563,3 +565,98 @@ class TestNormalizationStageIndependence:
         # Only target
         tgt = normalize_reconstruction_targets(signal, 5)
         assert tgt.shape == (5, 100)
+
+
+# ---------------------------------------------------------------------------
+# Shared signal-source helpers
+# ---------------------------------------------------------------------------
+
+
+class TestInferSamplingRateFromTimestamps:
+    """Test sampling rate inference from timestamp deltas."""
+
+    def test_regular_timestamps(self):
+        """Regular 100 Hz timestamps."""
+        timestamps = np.arange(0, 1.0, 0.01)  # 100 Hz
+        sr = infer_sampling_rate_from_timestamps(timestamps)
+        assert np.isclose(sr, 100.0, rtol=1e-2)
+
+    def test_200hz_timestamps(self):
+        """Regular 200 Hz timestamps."""
+        timestamps = np.arange(0, 1.0, 0.005)
+        sr = infer_sampling_rate_from_timestamps(timestamps)
+        assert np.isclose(sr, 200.0, rtol=1e-2)
+
+    def test_irregular_timestamps_uses_median(self):
+        """Median is robust to outliers in sampling intervals."""
+        timestamps = np.array([0.0, 0.01, 0.02, 0.03, 0.04, 0.5, 0.51])
+        # Most deltas are 0.01 s (100 Hz), one outlier is 0.46 s
+        sr = infer_sampling_rate_from_timestamps(timestamps)
+        assert np.isclose(sr, 100.0, rtol=1e-2)
+
+    def test_empty_or_invalid_timestamps_raises(self):
+        """Non-finite timestamps raise ValueError."""
+        with pytest.raises(ValueError):
+            infer_sampling_rate_from_timestamps(np.array([np.nan, np.inf]))
+
+    def test_single_sample_raises(self):
+        """Single timestamp (no deltas) raises ValueError."""
+        with pytest.raises(ValueError):
+            infer_sampling_rate_from_timestamps(np.array([0.0]))
+
+
+class TestResolveSignalSource:
+    """Test signal source resolution from torch_brain Data objects."""
+
+    @pytest.fixture
+    def mock_data_with_eeg(self):
+        """Create a minimal mock torch_brain Data with EEG."""
+        from unittest.mock import MagicMock
+        data = MagicMock()
+        # Mock EEG source with sampling rate
+        eeg = MagicMock()
+        eeg.sampling_rate = 128.0
+        data.eeg = eeg
+        data.ecog = None
+        data.seeg = None
+        return data
+
+    @pytest.fixture
+    def mock_data_with_timestamps(self):
+        """Create a minimal mock torch_brain Data with inferred SR."""
+        from unittest.mock import MagicMock
+        data = MagicMock()
+        # Mock EEG source without sampling_rate; infer from timestamps
+        eeg = MagicMock()
+        eeg.sampling_rate = None
+        eeg.timestamps = np.arange(0, 1.0, 0.01)  # 100 Hz inferred
+        data.eeg = eeg
+        data.ecog = None
+        data.seeg = None
+        return data
+
+    def test_resolve_eeg_with_sampling_rate(self, mock_data_with_eeg):
+        """Resolve EEG source with explicit sampling_rate."""
+        signal_source, modality, sr = resolve_signal_source(mock_data_with_eeg)
+        assert signal_source is mock_data_with_eeg.eeg
+        assert modality == "EEG"
+        assert sr == 128.0
+
+    def test_resolve_eeg_with_timestamps(self, mock_data_with_timestamps):
+        """Resolve EEG source with inferred sampling_rate."""
+        signal_source, modality, sr = resolve_signal_source(
+            mock_data_with_timestamps
+        )
+        assert signal_source is mock_data_with_timestamps.eeg
+        assert modality == "EEG"
+        assert np.isclose(sr, 100.0, rtol=1e-2)
+
+    def test_no_signal_source_raises(self):
+        """Missing all signal sources raises ValueError."""
+        from unittest.mock import MagicMock
+        data = MagicMock()
+        data.eeg = None
+        data.ecog = None
+        data.seeg = None
+        with pytest.raises(ValueError, match="must have an 'eeg'"):
+            resolve_signal_source(data)

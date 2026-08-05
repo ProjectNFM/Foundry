@@ -10,6 +10,12 @@ from torch_brain.batching import pad2d
 import torchaudio.functional as F
 from braindecode.models.labram import LABRAM_CHANNEL_ORDER
 
+from foundry.models.signal_preparation import (
+    normalize_signal_length,
+    resolve_signal_source,
+)
+from foundry.models.embeddings.patching import patch_signal
+
 _LABRAM_UPPER = {ch.upper() for ch in LABRAM_CHANNEL_ORDER}
 _LABRAM_UPPER_LIST = [ch.upper() for ch in LABRAM_CHANNEL_ORDER]
 
@@ -28,6 +34,8 @@ def to_labram_channel_name(channel_id: str) -> Optional[str]:
     Returns:
         Uppercase LaBraM channel name, or ``None`` if no match is found.
     """
+    print("LABRAM_CHANNEL_ORDER", LABRAM_CHANNEL_ORDER)
+    exit()
     name = str(channel_id).upper().strip()
     if "/" in name:
         name = name.rsplit("/", 1)[-1].strip()
@@ -108,51 +116,30 @@ def labram_index_tensor_to_names(channel_index: torch.Tensor) -> list[str]:
     return [_LABRAM_UPPER_LIST[int(i)] for i in indices]
 
 
-def extract_labram_patches(
+def prepare_labram_continuous_signal(
     data: Data,
     num_channels: int,
     num_samples: int,
     target_sampling_rate: int = 200,
-) -> tuple[torch.Tensor, list[str]]:
-    """Extract, resample, and segment EEG into LaBraM patches.
+) -> tuple[np.ndarray, list[str]]:
+    """Prepare continuous LaBraM signal: resolve, resample, filter, normalize length.
 
-    Converts raw torch_brain Data into patch tensors suitable for LaBraM pre-training.
-    This shared utility is used by both VQNSPModel and LaBraMForMaskedEEGModeling
-    for consistent preprocessing.
+    Shared utility for both tokenization and patch extraction. Returns a continuous
+    (T, C) signal at the target sampling rate, with length normalized and channels
+    filtered to LaBraM canonical order.
 
     Args:
         data: torch_brain Data object with eeg/ecog/seeg signal.
         num_channels: Expected number of channels after filtering.
-        num_samples: Expected total samples at target_sampling_rate.
-        target_sampling_rate: Target rate for resampling (default: 200 Hz, LaBraM standard).
+        num_samples: Total samples at target_sampling_rate.
+        target_sampling_rate: Target rate (default: 200 Hz).
 
     Returns:
-        Tuple of (input_patches, channel_names) where:
-        - input_patches: Padded tensor of shape [T, C] (after pad2d)
-        - channel_names: List of channel names in LABRAM_CHANNEL_ORDER
+        Tuple of (signal, channel_names) where:
+        - signal: (T, C) float32 array at target_sampling_rate, length-normalized
+        - channel_names: List of LaBraM channel names (canonical order)
     """
-    signal_source = None
-    default_type = None
-    sampling_rate = None
-
-    for modality in ["eeg", "ecog", "seeg"]:
-        signal = getattr(data, modality, None)
-        if signal is not None:
-            signal_source = signal
-            default_type = modality.upper()
-            if (
-                hasattr(signal, "sampling_rate")
-                and signal.sampling_rate is not None
-            ):
-                sampling_rate = float(signal.sampling_rate)
-            else:
-                sampling_rate = _infer_sampling_rate_from_timestamps(
-                    signal.timestamps
-                )
-            break
-
-    if signal_source is None:
-        raise ValueError("Data must have an 'eeg', 'ecog', or 'seeg' field")
+    signal_source, default_type, sampling_rate = resolve_signal_source(data)
 
     modality_field = (
         data.channels.type.astype(str)
@@ -166,6 +153,7 @@ def extract_labram_patches(
     signal = signal_source.signal[:, modality_mask]
     signal = np.asarray(signal, dtype=np.float32)
 
+    # Resample if needed
     if sampling_rate != target_sampling_rate:
         signal_tensor = torch.from_numpy(signal.T).unsqueeze(0)
         signal_tensor = F.resample(
@@ -175,12 +163,15 @@ def extract_labram_patches(
         )
         signal = signal_tensor.squeeze(0).T.numpy()
 
+    # Sanitize non-finite values
     signal = np.where(~np.isfinite(signal), 0.0, signal)
 
+    # Map channels to LaBraM canonical order
     channel_ids = data.channels.id[modality_mask].astype(str)
     keep_indices, matching_channels = resolve_labram_channels(channel_ids)
     signal = signal[:, keep_indices]
 
+    # Warn if channel count mismatch
     if signal.shape[1] != num_channels:
         warnings.warn(
             f"Expected {num_channels} channels after LaBraM filtering, "
@@ -188,27 +179,56 @@ def extract_labram_patches(
             UserWarning,
         )
 
-    x = torch.from_numpy(signal)
-    return pad2d(x), matching_channels
+    # Normalize length to exact sample count
+    sequence_length = num_samples / target_sampling_rate
+    signal = normalize_signal_length(signal, target_sampling_rate, sequence_length)
+
+    return signal, matching_channels
 
 
-def _infer_sampling_rate_from_timestamps(
-    timestamps: np.ndarray,
-) -> float:
-    """Infer sampling rate from timestamp deltas.
+def extract_labram_patches(
+    data: Data,
+    num_channels: int,
+    num_samples: int,
+    target_sampling_rate: int = 200,
+) -> tuple[torch.Tensor, list[str]]:
+    """Extract and patch EEG for LaBraM pre-training.
+
+    Converts raw torch_brain Data into (C, N, patch_size) patch tensors.
+    Used by VQNSPModel and LaBraMForMaskedEEGModeling.
 
     Args:
-        timestamps: Timestamp array.
+        data: torch_brain Data object with eeg/ecog/seeg signal.
+        num_channels: Expected number of channels after filtering.
+        num_samples: Total samples at target_sampling_rate (must be divisible by patch_size for 1s patches).
+        target_sampling_rate: Target rate (default: 200 Hz, LaBraM standard).
 
     Returns:
-        Estimated sampling rate in Hz.
+        Tuple of (input_patches, channel_names) where:
+        - input_patches: Tensor of shape (C, N, 200) with N patches of 200 samples each
+        - channel_names: List of channel names in LABRAM_CHANNEL_ORDER
     """
-    sample_deltas = np.diff(timestamps).astype(np.float64)
-    valid_deltas = sample_deltas[
-        np.isfinite(sample_deltas) & (sample_deltas > 0)
-    ]
-    if valid_deltas.size == 0:
-        raise ValueError(
-            "Could not infer a valid sampling rate from timestamps."
-        )
-    return 1.0 / float(np.median(valid_deltas))
+    # Prepare continuous signal
+    signal, channel_names = prepare_labram_continuous_signal(
+        data, num_channels, num_samples, target_sampling_rate
+    )
+
+    # Unfold into patches: 1-second patches at 200 Hz = 200 samples, no stride
+    patch_duration = 1.0  # seconds
+    stride = 1.0  # seconds (non-overlapping)
+    signal_tensor = torch.from_numpy(signal.T).unsqueeze(0)  # (1, C, T)
+
+    # patch_signal returns (B, N_patches, C, patch_samples)
+    patches = patch_signal(
+        signal_tensor,
+        patch_duration=patch_duration,
+        stride=stride,
+        sampling_rate=target_sampling_rate,
+    )  # (1, N_patches, C, 200)
+
+    # Rearrange to (C, N_patches, 200) and remove batch dim
+    output_patches = patches.squeeze(0).permute(1, 0, 2)  # (C, N_patches, 200)
+
+    return output_patches, channel_names
+
+

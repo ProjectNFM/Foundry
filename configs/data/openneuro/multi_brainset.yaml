@@ -14,5 +14,6 @@ task_type: ???
 
 dataset_kwargs:
   brainsets:
-    - klinzing_sleep_ds005555
+    # - klinzing_sleep_ds005555
+    - kochi_visualnaming_ds006914
   split_type: ${..split_type}

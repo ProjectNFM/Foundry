@@ -10,7 +10,9 @@ from foundry.models.backbones import PerceiverIOBackbone
 from foundry.models.readout import build_readout_router
 from foundry.models.signal_preparation import (
     PreparedSignal,
+    infer_sampling_rate_from_timestamps,
     normalize_encoder_inputs,
+    resolve_signal_source,
 )
 from foundry.models.ssl_meta import ModelOutput
 from foundry.models.tokenizer import EEGTokenizer
@@ -374,30 +376,8 @@ class POYOEEGModel(nn.Module):
         return self._task_configs
 
     def _resolve_signal_source(self, data: Data):
-        """Find the signal source, default modality type, and sampling rate.
-
-        Returns:
-            Tuple of (signal_source, default_type, sampling_rate) where
-            signal_source is the time series object, default_type is the
-            uppercase modality name used when channels.type is absent, and
-            sampling_rate is resolved from the signal source or inferred from
-            timestamps.
-        """
-        for modality in ["eeg", "ecog", "seeg"]:
-            signal = getattr(data, modality, None)
-            if signal is not None:
-                if (
-                    hasattr(signal, "sampling_rate")
-                    and signal.sampling_rate is not None
-                ):
-                    sampling_rate = float(signal.sampling_rate)
-                else:
-                    sampling_rate = self._infer_sampling_rate_from_timestamps(
-                        signal.timestamps
-                    )
-                return signal, modality.upper(), sampling_rate
-
-        raise ValueError("Data must have an 'eeg', 'ecog', or 'seeg' field")
+        """Find the signal source, default modality type, and sampling rate (shared impl)."""
+        return resolve_signal_source(data)
 
     def _prepare_signal(self, data: Data) -> PreparedSignal:
         """Filter by modality, sanitize, normalize length, and optionally z-score.
@@ -445,16 +425,7 @@ class POYOEEGModel(nn.Module):
     def _infer_sampling_rate_from_timestamps(
         self, timestamps: np.ndarray
     ) -> float:
-        sample_deltas = np.diff(timestamps).astype(np.float64)
-
-        valid_deltas = sample_deltas[
-            np.isfinite(sample_deltas) & (sample_deltas > 0)
-        ]
-        if valid_deltas.size == 0:
-            raise ValueError(
-                "Could not infer a valid sampling rate from timestamps."
-            )
-        return 1.0 / float(np.median(valid_deltas))
+        return infer_sampling_rate_from_timestamps(timestamps)
 
     def _extract_targets(self, data: Data):
         return extract_multitask_targets(self._task_configs, data)

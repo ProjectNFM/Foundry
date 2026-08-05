@@ -5,7 +5,6 @@ which learns to predict VQ-NSP codebook token IDs at masked positions in EEG pat
 """
 
 from typing import Optional
-import warnings
 
 import torch
 import torch.nn as nn
@@ -18,10 +17,11 @@ from foundry.models.patch_utils import (
     labram_index_tensor_to_names,
     labram_names_to_index_tensor,
 )
+from foundry.tasks.masking import MaskingStrategy, RandomTokenMasking
 
 
-class LaBraMForMaskedEEGModeling(nn.Module):
-    """LaBraM Neural Transformer for Masked EEG Modeling (Stage 2).
+class MaskedLaBram(nn.Module):
+    """MaskedLaBram: Masked EEG modeling with VQ-NSP Stage-2 (discrete codebook CE).
 
     Predicts VQ-NSP codebook token IDs at masked patch positions using
     a transformer backbone with channel and temporal position embeddings.
@@ -66,9 +66,6 @@ class LaBraMForMaskedEEGModeling(nn.Module):
             use_mean_pooling=False,
         )
 
-        self.mask_token = nn.Parameter(torch.randn(1, 1, embed_dim))
-        nn.init.normal_(self.mask_token, std=0.02)
-
         self.lm_head = nn.Linear(embed_dim, vocab_size)
         nn.init.normal_(self.lm_head.weight, std=0.02)
 
@@ -105,11 +102,14 @@ class LaBraMForMaskedEEGModeling(nn.Module):
         channel_index: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
-        """Forward pass with optional masking.
+        """Forward pass through LaBraM backbone.
+
+        Input patches should already be masked (via apply_masking). This method
+        just encodes and projects to vocabulary logits.
 
         Args:
-            input_patches: Patches of shape [B, C, N_patches, 200] after collate.
-            bool_mask: Optional mask of shape [B, N_seq] where True = masked.
+            input_patches: Patches of shape [B, C, N_patches, 200] (already masked).
+            bool_mask: Unused; kept for compatibility with apply_masking pipeline.
             channel_index: Optional collated ``[B, C]`` indices from tokenize().
             **kwargs: Ignored.
 
@@ -125,22 +125,11 @@ class LaBraMForMaskedEEGModeling(nn.Module):
             )
 
         B, C, N, patch_size = input_patches.shape
-
-        if len(input_patches.shape) == 4:
-            input_patches = input_patches.reshape(B, C, N * patch_size)
-
-        if bool_mask is not None:
-            flat_mask = bool_mask.reshape(-1)
-            masked_patches = input_patches.clone()
-
-            for i, is_masked in enumerate(flat_mask):
-                if is_masked:
-                    masked_patches.reshape(B * C, -1)[i] = 0.0
-
-            input_patches = masked_patches
+        # Reshape to continuous signal for Braindecode backbone
+        input_signal = input_patches.reshape(B, C, N * patch_size)
 
         features = self.backbone(
-            input_patches,
+            input_signal,
             ch_names=self._ch_names,
             return_all_tokens=True,
         )
@@ -166,59 +155,73 @@ class LaBraMForMaskedEEGModeling(nn.Module):
 
 def apply_masking(
     patches: torch.Tensor,
-    mask_ratio: float = 0.5,
+    masking: Optional[MaskingStrategy] = None,
     symmetric: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Apply random masking to patches (symmetric masking for BEiT-v2 style).
+    """Apply masking to patches with optional symmetric BEiT-v2 augmentation.
+
+    Uses a MaskingStrategy to generate mask indices, then zero-fills the masked
+    positions in the patch tensor. This is LaBraM-specific (zero-fill + all-token CE).
 
     Args:
-        patches: Patches of shape [B, C, N_patches, 200].
-        mask_ratio: Fraction of patches to mask (default: 0.5).
-        symmetric: If True, return both mask and complement (default: True).
+        patches: Patches of shape [B, C, N_patches, patch_size].
+        masking: MaskingStrategy to apply (default: RandomTokenMasking(0.5)).
+        symmetric: If True, return both mask and complement (BEiT-v2 style).
+            Augments batch by 2x with complementary masks.
 
     Returns:
         If symmetric=False:
-            Tuple of (masked_patches, bool_mask)
+            Tuple of (masked_patches, bool_mask) where bool_mask has shape [B, C*N]
+            and True indicates a masked position.
         If symmetric=True:
-            Tuple of (all_masked_patches, all_bool_masks) where shapes are doubled
-            along batch dimension (first half: original mask, second half: complement)
+            Tuple of (all_masked_patches, all_bool_masks) where batch is doubled:
+            - First B samples: original mask applied
+            - Second B samples: complement mask applied
     """
+    if masking is None:
+        masking = RandomTokenMasking(mask_ratio=0.5)
+
     B, C, N, patch_size = patches.shape
-    N_total = C * N
 
-    mask_size = int(N_total * mask_ratio)
+    # Create a dummy channel mask (all real, no padding)
+    channel_mask = torch.ones(B, C, dtype=torch.bool, device=patches.device)
 
-    bool_mask = torch.ones(B, N_total, dtype=torch.bool, device=patches.device)
+    # Call MaskingStrategy to get mask indices
+    # Returns mask_indices: [B, num_masked] and validity_mask: [B, num_masked]
+    mask_indices, _ = masking(C, N, channel_mask, device=patches.device)
+
+    # Convert mask indices to bool mask: True where masked
+    bool_mask = torch.zeros(B, C * N, dtype=torch.bool, device=patches.device)
     for b in range(B):
-        idx = torch.randperm(N_total, device=patches.device)[:mask_size]
-        bool_mask[b, idx] = False
+        bool_mask[b, mask_indices[b]] = True
 
     if symmetric:
         complement_mask = ~bool_mask
 
+        # Apply original mask: zero out where mask is True
         masked_patches_a = patches.clone()
         masked_patches_b = patches.clone()
 
-        for b in range(B):
-            for c in range(C):
-                for n in range(N):
-                    idx = c * N + n
-                    if not bool_mask[b, idx]:
-                        masked_patches_a[b, c, n] = 0.0
-                    if not complement_mask[b, idx]:
-                        masked_patches_b[b, c, n] = 0.0
+        # Vectorized zero-fill: reshape to [B, C*N, patch_size]
+        patches_flat = patches.reshape(B, C * N, patch_size)
+        patches_a_flat = masked_patches_a.reshape(B, C * N, patch_size)
+        patches_b_flat = masked_patches_b.reshape(B, C * N, patch_size)
+
+        patches_a_flat[bool_mask] = 0.0
+        patches_b_flat[complement_mask] = 0.0
+
+        masked_patches_a = patches_a_flat.reshape(B, C, N, patch_size)
+        masked_patches_b = patches_b_flat.reshape(B, C, N, patch_size)
 
         all_patches = torch.cat([masked_patches_a, masked_patches_b], dim=0)
         all_masks = torch.cat([bool_mask, complement_mask], dim=0)
 
         return all_patches, all_masks
     else:
+        # Apply mask: zero out where mask is True
         masked_patches = patches.clone()
-        for b in range(B):
-            for c in range(C):
-                for n in range(N):
-                    idx = c * N + n
-                    if not bool_mask[b, idx]:
-                        masked_patches[b, c, n] = 0.0
+        patches_flat = masked_patches.reshape(B, C * N, patch_size)
+        patches_flat[bool_mask] = 0.0
+        masked_patches = patches_flat.reshape(B, C, N, patch_size)
 
         return masked_patches, bool_mask

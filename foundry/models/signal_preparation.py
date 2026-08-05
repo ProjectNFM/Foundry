@@ -5,6 +5,7 @@ This module owns the single implementation of:
 - Patch-count calculation (for any stride/patch-size combination)
 - The immutable PreparedSignal contract consumed by both encoder inputs
   and reconstruction targets.
+- Signal source resolution and sampling rate inference (shared across models)
 
 Normalization stages are explicitly named and independently configurable:
 - ``normalize_encoder_inputs``: optional per-channel z-scoring before embedding,
@@ -17,6 +18,7 @@ Normalization stages are explicitly named and independently configurable:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -46,6 +48,69 @@ class PreparedSignal:
     original_num_samples: int
     num_channels: int
     modality_mask: np.ndarray
+
+
+def infer_sampling_rate_from_timestamps(
+    timestamps: np.ndarray,
+) -> float:
+    """Infer sampling rate from timestamp deltas (shared across models).
+
+    Args:
+        timestamps: Timestamp array with irregular or regular spacing.
+
+    Returns:
+        Estimated sampling rate in Hz (median of valid deltas).
+
+    Raises:
+        ValueError: If no valid timestamp deltas can be computed.
+    """
+    sample_deltas = np.diff(timestamps).astype(np.float64)
+    valid_deltas = sample_deltas[
+        np.isfinite(sample_deltas) & (sample_deltas > 0)
+    ]
+    if valid_deltas.size == 0:
+        raise ValueError(
+            "Could not infer a valid sampling rate from timestamps."
+        )
+    return 1.0 / float(np.median(valid_deltas))
+
+
+def resolve_signal_source(
+    data: Any,
+) -> tuple[Any, str, float]:
+    """Find the signal source, default modality type, and sampling rate.
+
+    Searches for the first available signal source (eeg, ecog, seeg) and
+    infers its sampling rate. This is shared across all models to ensure
+    consistent signal resolution.
+
+    Args:
+        data: torch_brain Data object with optional eeg/ecog/seeg signals.
+
+    Returns:
+        Tuple of (signal_source, default_type, sampling_rate) where:
+        - signal_source: The time series object (e.g., data.eeg)
+        - default_type: Uppercase modality name ('EEG', 'ECOG', or 'SEEG')
+        - sampling_rate: Inferred or stored sampling rate in Hz
+
+    Raises:
+        ValueError: If no signal source is found.
+    """
+    for modality in ["eeg", "ecog", "seeg"]:
+        signal = getattr(data, modality, None)
+        if signal is not None:
+            if (
+                hasattr(signal, "sampling_rate")
+                and signal.sampling_rate is not None
+            ):
+                sampling_rate = float(signal.sampling_rate)
+            else:
+                sampling_rate = infer_sampling_rate_from_timestamps(
+                    signal.timestamps
+                )
+            return signal, modality.upper(), sampling_rate
+
+    raise ValueError("Data must have an 'eeg', 'ecog', or 'seeg' field")
 
 
 def normalize_signal_length(
@@ -159,6 +224,8 @@ def normalize_reconstruction_targets(
 
 __all__ = [
     "PreparedSignal",
+    "infer_sampling_rate_from_timestamps",
+    "resolve_signal_source",
     "normalize_signal_length",
     "compute_num_patches",
     "normalize_encoder_inputs",

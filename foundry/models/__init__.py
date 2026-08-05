@@ -43,11 +43,14 @@ from foundry.models.baselines import (
 )
 from foundry.models.labram import LaBraMEEGModel
 from foundry.models.vqnsp import NormEMAVectorQuantizer, VQNSPModel
-from foundry.models.labram_pretrain import (
-    LaBraMForMaskedEEGModeling,
+from foundry.models.masked_labram import (
+    MaskedLaBram,
     apply_masking,
 )
-from foundry.models.patch_utils import extract_labram_patches
+from foundry.models.patch_utils import (
+    extract_labram_patches,
+    prepare_labram_continuous_signal,
+)
 from braindecode.models.labram import LABRAM_CHANNEL_ORDER
 
 __all__ = [
@@ -56,13 +59,16 @@ __all__ = [
     "LaBraMEEGModel",
     "VQNSPModel",
     "NormEMAVectorQuantizer",
-    "LaBraMForMaskedEEGModeling",
+    "MaskedLaBram",
     "apply_masking",
     "extract_labram_patches",
+    "prepare_labram_continuous_signal",
     "EEGTokenizer",
     "PreparedSignal",
     "compute_num_patches",
     "normalize_signal_length",
+    "infer_sampling_rate_from_timestamps",
+    "resolve_signal_source",
     "normalize_encoder_inputs",
     "normalize_reconstruction_targets",
     "TemporalConvAvgPool",
