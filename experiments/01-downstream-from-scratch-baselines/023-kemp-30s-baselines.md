@@ -2,7 +2,7 @@
 
 **Status:** Completed
 **Date started:** 2026-07-29
-**Parent experiment:** [KempSleep Baselines and Finetuning: Dynamic Channel Embeddings × Tokenizer](../experiments/022-kemp-baselines-finetune-cwt-dynch.md)
+**Parent experiment:** [KempSleep Baselines and Finetuning: Dynamic Channel Embeddings × Tokenizer](../_legacy/022-kemp-baselines-finetune-cwt-dynch.md)
 **Follow-up experiments:** TBD
 
 ## Background

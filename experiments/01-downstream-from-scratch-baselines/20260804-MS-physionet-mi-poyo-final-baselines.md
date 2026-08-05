@@ -14,7 +14,7 @@ fold 0, achieving **0.937 F1** — surpassing tuned EEGNet (0.924) by +1.4%.
 
 However, that experiment only evaluated the CWT-CNN + dynamic channel embedding
 condition. To produce a complete cross-architecture comparison mirroring the
-[KempSleep 30s baselines](../_legacy/023-kemp-30s-baselines.md) (which ran all
+[KempSleep 30s baselines](./023-kemp-30s-baselines.md) (which ran all
 4 POYO conditions × 3 folds), we need results for all combinations of:
 
 - **Tokenizer:** CWT-CNN vs ResampleCNN
@@ -160,11 +160,11 @@ uv run python analysis/030_physionet_mi_final_baselines.py
 
 ### Figures
 
-![Main Results — bar chart with error bars](analysis/figures/030_physionet_mi_final_main_results.png)
+![Main Results — bar chart with error bars](../../analysis/figures/030_physionet_mi_final_main_results.png)
 
-![F1 Learning Curves — fold 0](analysis/figures/030_physionet_mi_final_f1_curves.png)
+![F1 Learning Curves — fold 0](../../analysis/figures/030_physionet_mi_final_f1_curves.png)
 
-![Cross-Fold Variance — strip plot](analysis/figures/030_physionet_mi_final_fold_variance.png)
+![Cross-Fold Variance — strip plot](../../analysis/figures/030_physionet_mi_final_fold_variance.png)
 
 ## Conclusions
 

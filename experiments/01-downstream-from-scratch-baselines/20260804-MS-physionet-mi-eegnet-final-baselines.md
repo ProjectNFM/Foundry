@@ -138,11 +138,11 @@ uv run python analysis/030_physionet_mi_final_baselines.py
 
 ### Figures
 
-![Main Results — bar chart with error bars](analysis/figures/030_physionet_mi_final_main_results.png)
+![Main Results — bar chart with error bars](../../analysis/figures/030_physionet_mi_final_main_results.png)
 
-![F1 Learning Curves — fold 0](analysis/figures/030_physionet_mi_final_f1_curves.png)
+![F1 Learning Curves — fold 0](../../analysis/figures/030_physionet_mi_final_f1_curves.png)
 
-![Cross-Fold Variance — strip plot](analysis/figures/030_physionet_mi_final_fold_variance.png)
+![Cross-Fold Variance — strip plot](../../analysis/figures/030_physionet_mi_final_fold_variance.png)
 
 ## Conclusions
 

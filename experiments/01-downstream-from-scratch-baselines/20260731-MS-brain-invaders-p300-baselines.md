@@ -2,7 +2,7 @@
 
 **Status:** Completed
 **Date started:** 2026-07-31
-**Parent experiment:** [KempSleep 30s-Epoch From-Scratch Baselines](../_legacy/023-kemp-30s-baselines.md)
+**Parent experiment:** [KempSleep 30s-Epoch From-Scratch Baselines](./023-kemp-30s-baselines.md)
 **Follow-up experiments:** [Brain Invaders P300 HP Search](20260731-MS-brain-invaders-p300-hp-search.md)
 **Tags:** p300, brain_invaders, baseline, from_scratch, eegnet, poyo, cwt_cnn, resample_cnn
 

@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-07-29
 **Parent experiment:** [CWT CNN with Dynamic Channel Embeddings](../experiments/021-cwt-cnn-dynamic-channel-emb.md)
-**Follow-up experiments:** [KempSleep 30s-Epoch From-Scratch Baselines](../experiments/023-kemp-30s-baselines.md)
+**Follow-up experiments:** [KempSleep 30s-Epoch From-Scratch Baselines](../01-downstream-from-scratch-baselines/023-kemp-30s-baselines.md)
 
 ## Background
 

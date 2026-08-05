@@ -133,8 +133,8 @@ uv run python analysis/028_physionet_mi_hp_search_poyo.py
 
 ### Figures
 
-![HP Heatmap](../analysis/figures/028_physionet_mi_poyo_hp_heatmap.png)
-![LR Effect](../analysis/figures/028_physionet_mi_poyo_hp_lr_effect.png)
+![HP Heatmap](../../analysis/figures/028_physionet_mi_poyo_hp_heatmap.png)
+![LR Effect](../../analysis/figures/028_physionet_mi_poyo_hp_lr_effect.png)
 
 ### WandB
 
