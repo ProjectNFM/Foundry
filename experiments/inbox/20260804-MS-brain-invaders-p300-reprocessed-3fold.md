@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-08-04
 **Parent experiment:** [EEGNet Reprocessed Long Training](20260804-MS-brain-invaders-eegnet-reprocessed-long.md), [POYO ResampleCNN Reprocessed Long Training](20260804-MS-brain-invaders-poyo-rcnn-reprocessed-long.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [POYO Overfitting Diagnosis — Regularization & Frozen Tokenizer Ablation](20260805-MS-poyo-overfitting-regularization-ablation.md)
 **Tags:** p300, brain_invaders, baseline, reprocessed, 3fold, eegnet, poyo, cwt_cnn, resample_cnn, intersubject, intrasession
 
 ## Background
