@@ -152,11 +152,11 @@ uv run python analysis/015_session_emb_intrasession.py
 
 ### Figures
 
-![Best validation loss and train-val gap comparison](../analysis/figures/015_val_comparison.png)
+![Best validation loss and train-val gap comparison](../../analysis/figures/015_val_comparison.png)
 
-![Learning curves per mode](../analysis/figures/015_learning_curves.png)
+![Learning curves per mode](../../analysis/figures/015_learning_curves.png)
 
-![Validation loss overlay](../analysis/figures/015_val_overlay.png)
+![Validation loss overlay](../../analysis/figures/015_val_overlay.png)
 
 ## Conclusions
 

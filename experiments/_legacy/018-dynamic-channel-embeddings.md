@@ -139,11 +139,11 @@ uv run python analysis/018_dynamic_channel_emb.py
 
 ### Figures
 
-![Validation loss overlay — dynamic vs disabled](../analysis/figures/018_val_overlay.png)
+![Validation loss overlay — dynamic vs disabled](../../analysis/figures/018_val_overlay.png)
 
-![Bar comparison — best val loss and train-val gap](../analysis/figures/018_bar_comparison.png)
+![Bar comparison — best val loss and train-val gap](../../analysis/figures/018_bar_comparison.png)
 
-![Learning curves — individual train/val per condition](../analysis/figures/018_learning_curves.png)
+![Learning curves — individual train/val per condition](../../analysis/figures/018_learning_curves.png)
 
 ## Conclusions
 

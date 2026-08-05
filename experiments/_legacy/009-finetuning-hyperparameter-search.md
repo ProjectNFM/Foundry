@@ -241,11 +241,11 @@ Key observations from learning curves (best run per condition):
 
 ### Figures
 
-![HP search heatmap](../analysis/figures/009_hp_search_heatmap.png)
+![HP search heatmap](../../analysis/figures/009_hp_search_heatmap.png)
 
-![Best config comparison](../analysis/figures/009_best_comparison.png)
+![Best config comparison](../../analysis/figures/009_best_comparison.png)
 
-![Learning curves — top 3 configs per condition](../analysis/figures/009_learning_curves_top3.png)
+![Learning curves — top 3 configs per condition](../../analysis/figures/009_learning_curves_top3.png)
 
 ## Conclusions
 

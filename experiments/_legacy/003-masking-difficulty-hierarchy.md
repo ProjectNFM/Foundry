@@ -91,7 +91,7 @@ uv run python analysis/003_masking_difficulty_hierarchy.py
 
 ### Figures
 
-![Training loss comparison across masking strategies](../analysis/figures/003_masking_difficulty_hierarchy.png)
+![Training loss comparison across masking strategies](../../analysis/figures/003_masking_difficulty_hierarchy.png)
 
 ## Conclusions
 

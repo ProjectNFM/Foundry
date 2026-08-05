@@ -165,27 +165,27 @@ uv run python analysis/019_dynamic_channel_emb_viz.py
 
 **Backbone embeddings by sleep stage (disabled vs dynamic):**
 
-![Backbone by sleep stage](../analysis/figures/019_backbone_comparison.png)
+![Backbone by sleep stage](../../analysis/figures/019_backbone_comparison.png)
 
 **Backbone embeddings by session (disabled vs dynamic):**
 
-![Backbone by session](../analysis/figures/019_backbone_by_session.png)
+![Backbone by session](../../analysis/figures/019_backbone_by_session.png)
 
 **Dynamic channel embeddings — combined view (by channel, session, stage):**
 
-![Channel embeddings combined](../analysis/figures/019_channel_emb_combined.png)
+![Channel embeddings combined](../../analysis/figures/019_channel_emb_combined.png)
 
 **Dynamic channel embeddings — by channel type:**
 
-![Channel embeddings by channel](../analysis/figures/019_channel_emb_by_channel.png)
+![Channel embeddings by channel](../../analysis/figures/019_channel_emb_by_channel.png)
 
 **Dynamic channel embeddings — by session:**
 
-![Channel embeddings by session](../analysis/figures/019_channel_emb_by_session.png)
+![Channel embeddings by session](../../analysis/figures/019_channel_emb_by_session.png)
 
 **Dynamic channel embeddings — by sleep stage:**
 
-![Channel embeddings by stage](../analysis/figures/019_channel_emb_by_stage.png)
+![Channel embeddings by stage](../../analysis/figures/019_channel_emb_by_stage.png)
 
 ## Conclusions
 

@@ -163,19 +163,19 @@ uv run python analysis/020_linear_probe_dynamic_channel_emb.py
 
 **F1 and accuracy comparison across all 4 conditions:**
 
-![Bar comparison](../analysis/figures/020_bar_comparison.png)
+![Bar comparison](../../analysis/figures/020_bar_comparison.png)
 
 **Validation F1 learning curves:**
 
-![F1 curves](../analysis/figures/020_f1_curves.png)
+![F1 curves](../../analysis/figures/020_f1_curves.png)
 
 **Dynamic channel embedding F1 advantage over disabled baseline:**
 
-![Dynamic advantage](../analysis/figures/020_dynamic_advantage.png)
+![Dynamic advantage](../../analysis/figures/020_dynamic_advantage.png)
 
 **Train/val loss curves per condition:**
 
-![Learning curves](../analysis/figures/020_learning_curves.png)
+![Learning curves](../../analysis/figures/020_learning_curves.png)
 
 ## Conclusions
 

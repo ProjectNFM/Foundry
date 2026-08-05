@@ -159,11 +159,11 @@ uv run python analysis/017_full_dataset_scaling.py
 
 ### Figures
 
-![Validation loss overlay — full vs small](../analysis/figures/017_val_overlay.png)
+![Validation loss overlay — full vs small](../../analysis/figures/017_val_overlay.png)
 
-![Learning curves — full vs small (sess-S ch-D)](../analysis/figures/017_learning_curves.png)
+![Learning curves — full vs small (sess-S ch-D)](../../analysis/figures/017_learning_curves.png)
 
-![Bar comparison — best val loss](../analysis/figures/017_bar_comparison.png)
+![Bar comparison — best val loss](../../analysis/figures/017_bar_comparison.png)
 
 ## Failure Diagnosis
 

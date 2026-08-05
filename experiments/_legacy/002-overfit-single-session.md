@@ -115,7 +115,7 @@ uv run python analysis/002_overfit_single_session.py
 
 After running the analysis script:
 
-![Train vs Val Loss](../analysis/figures/002_overfit_single_session_loss.png)
+![Train vs Val Loss](../../analysis/figures/002_overfit_single_session_loss.png)
 
 ## Conclusions
 

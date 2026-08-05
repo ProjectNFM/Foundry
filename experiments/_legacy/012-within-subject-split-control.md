@@ -183,11 +183,11 @@ uv run python analysis/012_within_subject_split.py
 
 ### Figures
 
-![Three-way comparison of gap, F1, and loss](../analysis/figures/012_three_way_comparison.png)
+![Three-way comparison of gap, F1, and loss](../../analysis/figures/012_three_way_comparison.png)
 
-![Train/val loss curves by condition](../analysis/figures/012_loss_curves.png)
+![Train/val loss curves by condition](../../analysis/figures/012_loss_curves.png)
 
-![Intrasession vs intersubject split comparison](../analysis/figures/012_split_comparison.png)
+![Intrasession vs intersubject split comparison](../../analysis/figures/012_split_comparison.png)
 
 ## Conclusions
 

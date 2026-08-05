@@ -1,6 +1,6 @@
 # Brain Invaders P300 Reprocessed — 3-Fold Baselines (All Architectures, Inter + Intra)
 
-**Status:** Draft
+**Status:** Completed
 **Date started:** 2026-08-04
 **Parent experiment:** [EEGNet Reprocessed Long Training](20260804-MS-brain-invaders-eegnet-reprocessed-long.md), [POYO ResampleCNN Reprocessed Long Training](20260804-MS-brain-invaders-poyo-rcnn-reprocessed-long.md)
 **Follow-up experiments:** TBD
@@ -106,12 +106,141 @@ uv run python main.py experiment=p300/brain_invaders_reprocessed_3fold_eegnet -m
 
 ## Results
 
-TBD
+### Summary
+
+All 30 runs completed successfully (5 conditions × 3 folds × 2 split types).
+Intrasession splits provided only a marginal improvement over intersubject
+(+1.5 to +2.0pp F1), far less than the hypothesized jump to 0.5+ F1.
+EEGNet was the best-performing architecture in both split types, while all
+POYO variants exhibited extreme overfitting (train F1 ~0.96–0.98 vs val
+~0.32–0.38). EEGNet showed no overfitting at all (train ≈ val F1).
+
+### Metrics
+
+**Intersubject (3-fold mean ± std):**
+
+| Condition      | Val F1        | Val AUROC     | Val Acc | Train F1 | Overfit Gap |
+|----------------|---------------|---------------|---------|----------|-------------|
+| EEGNet         | 0.386 ± 0.045 | 0.693 ± 0.056 | 0.761   | 0.385    | −0.002      |
+| CWT Disabled   | 0.349 ± 0.024 | 0.656 ± 0.030 | 0.792   | 0.983    | +0.634      |
+| CWT Dynamic    | 0.364 ± 0.040 | 0.677 ± 0.041 | 0.794   | 0.983    | +0.619      |
+| RCNN Disabled  | 0.321 ± 0.019 | 0.619 ± 0.020 | 0.778   | 0.952    | +0.631      |
+| RCNN Dynamic   | 0.328 ± 0.022 | 0.629 ± 0.017 | 0.771   | 0.964    | +0.636      |
+
+**Intrasession (3-fold mean ± std):**
+
+| Condition      | Val F1        | Val AUROC     | Val Acc | Train F1 | Overfit Gap |
+|----------------|---------------|---------------|---------|----------|-------------|
+| EEGNet         | 0.404 ± 0.011 | 0.709 ± 0.013 | 0.749   | 0.381    | −0.023      |
+| CWT Disabled   | 0.369 ± 0.006 | 0.685 ± 0.005 | 0.801   | 0.984    | +0.615      |
+| CWT Dynamic    | 0.380 ± 0.009 | 0.698 ± 0.012 | 0.794   | 0.982    | +0.603      |
+| RCNN Disabled  | 0.339 ± 0.006 | 0.643 ± 0.008 | 0.778   | 0.967    | +0.629      |
+| RCNN Dynamic   | 0.342 ± 0.003 | 0.654 ± 0.002 | 0.768   | 0.964    | +0.621      |
+
+**Inter vs Intra comparison:**
+
+| Condition      | Inter F1 | Intra F1 | Δ (pp) | Ratio |
+|----------------|----------|----------|--------|-------|
+| EEGNet         | 0.386    | 0.404    | +1.7   | 1.04× |
+| CWT Disabled   | 0.349    | 0.369    | +2.0   | 1.06× |
+| CWT Dynamic    | 0.364    | 0.380    | +1.6   | 1.04× |
+| RCNN Disabled  | 0.321    | 0.339    | +1.7   | 1.05× |
+| RCNN Dynamic   | 0.328    | 0.342    | +1.5   | 1.04× |
+
+**Tokenizer comparison (CWT-CNN vs ResampleCNN):**
+- CWT-CNN advantage: +2.8 to +3.7pp F1 (consistent across splits and channel emb modes)
+
+**Channel embedding effect (dynamic vs disabled):**
+- CWT-CNN: +1.1 to +1.5pp (small positive)
+- ResampleCNN: +0.4 to +0.7pp (negligible)
+
+### Analysis
+
+Script: `analysis/032_brain_invaders_reproc_3fold.py`
+
+```bash
+uv run python analysis/032_brain_invaders_reproc_3fold.py
+```
+
+WandB: project=`foundry_finetuning`, group=`BI_P300_REPROC_3FOLD` (30 runs)
+
+### Figures
+
+![Main Results — Intersubject vs Intrasession](../../analysis/figures/032_bi_reproc_3fold_main_results.png)
+
+![Intrasession Advantage per Condition](../../analysis/figures/032_bi_reproc_3fold_intra_advantage.png)
+
+![Cross-Fold Variance by Split Type](../../analysis/figures/032_bi_reproc_3fold_fold_variance.png)
+
+![Train vs Val F1 — Overfitting by Split Type](../../analysis/figures/032_bi_reproc_3fold_overfitting.png)
 
 ## Conclusions
 
-TBD
+1. **CWT-CNN outperforms ResampleCNN** by +2.8 to +3.7pp F1, consistent with
+   the +3.5pp advantage seen in the original baselines and other tasks.
+   **Hypothesis 1 confirmed.**
+
+2. **All models remain below 0.5 F1** in both intersubject and intrasession
+   splits. Best result is EEGNet intrasession at 0.404 F1.
+   **Hypothesis 2 confirmed.**
+
+3. **Dynamic channel embeddings have a small positive effect** (+0.4 to +1.5pp),
+   consistent with prior negligible-effect findings on Brain Invaders and
+   PhysioNet MI. **Hypothesis 3 confirmed.**
+
+4. **EEGNet is the best architecture**, outperforming the best POYO condition
+   (CWT Dynamic) by ~2–2.5pp F1. This is a small but consistent edge, not
+   the near-equivalence hypothesized. **Hypothesis 4 partially refuted** —
+   EEGNet has a slight advantage, not a tie.
+
+5. **Intrasession barely outperforms intersubject** (+1.5 to +2.0pp across
+   all conditions). The hypothesized jump to 0.5+ F1 did not materialise.
+   **Hypothesis 5 refuted.** This is the most important finding: the poor
+   P300 classification performance is NOT primarily driven by cross-subject
+   variability. Even when train and val share the same subjects, models
+   cannot decode P300 well, pointing to a deeper issue with the task setup,
+   data quality, or signal-to-noise ratio in the reprocessed data.
+
+**Additional findings:**
+- POYO models exhibit extreme overfitting (train F1 0.95–0.98 vs val 0.32–0.38)
+  despite HP-tuned learning rates and early stopping. EEGNet shows zero
+  overfitting (train ≈ val F1 ≈ 0.38–0.40). This divergence is striking
+  given that both architectures achieve similar validation performance,
+  suggesting POYO memorises training data without learning generalisable
+  P300 features.
+- Intrasession splits dramatically reduce cross-fold variance (std 0.002–0.011
+  vs 0.015–0.045 for intersubject), indicating more stable evaluation but
+  not better decoding.
 
 ## Notes for future experiments
 
-TBD
+### Diagnosing POYO overfitting
+- **Regularisation sweep:** POYO (embed_dim=256, depth=4) has far more
+  parameters than EEGNet. Try stronger weight decay (0.05, 0.1), add
+  dropout layers, or reduce model capacity (embed_dim=64/128, depth=2)
+  to test whether overfitting is a capacity problem.
+- **Gradient/memorisation analysis:** Log per-epoch gradient norms and
+  training loss trajectories to understand when memorisation begins.
+  Compare POYO vs EEGNet training dynamics.
+- **Frozen-tokenizer ablation:** Freeze the CWT-CNN/ResampleCNN weights
+  and train only the POYO backbone. If overfitting persists, the issue
+  is in the transformer; if it disappears, the tokenizer is the source
+  of memorisation capacity.
+- **Data augmentation:** Add time-shift, channel dropout, or Gaussian
+  noise augmentation to POYO training. EEGNet's implicit regularisation
+  (depthwise separable convolutions, heavy dropout) may explain why it
+  doesn't overfit — explicit augmentation might achieve the same for POYO.
+
+### Diagnosing the intrasession ceiling
+- **Per-subject breakdown:** Compute val F1 per subject in intrasession
+  mode. If some subjects reach 0.6+ F1 while others are near chance, the
+  mean is masking real decodability behind a few "hard" subjects.
+- **Grand-average ERP inspection:** Plot grand-average ERPs for Target vs
+  NonTarget in the reprocessed data. If the P300 component is attenuated
+  or absent, the preprocessing pipeline may be the root cause.
+- **Single-subject ceiling models:** Train a separate model per subject
+  (within-session data only) to establish an upper bound on decodability
+  with this data.
+- **Comparison with original (non-reprocessed) data in intrasession mode:**
+  If the original data yields higher intrasession F1, the reprocessing
+  pipeline is destroying P300-relevant features.

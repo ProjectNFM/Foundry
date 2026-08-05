@@ -263,27 +263,27 @@ uv run python analysis/023_kemp_30s_baselines.py
 
 **Main results — all conditions × dataset sizes (3-fold mean ± std):**
 
-![Main results](../analysis/figures/023_main_results.png)
+![Main results](../../analysis/figures/023_main_results.png)
 
 **30s vs 2s window length comparison (fold 0, from scratch):**
 
-![30s vs 2s](../analysis/figures/023_30s_vs_2s.png)
+![30s vs 2s](../../analysis/figures/023_30s_vs_2s.png)
 
 **Data scaling — how each model benefits from 10× more training data:**
 
-![Data scaling](../analysis/figures/023_data_scaling.png)
+![Data scaling](../../analysis/figures/023_data_scaling.png)
 
 **Tokenizer × channel embedding interaction (full dataset):**
 
-![Tokenizer × channel emb](../analysis/figures/023_tokenizer_channel_emb.png)
+![Tokenizer × channel emb](../../analysis/figures/023_tokenizer_channel_emb.png)
 
 **Cross-fold variance — individual fold results:**
 
-![Fold variance](../analysis/figures/023_fold_variance.png)
+![Fold variance](../../analysis/figures/023_fold_variance.png)
 
 **Validation F1 learning curves (fold 0):**
 
-![F1 curves](../analysis/figures/023_f1_curves.png)
+![F1 curves](../../analysis/figures/023_f1_curves.png)
 
 ## Conclusions
 

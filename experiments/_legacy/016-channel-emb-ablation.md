@@ -169,11 +169,11 @@ uv run python analysis/016_channel_emb_ablation.py
 
 ### Figures
 
-![Grid comparison of best val loss and train-val gap](../analysis/figures/016_grid_comparison.png)
+![Grid comparison of best val loss and train-val gap](../../analysis/figures/016_grid_comparison.png)
 
-![Validation loss overlay for all conditions](../analysis/figures/016_val_overlay.png)
+![Validation loss overlay for all conditions](../../analysis/figures/016_val_overlay.png)
 
-![Learning curves per condition](../analysis/figures/016_learning_curves.png)
+![Learning curves per condition](../../analysis/figures/016_learning_curves.png)
 
 ## Conclusions
 

@@ -125,7 +125,7 @@ uv run python analysis/004_channel_identity_decoder.py
 
 ### Figures
 
-![Training loss comparison: baseline vs channel emb in decoder](../analysis/figures/004_channel_identity_decoder.png)
+![Training loss comparison: baseline vs channel emb in decoder](../../analysis/figures/004_channel_identity_decoder.png)
 
 ## Conclusions
 

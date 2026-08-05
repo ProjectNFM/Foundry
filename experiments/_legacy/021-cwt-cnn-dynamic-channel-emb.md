@@ -292,39 +292,39 @@ uv run python analysis/021_cwt_dynamic_channel_emb_viz.py
 
 **Pretraining validation loss — CWT-CNN vs ResampleCNN:**
 
-![Pretrain val overlay](../analysis/figures/021_pretrain_val_overlay.png)
+![Pretrain val overlay](../../analysis/figures/021_pretrain_val_overlay.png)
 
 **Pretraining bar comparison (best val loss + train-val gap):**
 
-![Pretrain bar](../analysis/figures/021_pretrain_bar_comparison.png)
+![Pretrain bar](../../analysis/figures/021_pretrain_bar_comparison.png)
 
 **Linear probe F1 — CWT-CNN vs ResampleCNN (all 8 conditions):**
 
-![LP cross-tokenizer](../analysis/figures/021_lp_cross_tokenizer.png)
+![LP cross-tokenizer](../../analysis/figures/021_lp_cross_tokenizer.png)
 
 **Linear probe F1 learning curves:**
 
-![LP F1 curves](../analysis/figures/021_lp_f1_curves.png)
+![LP F1 curves](../../analysis/figures/021_lp_f1_curves.png)
 
 **Dynamic vs disabled F1 advantage (by tokenizer × init):**
 
-![LP dynamic advantage](../analysis/figures/021_lp_dynamic_advantage.png)
+![LP dynamic advantage](../../analysis/figures/021_lp_dynamic_advantage.png)
 
 **Pretraining advantage (pretrained vs random F1, by tokenizer × channel):**
 
-![LP pretrain advantage](../analysis/figures/021_lp_pretrain_advantage.png)
+![LP pretrain advantage](../../analysis/figures/021_lp_pretrain_advantage.png)
 
 **Backbone embeddings — disabled vs dynamic (by sleep stage):**
 
-![Backbone comparison](../analysis/figures/021_backbone_comparison.png)
+![Backbone comparison](../../analysis/figures/021_backbone_comparison.png)
 
 **Backbone embeddings — disabled vs dynamic (by session):**
 
-![Backbone by session](../analysis/figures/021_backbone_by_session.png)
+![Backbone by session](../../analysis/figures/021_backbone_by_session.png)
 
 **Dynamic channel embeddings — combined view (channel, session, stage):**
 
-![Channel emb combined](../analysis/figures/021_channel_emb_combined.png)
+![Channel emb combined](../../analysis/figures/021_channel_emb_combined.png)
 
 ## Conclusions
 

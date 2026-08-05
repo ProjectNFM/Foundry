@@ -214,27 +214,27 @@ uv run python analysis/022_kemp_baselines_finetune_cwt_dynch.py
 
 **Bar comparison — all 8 conditions (sorted by F1):**
 
-![Bar comparison](../analysis/figures/022_bar_comparison.png)
+![Bar comparison](../../analysis/figures/022_bar_comparison.png)
 
 **Grouped by tokenizer — init × channel emb within each tokenizer:**
 
-![Grouped by tokenizer](../analysis/figures/022_grouped_by_tokenizer.png)
+![Grouped by tokenizer](../../analysis/figures/022_grouped_by_tokenizer.png)
 
 **Interaction plots — each factor's effect:**
 
-![Interaction plots](../analysis/figures/022_interaction_plots.png)
+![Interaction plots](../../analysis/figures/022_interaction_plots.png)
 
 **Validation F1 learning curves (split by tokenizer):**
 
-![F1 curves](../analysis/figures/022_f1_curves.png)
+![F1 curves](../../analysis/figures/022_f1_curves.png)
 
 **Average effect sizes across conditions:**
 
-![Effect sizes](../analysis/figures/022_effect_sizes.png)
+![Effect sizes](../../analysis/figures/022_effect_sizes.png)
 
 **Train/val loss curves for all 8 conditions:**
 
-![Learning curves](../analysis/figures/022_learning_curves.png)
+![Learning curves](../../analysis/figures/022_learning_curves.png)
 
 ## Conclusions
 

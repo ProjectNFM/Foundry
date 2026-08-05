@@ -130,11 +130,11 @@ uv run python analysis/005_tokenizer_comparison.py
 
 ### Figures
 
-![Val loss comparison](../analysis/figures/005_tokenizer_comparison_val_loss.png)
+![Val loss comparison](../../analysis/figures/005_tokenizer_comparison_val_loss.png)
 
-![Val loss learning curves](../analysis/figures/005_tokenizer_comparison_learning_curves.png)
+![Val loss learning curves](../../analysis/figures/005_tokenizer_comparison_learning_curves.png)
 
-![Train loss learning curves](../analysis/figures/005_tokenizer_comparison_train_curves.png)
+![Train loss learning curves](../../analysis/figures/005_tokenizer_comparison_train_curves.png)
 
 ## Conclusions
 

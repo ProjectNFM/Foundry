@@ -134,9 +134,9 @@ uv run python analysis/006_kemp_sleep_tokenizer_baseline.py
 
 ### Figures
 
-![Val F1 bar chart by tokenizer](../analysis/figures/006_kemp_sleep_tokenizer_val_f1.png)
+![Val F1 bar chart by tokenizer](../../analysis/figures/006_kemp_sleep_tokenizer_val_f1.png)
 
-![Val F1 learning curves](../analysis/figures/006_kemp_sleep_tokenizer_learning_curves.png)
+![Val F1 learning curves](../../analysis/figures/006_kemp_sleep_tokenizer_learning_curves.png)
 
 ## Conclusions
 

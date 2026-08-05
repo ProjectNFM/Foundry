@@ -110,7 +110,7 @@ table, and saves a train/val loss curve to `analysis/figures/`.
 
 After running the analysis script:
 
-![Train vs Val Loss](../analysis/figures/001_overfit_single_batch_loss.png)
+![Train vs Val Loss](../../analysis/figures/001_overfit_single_batch_loss.png)
 
 ## Conclusions
 
