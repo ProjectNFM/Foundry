@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from foundry.data.datasets import BrainInvadersP300, PhysionetMI
+from foundry.data.datasets.brain_invaders_p300 import _keep_anchor_trial
 from foundry.tasks.config import TaskConfig
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -99,5 +100,11 @@ class TestBrainInvadersP300DatasetWrapper:
         ds = BrainInvadersP300(root=str(tmp_path), recording_ids=[])
         assert ds.get_channel_ids() == []
 
-    def test_get_required_transforms_empty(self):
-        assert BrainInvadersP300.get_required_transforms("p300") == []
+    def test_get_required_transforms_returns_keep_anchor_trial(self):
+        transforms = BrainInvadersP300.get_required_transforms("p300")
+
+        assert len(transforms) == 1
+        assert transforms[0] is _keep_anchor_trial
+
+    def test_get_required_transforms_empty_for_unknown_task(self):
+        assert BrainInvadersP300.get_required_transforms("other_task") == []
