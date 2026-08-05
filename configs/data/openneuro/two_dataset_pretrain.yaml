@@ -1,0 +1,21 @@
+# Two-dataset OpenNeuro pretraining: Klinzing sleep + Shirazi HBN resting-state.
+# ~1600 recordings spanning two distinct EEG paradigms for diverse pretraining.
+_target_: foundry.data.datamodules.NeuralDataModule
+
+dataset_class: foundry.data.datasets.OpenNeuroMultiBrainset
+
+root: ./data/processed/
+batch_size: ${hyperparameters.batch_size}
+num_workers: ${hyperparameters.num_workers}
+pin_memory: true
+sequence_length: ${hyperparameters.sequence_length}
+seed: ${run.seed}
+
+split_type: ???
+task_type: ???
+
+dataset_kwargs:
+  brainsets:
+    - klinzing_sleep_ds005555
+    - shirazi_hbnr1_ds005505
+  split_type: ${..split_type}
