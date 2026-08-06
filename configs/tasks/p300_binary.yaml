@@ -1,0 +1,27 @@
+name: p300_binary
+
+class_mapping:
+  mapping:
+    Target: Target
+    NonTarget: NonTarget
+  order: [NonTarget, Target]
+
+head:
+  _target_: foundry.tasks.heads.ReadoutHead
+
+target_extractor:
+  _target_: foundry.tasks.targets.TargetExtractor
+  timestamp_key: p300_trials.timestamps
+  value_key: p300_trials.targets
+
+loss:
+  _target_: foundry.tasks.losses.CrossEntropyTaskLoss
+
+metrics:
+  _target_: foundry.tasks.metrics.classification_metrics
+
+metric_summary_modes:
+  acc: max
+  f1: max
+  auroc: max
+  loss: min

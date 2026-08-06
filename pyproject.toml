@@ -24,6 +24,7 @@ dependencies = [
 [dependency-groups]
 dev = ["pre-commit>=4.5.1", "pytest>=8.0.0", "ruff==0.15.22"]
 notebook = ["ipykernel>=7.2.0", "seaborn>=0.13.2"]
+pipelines = ["mne~=1.11.0", "moabb~=1.4.3", "scikit-learn~=1.7.2"]
 
 [tool.uv.sources]
 torch-brain = { git = "https://github.com/neuro-galaxy/torch_brain", branch = "main" }

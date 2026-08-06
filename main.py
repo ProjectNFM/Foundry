@@ -7,7 +7,9 @@ from pathlib import Path
 
 import hydra
 import torch
+import torch.multiprocessing
 from hydra.core.hydra_config import HydraConfig
+
 from hydra.utils import get_class, instantiate
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
@@ -19,6 +21,7 @@ from foundry.seed import set_seed
 from foundry.tools.stage_data import stage_data
 from foundry.training.pretrained import TransferMode, load_pretrained_weights
 
+torch.multiprocessing.set_sharing_strategy("file_system")
 logger = logging.getLogger(__name__)
 
 os.environ.setdefault("SLURM_TMPDIR", "/tmp")
@@ -437,6 +440,13 @@ def _log_config_to_wandb(trainer, cfg: DictConfig):
         for key in loggable_keys
         if key in cfg
     }
+    slurm_job_id = os.environ.get("SLURM_JOB_ID")
+    if slurm_job_id:
+        config_to_log["slurm_job_id"] = slurm_job_id
+        array_task_id = os.environ.get("SLURM_ARRAY_TASK_ID")
+        if array_task_id:
+            config_to_log["slurm_array_task_id"] = array_task_id
+
     trainer.logger.experiment.config.update(
         config_to_log, allow_val_change=True
     )

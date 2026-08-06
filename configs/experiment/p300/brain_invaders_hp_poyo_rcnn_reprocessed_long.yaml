@@ -1,0 +1,90 @@
+# @package _global_
+#
+# POYO ResampleCNN HP search on reprocessed Brain Invaders P300 data.
+# Long training (1000 epochs, no early stopping) to push through plateaus.
+#
+# Sweeps learning rate with other settings fixed.
+# Single fold (fold 0) — best config to be re-run on all 3 folds.
+#
+# Launch all 5 jobs on SLURM (5 lr values):
+#   uv run python main.py experiment=p300/brain_invaders_hp_poyo_rcnn_reprocessed_long -m
+
+defaults:
+  - override /model: poyo_eeg
+  - override /model/tokenizer: per_channel_resample_cnn
+  - override /model/session_emb: disabled
+  - override /data: brain_invaders_p300/allsess
+  - override /hydra/launcher: slurm_default
+
+task_configs:
+  - p300_binary
+
+model:
+  zero_output_timestamps: true
+  normalize_inputs: true
+  channel_emb_mode: dynamic
+  embed_dim: 256
+  depth: 4
+
+data:
+  split_type: intersubject
+  task_type: p300
+
+stage:
+  skip: true
+
+run:
+  name: bi_p300_poyo_rcnn_reproc_long_lr${hyperparameters.learning_rate}
+  group: BI_P300_POYO_RCNN_REPROC_LONG
+  tags: [p300, brain_invaders, hp_search, poyo, resample_cnn, reprocessed, long_training]
+  log_level: INFO
+  project: foundry_finetuning
+  compile: default
+
+class_weights:
+  mode: auto
+  smoothing: 1.0
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 1.0
+  patch_duration: null
+  sampling_rate: 512
+  fold_number: 0
+  num_workers: 6
+  num_channels: null
+  session_configs: null
+  learning_rate: 1e-4
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 1000
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/p300_binary_f1
+      mode: max
+      patience: 1000
+    model_checkpoint:
+      monitor: val/p300_binary_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/p300_binary_f1:.4f}"
+
+hydra:
+  sweeper:
+    params:
+      hyperparameters.learning_rate: 1e-3, 5e-4, 1e-4, 5e-5, 1e-5
+  launcher:
+    tasks_per_node: 1
+    cpus_per_task: 6
+    mem_gb: 32
+    gres: gpu:l40s:1
+    timeout_min: 1440
+    max_num_timeout: 5
+    setup:
+      - "set -a"
+      - "source .env"
+      - "set +a"
+      - "export RANK=0"
+      - "uv run python -m foundry.tools.stage_data --experiment p300/brain_invaders_hp_poyo_rcnn_reprocessed_long"

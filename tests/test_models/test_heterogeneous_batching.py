@@ -182,7 +182,7 @@ def create_data_sample(num_channels, session_id="session1"):
 
 class TestTokenizerOutput:
     def test_tokenize_shape(self, model_with_linear):
-        """Tokenizer outputs raw signal in (C_padded, T) shape."""
+        """Tokenizer outputs raw signal in (C_padded, T) shape wrapped by pad2d."""
         model_with_linear.session_emb.initialize_vocab(["session1"])
         model_with_linear.channel_emb.initialize_vocab(
             [f"ch{i}" for i in range(NUM_CHANNELS)]
@@ -191,7 +191,7 @@ class TestTokenizerOutput:
         data = create_data_sample(num_channels=4)
         tokens = model_with_linear.tokenize(data)
 
-        assert tokens["input_values"].shape == (NUM_CHANNELS, NUM_SAMPLES)
+        assert tokens["input_values"].obj.shape == (NUM_CHANNELS, NUM_SAMPLES)
         assert tokens["input_timestamps"].shape == (NUM_PATCHES,)
         assert tokens["input_channel_index"].shape == (NUM_CHANNELS,)
         assert tokens["input_mask"].shape == (NUM_CHANNELS,)
@@ -209,7 +209,7 @@ class TestTokenizerOutput:
         assert tokens["input_mask"][:4].all()
         assert not tokens["input_mask"][4:].any()
 
-        assert (tokens["input_values"][4:, :] == 0).all()
+        assert (tokens["input_values"].obj[4:, :] == 0).all()
 
     def test_full_channels_no_padding(self, model_with_linear):
         """When data has max channels, no padding is needed."""
@@ -238,7 +238,10 @@ class TestHeterogeneousBatching:
         tokens1 = model_with_linear.tokenize(data1)
         tokens2 = model_with_linear.tokenize(data2)
 
-        assert tokens1["input_values"].shape == tokens2["input_values"].shape
+        assert (
+            tokens1["input_values"].obj.shape
+            == tokens2["input_values"].obj.shape
+        )
         assert (
             tokens1["input_channel_index"].shape
             == tokens2["input_channel_index"].shape

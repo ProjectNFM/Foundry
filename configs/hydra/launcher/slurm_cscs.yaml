@@ -12,7 +12,7 @@ mem_gb: 32
 gres: gpu:1
 gpus_per_node: 1
 array_parallelism: 10
-name: ${hydra.job.name}
+name: ${run.name}
 srun_args:
   - "--mpi=none"
   - "--network=disable_rdzv_get"

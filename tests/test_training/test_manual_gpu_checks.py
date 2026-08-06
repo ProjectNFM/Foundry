@@ -200,7 +200,7 @@ class TestManualCheck2_ParameterWatcherGPU:
 class TestManualCheck3_CwtLrMultiplier:
     """Manual check 3: cwt_lr_multiplier=10 separates param groups."""
 
-    def test_separate_groups_printed_on_gpu(self, capsys):
+    def test_separate_groups_printed_on_gpu(self, caplog):
         model = _CwtModel()
         module = FoundryModule(
             model=model,
@@ -208,9 +208,10 @@ class TestManualCheck3_CwtLrMultiplier:
             cwt_lr_multiplier=10.0,
         )
 
-        groups = module._build_param_groups()
+        with caplog.at_level(logging.INFO):
+            groups = module._build_param_groups()
 
-        captured = capsys.readouterr()
+        log_output = caplog.text
         assert len(groups) == 2
 
         base_group = groups[0]
@@ -219,12 +220,12 @@ class TestManualCheck3_CwtLrMultiplier:
         assert base_group["lr"] == pytest.approx(1e-4)
         assert cwt_group["lr"] == pytest.approx(1e-3)
 
-        assert "CWT LR multiplier: 10.0x" in captured.out
-        assert "cwt_lr=1.00e-03" in captured.out
+        assert "CWT LR multiplier: 10.0x" in log_output
+        assert "cwt_lr=1.00e-03" in log_output
 
         cwt_param_count = sum(p.numel() for p in cwt_group["params"])
         assert cwt_param_count > 0
-        assert f"{cwt_param_count} params" in captured.out
+        assert f"{cwt_param_count} params" in log_output
 
     def test_configure_optimizers_uses_separate_groups_on_gpu(self):
         model = _CwtModel()

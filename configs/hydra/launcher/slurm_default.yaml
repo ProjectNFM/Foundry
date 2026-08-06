@@ -2,6 +2,7 @@ defaults:
   - submitit_slurm
 
 _target_: hydra_plugins.foundry_launcher.packed_launcher.SlurmLauncher
+name: ${run.group}
 submitit_folder: ${hydra.sweep.dir}/slurm_logs/%j
 stderr_to_stdout: true
 timeout_min: 180
@@ -15,7 +16,8 @@ array_parallelism: 256
 additional_parameters:
   requeue: true
 setup:
+  - "ulimit -n 65536"
   - "set -a"
-  - "source .env"
+  - "source .env || true"
   - "set +a"
   - "export RANK=0"

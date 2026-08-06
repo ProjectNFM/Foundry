@@ -1,0 +1,67 @@
+# @package _global_
+#
+# Single-session overfitting test for Brain Invaders P300 EEGNet.
+# Intrasession split on sub001 — can EEGNet learn P300 at all?
+#
+# Run locally:
+#   uv run python main.py experiment=p300/brain_invaders_overfit_debug
+
+defaults:
+  - override /model: eegnet
+  - override /data: brain_invaders_p300/singlesess
+
+task_configs:
+  - p300_binary
+
+model:
+  num_samples: 512
+  F1: 8
+  kernel_length: 64
+  dropout_rate: 0.5
+
+data:
+  split_type: intrasession
+  task_type: p300
+  dataset_kwargs:
+    fold: ${hyperparameters.fold_number}
+    recording_ids:
+      - "sub001_0_0"
+    epoch_duration: 1.0
+
+stage:
+  skip: true
+
+run:
+  name: bi_p300_overfit_sub001_zscore_NEWRUN
+  group: BI_P300_OVERFIT_DEBUG
+  tags: [p300, brain_invaders, eegnet, overfit, debug]
+  log_level: INFO
+  project: foundry_finetuning
+
+class_weights:
+  mode: auto
+  smoothing: 1.0
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 1.0
+  patch_duration: 0.1
+  sampling_rate: 512
+  fold_number: 0
+  num_workers: 4
+  learning_rate: 1e-3
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 2000
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/p300_binary_f1
+      mode: max
+      patience: 2000
+    model_checkpoint:
+      monitor: val/p300_binary_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/p300_binary_f1:.4f}"

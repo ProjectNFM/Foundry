@@ -1,0 +1,61 @@
+# @package _global_
+#
+# Intrasession overfit test on a single Brain Invaders P300 subject.
+# Use to verify the model can memorize one subject's P300 data locally.
+#
+# Run:
+#   uv run python main.py experiment=p300/poyo_brain_invaders_singlesess
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: brain_invaders_p300/singlesess
+  - override /model/tokenizer: per_channel_cwt
+
+task_configs:
+  - p300_binary
+
+model:
+  zero_output_timestamps: true
+  normalize_inputs: true
+
+data:
+  split_type: intrasession
+  task_type: p300
+
+run:
+  name: brain_invaders_p300_poyo_singlesess_overfit
+  group: P300_OVERFIT
+  tags: [p300, poyo, cwt, brain_invaders, singlesess, overfit]
+  log_level: INFO
+  project: foundry_finetuning
+  compile: false
+
+class_weights:
+  mode: auto
+  smoothing: 1.0
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 1.0
+  patch_duration: null
+  sampling_rate: 512
+  fold_number: 0
+  num_workers: 4
+  num_channels: null
+  session_configs: null
+  learning_rate: 1e-3
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 200
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/p300_binary_f1
+      mode: max
+      patience: 50
+    model_checkpoint:
+      monitor: val/p300_binary_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/p300_binary_f1:.4f}"

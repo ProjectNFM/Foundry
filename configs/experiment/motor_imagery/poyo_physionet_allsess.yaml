@@ -1,0 +1,55 @@
+# @package _global_
+
+defaults:
+  - override /model: poyo_eeg
+  - override /data: physionet_mi/allsess
+  - override /model/tokenizer: per_channel_cwt
+
+task_configs:
+  - motor_imagery_binary
+
+model:
+  zero_output_timestamps: true
+  normalize_inputs: true
+
+data:
+  split_type: intersubject
+  task_type: motor_imagery
+
+run:
+  name: physionet_mi_poyo_allsess
+  group: MOTOR_IMAGERY_BASELINE
+  tags: [motor_imagery, poyo, cwt, physionet, allsess]
+  log_level: INFO
+  project: foundry_finetuning
+  compile: default
+
+class_weights:
+  mode: auto
+  smoothing: 1.0
+
+hyperparameters:
+  batch_size: 512
+  sequence_length: 4.0
+  patch_duration: null
+  sampling_rate: 160
+  fold_number: 0
+  num_workers: 6
+  num_channels: null
+  session_configs: null
+  learning_rate: 1e-4
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 1000
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/motor_imagery_binary_f1
+      mode: max
+      patience: 20
+    model_checkpoint:
+      monitor: val/motor_imagery_binary_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/motor_imagery_binary_f1:.4f}"

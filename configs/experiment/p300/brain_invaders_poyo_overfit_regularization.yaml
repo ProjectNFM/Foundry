@@ -1,0 +1,98 @@
+# @package _global_
+#
+# POYO Overfitting Diagnosis — Regularization & Frozen Tokenizer Ablation
+#
+# Tests 7 conditions isolating sources of POYO's extreme overfitting on
+# Brain Invaders P300 (reprocessed): weight decay, dropout, frozen tokenizer,
+# and a combined "kitchen sink" condition.
+#
+# Single fold (fold 0), intersubject, CWT-CNN tokenizer, dynamic channel emb.
+# Each condition is launched via explicit CLI overrides (see launch script).
+#
+# Submit all 7 conditions to SLURM (requires -m flag for Hydra launcher):
+#   bash scripts/launch_overfit_regularization.sh
+#
+# Run a single condition locally for debugging (no -m → runs in-process):
+#   bash scripts/launch_overfit_regularization.sh local
+
+defaults:
+  - override /model: poyo_eeg
+  - override /model/tokenizer: per_channel_cwt_cnn
+  - override /model/session_emb: disabled
+  - override /data: brain_invaders_p300/allsess
+  - override /hydra/launcher: slurm_default
+
+task_configs:
+  - p300_binary
+
+model:
+  zero_output_timestamps: true
+  normalize_inputs: true
+  channel_emb_mode: dynamic
+  embed_dim: 256
+  depth: 4
+  ffn_dropout: 0.2
+  lin_dropout: 0.4
+  atn_dropout: 0.2
+
+data:
+  split_type: intersubject
+  task_type: p300
+
+stage:
+  skip: true
+
+run:
+  name: bi_p300_overfit_reg_${run.condition_tag}
+  group: BI_P300_OVERFIT_REGULARIZATION
+  tags: [p300, brain_invaders, poyo, overfitting, regularization, ablation]
+  log_level: INFO
+  project: foundry_finetuning
+  compile: default
+  condition_tag: baseline
+
+class_weights:
+  mode: auto
+  smoothing: 1.0
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 1.0
+  patch_duration: null
+  sampling_rate: 512
+  fold_number: 0
+  num_workers: 6
+  num_channels: null
+  session_configs: null
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  cwt_lr_multiplier: 1.0
+
+trainer:
+  max_epochs: 500
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/p300_binary_f1
+      mode: max
+      patience: 50
+    model_checkpoint:
+      monitor: val/p300_binary_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/p300_binary_f1:.4f}"
+
+hydra:
+  launcher:
+    tasks_per_node: 1
+    cpus_per_task: 6
+    mem_gb: 32
+    gres: gpu:l40s:1
+    timeout_min: 720
+    max_num_timeout: 5
+    setup:
+      - "set -a"
+      - "source .env"
+      - "set +a"
+      - "export RANK=0"
+      - "uv run python -m foundry.tools.stage_data --experiment p300/brain_invaders_poyo_overfit_regularization"

@@ -38,7 +38,8 @@ class RelativeChannelEncoder(nn.Module):
         self.token_dim = token_dim
         self.channel_emb_dim = channel_emb_dim
 
-        self.time_attn_score = nn.Linear(token_dim, 1)
+        # Bias is omitted: scores feed into softmax over N, which is shift-invariant.
+        self.time_attn_score = nn.Linear(token_dim, 1, bias=False)
         self.cross_channel_attn = nn.MultiheadAttention(
             embed_dim=token_dim,
             num_heads=num_heads,
