@@ -122,9 +122,6 @@ class TestFocalTaskLoss:
         loss_fn = FocalTaskLoss(alpha=alpha_weights, gamma=2.0)
         focal_loss = loss_fn(predictions, targets)
 
-        ce_loss_fn = CrossEntropyTaskLoss()
-        ce_loss = ce_loss_fn(predictions, targets)
-
         assert torch.is_tensor(focal_loss)
         assert focal_loss.dim() == 0
 
