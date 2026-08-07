@@ -1,8 +1,8 @@
-# Dataset summary (run A2):
-#   klinzing_sleep_ds005555:
-#     256 recordings, 128 subjects, eeg, 256 Hz
-#     channels/rec: min=2, max=16, mean=9.8, median=9
-#     duration: 2002.6 h, effective data: 19484.0 ch·h
+# Dataset summary (run A3):
+#   shirazi_hbnr1_ds005505:
+#     1342 recordings, 136 subjects, eeg, 500 Hz
+#     channels/rec: min=129, max=129, mean=129.0, median=129
+#     duration: 117.5 h, effective data: 15162.5 ch·h
 _target_: foundry.data.datamodules.NeuralDataModule
 
 dataset_class: foundry.data.datasets.OpenNeuroMultiBrainset
@@ -19,5 +19,5 @@ task_type: ???
 
 dataset_kwargs:
   brainsets:
-    - klinzing_sleep_ds005555
+    - shirazi_hbnr1_ds005505
   split_type: ${..split_type}

@@ -1,8 +1,16 @@
-# Dataset summary (run A2):
+# Dataset summary (run D2):
 #   klinzing_sleep_ds005555:
 #     256 recordings, 128 subjects, eeg, 256 Hz
 #     channels/rec: min=2, max=16, mean=9.8, median=9
 #     duration: 2002.6 h, effective data: 19484.0 ch·h
+#   kochi_visualnaming_ds006914:
+#     353 recordings, 110 subjects, ieeg, 1000 Hz
+#     channels/rec: min=2, max=66, mean=50.0, median=49
+#     duration: 51.0 h, effective data: 2564.8 ch·h
+#   Aggregate (2 brainsets):
+#     609 recordings, 238 subjects
+#     duration: 2053.6 h, effective data: 22048.8 ch·h
+#     sampling rates: 256 Hz, 1000 Hz
 _target_: foundry.data.datamodules.NeuralDataModule
 
 dataset_class: foundry.data.datasets.OpenNeuroMultiBrainset
@@ -20,4 +28,5 @@ task_type: ???
 dataset_kwargs:
   brainsets:
     - klinzing_sleep_ds005555
+    - kochi_visualnaming_ds006914
   split_type: ${..split_type}
