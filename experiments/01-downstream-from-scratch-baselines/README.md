@@ -138,7 +138,13 @@ fine-tuning experiments.
 
 ## Open Questions
 
-- **Can pretraining unlock POYO's advantage on from-scratch-equivalent tasks?** All three datasets show POYO matching but not exceeding EEGNet from scratch. The transformer backbone's capacity may only pay off with pretrained representations. **Follow-up:** [Two-Dataset Pretraining: Downstream Benefit Evaluation](../inbox/20260805-MS-two-dataset-pretrain-downstream-eval.md)
+- **Can pretraining unlock POYO's advantage on from-scratch-equivalent tasks?** All three datasets show POYO matching but not exceeding EEGNet from scratch. The transformer backbone's capacity may only pay off with pretrained representations. **Follow-ups:**
+  - [Two-Dataset Pretraining: Downstream Benefit Evaluation](../inbox/20260805-MS-two-dataset-pretrain-downstream-eval.md)
+  - [Volume Scaling](../02-volume-scaling/20260807-MS-volume-scaling-pretrain.md)
+  - [Diversity Scaling](../03-diversity-scaling/20260807-MS-diversity-scaling-pretrain.md)
+  - [Diversity vs Volume Controls](../04-diversity-volume-controls/20260807-MS-diversity-volume-controls.md)
+  - [Paradigm Diversity](../05-paradigm-diversity/20260807-MS-paradigm-diversity-pretrain.md)
+  - [Maximum Data](../06-maximum-data/20260807-MS-maximum-data-pretrain.md)
 - **What is the root cause of POYO's structural overfitting on P300?** Standard regularization (weight decay up to 0.1, dropout up to 0.5, frozen tokenizer) has zero effect. The model may be learning subject-specific patterns that do not transfer across individuals.
 - **Can better data processing improve Brain Invaders P300 results?** The intrasession ceiling (~0.40 F1) is far below within-session MOABB benchmarks (~0.72–0.86 AUC), suggesting either the data processing pipeline or the evaluation protocol differs substantially from standard practice.
 - **Would task-specific architectures (e.g., sequence-to-sequence for sleep staging, xDAWN spatial filtering for P300) close the gap to SOTA?** Our general-purpose architectures trade task-specific inductive biases for flexibility.
