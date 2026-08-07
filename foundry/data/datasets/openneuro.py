@@ -8,10 +8,15 @@ from torch_brain.datasets import (
     ShiraziHBNR1DS005505,
 )
 
+from .getzmann_resting_ds005385 import GetzmannRestingDS005385
+from .pavlov_verbal_wm_ds003655 import PavlovVerbalWmDS003655
+
 OPENNEURO_BRAINSET_REGISTRY: dict[str, type] = {
     "klinzing_sleep_ds005555": KlinzingSleepDS005555,
     "shirazi_hbnr1_ds005505": ShiraziHBNR1DS005505,
     "kochi_visualnaming_ds006914": KochiVisualNamingDS006914,
+    "pavlov_verbal_wm_ds003655": PavlovVerbalWmDS003655,
+    "getzmann_resting_ds005385": GetzmannRestingDS005385,
 }
 
 
