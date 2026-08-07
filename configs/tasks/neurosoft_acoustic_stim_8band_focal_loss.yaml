@@ -40,9 +40,9 @@ target_extractor:
 loss:
   _target_: foundry.tasks.losses.FocalTaskLoss
   alpha: auto
-  alpha_smoothing: 0.75
+  alpha_smoothing: 1.00
   gamma: 2.0
-  label_smoothing: 0.1
+  label_smoothing: 0.0
 
 metrics:
   _target_: foundry.tasks.metrics.classification_metrics
