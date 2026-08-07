@@ -62,13 +62,13 @@ A2's effective_data).
 uv run python main.py experiment=pretraining/poyo_data_scaling_base \
   data=openneuro/klinzing_headband_only \
   run.name=pretrain_C1_headband_only \
-  run.group=DATA_SCALING_CONTROLS
+  run.group=DATA_SCALING_CONTROLS -m
 
 # C2: 3-dataset volume-matched to A2
 uv run python main.py experiment=pretraining/poyo_data_scaling_base \
   data=openneuro/three_dataset_volume_matched \
   run.name=pretrain_C2_volume_matched \
-  run.group=DATA_SCALING_CONTROLS
+  run.group=DATA_SCALING_CONTROLS -m
 ```
 
 ### Launch commands — Downstream evaluation

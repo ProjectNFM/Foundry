@@ -60,19 +60,19 @@ Each run uses the base config with data/name/group overrides:
 uv run python main.py experiment=pretraining/poyo_data_scaling_base \
   data=openneuro/klinzing_small \
   run.name=pretrain_A1_klinzing_small \
-  run.group=DATA_SCALING_VOLUME
+  run.group=DATA_SCALING_VOLUME -m
 
 # A2: Klinzing full (256 recordings)
 uv run python main.py experiment=pretraining/poyo_data_scaling_base \
   data=openneuro/sleep_brainset \
   run.name=pretrain_A2_klinzing_full \
-  run.group=DATA_SCALING_VOLUME
+  run.group=DATA_SCALING_VOLUME -m
 
 # A3: Shirazi only (1,342 recordings, 129ch)
 uv run python main.py experiment=pretraining/poyo_data_scaling_base \
   data=openneuro/shirazi_only \
   run.name=pretrain_A3_shirazi_only \
-  run.group=DATA_SCALING_VOLUME
+  run.group=DATA_SCALING_VOLUME -m
 ```
 
 ### Launch commands — Downstream evaluation

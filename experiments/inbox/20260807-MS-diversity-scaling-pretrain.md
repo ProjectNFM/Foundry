@@ -63,19 +63,19 @@ evaluation. Otherwise, re-run with the standardized 200k-step budget.
 uv run python main.py experiment=pretraining/poyo_data_scaling_base \
   data=openneuro/two_dataset_pretrain \
   run.name=pretrain_B1_two_dataset \
-  run.group=DATA_SCALING_DIVERSITY
+  run.group=DATA_SCALING_DIVERSITY -m
 
 # B2: Klinzing + Shirazi + Pavlov (3 datasets)
 uv run python main.py experiment=pretraining/poyo_data_scaling_base \
   data=openneuro/three_dataset_pretrain \
   run.name=pretrain_B2_three_dataset \
-  run.group=DATA_SCALING_DIVERSITY
+  run.group=DATA_SCALING_DIVERSITY -m
 
 # B3: Klinzing + Shirazi + Pavlov + Getzmann (4 datasets)
 uv run python main.py experiment=pretraining/poyo_data_scaling_base \
   data=openneuro/four_dataset_pretrain \
   run.name=pretrain_B3_four_dataset \
-  run.group=DATA_SCALING_DIVERSITY
+  run.group=DATA_SCALING_DIVERSITY -m
 ```
 
 ### Launch commands — Downstream evaluation

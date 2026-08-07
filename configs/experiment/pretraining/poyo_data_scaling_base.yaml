@@ -67,6 +67,7 @@ trainer:
   max_epochs: -1
   precision: bf16-mixed
   val_check_interval: 5000
+  check_val_every_n_epoch: null
   callbacks:
     early_stopping:
       patience: 20

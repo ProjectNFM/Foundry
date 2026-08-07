@@ -58,19 +58,19 @@ Shirazi) if paradigm diversity adds value on top of dataset diversity.
 uv run python main.py experiment=pretraining/poyo_data_scaling_base \
   data=openneuro/kochi_only \
   run.name=pretrain_D1_kochi_only \
-  run.group=DATA_SCALING_PARADIGM
+  run.group=DATA_SCALING_PARADIGM -m
 
 # D2: Klinzing + Kochi
 uv run python main.py experiment=pretraining/poyo_data_scaling_base \
   data=openneuro/klinzing_kochi \
   run.name=pretrain_D2_klinzing_kochi \
-  run.group=DATA_SCALING_PARADIGM
+  run.group=DATA_SCALING_PARADIGM -m
 
 # D3: Klinzing + Shirazi + Kochi
 uv run python main.py experiment=pretraining/poyo_data_scaling_base \
   data=openneuro/klinzing_shirazi_kochi \
   run.name=pretrain_D3_klinzing_shirazi_kochi \
-  run.group=DATA_SCALING_PARADIGM
+  run.group=DATA_SCALING_PARADIGM -m
 ```
 
 ### Launch commands — Downstream evaluation

@@ -76,7 +76,7 @@ Staging 733G is tight but should be feasible on most nodes. If staging fails:
 uv run python main.py experiment=pretraining/poyo_data_scaling_base \
   data=openneuro/all_datasets \
   run.name=pretrain_E1_all_datasets \
-  run.group=DATA_SCALING_MAXDATA
+  run.group=DATA_SCALING_MAXDATA -m
 ```
 
 ### Launch commands — Downstream evaluation
