@@ -5,6 +5,7 @@ and optional tokenization/vocab initialization. It decouples data loading from
 model-specific preprocessing.
 """
 
+import gc
 import logging
 import math
 from typing import TYPE_CHECKING, Callable, Literal, Optional, Type
@@ -32,6 +33,20 @@ logger = logging.getLogger(__name__)
 
 
 _INTERPOLATION_ONLY_KEYS = ("subject",)
+
+
+def _disable_gc_in_worker(worker_id: int) -> None:
+    """Disable cyclic GC in DataLoader workers to prevent CUDA tensor cleanup.
+
+    When workers are forked from a process with an active CUDA context, they
+    inherit references to GPU tensors (e.g. via model bound methods used as
+    dataset transforms). Python's cyclic GC may try to free these tensors,
+    triggering ``cudaErrorInitializationError`` because CUDA cannot be used
+    in forked child processes. Disabling cyclic GC in workers is safe because
+    workers only perform CPU-side data loading and do not create new CUDA
+    reference cycles.
+    """
+    gc.disable()
 
 
 def normalize_data_config(data_cfg: DictConfig) -> None:
@@ -378,7 +393,10 @@ class NeuralDataModule(LightningDataModule):
             collate_fn=collate,
             persistent_workers=self.num_workers > 0,
             prefetch_factor=2 if self.num_workers > 0 else None,
-            drop_last=(split == "train"),  # Only drop last for training
+            drop_last=(split == "train"),
+            worker_init_fn=_disable_gc_in_worker
+            if self.num_workers > 0
+            else None,
         )
 
     def train_dataloader(self) -> DataLoader:

@@ -79,6 +79,7 @@ hydra:
     timeout_min: 2880
     max_num_timeout: 5
     setup:
+      - "ulimit -n 65536"
       - "set -a"
       - "source .env"
       - "set +a"
