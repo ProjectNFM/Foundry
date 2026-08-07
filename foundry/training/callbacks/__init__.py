@@ -10,6 +10,9 @@ from __future__ import annotations
 from lightning import Trainer
 
 from foundry.training.callbacks.diagnostics import ParameterWatcherCallback
+from foundry.training.callbacks.embedding_viz import (
+    EmbeddingVisualizationCallback,
+)
 from foundry.training.callbacks.lifecycle import (
     DeterministicSamplerCallback,
     VocabInitializerCallback,
@@ -37,6 +40,7 @@ __all__ = [
     "ConfusionMatrixCallback",
     "DeterministicSamplerCallback",
     "EffectiveBatchSizeCallback",
+    "EmbeddingVisualizationCallback",
     "ParameterWatcherCallback",
     "ReconstructionVisualizationCallback",
     "SessionMetricsCallback",
