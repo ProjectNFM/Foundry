@@ -1,6 +1,6 @@
 # Two-Dataset Pretraining: Downstream Benefit Evaluation
 
-**Status:** Draft
+**Status:** In Progress
 **Date started:** 2026-08-05
 **Parent experiment:** [01-downstream-from-scratch-baselines](../01-downstream-from-scratch-baselines/README.md)
 **Follow-up experiments:** [Volume Scaling](../02-volume-scaling/20260807-MS-volume-scaling-pretrain.md), [Diversity Scaling](../03-diversity-scaling/20260807-MS-diversity-scaling-pretrain.md), [Diversity vs Volume Controls](../04-diversity-volume-controls/20260807-MS-diversity-volume-controls.md), [Paradigm Diversity](../05-paradigm-diversity/20260807-MS-paradigm-diversity-pretrain.md), [Maximum Data](../06-maximum-data/20260807-MS-maximum-data-pretrain.md)
@@ -122,7 +122,12 @@ from-scratch baselines for fair comparison.
 
 Checkpoint paths are auto-resolved: downstream configs construct the pretrained
 checkpoint path from the sweep variables using the pattern:
-`${SCRATCH}/runs/PRETRAIN_TWO_DATASET_4VARIANTS/pretrain_2ds_<tokenizer>_ch-<channel_emb>/checkpoints/last.ckpt`
+`${SCRATCH}/runs/PRETRAIN_TWO_DATASET_4VARIANTS/pretrain_2ds_<tokenizer>_ch-<channel_emb><suffix>/checkpoints/last.ckpt`
+
+where `<suffix>` is `_fix` for `dynamic` channel_emb runs (re-run to fix an
+upstream issue) and empty for `disabled` runs. This is handled via a
+`_pretrain_ckpt_suffix` map with OmegaConf nested interpolation in each
+downstream config.
 
 Transfer mode is `permissive` (not strict) since the pretraining and downstream
 datasets have different channel configurations.

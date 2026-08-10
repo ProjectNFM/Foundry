@@ -32,6 +32,10 @@ data:
 stage:
   skip: true
 
+_pretrain_ckpt_suffix:
+  disabled: ""
+  dynamic: "_fix"
+
 run:
   name: bi_ft2ds_${hydra:runtime.choices.model/tokenizer}_ch-${model.channel_emb_mode}_fold${hyperparameters.fold_number}
   group: BI_P300_FINETUNE_FROM_2DS_PRETRAIN
@@ -39,7 +43,7 @@ run:
   log_level: INFO
   project: foundry_finetuning
   compile: default
-  pretrained_checkpoint: ${oc.env:SCRATCH}/runs/PRETRAIN_TWO_DATASET_4VARIANTS/pretrain_2ds_${hydra:runtime.choices.model/tokenizer}_ch-${model.channel_emb_mode}/checkpoints/last.ckpt
+  pretrained_checkpoint: ${oc.env:SCRATCH}/runs/PRETRAIN_TWO_DATASET_4VARIANTS/pretrain_2ds_${hydra:runtime.choices.model/tokenizer}_ch-${model.channel_emb_mode}${_pretrain_ckpt_suffix.${model.channel_emb_mode}}/checkpoints/last.ckpt
   pretrained_transfer_mode: permissive
   freeze_pretrained: false
 
