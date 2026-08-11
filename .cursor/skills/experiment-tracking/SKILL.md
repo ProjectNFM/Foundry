@@ -16,11 +16,17 @@ This project uses a 3-stage experiment pipeline with a staged inbox workflow.
 | Stage | Skill | Trigger |
 |-------|-------|---------|
 | 1. Plan | [create-experiment](../create-experiment/SKILL.md) | "new experiment", "I want to test", "plan experiment" |
-| 2. Analyze | [run-experiment](../run-experiment/SKILL.md) | "run is done", "analyze results", WandB IDs provided |
+| 2a. Analyze runs | [run-experiment](../run-experiment/SKILL.md) | "run is done", "analyze results", WandB run IDs provided |
+| 2b. Report sweep | [report-sweep](../report-sweep/SKILL.md) | WandB group and/or sweep ID(s), "report sweep", compare minipigs vs monkeys |
 | 3. Archive | [archive-group](../archive-group/SKILL.md) | "archive", "group these", "clean inbox", "synthesize" |
 
 When the user's intent maps to one of these stages, read and follow the
 corresponding sub-skill immediately.
+
+Prefer **report-sweep** over **run-experiment** when the user supplies a
+group and/or sweep ID(s) and wants a species comparison report.
+`report-sweep` auto-resolves one vs many sweeps — do not ask the user to
+reformat IDs before invoking it.
 
 ## Directory Structure
 
