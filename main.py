@@ -249,6 +249,47 @@ def _load_task_configs(cfg: DictConfig) -> dict:
     return configs
 
 
+def _apply_task_loss_overrides(cfg: DictConfig, task_configs: dict) -> None:
+    """Apply Hydra/sweep ``task_loss.*`` overrides onto loaded task losses.
+
+    Task YAMLs are loaded independently of the Hydra tree, so WandB sweep
+    params cannot target nested ``loss.gamma`` fields directly. Overrides
+    under ``cfg.task_loss`` are merged into every ``FocalTaskLoss`` config.
+    """
+    overrides = OmegaConf.select(cfg, "task_loss", default=None)
+    if overrides is None:
+        return
+
+    override_dict = OmegaConf.to_container(overrides, resolve=True)
+    if not isinstance(override_dict, dict):
+        return
+
+    # Drop empty / unset keys (config.yaml seeds ``task_loss: {}``).
+    override_dict = {
+        key: value
+        for key, value in override_dict.items()
+        if value is not None and not str(key).startswith("_")
+    }
+    if not override_dict:
+        return
+
+    for name, task_cfg in task_configs.items():
+        loss = task_cfg.loss
+        if not isinstance(loss, dict):
+            continue
+        loss_target = str(loss.get("_target_", ""))
+        if "FocalTaskLoss" not in loss_target:
+            continue
+        for key, value in override_dict.items():
+            loss[key] = value
+            logger.info(
+                "Applied task_loss override to %r: loss.%s = %s",
+                name,
+                key,
+                value,
+            )
+
+
 def _validate_and_apply_focal_loss_weights(
     cfg: DictConfig, datamodule, task_configs: dict, setup_done: bool = False
 ) -> tuple[dict, bool]:
@@ -381,6 +422,7 @@ def _build_model_and_data(cfg: DictConfig):
     _populate_data_driven_hyperparams(cfg)
 
     task_configs = _load_task_configs(cfg)
+    _apply_task_loss_overrides(cfg, task_configs)
     normalize_data_config(cfg.data)
     datamodule = instantiate(cfg.data, tokenizer=None)
     datamodule._task_configs = task_configs

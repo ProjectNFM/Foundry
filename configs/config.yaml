@@ -39,6 +39,16 @@ class_weights:
   mode: none
   smoothing: 0.5
 
+# Optional overrides applied onto FocalTaskLoss after task YAMLs are loaded.
+# Keys must be declared here so Hydra struct mode accepts CLI/sweep overrides
+# (empty ``task_loss: {}`` rejects unknown nested keys).
+# null means "keep the value from the task YAML".
+task_loss:
+  alpha: null
+  gamma: null
+  label_smoothing: null
+  alpha_smoothing: null
+
 run:
   seed: 42
   # Enable torch deterministic algorithms for bitwise reproducibility

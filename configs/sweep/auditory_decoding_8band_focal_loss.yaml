@@ -1,0 +1,42 @@
+# WandB grid sweep over FocalTaskLoss hyperparameters for 8-band auditory decoding.
+#
+# IMPORTANT: Run with an experiment that uses the focal-loss task config, e.g.:
+#
+#   wandb sweep configs/sweep/auditory_decoding_8band_focal_loss.yaml
+#   WANDB_SWEEP_EXPERIMENT=auditory_decoding/test \
+#     uv run python -m foundry.tools.wandb_sweep_agent_worker <sweep-id>
+#
+# Or via the CSCS agent helper:
+#   bash jobs/cscs_task_wandb_agent.sh <sweep-id> auditory_decoding/test
+#
+# Sweep params are injected as Hydra overrides under ``task_loss.*`` and applied
+# onto every FocalTaskLoss after the task YAML is loaded (see main.py).
+#
+# Grid size: 4 gamma × 2 label_smoothing = 8 runs.
+#
+# Metric: val/{task_name}_{metric_key}
+# Task name: neurosoft_acoustic_stim_8band (from the task YAML ``name:`` field)
+# Metric key: f1 (from metric_summary_modes)
+
+defaults:
+  - default
+
+method: grid
+metric:
+  name: val/neurosoft_acoustic_stim_8band_f1
+  goal: maximize
+parameters:
+  task_loss.gamma:
+    values:
+      - 0.5
+      - 1.0
+      - 1.5
+      - 2.0
+  task_loss.label_smoothing:
+    values:
+      - 0.1
+      - 0.2
+  task_loss.alpha_smoothing:
+    values:
+      - 0.75
+      - 1.00
