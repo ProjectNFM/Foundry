@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-08-05
 **Parent experiment:** [01-downstream-from-scratch-baselines](../01-downstream-from-scratch-baselines/README.md)
-**Follow-up experiments:** [Volume Scaling](../02-volume-scaling/20260807-MS-volume-scaling-pretrain.md), [Diversity Scaling](../03-diversity-scaling/20260807-MS-diversity-scaling-pretrain.md), [Diversity vs Volume Controls](../04-diversity-volume-controls/20260807-MS-diversity-volume-controls.md), [Paradigm Diversity](../05-paradigm-diversity/20260807-MS-paradigm-diversity-pretrain.md), [Maximum Data](../06-maximum-data/20260807-MS-maximum-data-pretrain.md)
+**Follow-up experiments:** [Volume Scaling](./20260807-MS-volume-scaling-pretrain.md), [Diversity Scaling](./20260807-MS-diversity-scaling-pretrain.md), [Diversity vs Volume Controls](./20260807-MS-diversity-volume-controls.md), [Paradigm Diversity](./20260807-MS-paradigm-diversity-pretrain.md), [Maximum Data](./20260807-MS-maximum-data-pretrain.md)
 **Tags:** pretraining, mae, masked, two_dataset, klinzing, shirazi, downstream, finetuning, linear_probe, embedding_analysis
 
 ## Background
@@ -203,4 +203,4 @@ uv run python analysis/035_two_dataset_pretrain_downstream.py
 
 ## Notes for future experiments
 
-- The [Volume Scaling](../02-volume-scaling/20260807-MS-volume-scaling-pretrain.md) experiment will test whether increasing pretraining data volume improves downstream transfer beyond the two-dataset baseline established here.
+- The [Volume Scaling](./20260807-MS-volume-scaling-pretrain.md) experiment will test whether increasing pretraining data volume improves downstream transfer beyond the two-dataset baseline established here.

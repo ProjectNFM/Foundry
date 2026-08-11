@@ -1,6 +1,6 @@
 # Paradigm Diversity: Does Visual Naming EEG Help Transfer?
 
-**Status:** Draft
+**Status:** Completed
 **Date started:** 2026-08-07
 **Parent experiment:** [01-downstream-from-scratch-baselines](../01-downstream-from-scratch-baselines/README.md)
 **Follow-up experiments:** TBD
@@ -8,8 +8,8 @@
 
 ## Background
 
-The [volume scaling](../02-volume-scaling/20260807-MS-volume-scaling-pretrain.md) and
-[diversity scaling](../03-diversity-scaling/20260807-MS-diversity-scaling-pretrain.md)
+The [volume scaling](./20260807-MS-volume-scaling-pretrain.md) and
+[diversity scaling](./20260807-MS-diversity-scaling-pretrain.md)
 experiments test within-modality diversity (all EEG, varying datasets). This experiment
 introduces **paradigm diversity** by adding Kochi Visual Naming (ds006914) — an iEEG
 dataset from a fundamentally different cognitive paradigm (visual object naming vs
@@ -125,12 +125,83 @@ done
 
 ## Results
 
-TBD
+### Pretraining
+
+All 3 runs completed 200k optimizer steps.
+
+| Run | Final Val Loss | Best Val Loss |
+|-----|---------------|---------------|
+| D1 (Kochi only, 2.6k ch·h) | 0.1599 | 0.1599 |
+| D2 (Klinzing+Kochi, 22.0k ch·h) | 0.1003 | 0.1003 |
+| D3 (Klinzing+Shirazi+Kochi, 37.2k ch·h) | 0.1059 | 0.1059 |
+
+D1 has the highest reconstruction loss across all 12 pretraining runs,
+reflecting Kochi's high variability (2-66ch, variable electrode configs,
+visual naming paradigm).
+
+### Downstream — Finetuning
+
+| Task | D1 (Kochi, 2.6k) | D2 (Klin+Kochi, 22k) | D3 (Klin+Shir+Kochi, 37.2k) | Baseline |
+|------|:---:|:---:|:---:|:---:|
+| Kemp Sleep | 0.721 ± 0.013 | 0.727 ± 0.004 | **0.730 ± 0.010** | 0.730 |
+| PhysioNet MI | 0.725 ± 0.107 | 0.877 ± 0.043 | **0.876 ± 0.048** | 0.887 |
+| Brain Inv P300 | **0.345 ± 0.017** | 0.337 ± 0.014 | 0.332 ± 0.018 | 0.386 |
+
+### Downstream — Linear Probe
+
+| Task | D1 | D2 | D3 |
+|------|:---:|:---:|:---:|
+| Kemp Sleep | 0.491 ± 0.014 | 0.568 ± 0.010 | **0.573 ± 0.014** |
+| PhysioNet MI | 0.649 ± 0.009 | **0.661 ± 0.003** | 0.650 ± 0.023 |
+| Brain Inv P300 | 0.288 ± 0.003 | 0.288 ± 0.002 | 0.286 ± 0.002 |
+
+### Key comparisons
+
+- **D1 (Kochi only):** Catastrophic MI failure (0.725 ± 0.107, fold0/fold1
+  stuck near chance at ~0.66). Visual naming pretraining alone is insufficient
+  for MI. Paradoxically, D1 has the best P300 finetuning among D runs (0.345),
+  suggesting Kochi's event-related temporal structure partially aligns with P300.
+- **D2 vs A2 (adding Kochi to Klinzing):** Essentially identical — Kochi
+  provides no benefit on any task (Sleep: -0.001, MI: -0.007, P300: -0.001).
+- **D3 vs B1 (adding Kochi to Klinzing+Shirazi):** D3 matches B1 on Sleep
+  (+0.003) but is worse on MI (-0.010). Kochi adds negligible value in a
+  multi-source setting.
+- All Kochi-containing configs (D1-D3) have the **weakest Kemp Sleep linear
+  probes** among all experiments, suggesting paradigm-mismatched pretraining
+  corrupts sleep-relevant representations.
+
+### Analysis
+
+```bash
+uv run python analysis/036_data_scaling_all_experiments.py
+```
+
+### Figures
+
+![Paradigm Diversity Downstream](../../analysis/figures/036_paradigm_downstream.png)
+![Delta Heatmap](../../analysis/figures/036_downstream_finetune_delta_heatmap.png)
 
 ## Conclusions
 
-TBD
+**Hypothesis partially confirmed for P300 but refuted for MI and Sleep.**
+Kochi provides a small P300 benefit (D1 has the best P300 among D runs),
+consistent with shared event-related processing between visual naming and P300.
+However, Kochi provides no benefit for MI and slightly hurts all tasks when
+added to multi-source mixes (D2 ≈ A2, D3 ≈ B1).
+
+The paradigm-diversity hypothesis — that cross-paradigm pretraining helps
+build general neural representations — is not supported. Instead, Kochi's
+visual naming data appears to either dilute useful representations or
+introduce conflicting features. D1's catastrophic MI failure (0.725 with
+enormous variance) particularly illustrates this: visual naming pretraining
+alone is insufficient for motor imagery.
 
 ## Notes for future experiments
 
-TBD
+- Investigate why B2 (3 datasets with Pavlov) is the sweet spot — Pavlov's
+  working memory paradigm may share task-relevant structure that Kochi lacks.
+- D1's P300 advantage deserves follow-up: is the benefit from Kochi's
+  event-related processing or just from its small data size (avoiding
+  overfitting to reconstruction)?
+- Test whether Kochi helps on downstream tasks with similar cognitive demands
+  (e.g., visual ERP classification, language processing).

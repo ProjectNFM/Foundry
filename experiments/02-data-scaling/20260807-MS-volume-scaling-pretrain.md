@@ -1,6 +1,6 @@
 # Volume Scaling: Does More Data from a Single Source Improve Transfer?
 
-**Status:** Draft
+**Status:** Completed
 **Date started:** 2026-08-07
 **Parent experiment:** [01-downstream-from-scratch-baselines](../01-downstream-from-scratch-baselines/README.md)
 **Follow-up experiments:** TBD
@@ -11,7 +11,7 @@
 The [from-scratch baselines](../01-downstream-from-scratch-baselines/README.md) established
 reference performance for POYO CWT-CNN across three downstream EEG tasks (Kemp Sleep F1=0.730,
 PhysioNet MI F1=0.884, Brain Invaders P300 F1=0.364). The
-[two-dataset pretrain experiment](../inbox/20260805-MS-two-dataset-pretrain-downstream-eval.md)
+[two-dataset pretrain experiment](./20260805-MS-two-dataset-pretrain-downstream-eval.md)
 is testing whether pretraining on Klinzing + Shirazi can beat these baselines.
 
 This experiment isolates the **volume scaling** axis: holding the model fixed (CWT-CNN +
@@ -198,12 +198,81 @@ uv run python main.py experiment=p300/brain_invaders_linear_probe_from_data_scal
 
 ## Results
 
-TBD
+### Pretraining
+
+All 3 runs completed 200k optimizer steps (400k total steps with val checks).
+
+| Run | Final Val Loss | Best Val Loss |
+|-----|---------------|---------------|
+| A1 (Klinzing small, 2.3k ch·h) | 0.0317 | 0.0315 |
+| A2 (Klinzing full, 19.5k ch·h) | 0.0446 | 0.0446 |
+| A3 (Shirazi, 15.2k ch·h) | 0.0557 | 0.0557 |
+
+A1 has the lowest reconstruction loss — expected since it trains on the
+smallest, most homogeneous data. Higher loss reflects more complex/diverse
+data to reconstruct, not worse learning.
+
+### Downstream — Finetuning
+
+Best val F1 per fold (max across all epochs), mean ± std across 3 folds.
+
+| Task | A1 (2.3k ch·h) | A2 (19.5k ch·h) | A3 (15.2k ch·h) | Best Baseline |
+|------|:---:|:---:|:---:|:---:|
+| Kemp Sleep | 0.727 ± 0.007 | 0.729 ± 0.007 | **0.737 ± 0.007** | 0.730 |
+| PhysioNet MI | 0.881 ± 0.040 | **0.885 ± 0.040** | 0.880 ± 0.046 | 0.887 |
+| Brain Invaders P300 | **0.342 ± 0.020** | 0.338 ± 0.020 | 0.336 ± 0.014 | 0.386 |
+
+### Downstream — Linear Probe (representation quality)
+
+| Task | A1 | A2 | A3 |
+|------|:---:|:---:|:---:|
+| Kemp Sleep | 0.561 ± 0.010 | **0.599 ± 0.010** | 0.369 ± 0.009 |
+| PhysioNet MI | 0.661 ± 0.005 | 0.653 ± 0.018 | **0.672 ± 0.014** |
+| Brain Invaders P300 | 0.286 ± 0.003 | 0.289 ± 0.004 | **0.289 ± 0.004** |
+
+### Key comparisons
+
+- **A1 → A2 (10x volume):** Negligible finetuning gains (+0.001 Kemp, +0.003 MI,
+  -0.004 P300). But large linear probe improvement on Kemp Sleep
+  (0.561 → 0.599), confirming better sleep representations with more data.
+- **A2 vs A3 (channel richness):** A3 wins Kemp Sleep finetuning (+0.008 over A2,
+  above baseline) but has catastrophically poor Kemp Sleep linear probe (0.369
+  vs 0.599). Shirazi's 129ch representations encode sleep structure poorly
+  despite strong finetuning — the model can adapt during finetuning but the
+  pretrained features aren't sleep-relevant.
+- No volume-scaling config beats EEGNet on MI or P300.
+
+### Analysis
+
+```bash
+uv run python analysis/036_data_scaling_all_experiments.py
+```
+
+### Figures
+
+![Volume Scaling Downstream](../../analysis/figures/036_volume_downstream.png)
+![Pretrain Loss Curves](../../analysis/figures/036_pretrain_loss_curves_all.png)
+![F1 vs Effective Data](../../analysis/figures/036_downstream_f1_vs_effective_data.png)
 
 ## Conclusions
 
-TBD
+**Hypothesis partially confirmed.** A1 → A2 (10x volume) shows minimal finetuning
+improvement but meaningful representation quality gains (Kemp Sleep LP +0.038).
+A2 vs A3 shows the expected channel richness effect on Kemp Sleep finetuning
+(A3 > A2 > baseline), but A3's representations are poor — the domain gap between
+Shirazi's 129ch developmental EEG and Kemp's sleep EEG is too large for the
+frozen backbone to bridge.
+
+Volume scaling within a single source has **diminishing returns for finetuning**
+after moderate amounts (~2k vs ~19k ch·h gives only +0.001-0.003 F1). The
+benefit is more visible in linear probes (representation quality) than in
+finetuning (where the model can compensate for poor representations).
 
 ## Notes for future experiments
 
-TBD
+- Investigate why B2 (3 datasets with Pavlov) is the sweet spot for downstream
+  performance — Pavlov's working memory paradigm may share task-relevant structure
+  with downstream tasks.
+- A3's finetuning vs linear probe gap (good FT, terrible LP) deserves investigation
+  — what features does the model learn to ignore during finetuning that were
+  encoded during pretraining?

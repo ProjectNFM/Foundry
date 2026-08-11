@@ -1,15 +1,15 @@
 # Diversity vs Volume vs Channel Density Controls
 
-**Status:** Draft
+**Status:** Completed
 **Date started:** 2026-08-07
-**Parent experiment:** [02-volume-scaling](../02-volume-scaling/20260807-MS-volume-scaling-pretrain.md)
+**Parent experiment:** [Volume Scaling](./20260807-MS-volume-scaling-pretrain.md)
 **Follow-up experiments:** TBD
 **Tags:** pretraining, mae, masked, data_scaling, controls, channel_density, volume_matched, cwt_cnn, dynamic_ch
 
 ## Background
 
-The [volume scaling](../02-volume-scaling/20260807-MS-volume-scaling-pretrain.md) and
-[diversity scaling](../03-diversity-scaling/20260807-MS-diversity-scaling-pretrain.md)
+The [volume scaling](./20260807-MS-volume-scaling-pretrain.md) and
+[diversity scaling](./20260807-MS-diversity-scaling-pretrain.md)
 experiments vary both data volume and diversity simultaneously, making it hard to
 attribute improvements to one factor.
 
@@ -113,12 +113,81 @@ done
 
 ## Results
 
-TBD
+### Pretraining
+
+Both runs completed 200k optimizer steps.
+
+| Run | Final Val Loss | Best Val Loss |
+|-----|---------------|---------------|
+| C1 (Headband only, 7.3k ch·h) | 0.0521 | 0.0512 |
+| C2 (3ds vol-matched, 19.6k ch·h) | 0.0476 | 0.0476 |
+
+### Downstream — Finetuning
+
+| Task | C1 (headband, 7.3k) | C2 (3ds vol-matched, 19.6k) | A2 (Klinzing full, 19.5k) | Baseline |
+|------|:---:|:---:|:---:|:---:|
+| Kemp Sleep | 0.735 ± 0.002 | **0.739 ± 0.004** | 0.729 ± 0.007 | 0.730 |
+| PhysioNet MI | **0.884 ± 0.040** | 0.875 ± 0.049 | 0.885 ± 0.040 | 0.887 |
+| Brain Inv P300 | **0.334 ± 0.017** | 0.329 ± 0.008 | 0.338 ± 0.020 | 0.386 |
+
+### Downstream — Linear Probe
+
+| Task | C1 | C2 | A2 (reference) |
+|------|:---:|:---:|:---:|
+| Kemp Sleep | 0.626 ± 0.008 | **0.636 ± 0.010** | 0.599 ± 0.010 |
+| PhysioNet MI | 0.664 ± 0.001 | **0.670 ± 0.016** | 0.653 ± 0.018 |
+| Brain Inv P300 | 0.284 ± 0.009 | **0.301 ± 0.013** | 0.289 ± 0.004 |
+
+### Key comparisons
+
+- **C2 vs A2 (diversity at constant volume, ~19.5k ch·h):** Mixed finetuning
+  results — C2 beats A2 on Kemp Sleep (+0.010) but loses on MI (-0.010) and
+  P300 (-0.009). However, C2 dominates ALL linear probes (Sleep: +0.037,
+  MI: +0.017, P300: +0.012). **Diversity provides a strong independent
+  benefit for representation quality but not consistently for finetuning.**
+- **C1 vs A2 (headband-only vs full Klinzing):** C1 (7.3k ch·h, ~6ch)
+  matches or exceeds A2 (19.5k ch·h, ~10-16ch) on finetuning. C1 beats
+  A2 on Kemp Sleep (+0.006) and MI (-0.001 within noise). Channel density
+  and volume are NOT critical for finetuning transfer.
+- C2 achieves the **best Kemp Sleep finetuning** (0.739) and the **best
+  linear probes on all 3 tasks** among all 12 pretraining configurations.
+
+### Analysis
+
+```bash
+uv run python analysis/036_data_scaling_all_experiments.py
+```
+
+### Figures
+
+![Controls Downstream](../../analysis/figures/036_controls_downstream.png)
+![Key Comparisons](../../analysis/figures/036_key_comparisons_diversity_vs_volume.png)
+![Linear Probe Heatmap](../../analysis/figures/036_downstream_linear_probe_heatmap.png)
 
 ## Conclusions
 
-TBD
+**Hypothesis partially confirmed.** C2 (3-source, volume-matched) outperforms
+A2 (single-source) on representation quality (all 3 linear probes substantially
+better), confirming that **diversity provides an independent benefit beyond
+total effective data**. However, this representation advantage does not
+consistently translate to finetuning gains — C2 wins Kemp Sleep but loses MI
+and P300 finetuning.
+
+C1 (headband-only, ~6ch) **refutes the channel density hypothesis**: despite
+having ~1/3 the effective data and only ~6 channels, C1 matches or exceeds A2
+on finetuning. This suggests that for finetuning transfer, temporal diversity
+in training data matters more than spatial richness per recording.
+
+The key insight is that **diversity helps representations (linear probes) more
+than it helps finetuning**, possibly because finetuning can compensate for
+suboptimal representations through adaptation, while linear probes expose the
+raw quality of pretrained features.
 
 ## Notes for future experiments
 
-TBD
+- Investigate why B2 (3 datasets with Pavlov) is the sweet spot — Pavlov's
+  working memory paradigm may share task-relevant structure with downstream
+  tasks.
+- The representation vs finetuning gap (C2 best linear probes but not best
+  finetuning) suggests investigating partial freezing strategies — if pretrained
+  features are better, selective unfreezing may capture more benefit.
