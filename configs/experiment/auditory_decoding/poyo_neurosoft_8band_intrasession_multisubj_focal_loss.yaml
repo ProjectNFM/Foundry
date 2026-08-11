@@ -6,7 +6,7 @@
 defaults:
   - override /model: poyo_eeg
   - override /model/tokenizer: per_channel_resample_cnn
-  - override /data: neurosoft_monkeys/multisess_raw
+  - override /data: neurosoft_minipigs/multisess_raw
   - override /cluster: cscs
 
 task_configs:
@@ -29,8 +29,8 @@ run:
     - ${hydra:runtime.choices.model}
     - training
     - 8band
-    - monkeys
-    - focal_loss
+    - minipigs
+    - focal_loss+opt_capacity
   seed: 42
   log_level: INFO
 

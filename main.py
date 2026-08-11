@@ -1,4 +1,5 @@
 import hashlib
+import inspect
 import logging
 import os
 import sys
@@ -409,6 +410,36 @@ def _apply_auto_class_weights(
     return task_configs, setup_done
 
 
+def _instantiate_config(node):
+    """Instantiate a config node, ignoring keys that are not constructor args.
+
+    Resolves interpolations first so config-only helpers (e.g.
+    ``channel_emb_fraction`` on a tokenizer) can feed derived fields
+    (e.g. ``channel_emb_dim``) before being dropped.
+    """
+    if not OmegaConf.is_config(node):
+        return node
+
+    target = OmegaConf.select(node, "_target_", default=None)
+    if target is None:
+        return instantiate(node)
+
+    target_cls = get_class(target)
+    params = inspect.signature(target_cls.__init__).parameters
+    has_var_keyword = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+    container = OmegaConf.to_container(node, resolve=True)
+    if has_var_keyword:
+        return instantiate(container)
+
+    allowed = set(params)
+    filtered = {
+        k: v for k, v in container.items() if k == "_target_" or k in allowed
+    }
+    return instantiate(filtered)
+
+
 def _build_model_and_data(cfg: DictConfig):
     """Construct the model and data module from the Hydra config.
 
@@ -438,11 +469,19 @@ def _build_model_and_data(cfg: DictConfig):
     )
 
     ModelClass = get_class(cfg.model._target_)
+    # model_kwargs = {
+    #     k: instantiate(v) if OmegaConf.is_config(v) else v
+    #     for k, v in cfg.model.items()
+    #     if k != "_target_"
+    # }
+    # Only forward constructor args so config-only helpers are ignored.
+    model_param_names = set(inspect.signature(ModelClass.__init__).parameters)
     model_kwargs = {
-        k: instantiate(v) if OmegaConf.is_config(v) else v
+        k: _instantiate_config(v) if OmegaConf.is_config(v) else v
         for k, v in cfg.model.items()
-        if k != "_target_"
+        if k not in ("_target_", "task_configs") and k in model_param_names
     }
+
     session_emb_cfg = model_kwargs.pop("session_emb", None)
     if session_emb_cfg is not None:
         if OmegaConf.is_config(session_emb_cfg):
