@@ -8,6 +8,7 @@ from .peterson_brunton_pose_trajectory_2022 import (
     PetersonBruntonPoseTrajectory2022,
 )
 from .physionet_mi import PhysionetMI
+from .physionet_mi import PhysionetMI
 
 __all__ = [
     "BrainInvadersP300",

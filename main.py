@@ -249,23 +249,123 @@ def _load_task_configs(cfg: DictConfig) -> dict:
     return configs
 
 
+def _validate_and_apply_focal_loss_weights(
+    cfg: DictConfig, datamodule, task_configs: dict, setup_done: bool = False
+) -> tuple[dict, bool]:
+    """Validate FocalTaskLoss configuration and apply auto-alpha if requested.
+
+    Raises an error if FocalTaskLoss is used with class_weights.mode='auto'.
+    If alpha='auto' is set, computes inverse-frequency weights using each
+    task's ``alpha_smoothing`` (default ``1.0``).
+
+    Returns:
+        (task_configs, setup_done) - tuple where setup_done indicates if datamodule.setup("fit")
+        was called and doesn't need to be called again.
+    """
+    class_weights_cfg = OmegaConf.select(cfg, "class_weights", default=None)
+    class_weights_mode = (
+        class_weights_cfg.get("mode", None) if class_weights_cfg else None
+    )
+
+    # (task_name, alpha_smoothing)
+    focal_tasks_with_auto_alpha: list[tuple[str, float]] = []
+
+    for name, task_cfg in task_configs.items():
+        loss_cfg = task_cfg.loss
+
+        # Handle both dict and DictConfig
+        if isinstance(loss_cfg, dict):
+            loss_target = loss_cfg.get("_target_", None)
+            alpha_val = loss_cfg.get("alpha", None)
+            alpha_smoothing = loss_cfg.get("alpha_smoothing", 1.0)
+        else:
+            loss_target = OmegaConf.select(loss_cfg, "_target_", default=None)
+            alpha_val = OmegaConf.select(loss_cfg, "alpha", default=None)
+            alpha_smoothing = OmegaConf.select(
+                loss_cfg, "alpha_smoothing", default=1.0
+            )
+
+        if loss_target is None or "FocalTaskLoss" not in loss_target:
+            continue
+
+        if class_weights_mode == "auto":
+            raise ValueError(
+                f"Task '{name}' uses FocalTaskLoss with class_weights.mode='auto'. "
+                "FocalTaskLoss should not use class_weights; use 'alpha' instead. "
+                "Set class_weights.mode='none' or remove it, then set alpha='auto' or "
+                "provide an explicit per-class alpha list."
+            )
+
+        if alpha_val == "auto":
+            focal_tasks_with_auto_alpha.append((name, float(alpha_smoothing)))
+
+    if focal_tasks_with_auto_alpha:
+        logger.info(
+            "FocalTaskLoss alpha='auto' for %s: running datamodule setup + "
+            "class-frequency scan (same cost as class_weights.mode='auto'). "
+            "Use an explicit alpha list to skip this.",
+            [name for name, _ in focal_tasks_with_auto_alpha],
+        )
+        if not setup_done:
+            datamodule.setup("fit")
+            setup_done = True
+
+        # Group by smoothing to avoid redundant weight computation
+        smoothing_to_tasks: dict[float, list[str]] = {}
+        for name, alpha_smoothing in focal_tasks_with_auto_alpha:
+            smoothing_to_tasks.setdefault(alpha_smoothing, []).append(name)
+
+        smoothing_to_weights = {
+            smoothing: datamodule.compute_class_weights(smoothing=smoothing)
+            for smoothing in smoothing_to_tasks
+        }
+
+        for name, alpha_smoothing in focal_tasks_with_auto_alpha:
+            weights = smoothing_to_weights[alpha_smoothing]
+            if name in weights:
+                task_configs[name].loss["alpha"] = weights[name]
+                logger.info(
+                    "Applied auto-computed alpha weights to FocalTaskLoss for "
+                    "task %r (alpha_smoothing=%.3f): %s",
+                    name,
+                    alpha_smoothing,
+                    weights[name],
+                )
+            else:
+                logger.warning(
+                    "Task %r not found in computed weights. Available tasks: %s",
+                    name,
+                    list(weights.keys()),
+                )
+
+    return task_configs, setup_done
+
+
 def _apply_auto_class_weights(
-    cfg: DictConfig, datamodule, task_configs: dict
-) -> dict:
+    cfg: DictConfig, datamodule, task_configs: dict, setup_done: bool = False
+) -> tuple[dict, bool]:
+    """Apply auto-computed class weights to losses that support them.
+
+    Returns:
+        (task_configs, setup_done) - tuple where setup_done indicates if datamodule.setup("fit")
+        was called and doesn't need to be called again.
+    """
     class_weights_cfg = OmegaConf.select(cfg, "class_weights", default=None)
     if class_weights_cfg is None:
-        return task_configs
+        return task_configs, setup_done
 
     mode = class_weights_cfg.get("mode", None)
     if mode != "auto":
-        return task_configs
+        return task_configs, setup_done
 
-    datamodule.setup("fit")
+    if not setup_done:
+        datamodule.setup("fit")
+        setup_done = True
     smoothing = class_weights_cfg.get("smoothing", 1.0)
     weights = datamodule.compute_class_weights(smoothing=smoothing)
     for name, class_weights in weights.items():
         task_configs[name].loss["class_weights"] = class_weights
-    return task_configs
+    return task_configs, setup_done
 
 
 def _build_model_and_data(cfg: DictConfig):
@@ -284,7 +384,16 @@ def _build_model_and_data(cfg: DictConfig):
     normalize_data_config(cfg.data)
     datamodule = instantiate(cfg.data, tokenizer=None)
     datamodule._task_configs = task_configs
-    task_configs = _apply_auto_class_weights(cfg, datamodule, task_configs)
+
+    # Resolve FocalTaskLoss alpha='auto' before instantiate; track setup state
+    task_configs, setup_done = _validate_and_apply_focal_loss_weights(
+        cfg, datamodule, task_configs
+    )
+
+    # Apply auto class weights for CrossEntropy; reuse setup state from above
+    task_configs, _ = _apply_auto_class_weights(
+        cfg, datamodule, task_configs, setup_done=setup_done
+    )
 
     ModelClass = get_class(cfg.model._target_)
     model_kwargs = {

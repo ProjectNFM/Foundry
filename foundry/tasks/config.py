@@ -41,7 +41,8 @@ class TaskConfig:
 
     @property
     def kind(self) -> str:
-        if "CrossEntropy" in self.loss.get("_target_", ""):
+        loss_target = self.loss.get("_target_", "")
+        if "CrossEntropy" in loss_target or "FocalTaskLoss" in loss_target:
             return "binary" if self.output_dim == 2 else "multiclass"
         return "continuous"
 
