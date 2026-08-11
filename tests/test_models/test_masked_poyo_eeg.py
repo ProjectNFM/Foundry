@@ -403,6 +403,130 @@ class TestMaskedModelTokenize:
         )
 
 
+class TestDynamicDurationTokenize:
+    """Tokenization adapts to actual window duration from Data.start/end."""
+
+    def _make_data(
+        self, duration, channel_ids, channel_types, sr=100.0, start=0.0
+    ):
+        end = start + duration
+        num_samples = round(sr * duration)
+        n_ch = len(channel_ids)
+        signal = np.random.randn(num_samples, n_ch).astype(np.float32)
+        eeg = RegularTimeSeries(
+            signal=signal, sampling_rate=sr, domain_start=start
+        )
+        data = Data(eeg=eeg, domain=Interval(start, end))
+        data.channels = _MockChannels(channel_ids, types=channel_types)
+        data.session = _MockSession("session_0")
+        data._absolute_start = start
+        return data
+
+    def test_latent_count_constant_across_durations(self):
+        """_tokenize_core produces the same number of latent tokens
+        regardless of the actual window duration."""
+        base_seq_len = 1.0
+        latent_step = 0.5
+        num_latents_per_step = 2
+        C_pad = 4
+        N = 10
+
+        model = _build_minimal_masked_model(
+            C_pad=C_pad,
+            N=N,
+            sequence_length=base_seq_len,
+            mask_ratio=0.5,
+        )
+        model._num_latent_bins = round(base_seq_len / latent_step)
+
+        channel_ids = [f"ch_{i}" for i in range(C_pad)]
+        channel_types = ["EEG"] * C_pad
+        expected_latent_count = model._num_latent_bins * num_latents_per_step
+
+        for duration in [0.5, 1.0, 2.0, 5.0]:
+            data = self._make_data(
+                duration, channel_ids, channel_types, sr=100.0
+            )
+            result, _ = model._tokenize_core(data)
+
+            assert len(result["latent_index"]) == expected_latent_count, (
+                f"Duration {duration}s produced "
+                f"{len(result['latent_index'])} latent tokens, "
+                f"expected {expected_latent_count}"
+            )
+            assert (
+                len(result["latent_timestamps"]) == expected_latent_count
+            )
+
+    def test_prepare_signal_uses_actual_duration(self):
+        """_prepare_signal respects the explicit sequence_length argument."""
+        C_pad = 4
+        N = 10
+
+        model = _build_minimal_masked_model(
+            C_pad=C_pad, N=N, sequence_length=1.0
+        )
+
+        channel_ids = [f"ch_{i}" for i in range(C_pad)]
+        channel_types = ["EEG"] * C_pad
+
+        data_2s = self._make_data(
+            2.0, channel_ids, channel_types, sr=100.0
+        )
+
+        prepared_default = model._prepare_signal(data_2s)
+        assert prepared_default.num_samples == round(100.0 * 2.0)
+
+        prepared_explicit = model._prepare_signal(
+            data_2s, sequence_length=1.0
+        )
+        assert prepared_explicit.num_samples == round(100.0 * 1.0)
+
+    def test_get_actual_duration_fallback(self):
+        """_get_actual_duration returns self.sequence_length when
+        Data has no domain."""
+        model = _build_minimal_masked_model(sequence_length=1.0)
+
+        data = Data()
+        data.channels = _MockChannels(["ch_0"], types=["EEG"])
+        data.session = _MockSession("session_0")
+
+        assert model._get_actual_duration(data) == 1.0
+
+    def test_get_actual_duration_from_data(self):
+        """_get_actual_duration derives duration from Data.domain."""
+        model = _build_minimal_masked_model(sequence_length=1.0)
+
+        data = Data(domain=Interval(10.0, 15.0))
+        data.channels = _MockChannels(["ch_0"], types=["EEG"])
+        data.session = _MockSession("session_0")
+
+        assert model._get_actual_duration(data) == 5.0
+
+    def test_masked_tokenize_uses_actual_duration(self):
+        """MaskedPOYOEEGModel.tokenize() produces reconstruction targets
+        that match the actual window duration, not self.sequence_length."""
+        C_pad = 4
+        N = 10
+        base_seq_len = 1.0
+
+        model = _build_minimal_masked_model(
+            C_pad=C_pad, N=N, sequence_length=base_seq_len
+        )
+
+        channel_ids = [f"ch_{i}" for i in range(C_pad)]
+        channel_types = ["EEG"] * C_pad
+
+        data = self._make_data(
+            base_seq_len, channel_ids, channel_types, sr=100.0
+        )
+        result = model.tokenize(data)
+
+        assert "reconstruction_targets" in result
+        assert "latent_index" in result
+        assert "latent_timestamps" in result
+
+
 class TestComputeVisibleIndicesProperties:
     def test_preserves_token_order(self):
         total = 20

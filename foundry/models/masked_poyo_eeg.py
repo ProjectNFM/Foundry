@@ -423,8 +423,9 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         """
         result, prepared = self._tokenize_core(data)
 
+        actual_duration = self._get_actual_duration(data)
         targets_tensor = self.tokenizer.compute_reconstruction_targets(
-            prepared.signal, prepared.sampling_rate, self.sequence_length
+            prepared.signal, prepared.sampling_rate, actual_duration
         )
 
         if self.tokenizer.does_patching:

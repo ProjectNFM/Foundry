@@ -79,3 +79,67 @@ class TestCreateLinspaceLatentTokens:
         assert len(idx) == 1
         assert len(ts) == 1
         np.testing.assert_allclose(ts, [0.5])
+
+
+class TestDynamicLatentGrid:
+    """Verify that using _num_latent_bins + effective_step produces a
+    fixed token count across different window durations."""
+
+    def test_fixed_token_count_across_durations(self):
+        """All durations produce the same number of latent tokens."""
+        base_seq_len = 2.0
+        latent_step = 0.1
+        num_latents_per_step = 16
+        num_bins = round(base_seq_len / latent_step)
+
+        durations = [1.0, 2.0, 5.0, 10.0, 30.0]
+        expected_count = num_bins * num_latents_per_step
+
+        for dur in durations:
+            effective_step = dur / num_bins
+            idx, ts = create_linspace_latent_tokens(
+                0, dur, step=effective_step,
+                num_latents_per_step=num_latents_per_step,
+            )
+            assert len(idx) == expected_count, (
+                f"Duration {dur}s produced {len(idx)} tokens, "
+                f"expected {expected_count}"
+            )
+            assert len(ts) == expected_count
+
+    def test_baseline_duration_matches_original(self):
+        """For the baseline duration, effective_step == latent_step."""
+        base_seq_len = 2.0
+        latent_step = 0.1
+        num_latents_per_step = 16
+        num_bins = round(base_seq_len / latent_step)
+
+        effective_step = base_seq_len / num_bins
+        np.testing.assert_allclose(effective_step, latent_step)
+
+        idx_dyn, ts_dyn = create_linspace_latent_tokens(
+            0, base_seq_len, step=effective_step,
+            num_latents_per_step=num_latents_per_step,
+        )
+        idx_orig, ts_orig = create_linspace_latent_tokens(
+            0, base_seq_len, step=latent_step,
+            num_latents_per_step=num_latents_per_step,
+        )
+        np.testing.assert_array_equal(idx_dyn, idx_orig)
+        np.testing.assert_allclose(ts_dyn, ts_orig)
+
+    def test_timestamps_span_full_duration(self):
+        """Latent timestamps should cover [0, duration) evenly."""
+        num_bins = 20
+        num_latents_per_step = 16
+
+        for dur in [1.0, 5.0, 30.0]:
+            effective_step = dur / num_bins
+            _, ts = create_linspace_latent_tokens(
+                0, dur, step=effective_step,
+                num_latents_per_step=num_latents_per_step,
+            )
+            unique_ts = np.unique(ts)
+            assert len(unique_ts) == num_bins
+            assert unique_ts[0] > 0
+            assert unique_ts[-1] < dur

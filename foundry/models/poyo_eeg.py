@@ -139,6 +139,8 @@ class POYOEEGModel(nn.Module):
         self.normalize_inputs = normalize_inputs
         self.disable_session_emb = disable_session_emb
         self._task_configs = TaskConfig.normalize_task_configs(task_configs)
+
+        self._num_latent_bins = round(self.sequence_length / self.latent_step)
         self._latent_index, self._latent_timestamps = (
             create_linspace_latent_tokens(
                 0,
@@ -637,7 +639,23 @@ class POYOEEGModel(nn.Module):
             "Data must have an 'eeg', 'ecog', 'seeg', or 'ieeg' field"
         )
 
-    def _prepare_signal(self, data: Data) -> PreparedSignal:
+    def _get_actual_duration(self, data: Data) -> float:
+        """Derive the actual window duration from the Data object.
+
+        Falls back to ``self.sequence_length`` when start/end are not set.
+        """
+        if (
+            hasattr(data, "start")
+            and hasattr(data, "end")
+            and data.start is not None
+            and data.end is not None
+        ):
+            return float(data.end - data.start)
+        return self.sequence_length
+
+    def _prepare_signal(
+        self, data: Data, sequence_length: float | None = None
+    ) -> PreparedSignal:
         """Filter by modality, sanitize, normalize length, and optionally z-score.
 
         Shared logic used by both ``tokenize()`` and subclass target computation.
@@ -650,11 +668,17 @@ class POYOEEGModel(nn.Module):
 
         Args:
             data: Input data sample.
+            sequence_length: Target duration in seconds. When ``None``
+                (default), uses the actual window duration from ``data``
+                or falls back to ``self.sequence_length``.
 
         Returns:
             :class:`PreparedSignal` containing the length-normalized,
             sanitized signal and token-grid metadata.
         """
+        if sequence_length is None:
+            sequence_length = self._get_actual_duration(data)
+
         signal_source, default_type, sampling_rate = (
             self._resolve_signal_source(data)
         )
@@ -677,7 +701,7 @@ class POYOEEGModel(nn.Module):
             signal = normalize_encoder_inputs(signal)
 
         return self.tokenizer.prepare_signal(
-            signal, sampling_rate, self.sequence_length, modality_mask
+            signal, sampling_rate, sequence_length, modality_mask
         )
 
     def _infer_sampling_rate_from_timestamps(
@@ -724,7 +748,8 @@ class POYOEEGModel(nn.Module):
             :class:`PreparedSignal` contract and *result_dict* is a complete
             tokenized sample ready for collation.
         """
-        prepared = self._prepare_signal(data)
+        actual_duration = self._get_actual_duration(data)
+        prepared = self._prepare_signal(data, sequence_length=actual_duration)
 
         channel_ids = data.channels.id[prepared.modality_mask].astype(str)
         channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
@@ -733,13 +758,18 @@ class POYOEEGModel(nn.Module):
             signal=prepared.signal,
             channel_tokens=channel_tokens,
             sampling_rate=prepared.sampling_rate,
-            sequence_length=self.sequence_length,
+            sequence_length=actual_duration,
         )
         pretokenized["input_session_ids"] = str(data.session.id)
         input_timestamps = pretokenized.pop("input_timestamps")
 
-        latent_index = self._latent_index
-        latent_timestamps = self._latent_timestamps
+        effective_step = actual_duration / self._num_latent_bins
+        latent_index, latent_timestamps = create_linspace_latent_tokens(
+            0,
+            actual_duration,
+            step=effective_step,
+            num_latents_per_step=self.num_latents_per_step,
+        )
 
         input_session_index = self.session_emb.tokenizer(data.session.id)
 

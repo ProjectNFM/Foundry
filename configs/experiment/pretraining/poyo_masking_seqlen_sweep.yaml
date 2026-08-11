@@ -1,0 +1,101 @@
+# @package _global_
+#
+# Base config for masking-parameter and sequence-length sweep experiments.
+# Inherits the data-scaling setup but switches to intersubject validation,
+# tighter early stopping (patience=10), and doubled compute budget (400k steps).
+#
+# Usage — masking variants (M0-M4):
+#   uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
+#     data=openneuro/three_dataset_pretrain \
+#     model.masking.mask_ratio=0.7 \
+#     run.name=pretrain_M1_ratio70 run.group=MASKING_SEQLEN -m
+#
+# Usage — multi-length (S1, requires code changes):
+#   uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
+#     data=openneuro/three_dataset_pretrain \
+#     data.window_lengths=[1.0,2.0,5.0,10.0,30.0] \
+#     hyperparameters.sequence_length=30.0 \
+#     run.name=pretrain_S1_multilength run.group=MASKING_SEQLEN -m
+
+defaults:
+  - override /model: masked_poyo_eeg
+  - override /model/tokenizer: per_channel_cwt_cnn
+  - override /model/session_emb: disabled
+  - override /hydra/launcher: slurm_default
+
+task_configs:
+  - masked_reconstruction
+
+model:
+  zero_output_timestamps: false
+  normalize_inputs: true
+  channel_emb_mode: dynamic
+  masking:
+    _target_: foundry.tasks.masking.TemporalBlockMasking
+    block_size: 10
+    mask_ratio: 0.5
+
+data:
+  root: ${oc.env:SLURM_TMPDIR}/brainsets/processed
+  split_type: intersubject
+  task_type: null
+
+run:
+  name: masking_seqlen_sweep
+  project: foundry_pretraining
+  group: MASKING_SEQLEN
+  tags: [pretraining, mae, masked, masking_sweep, seqlen_sweep, cwt_cnn, dynamic_ch]
+  log_level: INFO
+  compile: default
+  resume_wandb_if_name_matches: true
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 2.0
+  patch_duration: null
+  sampling_rate: null
+  num_channels: null
+  fold_number: 0
+  num_workers: 12
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  warmup: 2000
+  decay: 398000
+  scheduler_interval: step
+
+trainer:
+  max_steps: 400000
+  max_epochs: -1
+  precision: bf16-mixed
+  val_check_interval: 5000
+  check_val_every_n_epoch: null
+  callbacks:
+    early_stopping:
+      patience: 10
+    model_checkpoint:
+      monitor: val/loss
+      mode: min
+      auto_insert_metric_name: false
+      filename: "best-step{step:06d}-val_loss_{val/loss:.4f}"
+    reconstruction_visualization:
+      log_every_n_steps: 1000
+    embedding_visualization:
+      every_n_epochs: 1
+
+stage:
+  skip: false
+
+hydra:
+  launcher:
+    tasks_per_node: 1
+    cpus_per_task: 12
+    mem_gb: 128
+    gres: gpu:l40s:1
+    timeout_min: 2880
+    max_num_timeout: 5
+    setup:
+      - "ulimit -n 65536"
+      - "set -a"
+      - "source .env"
+      - "set +a"
+      - "export RANK=0"

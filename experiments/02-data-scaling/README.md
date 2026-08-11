@@ -101,12 +101,14 @@ a data scaling issue.
   ChannelMasking (spatial), or hybrid approaches — could produce fundamentally
   different representations. The optimal masking strategy likely depends on
   which downstream task the representations need to support.
+  → Follow-up: [Masking Parameter Sweep](../inbox/20260811-MS-masking-parameter-sweep.md)
 
 - **Sequence length mismatch.** All pretraining used 2s windows, but downstream
   tasks range from 1s (P300) to 30s (Sleep). Representations learned on 2s
   windows may miss longer-range temporal structure critical for sleep staging
   (spindles, K-complexes, slow waves). Training on varied sequence lengths or
   longer windows could yield more versatile representations.
+  → Follow-up: [Multi-Length Pretraining](../inbox/20260811-MS-multi-length-pretraining.md)
 
 - **Data augmentation.** None of the pretraining runs used data augmentation.
   Standard EEG augmentations (time shift, amplitude scaling, channel dropout,
