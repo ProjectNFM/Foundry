@@ -91,7 +91,9 @@ def parse_run_variant(run_name: str) -> tuple[str, str, int] | None:
     return tokenizer, ch_emb, fold
 
 
-def fetch_group_results(group: str, metric_key: str, api: wandb.Api) -> pd.DataFrame:
+def fetch_group_results(
+    group: str, metric_key: str, api: wandb.Api
+) -> pd.DataFrame:
     """Fetch best (max) metric across all epochs for each run in a group."""
     entity = api.default_entity
     runs = api.runs(
@@ -120,17 +122,19 @@ def fetch_group_results(group: str, metric_key: str, api: wandb.Api) -> pd.DataF
             best_epoch = None
             num_epochs = 0
 
-        records.append({
-            "run_id": run.id,
-            "run_name": run.name,
-            "state": run.state,
-            "tokenizer": tokenizer,
-            "channel_emb": ch_emb,
-            "fold": fold,
-            "best_f1": best_f1,
-            "best_epoch": best_epoch,
-            "num_epochs": num_epochs,
-        })
+        records.append(
+            {
+                "run_id": run.id,
+                "run_name": run.name,
+                "state": run.state,
+                "tokenizer": tokenizer,
+                "channel_emb": ch_emb,
+                "fold": fold,
+                "best_f1": best_f1,
+                "best_epoch": best_epoch,
+                "num_epochs": num_epochs,
+            }
+        )
 
     return pd.DataFrame(records)
 
@@ -151,13 +155,15 @@ def print_phase2_table(task: str, summary: pd.DataFrame) -> None:
     best_name, best_val = BEST_BASELINE[task]
     poyo_name, poyo_val = BEST_POYO_BASELINE[task]
 
-    print(f"\n{'='*75}")
+    print(f"\n{'=' * 75}")
     print(f"  {task} — FINETUNING (Phase 2)")
     print(f"  Best overall baseline: {best_name} = {best_val:.3f}")
     print(f"  Best POYO baseline:    {poyo_name} = {poyo_val:.3f}")
-    print(f"{'='*75}")
-    print(f"  {'Variant':<28} {'Mean F1':>8} {'± Std':>8} {'N':>3}  {'Δ Best':>8} {'Δ POYO':>8}")
-    print(f"  {'-'*28} {'-'*8} {'-'*8} {'-'*3}  {'-'*8} {'-'*8}")
+    print(f"{'=' * 75}")
+    print(
+        f"  {'Variant':<28} {'Mean F1':>8} {'± Std':>8} {'N':>3}  {'Δ Best':>8} {'Δ POYO':>8}"
+    )
+    print(f"  {'-' * 28} {'-' * 8} {'-' * 8} {'-' * 3}  {'-' * 8} {'-' * 8}")
 
     for _, row in summary.sort_values("mean", ascending=False).iterrows():
         variant = row["variant"]
@@ -176,11 +182,11 @@ def print_phase2_table(task: str, summary: pd.DataFrame) -> None:
 
 def print_phase3_table(task: str, summary: pd.DataFrame) -> None:
     """Print Phase 3 linear probe table (representation quality)."""
-    print(f"\n{'='*75}")
+    print(f"\n{'=' * 75}")
     print(f"  {task} — LINEAR PROBE (Phase 3, representation quality)")
-    print(f"{'='*75}")
+    print(f"{'=' * 75}")
     print(f"  {'Variant':<28} {'Mean F1':>8} {'± Std':>8} {'N':>3}")
-    print(f"  {'-'*28} {'-'*8} {'-'*8} {'-'*3}")
+    print(f"  {'-' * 28} {'-' * 8} {'-' * 8} {'-' * 3}")
 
     for _, row in summary.sort_values("mean", ascending=False).iterrows():
         variant = row["variant"]
@@ -227,14 +233,24 @@ def make_comparison_figure(
                 stds.append(0)
 
         bars = ax.bar(
-            x, means, 0.6,
-            yerr=stds, capsize=4,
-            color=colors, edgecolor="white", linewidth=0.5,
+            x,
+            means,
+            0.6,
+            yerr=stds,
+            capsize=4,
+            color=colors,
+            edgecolor="white",
+            linewidth=0.5,
             error_kw=dict(lw=1.2),
         )
 
-        ax.axhline(y=best_val, color="black", linestyle="--", linewidth=1.5,
-                   label=f"Best baseline ({best_val:.3f})")
+        ax.axhline(
+            y=best_val,
+            color="black",
+            linestyle="--",
+            linewidth=1.5,
+            label=f"Best baseline ({best_val:.3f})",
+        )
 
         for bar, mean in zip(bars, means):
             if mean > 0:
@@ -242,7 +258,10 @@ def make_comparison_figure(
                     bar.get_x() + bar.get_width() / 2,
                     bar.get_height() + 0.008,
                     f"{mean:.3f}",
-                    ha="center", va="bottom", fontsize=8, fontweight="bold",
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                    fontweight="bold",
                 )
 
         ax.set_title(task, fontsize=11, fontweight="bold")
@@ -261,7 +280,9 @@ def make_comparison_figure(
 
     fig.suptitle(
         "Phase 2: Pretrained Finetuning vs Best Baseline (max F1 per fold)",
-        fontsize=12, fontweight="bold", y=1.01,
+        fontsize=12,
+        fontweight="bold",
+        y=1.01,
     )
     plt.tight_layout()
     out = FIGURES_DIR / "035_phase2_finetuning_vs_best_baseline.png"
@@ -305,9 +326,14 @@ def make_linear_probe_figure(
                 stds.append(0)
 
         bars = ax.bar(
-            x, means, 0.6,
-            yerr=stds, capsize=4,
-            color=colors, edgecolor="white", linewidth=0.5,
+            x,
+            means,
+            0.6,
+            yerr=stds,
+            capsize=4,
+            color=colors,
+            edgecolor="white",
+            linewidth=0.5,
             error_kw=dict(lw=1.2),
         )
 
@@ -315,8 +341,13 @@ def make_linear_probe_figure(
         ft_summary = all_results[task].get("Phase 2: Finetuning")
         if ft_summary is not None and not ft_summary.empty:
             ft_best = ft_summary["mean"].max()
-            ax.axhline(y=ft_best, color="black", linestyle="--", linewidth=1.2,
-                       label=f"Best finetuned ({ft_best:.3f})")
+            ax.axhline(
+                y=ft_best,
+                color="black",
+                linestyle="--",
+                linewidth=1.2,
+                label=f"Best finetuned ({ft_best:.3f})",
+            )
 
         for bar, mean in zip(bars, means):
             if mean > 0:
@@ -324,7 +355,10 @@ def make_linear_probe_figure(
                     bar.get_x() + bar.get_width() / 2,
                     bar.get_height() + 0.008,
                     f"{mean:.3f}",
-                    ha="center", va="bottom", fontsize=8, fontweight="bold",
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                    fontweight="bold",
                 )
 
         ax.set_title(task, fontsize=11, fontweight="bold")
@@ -340,7 +374,9 @@ def make_linear_probe_figure(
 
     fig.suptitle(
         "Phase 3: Linear Probe — Pretrained Representation Quality",
-        fontsize=12, fontweight="bold", y=1.01,
+        fontsize=12,
+        fontweight="bold",
+        y=1.01,
     )
     plt.tight_layout()
     out = FIGURES_DIR / "035_phase3_linear_probe_representation_quality.png"
@@ -379,7 +415,11 @@ def make_delta_heatmap(
 
     vmax = max(0.03, np.nanmax(np.abs(delta_matrix)))
     im = ax.imshow(
-        delta_matrix, cmap="RdYlGn", vmin=-vmax, vmax=vmax, aspect="auto",
+        delta_matrix,
+        cmap="RdYlGn",
+        vmin=-vmax,
+        vmax=vmax,
+        aspect="auto",
     )
 
     for i in range(len(variants)):
@@ -387,9 +427,13 @@ def make_delta_heatmap(
             val = delta_matrix[i, j]
             if not np.isnan(val):
                 ax.text(
-                    j, i, f"{val:+.3f}",
-                    ha="center", va="center",
-                    fontsize=10, fontweight="bold",
+                    j,
+                    i,
+                    f"{val:+.3f}",
+                    ha="center",
+                    va="center",
+                    fontsize=10,
+                    fontweight="bold",
                     color="black" if abs(val) < vmax * 0.7 else "white",
                 )
 
@@ -401,7 +445,8 @@ def make_delta_heatmap(
 
     ax.set_title(
         "Finetuning Transfer Gain vs Best Baseline\n(max F1 per fold, mean across folds)",
-        fontsize=11, fontweight="bold",
+        fontsize=11,
+        fontweight="bold",
     )
     plt.tight_layout()
     out = FIGURES_DIR / "035_phase2_delta_vs_best_baseline.png"
@@ -415,8 +460,8 @@ def main():
     api = wandb.Api()
     print(f"WandB entity: {api.default_entity}")
     print(f"Project: {PROJECT}")
-    print(f"\nNOTE: For each run, we take the MAX val F1 across all epochs")
-    print(f"      (best epoch per fold, as selected by early stopping).")
+    print("\nNOTE: For each run, we take the MAX val F1 across all epochs")
+    print("      (best epoch per fold, as selected by early stopping).")
 
     all_results: dict[str, dict[str, pd.DataFrame]] = {}
 
@@ -433,12 +478,16 @@ def main():
         print(f"  Found {len(df)} runs, {len(valid)} with metrics")
 
         if valid.empty:
-            all_results.setdefault(task, {})["Phase 2: Finetuning"] = pd.DataFrame()
+            all_results.setdefault(task, {})["Phase 2: Finetuning"] = (
+                pd.DataFrame()
+            )
             continue
 
         # Show per-fold detail
-        print(f"\n  Per-fold best F1:")
-        for _, row in valid.sort_values(["tokenizer", "channel_emb", "fold"]).iterrows():
+        print("\n  Per-fold best F1:")
+        for _, row in valid.sort_values(
+            ["tokenizer", "channel_emb", "fold"]
+        ).iterrows():
             print(
                 f"    {row['tokenizer']:<14} {row['channel_emb']:<9} fold{row['fold']}"
                 f"  F1={row['best_f1']:.4f}  (best @ step {row['best_epoch']}, "
@@ -462,11 +511,15 @@ def main():
         print(f"  Found {len(df)} runs, {len(valid)} with metrics")
 
         if valid.empty:
-            all_results.setdefault(task, {})["Phase 3: Linear Probe"] = pd.DataFrame()
+            all_results.setdefault(task, {})["Phase 3: Linear Probe"] = (
+                pd.DataFrame()
+            )
             continue
 
-        print(f"\n  Per-fold best F1:")
-        for _, row in valid.sort_values(["tokenizer", "channel_emb", "fold"]).iterrows():
+        print("\n  Per-fold best F1:")
+        for _, row in valid.sort_values(
+            ["tokenizer", "channel_emb", "fold"]
+        ).iterrows():
             print(
                 f"    {row['tokenizer']:<14} {row['channel_emb']:<9} fold{row['fold']}"
                 f"  F1={row['best_f1']:.4f}  (best @ step {row['best_epoch']}, "
@@ -483,8 +536,10 @@ def main():
     print("=" * 75)
 
     print("\n  Phase 2 — Finetuning (vs best overall baseline per task):")
-    print(f"  {'Task':<22} {'Best Pretrained Variant':<28} {'F1':>6} {'Δ Best Baseline':>16}")
-    print(f"  {'-'*22} {'-'*28} {'-'*6} {'-'*16}")
+    print(
+        f"  {'Task':<22} {'Best Pretrained Variant':<28} {'F1':>6} {'Δ Best Baseline':>16}"
+    )
+    print(f"  {'-' * 22} {'-' * 28} {'-' * 6} {'-' * 16}")
     for task in METRIC_KEYS:
         summary = all_results.get(task, {}).get("Phase 2: Finetuning")
         if summary is None or summary.empty:
@@ -497,9 +552,11 @@ def main():
             f" {delta:>+16.3f}"
         )
 
-    print("\n  Phase 3 — Linear Probe (representation quality, best variant per task):")
+    print(
+        "\n  Phase 3 — Linear Probe (representation quality, best variant per task):"
+    )
     print(f"  {'Task':<22} {'Best Variant':<28} {'F1':>6}")
-    print(f"  {'-'*22} {'-'*28} {'-'*6}")
+    print(f"  {'-' * 22} {'-' * 28} {'-' * 6}")
     for task in METRIC_KEYS:
         summary = all_results.get(task, {}).get("Phase 3: Linear Probe")
         if summary is None or summary.empty:
