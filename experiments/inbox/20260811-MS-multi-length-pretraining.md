@@ -25,7 +25,7 @@ that human scorers use. Conversely, P300 signals are sub-second, so 2s windows
 include substantial irrelevant context.
 
 This experiment tests whether training on **mixed-length windows**
-(1s, 2s, 5s, 10s, 30s simultaneously) produces representations that transfer
+(1s, 2s, 5s, 10s simultaneously) produces representations that transfer
 better across the full downstream task spectrum compared to fixed 2s pretraining.
 Each batch randomly selects one window length; all samples within that batch share
 the same duration.
@@ -36,17 +36,17 @@ and 400k max steps with patience=10 early stopping.
 ## Question
 
 Does exposing the model to varied temporal scales during pretraining — from 1s
-snippets up to 30s epochs — produce representations that transfer better than
+snippets up to 10s windows — produce representations that transfer better than
 fixed-2s pretraining across downstream tasks with different temporal requirements?
 
 ## Hypothesis
 
 Multi-length pretraining (S1) will outperform the fixed-2s baseline (M0) on
-sleep staging (where 30s context captures slow waves), perform comparably on
-motor imagery (where 2s is adequate), and improve on P300 (where 1s windows
-are a closer match to the downstream epoch length). The improvement on sleep
-staging will be larger for linear probes (representation quality) than for
-finetuning (where the model can adapt).
+sleep staging (where 10s context captures slow-wave structure), perform
+comparably on motor imagery (where 2s is adequate), and improve on P300
+(where 1s windows are a closer match to the downstream epoch length). The
+improvement on sleep staging will be larger for linear probes (representation
+quality) than for finetuning (where the model can adapt).
 
 Expected: S1 Kemp Sleep LP > M0 Kemp Sleep LP by at least +0.03 F1.
 
@@ -57,16 +57,13 @@ Expected: S1 Kemp Sleep LP > M0 Kemp Sleep LP by at least +0.03 F1.
 - **Model:** POYO CWT-CNN + dynamic channel embeddings, session_emb disabled
 - **Data:** B2 = Klinzing + Shirazi + Pavlov (`three_dataset_pretrain.yaml`)
 - **Task:** MAE pretraining (masked reconstruction)
-- **Training:** 400k max steps, batch_size=64, lr=1e-4, warmup 2k + cosine decay
-  over 398k steps, bf16-mixed, intersubject validation, early stopping patience=10
-- **Window lengths:** [1.0, 2.0, 5.0, 10.0, 30.0] — per-batch random selection
+- **Training:** 400k max steps, batch_size=16 × accumulate_grad_batches=4
+  (effective batch_size=64), lr=1e-4, warmup 2k + cosine decay over 398k steps,
+  bf16-mixed, intersubject validation, early stopping patience=10
+- **Window lengths:** [1.0, 2.0, 5.0, 10.0] — per-batch random selection
 - **WandB:** `foundry_pretraining`, group `MASKING_SEQLEN`
 
-### Code changes required
-
-This run requires modifications to the data pipeline before it can launch. See the
-[plan](../../.cursor/plans/masking_and_seqlen_experiments_c02e47cd.plan.md) for
-full details:
+### Code changes (implemented)
 
 1. **`VariableLengthBatchSampler`** (`foundry/data/samplers.py`) — batch sampler
    that randomly selects a window length per batch from the configured list.
@@ -77,12 +74,15 @@ full details:
    to actual duration, always producing 320 latents regardless of window length.
 4. **`NeuralDataModule` wiring** (`foundry/data/datamodules/base.py`) — use
    `VariableLengthBatchSampler` when `window_lengths` is provided.
+5. **CWT token caching fix** (`foundry/models/embeddings/temporal/base.py`) —
+   removed `_cached_target_tokens` that would incorrectly reuse the first batch's
+   token count for all subsequent batches with different durations.
 
 ### Pretraining run
 
 | Run | window_lengths | mask_ratio | block_size | Notes |
 |-----|:-:|:---:|:---:|-------|
-| S1 (multi-length) | [1, 2, 5, 10, 30] | 0.5 | 10 | All 5 window sizes, per-batch random selection |
+| S1 (multi-length) | [1, 2, 5, 10] | 0.5 | 10 | All 4 window sizes, per-batch random selection, bs=16×accum=4 |
 
 Compared against M0 (baseline, fixed 2s) from the
 [masking parameter sweep](./20260811-MS-masking-parameter-sweep.md).
@@ -90,11 +90,13 @@ Compared against M0 (baseline, fixed 2s) from the
 ### Launch command — Pretraining
 
 ```bash
-# S1: Multi-length pretraining (requires code changes first)
+# S1: Multi-length pretraining
 uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
   data=openneuro/three_dataset_pretrain \
-  data.window_lengths=[1.0,2.0,5.0,10.0,30.0] \
-  hyperparameters.sequence_length=30.0 \
+  +data.window_lengths=[1.0,2.0,5.0,10.0] \
+  hyperparameters.sequence_length=10.0 \
+  hyperparameters.batch_size=16 \
+  trainer.accumulate_grad_batches=4 \
   run.name=pretrain_S1_multilength run.group=MASKING_SEQLEN -m
 ```
 
@@ -137,9 +139,9 @@ uv run python main.py experiment=p300/brain_invaders_linear_probe_from_data_scal
 
 ### Risks and mitigations
 
-- **30s batches may OOM.** With CWT-CNN producing ~480 tokens/channel at 30s and
-  batch_size=64 on L40S (48GB), memory may be tight. Mitigation: reduce batch_size
-  for 30s batches via length-to-batchsize mapping, or use gradient checkpointing.
+- **Memory budget.** With CWT-CNN at target_token_rate=100, a 10s window produces
+  1000 tokens/channel. Using batch_size=16 with accumulate_grad_batches=4 keeps
+  the effective batch size at 64 while fitting within L40S (48GB) memory.
 - **Val loss is not directly comparable across lengths.** Batches at different
   lengths have different reconstruction difficulties. Consider logging per-length
   val loss for diagnostics.

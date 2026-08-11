@@ -10,11 +10,13 @@
 #     model.masking.mask_ratio=0.7 \
 #     run.name=pretrain_M1_ratio70 run.group=MASKING_SEQLEN -m
 #
-# Usage — multi-length (S1, requires code changes):
+# Usage — multi-length (S1):
 #   uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
 #     data=openneuro/three_dataset_pretrain \
-#     data.window_lengths=[1.0,2.0,5.0,10.0,30.0] \
-#     hyperparameters.sequence_length=30.0 \
+#     data.window_lengths=[1.0,2.0,5.0,10.0] \
+#     hyperparameters.sequence_length=10.0 \
+#     hyperparameters.batch_size=16 \
+#     trainer.accumulate_grad_batches=4 \
 #     run.name=pretrain_S1_multilength run.group=MASKING_SEQLEN -m
 
 defaults:
@@ -80,7 +82,7 @@ trainer:
     reconstruction_visualization:
       log_every_n_steps: 1000
     embedding_visualization:
-      every_n_epochs: 1
+      every_n_epochs: 5
 
 stage:
   skip: false
@@ -99,3 +101,4 @@ hydra:
       - "source .env"
       - "set +a"
       - "export RANK=0"
+      - "export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
