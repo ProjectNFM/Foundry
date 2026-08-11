@@ -24,10 +24,8 @@ parameters:
       - 0.2
       - 0.4
       - 0.6
-      - 0.8
   data.split_type:
     values:
-      - intrasession-causal
       - intrasession-block
   hyperparameters.batch_size:
     values:
@@ -35,8 +33,13 @@ parameters:
   hyperparameters.learning_rate:
     distribution: uniform
     min: 2.5e-5
-    max: 5.0e-5
+    max: 3.0e-5
   hyperparameters.weight_decay:
     distribution: uniform
     max: 0.7
     min: 0.01
+  trainer.gradient_clip_val:
+    values:
+      - 0.5
+      - 0.75
+      - 1.0

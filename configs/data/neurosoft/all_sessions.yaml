@@ -1,0 +1,90 @@
+_target_: foundry.data.datamodules.NeuralDataModule
+
+dataset_class: foundry.data.datasets.NeurosoftMultiBrainset
+
+root: ./data/processed/
+batch_size: ${hyperparameters.batch_size}
+num_workers: ${hyperparameters.num_workers}
+pin_memory: true
+sequence_length: ${hyperparameters.sequence_length}
+seed: ${run.seed}
+
+split_type: ???
+task_type: ???
+
+dataset_kwargs:
+  brainsets:
+    - neurosoft_minipigs_2026
+    - neurosoft_monkeys_2026  
+  split_type: ${..split_type}
+  recording_ids:
+    neurosoft_minipigs_2026:
+      - "sub-01_ses-01_task-AcousStim_acq-LH_desc-raw"
+      - "sub-01_ses-02_task-AcousStim_acq-LH_desc-raw"
+      - "sub-02_ses-01_task-AcousStim_acq-LH_desc-raw"
+      - "sub-02_ses-01_task-AcousStim_acq-RH_desc-raw"
+      - "sub-02_ses-02_task-AcousStim_acq-LH_desc-raw"
+      - "sub-02_ses-02_task-AcousStim_acq-RH_desc-raw"
+      - "sub-03_ses-01_task-AcousStim_acq-LH_desc-raw"
+      - "sub-03_ses-01_task-AcousStim_acq-RH_desc-raw"
+      - "sub-03_ses-03_task-AcousStim_acq-LHanest_desc-raw"
+      - "sub-03_ses-03_task-AcousStim_acq-RHanest_desc-raw"
+      - "sub-03_ses-04_task-AcousStim_acq-LHanest_desc-raw"
+      - "sub-03_ses-04_task-AcousStim_acq-RHanest_desc-raw"
+      - "sub-03_ses-06_task-AcousStim_acq-LH_desc-raw"
+      - "sub-03_ses-06_task-AcousStim_acq-RH_desc-raw"
+      - "sub-03_ses-07_task-AcousStim_acq-LHanest_desc-raw"
+      - "sub-03_ses-07_task-AcousStim_acq-RH_desc-raw"
+      - "sub-03_ses-07_task-AcousStim_acq-RHanest_desc-raw"
+      - "sub-04_ses-01_task-AcousStim_acq-LH_desc-raw"
+      - "sub-04_ses-01_task-AcousStim_acq-RH_desc-raw"
+      - "sub-04_ses-02_task-AcousStim_acq-LH_desc-raw"
+      - "sub-04_ses-02_task-AcousStim_acq-RH_desc-raw"
+      - "sub-04_ses-03_task-AcousStim_acq-LH_desc-raw"
+      - "sub-04_ses-03_task-AcousStim_acq-RH_desc-raw"
+      - "sub-04_ses-04_task-AcousStim_acq-LH_desc-raw"
+      - "sub-04_ses-04_task-AcousStim_acq-RH_desc-raw"
+      - "sub-05_ses-01_task-AcousStim_acq-LH_desc-raw"
+      - "sub-05_ses-01_task-AcousStim_acq-RH_desc-raw"
+      - "sub-05_ses-02_task-AcousStim_acq-LH_desc-raw"
+      - "sub-05_ses-02_task-AcousStim_acq-RH_desc-raw"
+      - "sub-06_ses-02_task-AcousStim_acq-LH_desc-raw"
+      - "sub-06_ses-02_task-AcousStim_acq-RH_desc-raw"
+      - "sub-07_ses-01_task-AcousStim_acq-LH_desc-raw"
+      - "sub-07_ses-01_task-AcousStim_acq-RH_desc-raw"
+      - "sub-07_ses-02_task-AcousStim_acq-LH_desc-raw"
+      - "sub-07_ses-02_task-AcousStim_acq-RH_desc-raw"
+      - "sub-07_ses-03_task-AcousStim_acq-LH_desc-raw"
+      - "sub-07_ses-03_task-AcousStim_acq-RH_desc-raw"
+      - "sub-07_ses-04_task-AcousStim_acq-LH_desc-raw"
+      - "sub-07_ses-04_task-AcousStim_acq-RH_desc-raw" 
+      - "sub-07_ses-05_task-AcousStim_acq-LH_desc-raw"
+      - "sub-07_ses-05_task-AcousStim_acq-RH_desc-raw"    
+    neurosoft_monkeys_2026:
+      - "sub-01_ses-010_task-AcousStim_acq-RH_desc-raw"
+      - "sub-01_ses-011_task-AcousStim_acq-RH_desc-raw"
+      - "sub-01_ses-012_task-AcousStim_acq-RH_desc-raw"
+      - "sub-01_ses-013_task-AcousStim_acq-RH_desc-raw"
+      - "sub-01_ses-014_task-AcousStim_acq-RH_desc-raw"
+      - "sub-01_ses-015_task-AcousStim_acq-RH_desc-raw"
+      - "sub-01_ses-016_task-AcousStim_acq-RH_desc-raw"
+      - "sub-01_ses-01_task-AcousStim_acq-RH_desc-raw"
+      - "sub-01_ses-02_task-AcousStim_acq-RH_desc-raw"
+      - "sub-01_ses-03_task-AcousStim_acq-RH_desc-raw"
+      - "sub-01_ses-04_task-AcousStim_acq-RH_desc-raw"
+      - "sub-01_ses-05_task-AcousStim_acq-RH_desc-raw"
+      - "sub-01_ses-06_task-AcousStim_acq-RH_desc-raw"
+      - "sub-01_ses-07_task-AcousStim_acq-RH_desc-raw"
+      - "sub-01_ses-08_task-AcousStim_acq-RH_desc-raw"
+      - "sub-01_ses-09_task-AcousStim_acq-RH_desc-raw"
+      - "sub-02_ses-01_task-AcousStim_acq-RH_desc-raw"
+      - "sub-02_ses-02_task-AcousStim_acq-RH_desc-raw"
+      - "sub-02_ses-03_task-AcousStim_acq-RH_desc-raw"
+      - "sub-02_ses-04_task-AcousStim_acq-RH_desc-raw"
+      - "sub-02_ses-05_task-AcousStim_acq-RH_desc-raw"
+      - "sub-03_ses-01_task-AcousStim_acq-RH_desc-raw"
+      - "sub-04_ses-01_task-AcousStim_acq-LH_desc-raw"
+      - "sub-04_ses-01_task-AcousStim_acq-RH_desc-raw"
+      - "sub-05_ses-01_task-AcousStim_acq-LH_desc-raw"
+      - "sub-05_ses-01_task-AcousStim_acq-RH_desc-raw"
+      - "sub-06_ses-01_task-AcousStim_acq-RH_desc-raw"

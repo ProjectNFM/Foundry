@@ -1,6 +1,10 @@
 from .brain_invaders_p300 import BrainInvadersP300
 from .kemp_sleep_edf_2013 import KempSleepEDF2013
-from .neurosoft import NeurosoftMinipigs2026, NeurosoftMonkeys2026
+from .neurosoft import (
+    NeurosoftMinipigs2026,
+    NeurosoftMonkeys2026,
+    NeurosoftMultiBrainset,
+)
 from .openneuro import OpenNeuroMultiBrainset
 from .peterson_brunton_pose_trajectory_2022 import (
     PetersonBruntonPoseTrajectory2022,
@@ -12,6 +16,7 @@ __all__ = [
     "KempSleepEDF2013",
     "NeurosoftMinipigs2026",
     "NeurosoftMonkeys2026",
+    "NeurosoftMultiBrainset",
     "OpenNeuroMultiBrainset",
     "PetersonBruntonPoseTrajectory2022",
     "PhysionetMI",
