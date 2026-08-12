@@ -3,7 +3,7 @@
 **Status:** Draft
 **Date started:** 2026-08-11
 **Parent experiment:** [Data Scaling Group](../02-data-scaling/README.md) (builds on B2 sweet spot)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Channel Encoder Leak Fix Impact](20260812-MS-channel-encoder-leak-fix-impact.md)
 **Tags:** pretraining, mae, masked, masking_sweep, cwt_cnn, dynamic_ch
 
 ## Background

@@ -274,8 +274,15 @@ class POYOEEGModel(nn.Module):
         input_session_ids=None,
         input_channel_counts: Optional[torch.Tensor] = None,
         context_kwargs: dict[str, torch.Tensor] | None = None,
+        token_mask: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
         """GPU tokenization + session embedding addition.
+
+        Args:
+            token_mask: Optional (B, C, N) boolean mask for the channel
+                encoder. When provided, only True positions contribute to
+                channel embedding computation. Used by MaskedPOYOEEGModel
+                to prevent masked tokens from leaking into embeddings.
 
         Returns:
             ``(inputs, session_emb, ch_emb_cache)`` where *inputs* has shape
@@ -293,6 +300,7 @@ class POYOEEGModel(nn.Module):
             input_channel_counts=input_channel_counts,
             channel_emb_fn=self._get_channel_emb_fn(),
             channel_encoder=self.relative_channel_encoder,
+            token_mask=token_mask,
         )
 
         session_emb = self._compute_session_embedding(

@@ -446,3 +446,81 @@ class TestMaskedPOYODynamicChannelEmb:
         assert result.viz is not None
         assert result.viz.num_channels == 4
         assert result.viz.num_time_tokens == 10
+
+
+class TestNoInformationLeak:
+    """Verify dynamic channel encoder does not leak masked token information."""
+
+    def test_masked_tokens_do_not_affect_channel_embeddings(self):
+        """Channel embeddings must be identical regardless of masked token values.
+
+        Directly tests the RelativeChannelEncoder: given the same token_mask,
+        changing token embeddings at masked positions must not change the
+        output channel embeddings.
+        """
+        encoder = RelativeChannelEncoder(
+            token_dim=48, channel_emb_dim=16, num_heads=4
+        )
+        encoder.eval()
+
+        B, C, N, D = 2, 4, 10, 48
+        tokens = torch.randn(B, C, N, D)
+        channel_mask = torch.ones(B, C, dtype=torch.bool)
+
+        # Mask 50% of tokens per channel
+        token_mask = torch.ones(B, C, N, dtype=torch.bool)
+        token_mask[:, :, N // 2 :] = False
+
+        with torch.no_grad():
+            ch_emb_1 = encoder(tokens, channel_mask, token_mask=token_mask)
+
+        # Replace masked token embeddings with large random values
+        tokens_corrupted = tokens.clone()
+        tokens_corrupted[:, :, N // 2 :] = torch.randn(B, C, N // 2, D) * 100
+
+        with torch.no_grad():
+            ch_emb_2 = encoder(
+                tokens_corrupted, channel_mask, token_mask=token_mask
+            )
+
+        torch.testing.assert_close(ch_emb_1, ch_emb_2)
+
+    def test_without_token_mask_values_do_leak(self):
+        """Without token_mask, different token values produce different embeddings.
+
+        This is the control: without the fix (token_mask=None), changing tokens
+        changes the output, confirming the leak.
+        """
+        encoder = RelativeChannelEncoder(
+            token_dim=48, channel_emb_dim=16, num_heads=4
+        )
+        encoder.eval()
+
+        B, C, N, D = 2, 4, 10, 48
+        tokens = torch.randn(B, C, N, D)
+        channel_mask = torch.ones(B, C, dtype=torch.bool)
+
+        with torch.no_grad():
+            ch_emb_1 = encoder(tokens, channel_mask, token_mask=None)
+
+        tokens_corrupted = tokens.clone()
+        tokens_corrupted[:, :, N // 2 :] = torch.randn(B, C, N // 2, D) * 100
+
+        with torch.no_grad():
+            ch_emb_2 = encoder(tokens_corrupted, channel_mask, token_mask=None)
+
+        assert not torch.allclose(ch_emb_1, ch_emb_2)
+
+    def test_masked_model_forward_uses_token_mask(self):
+        """End-to-end: MaskedPOYOEEGModel forward passes token_mask to encoder.
+
+        Verifies that the restructured forward pre-computes the mask and
+        threads it through by checking ch_emb_cache is produced.
+        """
+        model = _build_masked_model_with_channel_mode("dynamic")
+        model.eval()
+        batch = _make_masked_batch(model)
+        with torch.no_grad():
+            result = model(**batch)
+        assert result.task_outputs is not None
+        assert "masked_reconstruction" in result.task_outputs

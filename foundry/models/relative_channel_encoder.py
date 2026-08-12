@@ -52,12 +52,17 @@ class RelativeChannelEncoder(nn.Module):
         self,
         tokens: torch.Tensor,
         channel_mask: torch.Tensor,
+        token_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Compute dynamic channel embeddings from temporal tokens.
 
         Args:
             tokens: (B, C, N, D_tok) per-channel temporal token embeddings.
             channel_mask: (B, C) boolean mask — True for real channels.
+            token_mask: Optional (B, C, N) boolean mask — True for tokens to
+                include in temporal pooling. When None, all tokens are used.
+                Used to exclude masked tokens from contributing to channel
+                embeddings during masked pretraining.
 
         Returns:
             (B, C, channel_emb_dim) channel embeddings with padded channels
@@ -67,16 +72,24 @@ class RelativeChannelEncoder(nn.Module):
 
         # Stage 1: attention-weighted temporal pooling
         scores = self.time_attn_score(tokens).squeeze(-1)  # (B, C, N)
-        mask_expand = channel_mask.unsqueeze(-1).expand_as(scores)
+
+        if token_mask is not None:
+            effective_channel_mask = channel_mask & token_mask.any(dim=-1)
+            scores = scores.masked_fill(~token_mask, float("-inf"))
+        else:
+            effective_channel_mask = channel_mask
+
+        mask_expand = effective_channel_mask.unsqueeze(-1).expand_as(scores)
         scores = scores.masked_fill(~mask_expand, float("-inf"))
         weights = torch.softmax(scores, dim=-1)  # (B, C, N)
         weights = weights.masked_fill(~mask_expand, 0.0)
+        if token_mask is not None:
+            weights = weights.masked_fill(~token_mask, 0.0)
         pooled = torch.einsum("bcn,bcnd->bcd", weights, tokens)  # (B, C, D)
 
         # Stage 2: cross-channel attention
         # key_padding_mask: True means "ignore this position" in PyTorch MHA
-        key_padding_mask = ~channel_mask  # (B, C)
-        # Reshape to (B, C, D) for batch_first MHA
+        key_padding_mask = ~effective_channel_mask  # (B, C)
         attended, _ = self.cross_channel_attn(
             pooled,
             pooled,
@@ -88,7 +101,7 @@ class RelativeChannelEncoder(nn.Module):
         out = self.proj(attended)  # (B, C, channel_emb_dim)
         out = self.norm(out)
 
-        # Zero out padded channels
-        out = out.masked_fill(~channel_mask.unsqueeze(-1), 0.0)
+        # Zero out padded/fully-masked channels
+        out = out.masked_fill(~effective_channel_mask.unsqueeze(-1), 0.0)
 
         return out

@@ -375,6 +375,7 @@ class EEGTokenizer(nn.Module):
         input_sampling_rate: torch.Tensor | None = None,
         channel_emb_fn: Callable | None = None,
         channel_encoder: nn.Module | None = None,
+        token_mask: torch.Tensor | None = None,
         **kwargs,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor | None]:
         """GPU-side embedding.
@@ -391,6 +392,10 @@ class EEGTokenizer(nn.Module):
             channel_encoder: Optional :class:`RelativeChannelEncoder` for
                 dynamic channel embeddings. When provided, takes priority
                 over ``channel_emb_fn``.
+            token_mask: Optional (B, C, N) boolean mask indicating which
+                tokens to include in channel encoder pooling. Passed through
+                to the channel encoder to prevent masked tokens from
+                contributing to channel embeddings.
 
         Returns:
             When ``channel_encoder`` is provided:
@@ -446,6 +451,7 @@ class EEGTokenizer(nn.Module):
                 input_channel_index,
                 channel_emb_fn=channel_emb_fn,
                 channel_encoder=channel_encoder,
+                token_mask=token_mask,
             )
             return tokens, ch_emb
 
@@ -459,6 +465,7 @@ class EEGTokenizer(nn.Module):
         channel_index,
         channel_emb_fn=None,
         channel_encoder=None,
+        token_mask=None,
     ):
         """Reshape per-channel tokens and fuse channel identity embedding.
 
@@ -471,6 +478,8 @@ class EEGTokenizer(nn.Module):
             channel_emb_fn: Maps channel indices to embedding vectors.
             channel_encoder: Optional :class:`RelativeChannelEncoder`.
                 Takes priority over ``channel_emb_fn`` when provided.
+            token_mask: Optional (B, C, N) boolean mask for channel encoder
+                pooling. Passed to channel_encoder to exclude masked tokens.
 
         Returns:
             ``(tokens, ch_emb)`` where tokens is
@@ -485,7 +494,7 @@ class EEGTokenizer(nn.Module):
 
         ch_emb = None
         if channel_encoder is not None:
-            ch_emb = channel_encoder(tokens, channel_mask)  # (B, C, D_ch)
+            ch_emb = channel_encoder(tokens, channel_mask, token_mask=token_mask)
         elif channel_emb_fn is not None:
             ch_emb = channel_emb_fn(channel_index)  # (B, C, D_ch)
 

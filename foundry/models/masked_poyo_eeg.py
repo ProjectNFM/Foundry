@@ -67,7 +67,13 @@ class MaskedPOYOEEGModel(POYOEEGModel):
 
     RECONSTRUCTION_TASK_NAME: str = "masked_reconstruction"
 
-    def __init__(self, *args, masking: MaskingStrategy, **kwargs):
+    def __init__(
+        self,
+        *args,
+        masking: MaskingStrategy,
+        disable_channel_encoder_token_mask: bool = False,
+        **kwargs,
+    ):
         """Initialize the masked pretraining model.
 
         Args:
@@ -75,6 +81,9 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             masking: Masking strategy that determines which tokens are masked.
                 Must be compatible with :class:`PerChannelStrategy` (spatial
                 projection is not supported).
+            disable_channel_encoder_token_mask: When True, the channel encoder
+                sees all tokens (pre-fix behavior) instead of only visible ones.
+                Used for ablation experiments comparing with/without the leak fix.
             **kwargs: Keyword arguments forwarded to :class:`POYOEEGModel`.
 
         Raises:
@@ -82,6 +91,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         """
         super().__init__(*args, **kwargs)
         self.masking = masking
+        self.disable_channel_encoder_token_mask = disable_channel_encoder_token_mask
 
         if not self.tokenizer.uses_per_channel:
             raise ValueError(
@@ -282,7 +292,46 @@ class MaskedPOYOEEGModel(POYOEEGModel):
                 "context_sampling_rate": context_sampling_rate,
             }
 
-        # 1. GPU tokenization
+        B = input_values.shape[0]
+        device = input_values.device
+        C_pad = input_mask.shape[1]
+
+        # 1. Pre-compute N (time tokens per channel) before tokenization
+        if self._variable_time_tokens:
+            N = input_values.shape[2]
+        else:
+            sr = input_sampling_rate[0].item()
+            N = self.tokenizer.get_num_time_tokens(self.sequence_length, sr)
+
+        if input_timestamps.ndim == 3:
+            input_timestamps = input_timestamps.reshape(B, -1)
+        if (
+            reconstruction_targets is not None
+            and reconstruction_targets.ndim == 3
+        ):
+            reconstruction_targets = reconstruction_targets.reshape(B, -1)
+
+        # 2. Run masking early (before tokenization) to build token_mask
+        mask_indices, _channel_validity = self.masking(
+            num_channels=C_pad,
+            num_time_tokens=N,
+            channel_mask=input_mask,
+            device=device,
+        )
+
+        # 3. Build (B, C, N) token_mask from visible indices for channel encoder
+        ch_token_mask: torch.Tensor | None = None
+        if (
+            self.relative_channel_encoder is not None
+            and not self.disable_channel_encoder_token_mask
+        ):
+            token_mask_flat = torch.ones(
+                B, C_pad * N, dtype=torch.bool, device=device
+            )
+            token_mask_flat.scatter_(1, mask_indices, False)
+            ch_token_mask = token_mask_flat.reshape(B, C_pad, N)
+
+        # 4. GPU tokenization (with token_mask to prevent leak in channel encoder)
         inputs, session_emb, ch_emb_cache = self._tokenize_and_add_session(
             input_values,
             input_channel_index,
@@ -293,35 +342,19 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             input_session_ids=input_session_ids,
             input_channel_counts=input_channel_counts,
             context_kwargs=context_kwargs,
+            token_mask=ch_token_mask,
         )
 
-        B, num_tokens, D = inputs.shape
-        device = inputs.device
-        C_pad = input_mask.shape[1]
-        N = num_tokens // C_pad
+        _, num_tokens, D = inputs.shape
 
-        if input_timestamps.ndim == 3:
-            input_timestamps = input_timestamps.reshape(B, -1)
-        if (
-            reconstruction_targets is not None
-            and reconstruction_targets.ndim == 3
-        ):
-            reconstruction_targets = reconstruction_targets.reshape(B, -1)
-
-        # 2. Build authoritative token validity
+        # 5. Build authoritative token validity
         token_validity = build_token_validity_mask(
             input_mask,
             N,
             input_seq_len=input_seq_len if self._variable_time_tokens else None,
         )
 
-        # 3. Generate mask and derive per-position validity
-        mask_indices, _channel_validity = self.masking(
-            num_channels=C_pad,
-            num_time_tokens=N,
-            channel_mask=input_mask,
-            device=device,
-        )
+        # Derive per-position validity for masked tokens
         masked_validity = torch.gather(token_validity, 1, mask_indices)
 
         visible_indices = _compute_visible_indices(num_tokens, mask_indices)
@@ -335,13 +368,13 @@ class MaskedPOYOEEGModel(POYOEEGModel):
                 "or the sequence is fully padded."
             )
 
-        # 4. Gather visible tokens
+        # 6. Gather visible tokens
         expand_D = visible_indices.unsqueeze(-1).expand(-1, -1, D)
         visible_inputs = torch.gather(inputs, 1, expand_D)
         visible_ts = torch.gather(input_timestamps, 1, visible_indices)
         visible_ts_emb = self.rotary_emb(visible_ts)
 
-        # 5. Encoder + processor on visible tokens (shared helper)
+        # 7. Encoder + processor on visible tokens (shared helper)
         latents, latent_ts_emb = self._build_latents(
             latent_index, latent_timestamps
         )
@@ -354,7 +387,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             input_mask=encoder_mask,
         )
 
-        # 6. Build reconstruction queries (masked-model helper)
+        # 8. Build reconstruction queries (masked-model helper)
         recon_queries, recon_ts_emb, recon_task_index = (
             self._build_reconstruction_queries(
                 session_emb,
@@ -367,7 +400,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             )
         )
 
-        # 7. Combine with downstream queries (shared helper) if present
+        # 9. Combine with downstream queries (shared helper) if present
         if output_timestamps.numel() > 0:
             ds_queries, ds_ts_emb = self._build_downstream_queries(
                 output_session_index,
@@ -385,13 +418,13 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             all_ts_emb = recon_ts_emb
             combined_task_index = recon_task_index
 
-        # 8. Decode + route (shared helpers)
+        # 10. Decode + route (shared helpers)
         output_latents = self._decode(
             all_queries, latents, all_ts_emb, latent_ts_emb
         )
         task_outputs = self._route(output_latents, combined_task_index)
 
-        # 9. Gather reconstruction targets
+        # 11. Gather reconstruction targets
         ssl_meta = self._gather_reconstruction_targets(
             reconstruction_targets,
             mask_indices,
