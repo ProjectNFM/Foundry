@@ -1,0 +1,97 @@
+# @package _global_
+#
+# Linear probe on PhysioNet MI: freeze pretrained backbone, train readout only.
+# 4 conditions: 2 tokenizers × 2 channel_emb_modes, all with session_emb=disabled.
+#
+# Launch all 12 jobs on SLURM (4 conditions × 3 folds):
+#   uv run python main.py experiment=motor_imagery/physionet_linear_probe_from_2ds_pretrain -m
+
+defaults:
+  - override /model: poyo_eeg
+  - override /model/tokenizer: per_channel_cwt_cnn
+  - override /model/session_emb: disabled
+  - override /data: physionet_mi/allsess
+  - override /hydra/launcher: slurm_default
+
+task_configs:
+  - motor_imagery_binary
+
+model:
+  zero_output_timestamps: true
+  normalize_inputs: true
+  channel_emb_mode: disabled
+  embed_dim: 256
+  depth: 4
+
+data:
+  split_type: intersubject
+  task_type: motor_imagery
+
+stage:
+  skip: true
+
+_pretrain_ckpt_suffix:
+  disabled: ""
+  dynamic: "_fix"
+
+run:
+  name: physionet_lp2ds_${hydra:runtime.choices.model/tokenizer}_ch-${model.channel_emb_mode}_fold${hyperparameters.fold_number}
+  group: PHYSIONET_MI_LINEAR_PROBE_FROM_2DS_PRETRAIN
+  tags: [motor_imagery, physionet, linear_probe, pretrained, two_dataset]
+  log_level: INFO
+  project: foundry_finetuning
+  compile: default
+  pretrained_checkpoint: ${oc.env:SCRATCH}/runs/PRETRAIN_TWO_DATASET_4VARIANTS/pretrain_2ds_${hydra:runtime.choices.model/tokenizer}_ch-${model.channel_emb_mode}${_pretrain_ckpt_suffix.${model.channel_emb_mode}}/checkpoints/last.ckpt
+  pretrained_transfer_mode: permissive
+  freeze_pretrained: true
+
+class_weights:
+  mode: auto
+  smoothing: 1.0
+
+hyperparameters:
+  batch_size: 8
+  sequence_length: 4.0
+  patch_duration: null
+  sampling_rate: 160
+  fold_number: 0
+  num_workers: 6
+  num_channels: null
+  session_configs: null
+  learning_rate: 1e-3
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 100
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/motor_imagery_binary_f1
+      mode: max
+      patience: 10
+    model_checkpoint:
+      monitor: val/motor_imagery_binary_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_f1_{val/motor_imagery_binary_f1:.4f}"
+
+hydra:
+  sweeper:
+    params:
+      model/tokenizer: per_channel_cwt_cnn, per_channel_resample_cnn
+      model.channel_emb_mode: disabled, dynamic
+      hyperparameters.fold_number: 0, 1, 2
+  launcher:
+    tasks_per_node: 1
+    cpus_per_task: 6
+    mem_gb: 32
+    gres: gpu:l40s:1
+    timeout_min: 720
+    max_num_timeout: 5
+    setup:
+      - "ulimit -n 65536"
+      - "set -a"
+      - "source .env || true"
+      - "set +a"
+      - "export RANK=0"
+      - "uv run python -m foundry.tools.stage_data --experiment motor_imagery/physionet_linear_probe_from_2ds_pretrain"

@@ -1,0 +1,53 @@
+# Dataset summary (run A1):
+#   klinzing_sleep_ds005555:
+#     28 recordings, 14 subjects, eeg, 256 Hz
+#     channels/rec: min=3, max=16, mean=10.9, median=10
+#     duration: 215.3 h, effective data: 2337.7 ch·h
+_target_: foundry.data.datamodules.NeuralDataModule
+
+dataset_class: foundry.data.datasets.OpenNeuroMultiBrainset
+
+root: ./data/processed/
+batch_size: ${hyperparameters.batch_size}
+num_workers: ${hyperparameters.num_workers}
+pin_memory: true
+sequence_length: ${hyperparameters.sequence_length}
+seed: ${run.seed}
+
+split_type: ???
+task_type: ???
+
+dataset_kwargs:
+  brainsets:
+    - klinzing_sleep_ds005555
+  split_type: ${..split_type}
+  recording_ids:
+    klinzing_sleep_ds005555:
+      - "sub-100_task-Sleep_acq-psg"
+      - "sub-100_task-Sleep_acq-headband"
+      - "sub-101_task-Sleep_acq-psg"
+      - "sub-101_task-Sleep_acq-headband"
+      - "sub-102_task-Sleep_acq-psg"
+      - "sub-102_task-Sleep_acq-headband"
+      - "sub-103_task-Sleep_acq-psg"
+      - "sub-103_task-Sleep_acq-headband"
+      - "sub-104_task-Sleep_acq-psg"
+      - "sub-104_task-Sleep_acq-headband"
+      - "sub-105_task-Sleep_acq-psg"
+      - "sub-105_task-Sleep_acq-headband"
+      - "sub-106_task-Sleep_acq-psg"
+      - "sub-106_task-Sleep_acq-headband"
+      - "sub-107_task-Sleep_acq-psg"
+      - "sub-107_task-Sleep_acq-headband"
+      - "sub-108_task-Sleep_acq-psg"
+      - "sub-108_task-Sleep_acq-headband"
+      - "sub-109_task-Sleep_acq-psg"
+      - "sub-109_task-Sleep_acq-headband"
+      - "sub-111_task-Sleep_acq-psg"
+      - "sub-111_task-Sleep_acq-headband"
+      - "sub-112_task-Sleep_acq-psg"
+      - "sub-112_task-Sleep_acq-headband"
+      - "sub-113_task-Sleep_acq-psg"
+      - "sub-113_task-Sleep_acq-headband"
+      - "sub-115_task-Sleep_acq-psg"
+      - "sub-115_task-Sleep_acq-headband"

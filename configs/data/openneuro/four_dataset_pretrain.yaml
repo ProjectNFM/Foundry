@@ -1,0 +1,42 @@
+# Dataset summary (run B3):
+#   klinzing_sleep_ds005555:
+#     256 recordings, 128 subjects, eeg, 256 Hz
+#     channels/rec: min=2, max=16, mean=9.8, median=9
+#     duration: 2002.6 h, effective data: 19484.0 ch·h
+#   shirazi_hbnr1_ds005505:
+#     1342 recordings, 136 subjects, eeg, 500 Hz
+#     channels/rec: min=129, max=129, mean=129.0, median=129
+#     duration: 117.5 h, effective data: 15162.5 ch·h
+#   pavlov_verbal_wm_ds003655:
+#     156 recordings, 156 subjects, eeg, 500 Hz
+#     channels/rec: min=19, max=19, mean=19.0, median=19
+#     duration: 130.9 h, effective data: 2487.5 ch·h
+#   getzmann_resting_ds005385:
+#     3264 recordings, 608 subjects, eeg, 1000 Hz
+#     channels/rec: min=64, max=64, mean=64.0, median=64
+#     duration: 169.8 h, effective data: 10867.0 ch·h
+#   Aggregate (4 brainsets):
+#     5018 recordings, 1028 subjects
+#     duration: 2420.9 h, effective data: 48001.1 ch·h
+#     sampling rates: 256 Hz, 500 Hz, 1000 Hz
+_target_: foundry.data.datamodules.NeuralDataModule
+
+dataset_class: foundry.data.datasets.OpenNeuroMultiBrainset
+
+root: ./data/processed/
+batch_size: ${hyperparameters.batch_size}
+num_workers: ${hyperparameters.num_workers}
+pin_memory: true
+sequence_length: ${hyperparameters.sequence_length}
+seed: ${run.seed}
+
+split_type: ???
+task_type: ???
+
+dataset_kwargs:
+  brainsets:
+    - klinzing_sleep_ds005555
+    - shirazi_hbnr1_ds005505
+    - pavlov_verbal_wm_ds003655
+    - getzmann_resting_ds005385
+  split_type: ${..split_type}

@@ -16,7 +16,13 @@ from torch_brain.datasets import (
 )
 
 from foundry.data.datasets import OpenNeuroMultiBrainset
+from foundry.data.datasets.getzmann_resting_ds005385 import (
+    GetzmannRestingDS005385,
+)
 from foundry.data.datasets.openneuro import OPENNEURO_BRAINSET_REGISTRY
+from foundry.data.datasets.pavlov_verbal_wm_ds003655 import (
+    PavlovVerbalWmDS003655,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIGS_ROOT = REPO_ROOT / "configs"
@@ -462,6 +468,8 @@ class TestEdgeCases:
             "klinzing_sleep_ds005555",
             "shirazi_hbnr1_ds005505",
             "kochi_visualnaming_ds006914",
+            "pavlov_verbal_wm_ds003655",
+            "getzmann_resting_ds005385",
         }
 
     def test_registry_maps_to_correct_classes(self):
@@ -476,4 +484,12 @@ class TestEdgeCases:
         assert (
             OPENNEURO_BRAINSET_REGISTRY["kochi_visualnaming_ds006914"]
             is KochiVisualNamingDS006914
+        )
+        assert (
+            OPENNEURO_BRAINSET_REGISTRY["pavlov_verbal_wm_ds003655"]
+            is PavlovVerbalWmDS003655
+        )
+        assert (
+            OPENNEURO_BRAINSET_REGISTRY["getzmann_resting_ds005385"]
+            is GetzmannRestingDS005385
         )

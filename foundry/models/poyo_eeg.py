@@ -619,7 +619,7 @@ class POYOEEGModel(nn.Module):
             sampling_rate is resolved from the signal source or inferred from
             timestamps.
         """
-        for modality in ["eeg", "ecog", "seeg"]:
+        for modality in ["eeg", "ecog", "seeg", "ieeg"]:
             signal = getattr(data, modality, None)
             if signal is not None:
                 if (
@@ -633,7 +633,9 @@ class POYOEEGModel(nn.Module):
                     )
                 return signal, modality.upper(), sampling_rate
 
-        raise ValueError("Data must have an 'eeg', 'ecog', or 'seeg' field")
+        raise ValueError(
+            "Data must have an 'eeg', 'ecog', 'seeg', or 'ieeg' field"
+        )
 
     def _prepare_signal(self, data: Data) -> PreparedSignal:
         """Filter by modality, sanitize, normalize length, and optionally z-score.
