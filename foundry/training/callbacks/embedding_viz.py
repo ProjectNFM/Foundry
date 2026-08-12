@@ -94,7 +94,9 @@ class EmbeddingVisualizationCallback(L.Callback):
             )
             vocab = getattr(model.channel_emb, "vocab", None)
             if vocab is not None:
-                self._idx_to_channel = {idx: name for name, idx in vocab.items()}
+                self._idx_to_channel = {
+                    idx: name for name, idx in vocab.items()
+                }
 
         if self.class_names is None:
             self._discover_class_names(model)
@@ -314,7 +316,11 @@ class EmbeddingVisualizationCallback(L.Callback):
     @staticmethod
     def _extract_dataset_prefix(namespaced_id: str) -> str:
         """Return dataset prefix from a namespaced ID (everything before first '/')."""
-        return namespaced_id.split("/")[0] if "/" in namespaced_id else namespaced_id
+        return (
+            namespaced_id.split("/")[0]
+            if "/" in namespaced_id
+            else namespaced_id
+        )
 
     def _get_color_labels(
         self,
