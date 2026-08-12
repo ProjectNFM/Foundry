@@ -3,7 +3,7 @@
 **Status:** Draft
 **Date started:** 2026-08-12
 **Parent experiment:** [Masking Parameter Sweep](20260811-MS-masking-parameter-sweep.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Masking Parameter Sweep](20260811-MS-masking-parameter-sweep.md) (on hold), [Multi-Length Pretraining](20260811-MS-multi-length-pretraining.md) (on hold) — both paused pending these results
 **Tags:** pretraining, mae, masked, dynamic_ch, channel_encoder, information_leak, bugfix, ablation
 
 ## Background

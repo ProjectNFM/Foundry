@@ -88,6 +88,25 @@ a data scaling issue.
 | 5 | [Paradigm Diversity (D1-D3)](./20260807-MS-paradigm-diversity-pretrain.md) | Mostly refuted | D1 MI: 0.725 (catastrophic) |
 | 6 | [Maximum Data (E1)](./20260807-MS-maximum-data-pretrain.md) | Partially refuted | E1 < B2 on MI and Sleep |
 
+## Caveat: Channel Encoder Information Leak (2026-08-12)
+
+All pretraining runs in this group used `channel_emb_mode="dynamic"`, which
+contained an information leak in the `RelativeChannelEncoder`: the encoder's
+temporal pooling attended over **all** token embeddings — including masked
+reconstruction targets — giving the decoder a shortcut to lower loss without
+the backbone learning richer representations. This leak was discovered and
+fixed on 2026-08-12 (see [Channel Encoder Leak Fix Impact](../inbox/20260812-MS-channel-encoder-leak-fix-impact.md)).
+
+**Impact on these results:** Every pretraining checkpoint in this group
+benefited from the leak, meaning reconstruction losses were artificially low
+and the downstream transfer numbers may not reflect the model's true
+representation quality. If the leak fix ablation shows a material
+improvement in downstream transfer, all 12 pretraining configurations and
+their 216 downstream runs should be considered for rerunning with the
+corrected code. Until then, the findings here (B2 sweet spot, diversity >
+volume, etc.) remain directionally valid but the absolute numbers should be
+interpreted with this caveat.
+
 ## Open Questions
 
 - **Why is B2 the sweet spot?** Pavlov's working memory paradigm (19ch, 156

@@ -1,10 +1,20 @@
 # Masking Parameter Sweep: Does Harder Masking Produce Better Downstream Features?
 
-**Status:** Draft
+**Status:** On hold (2026-08-12) — awaiting [Channel Encoder Leak Fix](20260812-MS-channel-encoder-leak-fix-impact.md) results
 **Date started:** 2026-08-11
 **Parent experiment:** [Data Scaling Group](../02-data-scaling/README.md) (builds on B2 sweet spot)
 **Follow-up experiments:** [Channel Encoder Leak Fix Impact](20260812-MS-channel-encoder-leak-fix-impact.md)
 **Tags:** pretraining, mae, masked, masking_sweep, cwt_cnn, dynamic_ch
+
+> **On hold (2026-08-12):** All runs in this sweep use
+> `channel_emb_mode="dynamic"`, which was affected by an information leak in
+> the `RelativeChannelEncoder` (the encoder pooled over masked tokens, giving
+> the decoder a shortcut). A [leak fix ablation](20260812-MS-channel-encoder-leak-fix-impact.md)
+> is now running to quantify the impact. Because the leak interacts with
+> mask_ratio (higher ratios leak more information), the optimal masking
+> configuration may shift after the fix. This sweep is paused until those
+> results are in; it will be relaunched post-fix if the leak materially
+> affects downstream transfer.
 
 ## Background
 
