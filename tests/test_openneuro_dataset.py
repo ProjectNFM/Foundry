@@ -16,9 +16,13 @@ from torch_brain.datasets import (
 )
 
 from foundry.data.datasets import OpenNeuroMultiBrainset
-from foundry.data.datasets.getzmann_resting_ds005385 import GetzmannRestingDS005385
+from foundry.data.datasets.getzmann_resting_ds005385 import (
+    GetzmannRestingDS005385,
+)
 from foundry.data.datasets.openneuro import OPENNEURO_BRAINSET_REGISTRY
-from foundry.data.datasets.pavlov_verbal_wm_ds003655 import PavlovVerbalWmDS003655
+from foundry.data.datasets.pavlov_verbal_wm_ds003655 import (
+    PavlovVerbalWmDS003655,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIGS_ROOT = REPO_ROOT / "configs"
