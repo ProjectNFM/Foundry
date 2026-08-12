@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Optional
 
 import torch
+import torch.nn.functional as F
 from torch_brain.data import Data
 from torch_brain.batching import pad2d
 
@@ -72,6 +73,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         *args,
         masking: MaskingStrategy,
         disable_channel_encoder_token_mask: bool = False,
+        zero_masked_signal: bool = True,
         **kwargs,
     ):
         """Initialize the masked pretraining model.
@@ -84,6 +86,11 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             disable_channel_encoder_token_mask: When True, the channel encoder
                 sees all tokens (pre-fix behavior) instead of only visible ones.
                 Used for ablation experiments comparing with/without the leak fix.
+            zero_masked_signal: When True, zeros out the raw signal at masked
+                time positions before the temporal embedding (CWT/CNN).
+                Prevents information leakage through the tokenizer's temporal
+                receptive field, where wavelets/convolutions at visible
+                positions would otherwise encode signal from masked positions.
             **kwargs: Keyword arguments forwarded to :class:`POYOEEGModel`.
 
         Raises:
@@ -92,6 +99,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         super().__init__(*args, **kwargs)
         self.masking = masking
         self.disable_channel_encoder_token_mask = disable_channel_encoder_token_mask
+        self.zero_masked_signal = zero_masked_signal
 
         if not self.tokenizer.uses_per_channel:
             raise ValueError(
@@ -330,6 +338,26 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             )
             token_mask_flat.scatter_(1, mask_indices, False)
             ch_token_mask = token_mask_flat.reshape(B, C_pad, N)
+
+        # 3.5. Zero raw signal at masked time positions so the temporal
+        #       embedding (CWT/CNN) cannot leak masked-token information
+        #       into visible token embeddings through its receptive field.
+        if self.zero_masked_signal:
+            T_raw = input_values.shape[2]
+            masked_token_grid = torch.zeros(
+                B, C_pad * N, dtype=torch.bool, device=device
+            )
+            masked_token_grid.scatter_(1, mask_indices, True)
+            masked_token_grid = masked_token_grid.reshape(B, C_pad, N)
+
+            if N == T_raw:
+                signal_mask = masked_token_grid
+            else:
+                signal_mask = F.interpolate(
+                    masked_token_grid.float(), size=T_raw, mode="nearest"
+                ).bool()
+
+            input_values = input_values.masked_fill(signal_mask, 0.0)
 
         # 4. GPU tokenization (with token_mask to prevent leak in channel encoder)
         inputs, session_emb, ch_emb_cache = self._tokenize_and_add_session(

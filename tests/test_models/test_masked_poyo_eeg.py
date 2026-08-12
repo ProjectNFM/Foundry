@@ -529,3 +529,122 @@ class TestComputeVisibleIndicesProperties:
 
         diffs = visible[0, 1:] - visible[0, :-1]
         assert (diffs > 0).all(), "Visible indices should be in ascending order"
+
+
+class TestZeroMaskedSignal:
+    """Verify that zero_masked_signal prevents temporal embedding leakage."""
+
+    def _make_batch_and_mask(self, model, B=2, C_pad=4, N=10, T=100, sr=100.0):
+        device = next(model.parameters()).device
+        input_mask = torch.ones(B, C_pad, dtype=torch.bool, device=device)
+
+        torch.manual_seed(42)
+        mask_indices, _ = model.masking(
+            num_channels=C_pad,
+            num_time_tokens=N,
+            channel_mask=input_mask,
+            device=device,
+        )
+
+        masked_grid = torch.zeros(B, C_pad * N, dtype=torch.bool, device=device)
+        masked_grid.scatter_(1, mask_indices, True)
+        masked_grid = masked_grid.reshape(B, C_pad, N)
+        signal_mask = torch.nn.functional.interpolate(
+            masked_grid.float(), size=T, mode="nearest"
+        ).bool()
+
+        input_values = torch.randn(B, C_pad, T, device=device)
+
+        batch = dict(
+            input_values=input_values,
+            input_timestamps=(
+                torch.linspace(0, 1.0, N, device=device)
+                .unsqueeze(0)
+                .expand(B, -1)
+                .repeat(1, C_pad)
+            ),
+            input_channel_index=(
+                torch.arange(C_pad, device=device).unsqueeze(0).expand(B, -1)
+            ),
+            input_session_index=torch.zeros(
+                B, dtype=torch.long, device=device
+            ),
+            input_mask=input_mask,
+            input_sampling_rate=torch.full((B,), sr, device=device),
+            input_seq_len=torch.full(
+                (B,), T, dtype=torch.long, device=device
+            ),
+            latent_index=torch.from_numpy(model._latent_index)
+            .unsqueeze(0)
+            .expand(B, -1)
+            .to(device),
+            latent_timestamps=torch.from_numpy(model._latent_timestamps)
+            .unsqueeze(0)
+            .expand(B, -1)
+            .float()
+            .to(device),
+            output_session_index=torch.zeros(
+                B, 0, dtype=torch.long, device=device
+            ),
+            output_timestamps=torch.zeros(B, 0, device=device),
+            task_index=torch.zeros(B, 0, dtype=torch.long, device=device),
+            reconstruction_targets=torch.randn(
+                B, C_pad * N, device=device
+            ),
+        )
+
+        return batch, signal_mask
+
+    def test_corrupting_masked_signal_does_not_change_output(self):
+        """With zero_masked_signal=True, changing the raw signal at masked
+        positions must not affect model output, since those positions are
+        zeroed before the temporal embedding processes them."""
+        model = _build_minimal_masked_model()
+        model.zero_masked_signal = True
+        model.eval()
+
+        batch, signal_mask = self._make_batch_and_mask(model)
+
+        corrupted_values = batch["input_values"].clone()
+        corrupted_values[signal_mask] += 1000.0
+        corrupted_batch = {**batch, "input_values": corrupted_values}
+
+        torch.manual_seed(42)
+        with torch.no_grad():
+            result_orig = model(**batch)
+
+        torch.manual_seed(42)
+        with torch.no_grad():
+            result_corrupted = model(**corrupted_batch)
+
+        torch.testing.assert_close(
+            result_orig.task_outputs["masked_reconstruction"],
+            result_corrupted.task_outputs["masked_reconstruction"],
+        )
+
+    def test_without_zero_masked_signal_corruption_changes_output(self):
+        """Without signal zeroing, the temporal embedding's receptive field
+        leaks masked signal values into visible token embeddings, so
+        corrupting masked positions changes the output."""
+        model = _build_minimal_masked_model()
+        model.zero_masked_signal = False
+        model.eval()
+
+        batch, signal_mask = self._make_batch_and_mask(model)
+
+        corrupted_values = batch["input_values"].clone()
+        corrupted_values[signal_mask] += 1000.0
+        corrupted_batch = {**batch, "input_values": corrupted_values}
+
+        torch.manual_seed(42)
+        with torch.no_grad():
+            result_orig = model(**batch)
+
+        torch.manual_seed(42)
+        with torch.no_grad():
+            result_corrupted = model(**corrupted_batch)
+
+        assert not torch.allclose(
+            result_orig.task_outputs["masked_reconstruction"],
+            result_corrupted.task_outputs["masked_reconstruction"],
+        )
