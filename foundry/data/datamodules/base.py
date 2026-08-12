@@ -182,9 +182,7 @@ class NeuralDataModule(LightningDataModule):
             if sampler_class is not None
             else FastRandomFixedWindowSampler
         )
-        self.window_lengths = (
-            sorted(window_lengths) if window_lengths else None
-        )
+        self.window_lengths = sorted(window_lengths) if window_lengths else None
         self._task_configs = task_configs
 
         for key, val in (

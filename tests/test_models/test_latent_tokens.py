@@ -98,7 +98,9 @@ class TestDynamicLatentGrid:
         for dur in durations:
             effective_step = dur / num_bins
             idx, ts = create_linspace_latent_tokens(
-                0, dur, step=effective_step,
+                0,
+                dur,
+                step=effective_step,
                 num_latents_per_step=num_latents_per_step,
             )
             assert len(idx) == expected_count, (
@@ -118,11 +120,15 @@ class TestDynamicLatentGrid:
         np.testing.assert_allclose(effective_step, latent_step)
 
         idx_dyn, ts_dyn = create_linspace_latent_tokens(
-            0, base_seq_len, step=effective_step,
+            0,
+            base_seq_len,
+            step=effective_step,
             num_latents_per_step=num_latents_per_step,
         )
         idx_orig, ts_orig = create_linspace_latent_tokens(
-            0, base_seq_len, step=latent_step,
+            0,
+            base_seq_len,
+            step=latent_step,
             num_latents_per_step=num_latents_per_step,
         )
         np.testing.assert_array_equal(idx_dyn, idx_orig)
@@ -136,7 +142,9 @@ class TestDynamicLatentGrid:
         for dur in [1.0, 5.0, 30.0]:
             effective_step = dur / num_bins
             _, ts = create_linspace_latent_tokens(
-                0, dur, step=effective_step,
+                0,
+                dur,
+                step=effective_step,
                 num_latents_per_step=num_latents_per_step,
             )
             unique_ts = np.unique(ts)

@@ -105,9 +105,7 @@ class VariableLengthBatchSampler(torch.utils.data.Sampler):
         self.drop_last = drop_last
         self.generator = generator
 
-    def _generate_windows(
-        self, wl: float
-    ) -> list[tuple[str, float, float]]:
+    def _generate_windows(self, wl: float) -> list[tuple[str, float, float]]:
         """Generate all non-overlapping windows of length *wl*."""
         tuples: list[tuple[str, float, float]] = []
         for session_name, intervals in self.sampling_intervals.items():

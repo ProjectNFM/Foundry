@@ -454,9 +454,7 @@ class TestDynamicDurationTokenize:
                 f"{len(result['latent_index'])} latent tokens, "
                 f"expected {expected_latent_count}"
             )
-            assert (
-                len(result["latent_timestamps"]) == expected_latent_count
-            )
+            assert len(result["latent_timestamps"]) == expected_latent_count
 
     def test_prepare_signal_uses_actual_duration(self):
         """_prepare_signal respects the explicit sequence_length argument."""
@@ -470,16 +468,12 @@ class TestDynamicDurationTokenize:
         channel_ids = [f"ch_{i}" for i in range(C_pad)]
         channel_types = ["EEG"] * C_pad
 
-        data_2s = self._make_data(
-            2.0, channel_ids, channel_types, sr=100.0
-        )
+        data_2s = self._make_data(2.0, channel_ids, channel_types, sr=100.0)
 
         prepared_default = model._prepare_signal(data_2s)
         assert prepared_default.num_samples == round(100.0 * 2.0)
 
-        prepared_explicit = model._prepare_signal(
-            data_2s, sequence_length=1.0
-        )
+        prepared_explicit = model._prepare_signal(data_2s, sequence_length=1.0)
         assert prepared_explicit.num_samples == round(100.0 * 1.0)
 
     def test_get_actual_duration_fallback(self):
