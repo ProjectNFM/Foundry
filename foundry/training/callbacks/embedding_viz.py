@@ -453,7 +453,227 @@ class EmbeddingVisualizationCallback(L.Callback):
             log_dict["val/channel_embedding_tsne"] = wandb.Image(fig_tsne)
             plt.close(fig_tsne)
 
+        fig_scalp = self._make_channel_scalp_scatter(
+            embeddings, channel_names, trainer
+        )
+        if fig_scalp is not None:
+            log_dict["val/channel_embedding_pca_scalp"] = wandb.Image(
+                fig_scalp
+            )
+            plt.close(fig_scalp)
+
         wandb_experiment.log(log_dict, commit=False)
+
+    @classmethod
+    def _get_electrode_positions_2d(
+        cls,
+    ) -> dict[str, tuple[float, float]]:
+        """2D scalp positions for standard EEG electrodes via MNE montages.
+
+        Cached after first call.  Returns ``{lowercase_name: (x, y)}`` where
+        *x* is left(−)/right(+) and *y* is posterior(−)/anterior(+), in
+        meters.
+        """
+        cached = getattr(cls, "_electrode_pos_cache", None)
+        if cached is not None:
+            return cached
+
+        try:
+            import mne
+
+            mne.set_log_level("ERROR")
+        except ImportError:
+            log.info(
+                "MNE not installed — skipping scalp-position channel plot."
+            )
+            cls._electrode_pos_cache = {}
+            return cls._electrode_pos_cache
+
+        positions: dict[str, tuple[float, float]] = {}
+        for montage_name in ("standard_1020", "standard_1005"):
+            try:
+                montage = mne.channels.make_standard_montage(montage_name)
+                for ch, xyz in montage.get_positions()["ch_pos"].items():
+                    key = ch.lower()
+                    if key not in positions:
+                        positions[key] = (float(xyz[0]), float(xyz[1]))
+            except Exception:
+                continue
+
+        cls._electrode_pos_cache = positions
+        return positions
+
+    @staticmethod
+    def _extract_electrode_name(namespaced_id: str) -> str:
+        """Bare electrode name from a namespaced channel ID.
+
+        ``'dataset_name/sub-01/Fp1'`` → ``'Fp1'``
+        """
+        parts = namespaced_id.split("/")
+        return parts[-1] if len(parts) > 1 else namespaced_id
+
+    def _make_channel_scalp_scatter(
+        self,
+        embeddings: np.ndarray,
+        channel_names: list[str],
+        trainer: "Trainer",
+    ):
+        """Averaged-per-electrode PCA colored by 2D scalp position.
+
+        Groups buffered channel embeddings by bare electrode name,
+        averages, runs PCA, and colors each dot with an HSV colorwheel
+        encoding of the electrode's scalp coordinates.  A colorwheel
+        legend is drawn alongside.
+
+        Returns the figure, or ``None`` when positions cannot be resolved.
+        """
+        from collections import defaultdict
+
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import hsv_to_rgb as _hsv
+        from sklearn.decomposition import PCA
+
+        electrode_pos = self._get_electrode_positions_2d()
+        if not electrode_pos:
+            return None
+
+        groups: dict[str, list[np.ndarray]] = defaultdict(list)
+        for name, emb in zip(channel_names, embeddings):
+            groups[self._extract_electrode_name(name)].append(emb)
+
+        names = sorted(groups)
+        avg = np.array([np.mean(groups[n], axis=0) for n in names])
+
+        if avg.shape[0] < 3:
+            return None
+
+        pca = PCA(n_components=min(2, *avg.shape))
+        coords = pca.fit_transform(avg)
+
+        xs = np.zeros(len(names))
+        ys = np.zeros(len(names))
+        matched = np.zeros(len(names), dtype=bool)
+        for i, n in enumerate(names):
+            key = n.lower()
+            if key in electrode_pos:
+                xs[i], ys[i] = electrode_pos[key]
+                matched[i] = True
+
+        if matched.sum() < 3:
+            return None
+
+        max_d = np.sqrt(xs[matched] ** 2 + ys[matched] ** 2).max() or 1.0
+        angles = np.arctan2(ys, xs)
+        hues = (angles + np.pi) / (2 * np.pi)
+        sats = np.clip(np.sqrt(xs**2 + ys**2) / max_d, 0.15, 1.0)
+        hsv = np.stack([hues, sats, np.full_like(hues, 0.85)], axis=-1)
+        rgb = _hsv(hsv.reshape(-1, 1, 3)).reshape(-1, 3)
+
+        fig = plt.figure(figsize=(11, 8), layout="constrained")
+        gs = fig.add_gridspec(1, 2, width_ratios=[4, 1], wspace=0.12)
+        ax = fig.add_subplot(gs[0])
+        ax_leg = fig.add_subplot(gs[1])
+
+        ax.scatter(
+            coords[matched, 0],
+            coords[matched, 1],
+            c=rgb[matched],
+            s=50,
+            edgecolors="k",
+            linewidths=0.3,
+            alpha=0.85,
+            zorder=3,
+        )
+        if (~matched).any():
+            ax.scatter(
+                coords[~matched, 0],
+                coords[~matched, 1],
+                c="lightgray",
+                s=25,
+                alpha=0.5,
+                label="no position",
+                zorder=2,
+            )
+            ax.legend(markerscale=1.5, fontsize=8)
+
+        _LABEL_SET = {
+            "fp1", "fp2", "f7", "f3", "fz", "f4", "f8",
+            "t7", "t3", "c3", "cz", "c4", "t4", "t8",
+            "p7", "t5", "p3", "pz", "p4", "t6", "p8",
+            "o1", "oz", "o2",
+        }
+        for i, n in enumerate(names):
+            if n.lower() in _LABEL_SET or len(names) <= 40:
+                ax.annotate(
+                    n,
+                    (coords[i, 0], coords[i, 1]),
+                    fontsize=6,
+                    alpha=0.8,
+                    xytext=(4, 4),
+                    textcoords="offset points",
+                )
+
+        ax.set_title(
+            f"Channel Emb PCA — Scalp Position "
+            f"(epoch {trainer.current_epoch})"
+        )
+        ax.set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.1%})")
+        ax.set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.1%})")
+
+        self._draw_scalp_colorwheel(ax_leg, electrode_pos, max_d)
+        return fig
+
+    @staticmethod
+    def _draw_scalp_colorwheel(ax, electrode_pos, max_dist):
+        """Circular colorwheel legend matching the HSV scalp encoding."""
+        from matplotlib.colors import hsv_to_rgb as _hsv
+
+        n = 256
+        lin = np.linspace(-1, 1, n)
+        X, Y = np.meshgrid(lin, lin)
+        R = np.sqrt(X**2 + Y**2)
+        T = np.arctan2(Y, X)
+
+        H = (T + np.pi) / (2 * np.pi)
+        S = np.clip(R, 0.15, 1.0)
+        V = np.full_like(H, 0.85)
+        rgb_img = _hsv(np.stack([H, S, V], axis=-1))
+
+        alpha = np.where(R <= 1.0, 1.0, 0.0)
+        rgba = np.concatenate([rgb_img, alpha[..., np.newaxis]], axis=-1)
+        ax.imshow(rgba, extent=[-1.3, 1.3, -1.3, 1.3], origin="lower")
+
+        theta = np.linspace(0, 2 * np.pi, 100)
+        ax.plot(
+            np.cos(theta), np.sin(theta), "k-", linewidth=0.8, alpha=0.4
+        )
+        ax.plot(
+            [-0.1, 0, 0.1], [1.0, 1.12, 1.0],
+            "k-", linewidth=0.8, alpha=0.4,
+        )
+
+        ax.text(0, 1.25, "Front", ha="center", va="bottom", fontsize=8)
+        ax.text(0, -1.22, "Back", ha="center", va="top", fontsize=8)
+        ax.text(
+            -1.25, 0, "L", ha="right", va="center",
+            fontsize=9, weight="bold",
+        )
+        ax.text(
+            1.25, 0, "R", ha="left", va="center",
+            fontsize=9, weight="bold",
+        )
+
+        for _, (x, y) in electrode_pos.items():
+            xn = x / max_dist if max_dist > 0 else 0
+            yn = y / max_dist if max_dist > 0 else 0
+            if xn**2 + yn**2 <= 1.05:
+                ax.plot(xn, yn, "k.", markersize=1.5, alpha=0.3)
+
+        ax.set_xlim(-1.5, 1.5)
+        ax.set_ylim(-1.5, 1.5)
+        ax.set_aspect("equal")
+        ax.axis("off")
+        ax.set_title("Scalp Position\n(color key)", fontsize=9)
 
     def _clear_buffers(self) -> None:
         self._emb_buffer = []
