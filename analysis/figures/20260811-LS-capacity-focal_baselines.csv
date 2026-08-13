@@ -1,0 +1,5 @@
+label,species,run_id,run_name,gamma,alpha_smoothing,label_smoothing,weight_decay,cw_smoothing,embed_dim,depth,self_heads,cross_heads,channel_emb_fraction,tokenizer,f1,auroc,precision,recall,balanced_acc
+small_cap_CE,minipigs,ncx1been,poyo_eeg_neurosoft_8band,,,,0.08,0.75,32,2,6,6,1/2,per_channel_resample_cnn,0.3936342000961304,0.8009076118469238,0.4048957824707031,0.39539486169815063,0.39539486169815063
+small_cap_CE,monkeys,zrvjtixp,poyo_eeg_neurosoft_8band,,,,0.3,1.0,64,4,6,8,,per_channel_resample_cnn_add,0.5382431745529175,0.8916394710540771,0.5356448888778687,0.5484764575958252,0.5484764575958252
+default_cap_focal,minipigs,gebswvlu,poyo_eeg_neurosoft_8band,1.5,0.75,0.1,0.08,,256,4,8,8,1/4,per_channel_resample_cnn,0.3771702647209167,0.7939975261688232,0.3761769235134125,0.38532736897468567,0.38532736897468567
+default_cap_focal,monkeys,ubdan13a,poyo_eeg_neurosoft_8band,1.0,1.0,0.1,0.3,,256,4,8,8,,per_channel_resample_cnn_add,0.51433265209198,0.8879374265670776,0.5125800371170044,0.5210975408554077,0.5210975408554077
