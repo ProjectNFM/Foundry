@@ -166,6 +166,181 @@ class SessionMetricsCallback(L.Callback):
         return "_".join(keep) if keep else session_id
 
 
+class SourceMetricsCallback(L.Callback):
+    """Log validation metrics and confusion matrices separately by source.
+
+    Samples are grouped using ``StepOutput.source_id`` while model parameters
+    and readout heads remain shared. Logged keys follow
+    ``val/{source_id}/{task_name}_{metric}``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._val_source_buffers: dict = {}
+
+    def on_fit_start(
+        self, trainer: Trainer, pl_module: L.LightningModule
+    ) -> None:
+        self._val_source_buffers = {}
+
+    def on_validation_batch_end(
+        self,
+        trainer: Trainer,
+        pl_module: L.LightningModule,
+        outputs: Any,
+        batch: Any,
+        batch_idx: int,
+        dataloader_idx: int = 0,
+    ) -> None:
+        step_output = extract_step_output(outputs)
+        if step_output is None or step_output.source_id is None:
+            return
+
+        model = pl_module.model if hasattr(pl_module, "model") else pl_module
+        for task_name, cfg in model.task_configs.items():
+            if cfg.metrics is None or task_name in step_output.ssl_task_names:
+                continue
+            preds = step_output.task_outputs.get(task_name)
+            targets = step_output.target_values.get(task_name)
+            if preds is None or targets is None or targets.numel() == 0:
+                continue
+            self._accumulate_source_preds(
+                task_name,
+                preds,
+                targets,
+                step_output.task_index,
+                step_output.source_id,
+                model.router,
+            )
+
+    def _accumulate_source_preds(
+        self,
+        task_name: str,
+        preds: torch.Tensor,
+        targets: torch.Tensor,
+        task_index: torch.Tensor,
+        source_ids: list[str],
+        router,
+    ) -> None:
+        """Split flat task outputs by sample and buffer them by source."""
+        if len(source_ids) != task_index.shape[0]:
+            raise ValueError(
+                "Expected one source ID per validation sample, got "
+                f"{len(source_ids)} IDs for batch size {task_index.shape[0]}"
+            )
+
+        router_idx = router.get_task_index_by_name(task_name) + 1
+        counts = (task_index == router_idx).sum(dim=1)
+        per_item_preds = torch.split(preds, counts.tolist())
+        per_item_targets = torch.split(targets, counts.tolist())
+        task_buffer = self._val_source_buffers.setdefault(task_name, {})
+
+        for source_id, item_preds, item_targets in zip(
+            source_ids, per_item_preds, per_item_targets
+        ):
+            if item_preds.numel() == 0:
+                continue
+            source_buffer = task_buffer.setdefault(
+                str(source_id), {"preds": [], "targets": []}
+            )
+            source_buffer["preds"].append(item_preds.detach().cpu())
+            source_buffer["targets"].append(item_targets.detach().cpu())
+
+    def on_validation_epoch_end(
+        self, trainer: Trainer, pl_module: L.LightningModule
+    ) -> None:
+        if not self._val_source_buffers:
+            return
+
+        from foundry.training.callbacks import get_wandb_experiment
+
+        all_metrics: dict[str, Any] = {}
+        confusion_matrices = []
+        model = pl_module.model if hasattr(pl_module, "model") else pl_module
+
+        for task_name, source_data in self._val_source_buffers.items():
+            cfg = model.task_configs.get(task_name)
+            if cfg is None or cfg.metrics is None:
+                continue
+
+            for source_id, data in source_data.items():
+                preds = torch.cat(data["preds"])
+                targets = torch.cat(data["targets"])
+                if cfg.kind in ("binary", "multiclass"):
+                    valid = targets >= 0
+                    preds = preds[valid]
+                    targets = targets[valid]
+                if targets.numel() == 0:
+                    continue
+
+                try:
+                    metric_collection = instantiate(cfg.metrics)
+                    metric_preds, metric_targets = (
+                        pl_module._prepare_for_metrics(cfg, preds, targets)
+                    )
+                    metric_collection.update(metric_preds, metric_targets)
+                    results = metric_collection.compute()
+                except Exception:
+                    log.debug(
+                        "SourceMetrics: failed to compute metrics for "
+                        "task=%s source=%s, skipping.",
+                        task_name,
+                        source_id,
+                        exc_info=True,
+                    )
+                    continue
+
+                prefix = f"val/{source_id}/{task_name}"
+                for metric_name, value in results.items():
+                    all_metrics[f"{prefix}_{metric_name}"] = (
+                        value.item() if torch.is_tensor(value) else value
+                    )
+
+                if cfg.kind in ("binary", "multiclass"):
+                    tracker = ConfusionMatrixTracker(
+                        num_classes=cfg.output_dim,
+                        class_names=cfg.get_class_names(),
+                    )
+                    if cfg.kind == "multiclass":
+                        predicted_classes = preds.argmax(dim=-1)
+                    else:
+                        predicted_classes = (preds[:, 1] > preds[:, 0]).long()
+                    tracker.update(predicted_classes, targets)
+                    counts, normalized = tracker.compute()
+                    all_metrics[f"{prefix}_confusion_counts"] = counts.tolist()
+                    all_metrics[f"{prefix}_confusion_normalized"] = (
+                        normalized.tolist()
+                    )
+                    all_metrics[f"{prefix}_confusion_class_names"] = (
+                        tracker.class_names
+                    )
+                    confusion_matrices.append(
+                        (source_id, task_name, tracker, counts, normalized)
+                    )
+
+        if all_metrics and trainer.logger is not None:
+            trainer.logger.log_metrics(all_metrics, step=trainer.current_epoch)
+
+        wandb_experiment = get_wandb_experiment(trainer)
+        if wandb_experiment is not None:
+            for (
+                source_id,
+                task_name,
+                tracker,
+                counts,
+                normalized,
+            ) in confusion_matrices:
+                tracker.log_wandb(
+                    wandb_experiment,
+                    f"{source_id}/{task_name}",
+                    trainer.current_epoch,
+                    counts,
+                    normalized,
+                )
+
+        self._val_source_buffers = {}
+
+
 class ConfusionMatrixCallback(L.Callback):
     """Log confusion matrices for classification tasks at validation epoch end.
 

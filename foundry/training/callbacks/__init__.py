@@ -20,6 +20,7 @@ from foundry.training.callbacks.lifecycle import (
 from foundry.training.callbacks.metrics import (
     ConfusionMatrixCallback,
     SessionMetricsCallback,
+    SourceMetricsCallback,
 )
 from foundry.training.callbacks.tuning import EffectiveBatchSizeCallback
 from foundry.training.callbacks.visualization import (
@@ -44,6 +45,7 @@ __all__ = [
     "ParameterWatcherCallback",
     "ReconstructionVisualizationCallback",
     "SessionMetricsCallback",
+    "SourceMetricsCallback",
     "VocabInitializerCallback",
     "get_wandb_experiment",
 ]

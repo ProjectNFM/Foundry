@@ -28,6 +28,7 @@ class StepOutput:
     target_weights: dict[str, torch.Tensor | float]
     task_index: torch.Tensor
     session_id: list[str] | None = None
+    source_id: list[str] | None = None
     ssl_task_names: set[str] = field(default_factory=set)
     reconstruction_viz: ReconstructionVizMeta | None = None
     reconstruction_targets: torch.Tensor | None = None

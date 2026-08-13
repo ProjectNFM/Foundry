@@ -12,7 +12,10 @@ from hydra.utils import instantiate
 
 from foundry.models.readout import ReadoutRouter
 from foundry.tasks.config import TaskConfig
-from foundry.training.callbacks import SessionMetricsCallback
+from foundry.training.callbacks import (
+    SessionMetricsCallback,
+    SourceMetricsCallback,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TASKS_CONFIG_DIR = REPO_ROOT / "configs" / "tasks"
@@ -365,3 +368,45 @@ class TestSessionMetricsEndToEnd:
         module._shared_step("val", batch)
 
         assert not hasattr(module, "_val_session_buffers")
+
+
+def test_source_metrics_log_each_source_with_its_own_confusion_matrix():
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(
+        TASKS_CONFIG_DIR / "neurosoft_acoustic_stim_8band.yaml"
+    )
+    module = FoundryModule(model=_StubTaskModel({cfg.name: cfg}))
+    router_idx = module.model.router.get_task_index_by_name(cfg.name) + 1
+    batch = {
+        "output_embs": torch.randn(4, 8),
+        "task_index": torch.full((4, 1), router_idx),
+        "target_values": {cfg.name: torch.tensor([0, 1, 0, 1])},
+        "target_weights": {cfg.name: 1.0},
+        "source_id": ["minipigs", "minipigs", "monkeys", "monkeys"],
+    }
+    module.log = MagicMock()
+    module.log_dict = MagicMock()
+    step_output = module._shared_step("val", batch)
+
+    callback = SourceMetricsCallback()
+    trainer = MagicMock()
+    trainer.logger = MagicMock()
+    trainer.current_epoch = 3
+    callback.on_validation_batch_end(
+        trainer,
+        module,
+        outputs={"loss": step_output.loss, "step_output": step_output},
+        batch=None,
+        batch_idx=0,
+    )
+    callback.on_validation_epoch_end(trainer, module)
+
+    logged = trainer.logger.log_metrics.call_args[0][0]
+    for source_id in ("minipigs", "monkeys"):
+        prefix = f"val/{source_id}/{cfg.name}"
+        assert any(key.startswith(prefix) for key in logged)
+        assert f"{prefix}_confusion_counts" in logged
+        assert f"{prefix}_confusion_normalized" in logged
+        assert f"{prefix}_confusion_class_names" in logged
+    assert callback._val_source_buffers == {}

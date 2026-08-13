@@ -217,6 +217,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         output_session_index: torch.Tensor,
         output_timestamps: torch.Tensor,
         task_index: torch.Tensor,
+        output_source_index: Optional[torch.Tensor] = None,
         reconstruction_targets: Optional[torch.Tensor] = None,
         unpack_output: bool = False,
         context_values: Optional[torch.Tensor] = None,
@@ -255,6 +256,8 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             output_session_index: (B, n_out) session indices for downstream outputs.
             output_timestamps: (B, n_out) timestamps for downstream predictions.
             task_index: (B, n_out) padded task indices for downstream queries.
+            output_source_index: Optional (B, n_out) source indices used by
+                source-conditioned downstream decoder queries.
             reconstruction_targets: (B, C_pad*N) or (B, C_pad, N) z-scored targets.
                 ``None`` during inference (no target gathering).
             unpack_output: Unused (kept for API compatibility with base class).
@@ -374,6 +377,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
                 task_index,
                 output_timestamps,
                 session_emb=session_emb,
+                output_source_index=output_source_index,
             )
             all_queries = torch.cat([recon_queries, ds_queries], dim=1)
             all_ts_emb = torch.cat([recon_ts_emb, ds_ts_emb], dim=1)

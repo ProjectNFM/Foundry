@@ -20,4 +20,6 @@ emb_init_scale: 0.02
 t_min: 1e-2
 t_max: ${hyperparameters.sequence_length}
 disable_session_emb: false
+use_encoder_session_embedding: true
+decoder_source_ids: null
 channel_emb_mode: static

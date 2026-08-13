@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -231,6 +232,36 @@ def test_transfer_batch_to_device_converts_float64_to_float32():
 
     assert moved["output_embs"].dtype == torch.float32
     assert moved["target_values"][cfg.name].dtype == torch.float32
+
+
+def test_unpack_batch_expands_source_ids_for_opted_in_models():
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
+    model = _StubTaskModel({cfg.name: cfg})
+    model.source_ids_to_output_index = MagicMock(
+        return_value=torch.tensor([[0, 0], [1, 1]])
+    )
+    module = FoundryModule(model=model)
+    task_index = torch.ones(2, 2, dtype=torch.long)
+    batch = {
+        "output_embs": torch.randn(4, 8),
+        "task_index": task_index,
+        "target_values": {cfg.name: torch.tensor([0, 1, 0, 1])},
+        "target_weights": {cfg.name: 1.0},
+        "source_id": ["minipigs", "monkeys"],
+    }
+
+    model_inputs, _, _, _, _, source_id = module._unpack_batch(batch)
+
+    model.source_ids_to_output_index.assert_called_once_with(
+        source_id, task_index
+    )
+    assert torch.equal(
+        model_inputs["output_source_index"],
+        torch.tensor([[0, 0], [1, 1]]),
+    )
+    assert "source_id" not in model_inputs
 
 
 def test_wandb_metric_summaries_use_task_config_modes():

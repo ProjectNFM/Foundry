@@ -170,9 +170,14 @@ class FoundryModule(L.LightningModule):
             :class:`StepOutput` with the total loss, per-task outputs,
             targets, weights, and optional SSL/reconstruction metadata.
         """
-        model_inputs, target_values, target_weights, task_index, session_id = (
-            self._unpack_batch(batch)
-        )
+        (
+            model_inputs,
+            target_values,
+            target_weights,
+            task_index,
+            session_id,
+            source_id,
+        ) = self._unpack_batch(batch)
         batch_size = task_index.shape[0]
         model_output = self.model(**model_inputs, unpack_output=False)
 
@@ -249,6 +254,7 @@ class FoundryModule(L.LightningModule):
             target_weights=target_weights,
             task_index=task_index,
             session_id=session_id,
+            source_id=source_id,
             ssl_task_names=ssl_task_names,
             reconstruction_viz=reconstruction_viz,
             reconstruction_targets=model_inputs.get("reconstruction_targets"),
@@ -514,23 +520,45 @@ class FoundryModule(L.LightningModule):
     def _unpack_batch(self, batch: Dict[str, Any]):
         """Separate target/metadata keys from model-input keys in the batch.
 
-        Pops ``target_values``, ``target_weights``, ``session_id``,
-        ``absolute_start``, and ``eval_mask`` from *batch* (mutating it
-        in-place) so that the remaining dict can be passed directly as
-        ``**model_inputs``.
+        Pops target and metadata keys from *batch* (mutating it in-place) so
+        the remaining dict can be passed directly as ``**model_inputs``. If
+        the model exposes ``source_ids_to_output_index()``, source metadata is
+        converted to decoder-query indices before the forward pass.
 
         Returns:
             ``(model_inputs, target_values, target_weights, task_index,
-            session_id)`` where *model_inputs* is the modified *batch*.
+            session_id, source_id)`` where *model_inputs* is the modified
+            *batch*.
         """
         target_values = batch.pop("target_values")
         target_weights = batch.pop("target_weights")
         session_id = batch.pop("session_id", None)
+        source_id = batch.pop("source_id", None)
         batch.pop("absolute_start", None)
         batch.pop("eval_mask", None)
 
         task_index = batch["task_index"]
-        return batch, target_values, target_weights, task_index, session_id
+        if source_id is not None:
+            if isinstance(source_id, str):
+                source_id = [source_id]
+            else:
+                source_id = [str(value) for value in source_id]
+            source_index_fn = getattr(
+                self.model, "source_ids_to_output_index", None
+            )
+            if callable(source_index_fn):
+                output_source_index = source_index_fn(source_id, task_index)
+                if output_source_index is not None:
+                    batch["output_source_index"] = output_source_index
+
+        return (
+            batch,
+            target_values,
+            target_weights,
+            task_index,
+            session_id,
+            source_id,
+        )
 
     def _compute_task_losses(
         self,

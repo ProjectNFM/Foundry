@@ -74,6 +74,12 @@ class POYOEEGModel(nn.Module):
             with different amplifier gains and physical units. Recommended
             for pretraining; not needed when downstream data is already
             normalized.
+        use_encoder_session_embedding: If False, keep the session embedding
+            in downstream decoder queries but do not add it to encoder input
+            tokens.
+        decoder_source_ids: Optional ordered source vocabulary. When set, a
+            learned source embedding is added to downstream decoder queries.
+            Readout heads remain shared across sources.
     """
 
     SUPPORTED_MODALITIES = {"eeg", "ecog", "seeg", "ieeg"}
@@ -127,6 +133,8 @@ class POYOEEGModel(nn.Module):
         dynamic_session_encoder: DynamicSessionEncoder | None = None,
         channel_emb_mode: str = "static",
         channel_encoder_heads: int = 4,
+        use_encoder_session_embedding: bool = True,
+        decoder_source_ids: list[str] | None = None,
     ):
         super().__init__()
 
@@ -138,6 +146,7 @@ class POYOEEGModel(nn.Module):
         self.zero_output_timestamps = zero_output_timestamps
         self.normalize_inputs = normalize_inputs
         self.disable_session_emb = disable_session_emb
+        self.use_encoder_session_embedding = use_encoder_session_embedding
         self._task_configs = TaskConfig.normalize_task_configs(task_configs)
         self._latent_index, self._latent_timestamps = (
             create_linspace_latent_tokens(
@@ -209,6 +218,32 @@ class POYOEEGModel(nn.Module):
         )
         self.task_emb = nn.Embedding(self.router.num_tasks, self.embed_dim)
         nn.init.normal_(self.task_emb.weight, mean=0, std=emb_init_scale)
+        if decoder_source_ids is not None:
+            duplicate_source_ids = {
+                source_id
+                for source_id in decoder_source_ids
+                if decoder_source_ids.count(source_id) > 1
+            }
+            if duplicate_source_ids:
+                raise ValueError(
+                    "decoder_source_ids contains duplicate values: "
+                    f"{sorted(duplicate_source_ids)}"
+                )
+            if not decoder_source_ids:
+                raise ValueError("decoder_source_ids must not be empty")
+            self._decoder_source_to_index = {
+                source_id: index
+                for index, source_id in enumerate(decoder_source_ids)
+            }
+            self.decoder_source_emb = nn.Embedding(
+                len(decoder_source_ids), self.embed_dim
+            )
+            nn.init.normal_(
+                self.decoder_source_emb.weight, mean=0, std=emb_init_scale
+            )
+        else:
+            self._decoder_source_to_index = None
+            self.decoder_source_emb = None
         self.latent_emb = nn.Embedding(num_latents_per_step, self.embed_dim)
         nn.init.normal_(self.latent_emb.weight, mean=0, std=emb_init_scale)
         self.rotary_emb = RotaryTimeEmbedding(
@@ -297,7 +332,10 @@ class POYOEEGModel(nn.Module):
             inputs, input_session_index, context_kwargs
         )
 
-        if self.session_emb_mode != "disabled":
+        if (
+            self.session_emb_mode != "disabled"
+            and self.use_encoder_session_embedding
+        ):
             inputs = inputs + session_emb
 
         return inputs, session_emb, ch_emb_cache
@@ -417,6 +455,7 @@ class POYOEEGModel(nn.Module):
         task_index: torch.Tensor,
         output_timestamps: torch.Tensor,
         session_emb: torch.Tensor | None = None,
+        output_source_index: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Construct downstream task queries and their rotary timestamp embeddings.
 
@@ -431,6 +470,8 @@ class POYOEEGModel(nn.Module):
             session_emb: Optional precomputed ``(B, 1, D)`` session embedding
                 for dynamic mode. When provided, it is broadcast-added to
                 queries instead of looking up ``session_emb``.
+            output_source_index: Optional ``(B, n_out)`` source indices. This
+                is required when ``decoder_source_ids`` is configured.
 
         Returns:
             ``(queries, ts_emb)`` with shapes ``(B, n_out, embed_dim)`` and
@@ -445,8 +486,59 @@ class POYOEEGModel(nn.Module):
             queries = self.session_emb(output_session_index) + self.task_emb(
                 task_ids
             )
+        if self.decoder_source_emb is not None:
+            if output_source_index is None:
+                raise ValueError(
+                    "output_source_index is required when "
+                    "decoder_source_ids is configured"
+                )
+            if output_source_index.shape != task_index.shape:
+                raise ValueError(
+                    "output_source_index and task_index must have the same "
+                    f"shape, got {output_source_index.shape} and "
+                    f"{task_index.shape}"
+                )
+            queries = queries + self.decoder_source_emb(output_source_index)
         ts_emb = self.rotary_emb(output_timestamps)
         return queries, ts_emb
+
+    def source_ids_to_output_index(
+        self,
+        source_ids: list[str],
+        task_index: torch.Tensor,
+    ) -> torch.Tensor | None:
+        """Expand one source ID per sample to decoder-query indices.
+
+        Returns ``None`` when source-conditioned decoding is disabled so the
+        training module can preserve the default model input contract.
+        """
+        if self._decoder_source_to_index is None:
+            return None
+        if len(source_ids) != task_index.shape[0]:
+            raise ValueError(
+                "Expected one source ID per batch item, got "
+                f"{len(source_ids)} IDs for batch size {task_index.shape[0]}"
+            )
+
+        source_indices = []
+        for source_id in source_ids:
+            try:
+                source_indices.append(
+                    self._decoder_source_to_index[str(source_id)]
+                )
+            except KeyError as exc:
+                available = sorted(self._decoder_source_to_index)
+                raise ValueError(
+                    f"Unknown decoder source '{source_id}'. Available: "
+                    f"{available}"
+                ) from exc
+
+        per_sample = torch.tensor(
+            source_indices,
+            dtype=torch.long,
+            device=task_index.device,
+        )
+        return per_sample[:, None].expand_as(task_index)
 
     def _encode_and_process(
         self,
@@ -530,6 +622,7 @@ class POYOEEGModel(nn.Module):
         output_session_index: torch.Tensor,
         output_timestamps: torch.Tensor,
         task_index: torch.Tensor,
+        output_source_index: Optional[torch.Tensor] = None,
         unpack_output: bool = False,
         context_values: Optional[torch.Tensor] = None,
         context_channel_index: Optional[torch.Tensor] = None,
@@ -551,6 +644,8 @@ class POYOEEGModel(nn.Module):
             output_session_index: (B, n_out) session indices for outputs.
             output_timestamps: (B, n_out) timestamps for output predictions.
             task_index: (B, n_out) task/decoder indices.
+            output_source_index: Optional (B, n_out) source indices used by
+                source-conditioned decoder queries.
             unpack_output: Whether to unpack outputs by batch sample.
             context_values: (B, W, C, T) context windows for dynamic session
                 embedding. Only used when ``session_emb_mode == "dynamic"``.
@@ -594,6 +689,7 @@ class POYOEEGModel(nn.Module):
             task_index,
             output_timestamps,
             session_emb=session_emb,
+            output_source_index=output_source_index,
         )
 
         latents = self._encode_and_process(
@@ -770,6 +866,8 @@ class POYOEEGModel(nn.Module):
             "session_id": data.session.id,
             "absolute_start": data.absolute_start,
         }
+        if hasattr(data, "source_id"):
+            result["source_id"] = str(data.source_id)
         return result, prepared
 
     def tokenize(self, data: Data) -> dict:

@@ -49,6 +49,8 @@ callbacks:
     _target_: foundry.training.callbacks.ConfusionMatrixCallback
   session_metrics:
     _target_: foundry.training.callbacks.SessionMetricsCallback
+  source_metrics:
+    _target_: foundry.training.callbacks.SourceMetricsCallback
   parameter_watcher:
     _target_: foundry.training.callbacks.ParameterWatcherCallback
     param_patterns: ["*cwt*"]
