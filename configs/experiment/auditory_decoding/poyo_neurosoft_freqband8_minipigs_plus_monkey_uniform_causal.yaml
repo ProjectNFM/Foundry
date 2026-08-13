@@ -1,0 +1,31 @@
+# @package _global_
+# Uniform 8-band monkey controls matched to each one-band auxiliary volume.
+
+defaults:
+  - /experiment/auditory_decoding/poyo_neurosoft_freqband8_minipigs_plus_monkey_band_causal
+  - _self_
+
+auxiliary_band_counts:
+  low_bass: 3530
+  mid_bass: 2377
+  low_mids: 2626
+  midrange: 3334
+  high_mids: 3307
+  low_treble: 1953
+  mid_treble: 2878
+  high_treble: 3645
+
+data:
+  train_band_ids_by_source: null
+  train_uniform_band_total_count_by_source:
+    monkeys: ${auxiliary_band_counts.${auxiliary_band}}
+
+run:
+  name: poyo_neurosoft_freqband8_minipigs_plus_monkeys_uniform_n${auxiliary_band_counts.${auxiliary_band}}_causal
+  tags:
+    - neurosoft
+    - target_minipigs
+    - auxiliary_monkeys
+    - matched_to_${auxiliary_band}
+    - uniform_volume_control
+    - causal

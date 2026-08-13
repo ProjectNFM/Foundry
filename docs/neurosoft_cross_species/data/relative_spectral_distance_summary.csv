@@ -1,0 +1,2 @@
+feature_space,n_validation_windows,n_recording_band_medians,n_same_band_cross_species,n_different_band_within_species,mean_same_band_cross_species_au,mean_different_band_within_species_au,mean_distance_ratio,pairwise_probability_cross_larger
+relative_spectral,1012,344,8,56,87.8150631,37.8706736,2.3188144,0.8348214

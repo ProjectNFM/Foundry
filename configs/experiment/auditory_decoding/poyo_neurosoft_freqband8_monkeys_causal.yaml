@@ -1,0 +1,24 @@
+# @package _global_
+
+defaults:
+  - /experiment/auditory_decoding/poyo_neurosoft_freqband8_joint_causal
+  - _self_
+
+data:
+  dataset_kwargs:
+    sources:
+      - monkeys
+
+run:
+  name: poyo_neurosoft_freqband8_monkeys_causal
+  tags:
+    - neurosoft
+    - monkeys
+    - poyo_eeg
+    - multisession
+    - causal
+    - frequency_band_8class
+    - decoder_session_only
+    - decoder_source_query
+    - min_channels_8
+    - tokenizer_dim_256_filters_64

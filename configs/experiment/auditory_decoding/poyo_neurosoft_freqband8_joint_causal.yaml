@@ -1,0 +1,90 @@
+# @package _global_
+# Causal multisession 8-band decoding shared by the cross-species controls.
+
+defaults:
+  - override /model: poyo_eeg
+  - override /model/tokenizer: per_channel_patch_cnn
+  - override /data: neurosoft_minipigs_monkeys/multisess_raw
+
+task_configs:
+  - neurosoft_acoustic_stim_8band
+
+model:
+  embed_dim: ${hyperparameters.model_dim}
+  zero_output_timestamps: true
+  use_encoder_session_embedding: false
+  decoder_source_ids:
+    - minipigs
+    - monkeys
+  tokenizer:
+    stride: ${hyperparameters.patch_stride}
+    channel_fusion: concat
+    channel_emb_dim: ${hyperparameters.channel_emb_dim}
+    temporal_embedding:
+      embed_dim: ${hyperparameters.token_embed_dim}
+      num_filters: ${hyperparameters.cnn_num_filters}
+      kernel_size: ${hyperparameters.cnn_kernel_size}
+      stride: ${hyperparameters.cnn_stride}
+
+data:
+  split_type: intrasession-causal
+  task_type: acoustic_stim
+
+run:
+  project: foundry-pingsheng
+  name: poyo_neurosoft_freqband8_joint_causal
+  group: NEUROSOFT_CROSS_SPECIES_CAUSAL
+  tags:
+    - neurosoft
+    - minipigs
+    - monkeys
+    - poyo_eeg
+    - multisession
+    - causal
+    - frequency_band_8class
+    - decoder_session_only
+    - decoder_source_query
+    - min_channels_8
+    - tokenizer_dim_256_filters_64
+  seed: 42
+  log_level: INFO
+
+logger:
+  entity: neurosoft-bioelectronics
+
+hyperparameters:
+  batch_size: 128
+  sequence_length: 0.5
+  patch_duration: 0.1
+  patch_stride: 0.1
+  fold_number: 0
+  num_workers: 8
+  sampling_rate: 2000
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  model_dim: 256
+  channel_emb_dim: 64
+  token_embed_dim: 192
+  cnn_num_filters: 64
+  cnn_kernel_size: ${patch_samples:${hyperparameters.patch_duration},${hyperparameters.sampling_rate}}
+  cnn_stride: ${hyperparameters.cnn_kernel_size}
+  num_channels: null
+  session_configs: null
+
+trainer:
+  devices: 1
+  max_epochs: 1000
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/loss
+      mode: min
+      patience: 20
+    model_checkpoint:
+      monitor: val/loss
+      mode: min
+      auto_insert_metric_name: false
+      filename: best-val-loss
+
+stage:
+  skip: true

@@ -167,3 +167,19 @@ def test_min_channels_raises_if_a_source_has_no_usable_recordings(fake_sources):
         match="min_channels=10 filtered out all minipigs recordings",
     ):
         NeurosoftMinipigsMonkeys2026(root="unused", min_channels=10)
+
+
+def test_sources_selects_one_species_without_building_the_other(fake_sources):
+    dataset = NeurosoftMinipigsMonkeys2026(
+        root="unused",
+        sources=["minipigs"],
+        min_channels=8,
+    )
+
+    assert dataset.recording_ids == ["minipigs/pig-good"]
+    assert set(dataset.datasets) == {"minipigs"}
+
+
+def test_sources_rejects_unknown_species(fake_sources):
+    with pytest.raises(ValueError, match="Unknown Neurosoft source"):
+        NeurosoftMinipigsMonkeys2026(root="unused", sources=["humans"])

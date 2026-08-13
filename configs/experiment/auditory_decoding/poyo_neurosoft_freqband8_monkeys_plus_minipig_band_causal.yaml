@@ -1,0 +1,23 @@
+# @package _global_
+# Override auxiliary_band or sweep all eight class names with Hydra -m.
+
+defaults:
+  - /experiment/auditory_decoding/poyo_neurosoft_freqband8_joint_causal
+  - _self_
+
+auxiliary_band: mid_treble
+
+data:
+  train_band_ids_by_source:
+    minipigs:
+      - ${auxiliary_band}
+
+run:
+  name: poyo_neurosoft_freqband8_monkeys_plus_minipigs_${auxiliary_band}_causal
+  tags:
+    - neurosoft
+    - target_monkeys
+    - auxiliary_minipigs
+    - auxiliary_${auxiliary_band}
+    - one_band_control
+    - causal

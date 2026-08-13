@@ -294,7 +294,7 @@ class NeuralDataModule(LightningDataModule):
         """Return sorted list of unique channel IDs across the dataset."""
         return sorted(set(self.dataset.get_channel_ids()))
 
-    def _filter_intervals(self, sampling_intervals):
+    def _filter_intervals(self, sampling_intervals, split=None):
         """Remove intervals whose labels are excluded by task class mappings.
 
         Args:
@@ -370,7 +370,9 @@ class NeuralDataModule(LightningDataModule):
             DataLoader for the split.
         """
         sampling_intervals = self.dataset.get_sampling_intervals(split=split)
-        sampling_intervals = self._filter_intervals(sampling_intervals)
+        sampling_intervals = self._filter_intervals(
+            sampling_intervals, split=split
+        )
         if self._session_pct:
             sampling_intervals = self._subsample_sessions(
                 sampling_intervals, split

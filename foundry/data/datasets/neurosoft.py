@@ -61,13 +61,29 @@ class NeurosoftMinipigsMonkeys2026:
         minipigs_recording_ids: list[str] | None = None,
         monkeys_recording_ids: list[str] | None = None,
         min_channels: int | None = None,
+        sources: list[str] | None = None,
     ):
+        selected_sources = list(self.SOURCES) if sources is None else sources
+        unknown_sources = sorted(set(selected_sources) - set(self.SOURCES))
+        if unknown_sources:
+            raise ValueError(
+                f"Unknown Neurosoft source(s): {unknown_sources}. Available: "
+                f"{sorted(self.SOURCES)}"
+            )
+        if not selected_sources:
+            raise ValueError(
+                "sources must select at least one Neurosoft source"
+            )
+        if len(selected_sources) != len(set(selected_sources)):
+            raise ValueError("sources must not contain duplicate values")
+
         recording_ids_by_source = {
             "minipigs": minipigs_recording_ids,
             "monkeys": monkeys_recording_ids,
         }
         self.datasets = {}
-        for source, dataset_class in self.SOURCES.items():
+        for source in selected_sources:
+            dataset_class = self.SOURCES[source]
             source_recording_ids = recording_ids_by_source[source]
             if min_channels is not None:
                 probe_dataset = dataset_class(

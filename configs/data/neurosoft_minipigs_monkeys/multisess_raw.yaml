@@ -1,4 +1,4 @@
-_target_: foundry.data.datamodules.NeuralDataModule
+_target_: foundry.data.datamodules.NeurosoftMultispeciesDataModule
 
 dataset_class: foundry.data.datasets.NeurosoftMinipigsMonkeys2026
 
@@ -8,6 +8,8 @@ num_workers: ${hyperparameters.num_workers}
 pin_memory: false
 sequence_length: ${hyperparameters.sequence_length}
 seed: ${run.seed}
+train_band_ids_by_source: null
+train_uniform_band_total_count_by_source: null
 
 split_type: ???
 
