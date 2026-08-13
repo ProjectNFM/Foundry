@@ -11,6 +11,7 @@ import pytest
 from analysis._wandb_utils import (
     MetricNotFoundError,
     RunNotFoundError,
+    csv_dir,
     default_entity,
     fetch_metric_history,
     fetch_run_summary,
@@ -300,6 +301,21 @@ class TestFiguresDir:
         d = figures_dir(str(script))
         assert d.exists()
         assert d.name == "figures"
+        assert d.parent == tmp_path
+
+
+# ---------------------------------------------------------------------------
+# csv_dir
+# ---------------------------------------------------------------------------
+
+
+class TestCsvDir:
+    def test_creates_dir(self, tmp_path):
+        script = tmp_path / "my_script.py"
+        script.touch()
+        d = csv_dir(str(script))
+        assert d.exists()
+        assert d.name == "csv"
         assert d.parent == tmp_path
 
 

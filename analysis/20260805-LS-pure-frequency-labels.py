@@ -21,6 +21,7 @@ import pandas as pd
 import wandb
 
 from analysis._wandb_utils import (
+    csv_dir,
     default_entity,
     figures_dir,
     unwrap_summary_value,
@@ -62,6 +63,7 @@ LABEL_ORDER = ["multi-freq bands", "pure-freq"]
 
 STEM = Path(__file__).stem
 FIGURES_DIR = figures_dir(__file__)
+CSV_DIR = csv_dir(__file__)
 N_WORKERS = 8
 
 
@@ -128,7 +130,9 @@ def _extract_meta(config: dict[str, Any]) -> dict[str, Any]:
             "hyperparameters.learning_rate", hp.get("learning_rate")
         ),
         "tokenizer": tokenizer,
-        "atn_dropout": config.get("model.atn_dropout", model.get("atn_dropout")),
+        "atn_dropout": config.get(
+            "model.atn_dropout", model.get("atn_dropout")
+        ),
         "split_type": config.get("data.split_type")
         or (config.get("data") or {}).get("split_type"),
     }
@@ -210,9 +214,7 @@ def fetch_runs(api: wandb.Api | None = None) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=N_WORKERS) as pool:
         futures = {
-            pool.submit(
-                _fetch_one, rid, sp, sid, label_scheme=scheme
-            ): rid
+            pool.submit(_fetch_one, rid, sp, sid, label_scheme=scheme): rid
             for rid, sp, sid, scheme in stubs
         }
         done = 0
@@ -251,9 +253,9 @@ def primary_df(df: pd.DataFrame) -> pd.DataFrame:
         parts.append(base)
 
     out = pd.concat(parts, ignore_index=True)
-    return out.sort_values(
-        ["species", "label_scheme", "fold"]
-    ).reset_index(drop=True)
+    return out.sort_values(["species", "label_scheme", "fold"]).reset_index(
+        drop=True
+    )
 
 
 def mean_table(prim: pd.DataFrame) -> pd.DataFrame:
@@ -287,7 +289,8 @@ def delta_table(means: pd.DataFrame) -> pd.DataFrame:
             & (means["label_scheme"] == "multi-freq bands")
         ]
         pure = means.loc[
-            (means["species"] == species) & (means["label_scheme"] == "pure-freq")
+            (means["species"] == species)
+            & (means["label_scheme"] == "pure-freq")
         ]
         if multi.empty or pure.empty:
             continue
@@ -406,7 +409,7 @@ def main() -> None:
     print(f"Primary weight_decay: {OPTIMAL_WEIGHT_DECAY}")
 
     df = fetch_runs()
-    csv_path = FIGURES_DIR / f"{STEM}_runs.csv"
+    csv_path = CSV_DIR / f"{STEM}_runs.csv"
     df.to_csv(csv_path, index=False)
     print(f"\nSaved all runs → {csv_path}")
 
@@ -436,8 +439,7 @@ def main() -> None:
     for m in METRICS:
         ddisp[f"Δ{m}"] = ddisp.apply(
             lambda r, mm=m: (
-                f"{r[f'delta_{mm}']:+.4f} "
-                f"({100 * r[f'rel_delta_{mm}']:+.1f}%)"
+                f"{r[f'delta_{mm}']:+.4f} ({100 * r[f'rel_delta_{mm}']:+.1f}%)"
             ),
             axis=1,
         )
@@ -470,9 +472,8 @@ def main() -> None:
     ]
     if not extra.empty:
         print("\n=== Secondary: pure-freq non-optimal weight_decay ===")
-        g = (
-            extra.groupby(["species", "weight_decay"])[METRICS]
-            .agg(["mean", "std", "count"])
+        g = extra.groupby(["species", "weight_decay"])[METRICS].agg(
+            ["mean", "std", "count"]
         )
         print(g)
 

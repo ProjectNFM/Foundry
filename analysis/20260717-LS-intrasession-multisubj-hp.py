@@ -21,6 +21,7 @@ import pandas as pd
 import wandb
 
 from analysis._wandb_utils import (
+    csv_dir,
     default_entity,
     figures_dir,
     unwrap_summary_value,
@@ -47,6 +48,7 @@ METRIC_KEYS = {
 
 STEM = Path(__file__).stem
 FIGURES_DIR = figures_dir(__file__)
+CSV_DIR = csv_dir(__file__)
 N_WORKERS = 8
 
 
@@ -92,7 +94,9 @@ def _extract_hps(config: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "tokenizer": tokenizer,
-        "atn_dropout": config.get("model.atn_dropout", model.get("atn_dropout")),
+        "atn_dropout": config.get(
+            "model.atn_dropout", model.get("atn_dropout")
+        ),
         "learning_rate": config.get(
             "hyperparameters.learning_rate", hp.get("learning_rate")
         ),
@@ -105,7 +109,9 @@ def _extract_hps(config: dict[str, Any]) -> dict[str, Any]:
         "fold": hp.get("fold_number"),
         "split_type": config.get("data.split_type")
         or (config.get("data") or {}).get("split_type"),
-        "batch_size": config.get("hyperparameters.batch_size", hp.get("batch_size")),
+        "batch_size": config.get(
+            "hyperparameters.batch_size", hp.get("batch_size")
+        ),
     }
 
 
@@ -124,7 +130,9 @@ def _history_maxes(run: Any, wandb_keys: list[str]) -> dict[str, float | None]:
         if key not in history.columns or history[key].dropna().empty:
             raw = run.summary.get(key)
             val_min = unwrap_summary_value(raw, "min")
-            out[key] = float(val_min) if isinstance(val_min, (int, float)) else None
+            out[key] = (
+                float(val_min) if isinstance(val_min, (int, float)) else None
+            )
         else:
             out[key] = float(history[key].max())
     return out
@@ -186,12 +194,18 @@ def fetch_finished_runs(api: wandb.Api | None = None) -> pd.DataFrame:
     if df.empty:
         return df
 
-    for col in ["learning_rate", "weight_decay", "atn_dropout", "grad_clip", "f1"]:
+    for col in [
+        "learning_rate",
+        "weight_decay",
+        "atn_dropout",
+        "grad_clip",
+        "f1",
+    ]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df.sort_values(["species", "f1"], ascending=[True, False]).reset_index(
-        drop=True
-    )
+    return df.sort_values(
+        ["species", "f1"], ascending=[True, False]
+    ).reset_index(drop=True)
 
 
 def best_per_species(df: pd.DataFrame) -> pd.DataFrame:
@@ -336,7 +350,9 @@ def plot_f1_by_tokenizer(df: pd.DataFrame) -> Path:
     ax.set_xticklabels(short, rotation=15, ha="right")
     ax.set_xlabel("Tokenizer")
     ax.set_ylabel(f"Max val {TASK} F1")
-    ax.set_title("Intrasession multisubject HP search: F1 by tokenizer (mean ± std)")
+    ax.set_title(
+        "Intrasession multisubject HP search: F1 by tokenizer (mean ± std)"
+    )
     ax.legend(title="Species")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -414,7 +430,7 @@ def main() -> None:
     plot_best_bar(df)
     plot_f1_by_tokenizer(df)
 
-    csv_path = FIGURES_DIR / f"{STEM}_runs.csv"
+    csv_path = CSV_DIR / f"{STEM}_runs.csv"
     df.to_csv(csv_path, index=False)
     print(f"Saved: {csv_path}")
 

@@ -21,6 +21,7 @@ import pandas as pd
 import wandb
 
 from analysis._wandb_utils import (
+    csv_dir,
     default_entity,
     figures_dir,
     unwrap_summary_value,
@@ -64,6 +65,7 @@ METRICS = list(METRIC_KEYS)
 
 STEM = Path(__file__).stem
 FIGURES_DIR = figures_dir(__file__)
+CSV_DIR = csv_dir(__file__)
 N_WORKERS = 8
 
 
@@ -120,14 +122,18 @@ def _extract_meta(config: dict[str, Any]) -> dict[str, Any]:
         n_recordings = None
 
     subject = config.get("data.subject", data.get("subject"))
-    if subject is None and isinstance(recording_id, str) and recording_id.startswith(
-        "sub-"
+    if (
+        subject is None
+        and isinstance(recording_id, str)
+        and recording_id.startswith("sub-")
     ):
         subject = recording_id.split("_")[0]
 
     return {
         "tokenizer": tokenizer,
-        "atn_dropout": config.get("model.atn_dropout", model.get("atn_dropout")),
+        "atn_dropout": config.get(
+            "model.atn_dropout", model.get("atn_dropout")
+        ),
         "learning_rate": config.get(
             "hyperparameters.learning_rate", hp.get("learning_rate")
         ),
@@ -159,7 +165,9 @@ def _history_maxes(run: Any, wandb_keys: list[str]) -> dict[str, float | None]:
         if key not in history.columns or history[key].dropna().empty:
             raw = run.summary.get(key)
             val_min = unwrap_summary_value(raw, "min")
-            out[key] = float(val_min) if isinstance(val_min, (int, float)) else None
+            out[key] = (
+                float(val_min) if isinstance(val_min, (int, float)) else None
+            )
         else:
             out[key] = float(history[key].max())
     return out
@@ -224,14 +232,21 @@ def fetch_finished_runs(api: wandb.Api | None = None) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     if df.empty:
         return df
-    for col in METRICS + ["learning_rate", "weight_decay", "atn_dropout", "grad_clip"]:
+    for col in METRICS + [
+        "learning_rate",
+        "weight_decay",
+        "atn_dropout",
+        "grad_clip",
+    ]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     df["fold"] = pd.to_numeric(df["fold"], errors="coerce").astype("Int64")
     df["paradigm"] = pd.Categorical(
         df["paradigm"], categories=PARADIGM_ORDER, ordered=True
     )
-    return df.sort_values(["species", "paradigm", "fold"]).reset_index(drop=True)
+    return df.sort_values(["species", "paradigm", "fold"]).reset_index(
+        drop=True
+    )
 
 
 def _unit_key(row: pd.Series) -> str:
@@ -321,7 +336,9 @@ def paradigm_summary(df: pd.DataFrame, unit_df: pd.DataFrame) -> pd.DataFrame:
         ]
         rows.append(_summarize_units(subj, species, "single-subject"))
 
-        multi = df[(df["species"] == species) & (df["paradigm"] == "multi-subject")]
+        multi = df[
+            (df["species"] == species) & (df["paradigm"] == "multi-subject")
+        ]
         row: dict[str, Any] = {
             "species": species,
             "paradigm": "multi-subject",
@@ -378,7 +395,9 @@ def print_tables(
             for mean, std in zip(show[f"{m}_mean"], show[f"{m}_std"])
         ]
     print(
-        show[["species", "paradigm", "n_units", *METRICS]].to_string(index=False)
+        show[["species", "paradigm", "n_units", *METRICS]].to_string(
+            index=False
+        )
     )
 
     print("\n=== Excluded single-session outliers ===")
@@ -387,7 +406,14 @@ def print_tables(
     else:
         print(
             outliers[
-                ["species", "unit", "f1_mean", "auroc_mean", "f1_n", "outlier_reason"]
+                [
+                    "species",
+                    "unit",
+                    "f1_mean",
+                    "auroc_mean",
+                    "f1_n",
+                    "outlier_reason",
+                ]
             ].to_string(index=False, float_format=lambda x: f"{x:.4f}")
         )
 
@@ -447,7 +473,8 @@ def plot_paradigm_f1(summary: pd.DataFrame) -> Path:
             for p in labels
         ]
         stds = [
-            float(sub.loc[p, "f1_std"]) if p in sub.index else 0.0 for p in labels
+            float(sub.loc[p, "f1_std"]) if p in sub.index else 0.0
+            for p in labels
         ]
         offset = (i - 0.5) * width
         bars = ax.bar(
@@ -500,6 +527,7 @@ def plot_paradigm_f1(summary: pd.DataFrame) -> Path:
     print(f"Saved: {out}")
     return out
 
+
 def plot_singlesub_f1(unit_df: pd.DataFrame) -> Path:
     ss = unit_df[unit_df["paradigm"] == "single-subject"].copy()
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), sharey=True)
@@ -533,11 +561,13 @@ def main() -> None:
     import sys
 
     use_cached = "--cached" in sys.argv
-    print(f"Resolved: {len(SWEEP_IDS)} sweeps, project={PROJECT}, entity={ENTITY}")
+    print(
+        f"Resolved: {len(SWEEP_IDS)} sweeps, project={PROJECT}, entity={ENTITY}"
+    )
     for (species, paradigm), sid in SWEEP_IDS.items():
         print(f"  {species:9s} {paradigm:15s} → {sid}")
 
-    csv_runs = FIGURES_DIR / f"{STEM}_runs.csv"
+    csv_runs = CSV_DIR / f"{STEM}_runs.csv"
     if use_cached and csv_runs.exists():
         print(f"Loading cached runs from {csv_runs}")
         df = pd.read_csv(csv_runs)
@@ -560,9 +590,9 @@ def main() -> None:
     plot_paradigm_f1(summary)
     plot_singlesub_f1(unit_df)
 
-    csv_units = FIGURES_DIR / f"{STEM}_units.csv"
-    csv_summary = FIGURES_DIR / f"{STEM}_summary.csv"
-    csv_outliers = FIGURES_DIR / f"{STEM}_singlesess_outliers.csv"
+    csv_units = CSV_DIR / f"{STEM}_units.csv"
+    csv_summary = CSV_DIR / f"{STEM}_summary.csv"
+    csv_outliers = CSV_DIR / f"{STEM}_singlesess_outliers.csv"
     df.to_csv(csv_runs, index=False)
     flagged.to_csv(csv_units, index=False)
     summary.to_csv(csv_summary, index=False)

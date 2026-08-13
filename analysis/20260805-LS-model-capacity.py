@@ -26,6 +26,7 @@ import pandas as pd
 import wandb
 
 from analysis._wandb_utils import (
+    csv_dir,
     default_entity,
     figures_dir,
     unwrap_summary_value,
@@ -70,6 +71,7 @@ METRICS = list(METRIC_KEYS)
 
 STEM = Path(__file__).stem
 FIGURES_DIR = figures_dir(__file__)
+CSV_DIR = csv_dir(__file__)
 N_WORKERS = 8
 
 
@@ -142,13 +144,17 @@ def _history_maxes(run: Any, wandb_keys: list[str]) -> dict[str, float | None]:
         if key not in history.columns or history[key].dropna().empty:
             raw = run.summary.get(key)
             val_min = unwrap_summary_value(raw, "min")
-            out[key] = float(val_min) if isinstance(val_min, (int, float)) else None
+            out[key] = (
+                float(val_min) if isinstance(val_min, (int, float)) else None
+            )
         else:
             out[key] = float(history[key].max())
     return out
 
 
-def _fetch_one(run_id: str, species_hint: str, sweep_id: str) -> dict[str, Any] | None:
+def _fetch_one(
+    run_id: str, species_hint: str, sweep_id: str
+) -> dict[str, Any] | None:
     api = wandb.Api()
     run = api.run(_run_path(run_id))
     config = dict(run.config)
@@ -211,7 +217,9 @@ def fetch_finished_runs(api: wandb.Api | None = None) -> pd.DataFrame:
             else:
                 rows.append(row)
             if done % 20 == 0 or done == len(futures):
-                print(f"  {done}/{len(futures)} (kept={len(rows)}, skip_fold={skipped})")
+                print(
+                    f"  {done}/{len(futures)} (kept={len(rows)}, skip_fold={skipped})"
+                )
 
     df = pd.DataFrame(rows)
     if df.empty:
@@ -235,9 +243,9 @@ def fetch_finished_runs(api: wandb.Api | None = None) -> pd.DataFrame:
     ]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df.sort_values(["species", "f1"], ascending=[True, False]).reset_index(
-        drop=True
-    )
+    return df.sort_values(
+        ["species", "f1"], ascending=[True, False]
+    ).reset_index(drop=True)
 
 
 def best_per_species(df: pd.DataFrame) -> pd.DataFrame:
@@ -260,9 +268,11 @@ def best_per_species(df: pd.DataFrame) -> pd.DataFrame:
         "run_name",
         "run_id",
     ]
-    return df.loc[idx, [c for c in cols if c in df.columns]].sort_values(
-        "species"
-    ).reset_index(drop=True)
+    return (
+        df.loc[idx, [c for c in cols if c in df.columns]]
+        .sort_values("species")
+        .reset_index(drop=True)
+    )
 
 
 def _fetch_reference_run(
@@ -277,7 +287,11 @@ def _fetch_reference_run(
     run = api.run(_run_path(run_id))
     config = dict(run.config)
     model = config.get("model") or {}
-    tok = model.get("tokenizer") if isinstance(model.get("tokenizer"), dict) else {}
+    tok = (
+        model.get("tokenizer")
+        if isinstance(model.get("tokenizer"), dict)
+        else {}
+    )
     channel_emb_dim = tok.get("channel_emb_dim")
     embed_dim = model.get("embed_dim") or config.get("model.embed_dim")
     cef = config.get("model.tokenizer.channel_emb_fraction")
@@ -295,7 +309,8 @@ def _fetch_reference_run(
         "embed_dim": embed_dim,
         "depth": model.get("depth") or config.get("model.depth"),
         "self_heads": model.get("self_heads") or config.get("model.self_heads"),
-        "cross_heads": model.get("cross_heads") or config.get("model.cross_heads"),
+        "cross_heads": model.get("cross_heads")
+        or config.get("model.cross_heads"),
         "channel_emb_fraction": cef,
         "tokenizer": config.get("model/tokenizer"),
         "weight_decay": config.get("hyperparameters.weight_decay"),
@@ -322,9 +337,7 @@ def fetch_baselines(api: wandb.Api | None = None) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for species, run_id in OPT_BASELINE_RUN_IDS.items():
         rows.append(
-            _fetch_reference_run(
-                run_id, species, "opt_baseline_no_cw", api=api
-            )
+            _fetch_reference_run(run_id, species, "opt_baseline_no_cw", api=api)
         )
     for species, run_id in CW_BASELINE_RUN_IDS.items():
         rows.append(
@@ -357,15 +370,18 @@ def _fmt_table(df: pd.DataFrame) -> str:
     }
     for c in out.columns:
         if c in metric_float or (
-            c.startswith("delta_") and c.endswith(("f1", "auroc", "precision", "recall", "acc"))
+            c.startswith("delta_")
+            and c.endswith(("f1", "auroc", "precision", "recall", "acc"))
         ):
             out[c] = out[c].map(lambda x: f"{x:.4f}" if pd.notna(x) else "")
     for c in ["embed_dim", "depth", "self_heads", "cross_heads"]:
         if c in out.columns:
             out[c] = out[c].map(
-                lambda x: f"{int(x)}"
-                if pd.notna(x) and float(x) == int(float(x))
-                else x
+                lambda x: (
+                    f"{int(x)}"
+                    if pd.notna(x) and float(x) == int(float(x))
+                    else x
+                )
             )
     return out.to_string(index=False)
 
@@ -417,9 +433,9 @@ def print_tables(df: pd.DataFrame, baselines: pd.DataFrame) -> None:
     with pd.option_context("display.max_columns", 24, "display.width", 160):
         print(
             _fmt_table(
-                baselines[[c for c in base_cols if c in baselines.columns]].sort_values(
-                    ["species", "label"]
-                )
+                baselines[
+                    [c for c in base_cols if c in baselines.columns]
+                ].sort_values(["species", "label"])
             )
         )
 
@@ -445,16 +461,22 @@ def print_tables(df: pd.DataFrame, baselines: pd.DataFrame) -> None:
                 "baseline_run": brow["run_id"],
             }
         )
-    print("\n=== Best capacity vs baselines (fold 0; delta = best − baseline) ===")
+    print(
+        "\n=== Best capacity vs baselines (fold 0; delta = best − baseline) ==="
+    )
     with pd.option_context("display.max_columns", 20, "display.width", 160):
         print(_fmt_table(pd.DataFrame(cmp_rows)))
 
     # Best cell at each (embed_dim, depth) — max over heads/cef/wd — for heatmap context
     print("\n=== Best F1 at each (embed_dim, depth) [max over other HPs] ===")
     for species in sorted(df["species"].unique()):
-        pivot = _pivot_max(df.loc[df["species"] == species], "depth", "embed_dim", "f1")
+        pivot = _pivot_max(
+            df.loc[df["species"] == species], "depth", "embed_dim", "f1"
+        )
         print(f"\n{species}:")
-        print(pivot.map(lambda x: f"{x:.4f}" if pd.notna(x) else "").to_string())
+        print(
+            pivot.map(lambda x: f"{x:.4f}" if pd.notna(x) else "").to_string()
+        )
 
 
 def _annotate_heatmap(ax: Any, grid: pd.DataFrame) -> None:
@@ -470,7 +492,14 @@ def _annotate_heatmap(ax: Any, grid: pd.DataFrame) -> None:
                 ha="center",
                 va="center",
                 fontsize=8,
-                color="white" if val >= (np.nanmean(grid.values) if np.isfinite(np.nanmean(grid.values)) else 0) else "black",
+                color="white"
+                if val
+                >= (
+                    np.nanmean(grid.values)
+                    if np.isfinite(np.nanmean(grid.values))
+                    else 0
+                )
+                else "black",
             )
 
 
@@ -566,13 +595,17 @@ def plot_heatmap_heads(df: pd.DataFrame, best: pd.DataFrame) -> list[Path]:
     return paths
 
 
-def plot_heatmap_minipigs_cef(df: pd.DataFrame, best: pd.DataFrame) -> Path | None:
+def plot_heatmap_minipigs_cef(
+    df: pd.DataFrame, best: pd.DataFrame
+) -> Path | None:
     """Minipigs only: fix depth to best; axes embed_dim × channel_emb_fraction."""
     brow = best.loc[best["species"] == "minipigs"]
     if brow.empty:
         return None
     depth = brow.iloc[0]["depth"]
-    sp = df.loc[df["species"] == "minipigs"].dropna(subset=["channel_emb_fraction"])
+    sp = df.loc[df["species"] == "minipigs"].dropna(
+        subset=["channel_emb_fraction"]
+    )
     if sp.empty:
         return None
 
@@ -637,7 +670,9 @@ def plot_best_vs_baselines(df: pd.DataFrame, baselines: pd.DataFrame) -> Path:
             for species in species_list:
                 if lab == "best_capacity":
                     vals.append(
-                        float(best.loc[best["species"] == species, metric].iloc[0])
+                        float(
+                            best.loc[best["species"] == species, metric].iloc[0]
+                        )
                     )
                 elif lab == "opt_baseline_no_cw":
                     vals.append(
@@ -708,8 +743,8 @@ def main() -> None:
         f"entity={ENTITY}, fold={FOLD}"
     )
     api = wandb.Api()
-    csv_path = FIGURES_DIR / f"{STEM}_runs.csv"
-    base_csv = FIGURES_DIR / f"{STEM}_baselines.csv"
+    csv_path = CSV_DIR / f"{STEM}_runs.csv"
+    base_csv = CSV_DIR / f"{STEM}_baselines.csv"
 
     if use_cached and csv_path.exists():
         print(f"Loading cached runs from {csv_path}")

@@ -20,6 +20,7 @@ import pandas as pd
 import wandb
 
 from analysis._wandb_utils import (
+    csv_dir,
     default_entity,
     figures_dir,
     unwrap_summary_value,
@@ -57,6 +58,7 @@ SPLIT_ORDER = ["intrasession-block", "intrasession-causal"]
 
 STEM = Path(__file__).stem
 FIGURES_DIR = figures_dir(__file__)
+CSV_DIR = csv_dir(__file__)
 N_WORKERS = 8
 
 
@@ -114,7 +116,9 @@ def _extract_meta(config: dict[str, Any]) -> dict[str, Any]:
             "hyperparameters.learning_rate", hp.get("learning_rate")
         ),
         "tokenizer": tokenizer,
-        "atn_dropout": config.get("model.atn_dropout", model.get("atn_dropout")),
+        "atn_dropout": config.get(
+            "model.atn_dropout", model.get("atn_dropout")
+        ),
         "grad_clip": config.get(
             "trainer.gradient_clip_val",
             (config.get("trainer") or {}).get("gradient_clip_val"),
@@ -300,8 +304,16 @@ def plot_f1_fold0(comp: pd.DataFrame) -> Path:
         for sp in SPECIES_ORDER
     ]
 
-    ax.bar(x - width / 2, block_ys, width, label="block (baseline)", color=colors["block"])
-    ax.bar(x + width / 2, causal_ys, width, label="causal", color=colors["causal"])
+    ax.bar(
+        x - width / 2,
+        block_ys,
+        width,
+        label="block (baseline)",
+        color=colors["block"],
+    )
+    ax.bar(
+        x + width / 2, causal_ys, width, label="causal", color=colors["causal"]
+    )
     ax.set_xticks(x)
     ax.set_xticklabels(SPECIES_ORDER)
     ax.set_ylabel("max val F1 (fold 0, wd=0.08)")
@@ -356,7 +368,7 @@ def main() -> None:
     print(f"Primary weight_decay: {OPTIMAL_WEIGHT_DECAY}")
 
     df = fetch_runs()
-    csv_path = FIGURES_DIR / f"{STEM}_runs.csv"
+    csv_path = CSV_DIR / f"{STEM}_runs.csv"
     df.to_csv(csv_path, index=False)
     print(f"\nSaved all runs → {csv_path}")
 
@@ -369,8 +381,7 @@ def main() -> None:
     for m in METRICS:
         disp[f"Δ{m}"] = disp.apply(
             lambda r, mm=m: (
-                f"{r[f'delta_{mm}']:+.4f} "
-                f"({100 * r[f'rel_delta_{mm}']:+.1f}%)"
+                f"{r[f'delta_{mm}']:+.4f} ({100 * r[f'rel_delta_{mm}']:+.1f}%)"
             ),
             axis=1,
         )
@@ -390,7 +401,9 @@ def main() -> None:
         ].to_string(index=False)
     )
 
-    print("\n=== Block baseline fold mean±std (context; causal is fold 0 only) ===")
+    print(
+        "\n=== Block baseline fold mean±std (context; causal is fold 0 only) ==="
+    )
     means = baseline_fold_means(prim)
     mdisp = means.copy()
     for m in METRICS:
@@ -425,7 +438,14 @@ def main() -> None:
         print("\n=== Secondary: causal non-optimal weight_decay ===")
         print(
             extra[
-                ["species", "split_type", "fold", "weight_decay", *METRICS, "run_id"]
+                [
+                    "species",
+                    "split_type",
+                    "fold",
+                    "weight_decay",
+                    *METRICS,
+                    "run_id",
+                ]
             ].to_string(index=False)
         )
 

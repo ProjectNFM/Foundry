@@ -1,4 +1,0 @@
-species,paradigm,unit,f1_mean,f1_std,f1_n,auroc_mean,auroc_std,auroc_n,precision_mean,precision_std,precision_n,recall_mean,recall_std,recall_n,balanced_acc_mean,balanced_acc_std,balanced_acc_n,is_outlier,outlier_reason
-,,,,,,,,,,,,,,,,,,,
-monkeys,single-session,sub-02_ses-04_task-AcousStim_acq-RH_desc-raw,1.0,0.0,3,0.0,0.0,3,1.0,0.0,3,1.0,0.0,3,1.0,0.0,3,True,f1>=0.99
-monkeys,single-session,sub-02_ses-05_task-AcousStim_acq-RH_desc-raw,,,0,,,0,,,0,,,0,,,0,True,missing_f1

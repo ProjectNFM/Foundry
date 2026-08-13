@@ -22,6 +22,7 @@ import pandas as pd
 import wandb
 
 from analysis._wandb_utils import (
+    csv_dir,
     default_entity,
     figures_dir,
     unwrap_summary_value,
@@ -61,6 +62,7 @@ METRICS = list(METRIC_KEYS)
 
 STEM = Path(__file__).stem
 FIGURES_DIR = figures_dir(__file__)
+CSV_DIR = csv_dir(__file__)
 N_WORKERS = 8
 
 
@@ -102,8 +104,12 @@ def _extract_hps(config: dict[str, Any]) -> dict[str, Any]:
         "embed_dim": config.get("model.embed_dim", model.get("embed_dim")),
         "depth": config.get("model.depth", model.get("depth")),
         "self_heads": config.get("model.self_heads", model.get("self_heads")),
-        "cross_heads": config.get("model.cross_heads", model.get("cross_heads")),
-        "channel_emb_fraction": config.get("model.tokenizer.channel_emb_fraction"),
+        "cross_heads": config.get(
+            "model.cross_heads", model.get("cross_heads")
+        ),
+        "channel_emb_fraction": config.get(
+            "model.tokenizer.channel_emb_fraction"
+        ),
         "tokenizer": config.get("model/tokenizer"),
         "fold": config.get("hyperparameters.fold_number"),
         "learning_rate": config.get("hyperparameters.learning_rate"),
@@ -125,7 +131,9 @@ def _history_maxes(run: Any, wandb_keys: list[str]) -> dict[str, float | None]:
         if key not in history.columns or history[key].dropna().empty:
             raw = run.summary.get(key)
             val_min = unwrap_summary_value(raw, "min")
-            out[key] = float(val_min) if isinstance(val_min, (int, float)) else None
+            out[key] = (
+                float(val_min) if isinstance(val_min, (int, float)) else None
+            )
         else:
             out[key] = float(history[key].max())
     return out
@@ -146,7 +154,9 @@ def _attach_metrics(run: Any, row: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
-def _fetch_one(run_id: str, species_hint: str, sweep_id: str) -> dict[str, Any] | None:
+def _fetch_one(
+    run_id: str, species_hint: str, sweep_id: str
+) -> dict[str, Any] | None:
     api = wandb.Api()
     run = api.run(_run_path(run_id))
     config = dict(run.config)
@@ -207,9 +217,9 @@ def fetch_finished_runs(api: wandb.Api | None = None) -> pd.DataFrame:
     ]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df.sort_values(["species", "f1"], ascending=[True, False]).reset_index(
-        drop=True
-    )
+    return df.sort_values(
+        ["species", "f1"], ascending=[True, False]
+    ).reset_index(drop=True)
 
 
 def _fetch_reference(
@@ -235,13 +245,20 @@ def _fetch_reference(
         "embed_dim": model.get("embed_dim") or config.get("model.embed_dim"),
         "depth": model.get("depth") or config.get("model.depth"),
         "self_heads": model.get("self_heads") or config.get("model.self_heads"),
-        "cross_heads": model.get("cross_heads") or config.get("model.cross_heads"),
-        "channel_emb_fraction": config.get("model.tokenizer.channel_emb_fraction"),
+        "cross_heads": model.get("cross_heads")
+        or config.get("model.cross_heads"),
+        "channel_emb_fraction": config.get(
+            "model.tokenizer.channel_emb_fraction"
+        ),
         "tokenizer": config.get("model/tokenizer"),
     }
     # Capacity CE minipigs: infer cef from channel_emb_dim if needed
     if row["channel_emb_fraction"] is None:
-        tok = model.get("tokenizer") if isinstance(model.get("tokenizer"), dict) else {}
+        tok = (
+            model.get("tokenizer")
+            if isinstance(model.get("tokenizer"), dict)
+            else {}
+        )
         ced = tok.get("channel_emb_dim")
         ed = row["embed_dim"]
         if ced is not None and ed:
@@ -259,9 +276,7 @@ def fetch_baselines(api: wandb.Api | None = None) -> pd.DataFrame:
         api = wandb.Api()
     rows: list[dict[str, Any]] = []
     for species, run_id in CAPACITY_CE_RUN_IDS.items():
-        rows.append(
-            _fetch_reference(run_id, species, "small_cap_CE", api=api)
-        )
+        rows.append(_fetch_reference(run_id, species, "small_cap_CE", api=api))
     for species, run_id in FOCAL_DEFAULT_CAP_RUN_IDS.items():
         rows.append(
             _fetch_reference(run_id, species, "default_cap_focal", api=api)
@@ -286,9 +301,11 @@ def best_per_species(df: pd.DataFrame) -> pd.DataFrame:
         "run_name",
         "run_id",
     ]
-    return df.loc[idx, [c for c in cols if c in df.columns]].sort_values(
-        "species"
-    ).reset_index(drop=True)
+    return (
+        df.loc[idx, [c for c in cols if c in df.columns]]
+        .sort_values("species")
+        .reset_index(drop=True)
+    )
 
 
 def _fmt_table(df: pd.DataFrame) -> str:
@@ -312,9 +329,11 @@ def _fmt_table(df: pd.DataFrame) -> str:
     for c in ["embed_dim", "depth", "self_heads", "cross_heads"]:
         if c in out.columns:
             out[c] = out[c].map(
-                lambda x: f"{int(x)}"
-                if pd.notna(x) and float(x) == int(float(x))
-                else x
+                lambda x: (
+                    f"{int(x)}"
+                    if pd.notna(x) and float(x) == int(float(x))
+                    else x
+                )
             )
     return out.to_string(index=False)
 
@@ -380,7 +399,9 @@ def print_tables(df: pd.DataFrame, baselines: pd.DataFrame) -> None:
             .max()
             .sort_index()
         )
-        print(f"{species}: " + ", ".join(f"γ={k:g}→{v:.4f}" for k, v in g.items()))
+        print(
+            f"{species}: " + ", ".join(f"γ={k:g}→{v:.4f}" for k, v in g.items())
+        )
 
     print("\n=== Full grid (sorted by F1 within species) ===")
     print(
@@ -468,9 +489,18 @@ def plot_f1_by_gamma(df: pd.DataFrame, baselines: pd.DataFrame) -> Path:
     for ax, species in zip(axes, sorted(df["species"].unique())):
         sp = df.loc[df["species"] == species]
         g = sp.groupby("gamma")["f1"].max().sort_index()
-        ax.plot(g.index, g.values, "-o", color="#4C72B0", label="small_cap+focal", lw=2)
+        ax.plot(
+            g.index,
+            g.values,
+            "-o",
+            color="#4C72B0",
+            label="small_cap+focal",
+            lw=2,
+        )
         for x, y in zip(g.index, g.values):
-            ax.text(x, y + 0.002, f"{y:.3f}", ha="center", va="bottom", fontsize=7)
+            ax.text(
+                x, y + 0.002, f"{y:.3f}", ha="center", va="bottom", fontsize=7
+            )
 
         for label, color, style in [
             ("small_cap_CE", "#2ca02c", "--"),
@@ -483,7 +513,13 @@ def plot_f1_by_gamma(df: pd.DataFrame, baselines: pd.DataFrame) -> Path:
                     "f1",
                 ].iloc[0]
             )
-            ax.axhline(f1, color=color, linestyle=style, lw=1.5, label=f"{label} ({f1:.3f})")
+            ax.axhline(
+                f1,
+                color=color,
+                linestyle=style,
+                lw=1.5,
+                label=f"{label} ({f1:.3f})",
+            )
 
         ax.set_xlabel("task_loss.gamma")
         ax.set_ylabel(f"Max val {TASK} F1")
@@ -561,8 +597,8 @@ def main() -> None:
         f"entity={ENTITY}, fold={FOLD}"
     )
     api = wandb.Api()
-    csv_path = FIGURES_DIR / f"{STEM}_runs.csv"
-    base_csv = FIGURES_DIR / f"{STEM}_baselines.csv"
+    csv_path = CSV_DIR / f"{STEM}_runs.csv"
+    base_csv = CSV_DIR / f"{STEM}_baselines.csv"
 
     if use_cached and csv_path.exists():
         print(f"Loading cached runs from {csv_path}")

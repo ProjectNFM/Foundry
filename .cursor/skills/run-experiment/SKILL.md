@@ -41,19 +41,23 @@ those are the runs to analyze.
 
 ### Step 3: Generate Analysis Script
 
-Create `analysis/<slug>_analysis.py` that:
+Extract the experiment stem (target experiment filename without `.md`) and use it for all artifacts.
+
+Create an analysis script named `YYYYMMDD-<initials>-<slug>.py` that:
 
 - Accepts run ID(s) as constants at the top of the file
 - Uses `wandb.Api()` to fetch metrics history
 - Computes comparison tables between runs (or vs baseline)
 - Generates relevant figures (training curves, bar charts, etc.)
-- Saves figures to `analysis/figures/<slug>_*.png`
+- Saves figures to `analysis/figures/YYYYMMDD-<initials>-<slug>_*.png`
+- Saves CSV tables/caches to `analysis/csv/YYYYMMDD-<initials>-<slug>_*.csv`
+  (use `csv_dir` from `analysis/_wandb_utils.py`; do not write CSVs into `figures/`)
 - Prints a summary metrics table to stdout
 - Is self-contained (no imports from `foundry`)
 
 The script must be runnable with:
 ```bash
-uv run python analysis/<slug>_analysis.py
+uv run python analysis/YYYYMMDD-<initials>-<slug>.py
 ```
 
 ### Step 4: Execute Analysis
@@ -61,7 +65,7 @@ uv run python analysis/<slug>_analysis.py
 Run the analysis script and capture output:
 
 ```bash
-uv run python analysis/<slug>_analysis.py
+uv run python analysis/YYYYMMDD-<initials>-<slug>.py
 ```
 
 If the script fails, debug and fix it. Iterate until it produces clean output.
@@ -114,7 +118,10 @@ Update the experiment file in `experiments/inbox/` with:
 - Summary: narrative of what happened
 - Metrics: table from analysis script output
 - Analysis: reference to the script with run command
-- Figures: embedded with relative paths
+  ```bash
+  uv run python analysis/YYYYMMDD-<initials>-<slug>.py
+  ```
+- Figures: embedded with relative paths to `../../analysis/figures/YYYYMMDD-<initials>-<slug>_*.png`
 
 **Conclusions:** hypothesis verdict with supporting evidence
 

@@ -1,5 +1,0 @@
-label,species,run_id,run_name,embed_dim,depth,self_heads,cross_heads,channel_emb_fraction,tokenizer,weight_decay,smoothing,fold,f1,auroc,precision,recall,balanced_acc
-opt_baseline_no_cw,minipigs,skkz2nec,poyo_eeg_neurosoft_8band,256,4,8,8,1/4,per_channel_resample_cnn,0.08,,0,0.3627350926399231,0.7824782133102417,0.37913745641708374,0.3648206293582916,0.3648206293582916
-opt_baseline_no_cw,monkeys,ljqfklu4,poyo_eeg_neurosoft_8band,256,4,8,8,,per_channel_resample_cnn_add,0.08,,0,0.49636468291282654,0.8799620866775513,0.4967339038848877,0.5059937238693237,0.5059937238693237
-cw_baseline_s0.75,minipigs,wj09rzw3,poyo_eeg_neurosoft_8band,256,4,8,8,1/4,per_channel_resample_cnn,0.08,0.75,0,0.3764728307723999,0.7849016189575195,0.378044992685318,0.38287317752838135,0.38287317752838135
-cw_baseline_s1,monkeys,vv4a5uv7,poyo_eeg_neurosoft_8band,256,4,8,8,,per_channel_resample_cnn_add,0.08,1.0,0,0.5041117072105408,0.8847172856330872,0.5019400715827942,0.5190340280532837,0.5190340280532837

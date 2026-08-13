@@ -21,6 +21,7 @@ import pandas as pd
 import wandb
 
 from analysis._wandb_utils import (
+    csv_dir,
     default_entity,
     figures_dir,
     unwrap_summary_value,
@@ -56,6 +57,7 @@ SMOOTHING_ORDER = [0.5, 0.75, 1.0]
 
 STEM = Path(__file__).stem
 FIGURES_DIR = figures_dir(__file__)
+CSV_DIR = csv_dir(__file__)
 N_WORKERS = 8
 
 
@@ -117,7 +119,9 @@ def _extract_meta(config: dict[str, Any]) -> dict[str, Any]:
         "cw_mode": mode,
         "fold": fold,
         "tokenizer": tokenizer,
-        "atn_dropout": config.get("model.atn_dropout", model.get("atn_dropout")),
+        "atn_dropout": config.get(
+            "model.atn_dropout", model.get("atn_dropout")
+        ),
         "learning_rate": config.get(
             "hyperparameters.learning_rate", hp.get("learning_rate")
         ),
@@ -239,15 +243,14 @@ def fetch_finished_runs(api: wandb.Api | None = None) -> pd.DataFrame:
 def fold_means(df: pd.DataFrame) -> pd.DataFrame:
     """Mean ± std across folds for each species × smoothing (CW runs only)."""
     cw = df.loc[~df["is_baseline"]].copy()
-    g = (
-        cw.groupby(["species", "smoothing"], as_index=False)[METRICS]
-        .agg(["mean", "std", "count"])
+    g = cw.groupby(["species", "smoothing"], as_index=False)[METRICS].agg(
+        ["mean", "std", "count"]
     )
     # Flatten MultiIndex columns
     g.columns = [
-        "species" if c[0] == "species" else (
-            "smoothing" if c[0] == "smoothing" else f"{c[0]}_{c[1]}"
-        )
+        "species"
+        if c[0] == "species"
+        else ("smoothing" if c[0] == "smoothing" else f"{c[0]}_{c[1]}")
         for c in g.columns.to_list()
     ]
     return g
@@ -281,7 +284,9 @@ def mean_table(df: pd.DataFrame) -> pd.DataFrame:
             }
             for m in METRICS:
                 row[f"{m}_mean"] = float(base[m].mean())
-                row[f"{m}_std"] = float(base[m].std(ddof=1)) if len(base) > 1 else 0.0
+                row[f"{m}_std"] = (
+                    float(base[m].std(ddof=1)) if len(base) > 1 else 0.0
+                )
             rows.append(row)
 
         sub = df.loc[(df["species"] == species) & ~df["is_baseline"]]
@@ -317,9 +322,17 @@ def plot_f1_by_smoothing(df: pd.DataFrame) -> Path:
     colors = {"minipigs": "#4C78A8", "monkeys": "#F58518"}
 
     for i, species in enumerate(SPECIES_ORDER):
-        sub = cw_means.loc[cw_means["species"] == species].set_index("smoothing")
-        ys = [sub.loc[s, "f1_mean"] if s in sub.index else np.nan for s in SMOOTHING_ORDER]
-        es = [sub.loc[s, "f1_std"] if s in sub.index else np.nan for s in SMOOTHING_ORDER]
+        sub = cw_means.loc[cw_means["species"] == species].set_index(
+            "smoothing"
+        )
+        ys = [
+            sub.loc[s, "f1_mean"] if s in sub.index else np.nan
+            for s in SMOOTHING_ORDER
+        ]
+        es = [
+            sub.loc[s, "f1_std"] if s in sub.index else np.nan
+            for s in SMOOTHING_ORDER
+        ]
         ax.bar(
             x + (i - 0.5) * width,
             ys,
@@ -421,14 +434,16 @@ def main() -> None:
         print("No finished runs found.")
         return
 
-    csv_path = FIGURES_DIR / f"{STEM}_runs.csv"
+    csv_path = CSV_DIR / f"{STEM}_runs.csv"
     df.to_csv(csv_path, index=False)
     print(f"\nSaved run table → {csv_path}")
 
     cw = df.loc[~df["is_baseline"]]
-    print(f"\nFinished CW runs: {len(cw)} "
-          f"({(cw['species']=='minipigs').sum()} minipigs, "
-          f"{(cw['species']=='monkeys').sum()} monkeys)")
+    print(
+        f"\nFinished CW runs: {len(cw)} "
+        f"({(cw['species'] == 'minipigs').sum()} minipigs, "
+        f"{(cw['species'] == 'monkeys').sum()} monkeys)"
+    )
     print(f"Baseline runs: {df['is_baseline'].sum()}")
 
     print("\n=== Best config per species (by max val F1) ===")

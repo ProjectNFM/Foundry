@@ -22,6 +22,7 @@ import pandas as pd
 import wandb
 
 from analysis._wandb_utils import (
+    csv_dir,
     default_entity,
     figures_dir,
     unwrap_summary_value,
@@ -64,6 +65,7 @@ RATE_ORDER = [50, 100, 200]
 
 STEM = Path(__file__).stem
 FIGURES_DIR = figures_dir(__file__)
+CSV_DIR = csv_dir(__file__)
 N_WORKERS = 8
 
 
@@ -102,7 +104,11 @@ def _extract_meta(config: dict[str, Any]) -> dict[str, Any]:
     rate = config.get("model.tokenizer.temporal_embedding.target_token_rate")
     if rate is None:
         tok = model.get("tokenizer") if isinstance(model, dict) else None
-        te = (tok or {}).get("temporal_embedding") if isinstance(tok, dict) else {}
+        te = (
+            (tok or {}).get("temporal_embedding")
+            if isinstance(tok, dict)
+            else {}
+        )
         if isinstance(te, dict):
             rate = te.get("target_token_rate")
 
@@ -130,7 +136,9 @@ def _extract_meta(config: dict[str, Any]) -> dict[str, Any]:
         "smoothing": smoothing,
         "fold": fold,
         "tokenizer": tokenizer,
-        "atn_dropout": config.get("model.atn_dropout", model.get("atn_dropout")),
+        "atn_dropout": config.get(
+            "model.atn_dropout", model.get("atn_dropout")
+        ),
         "learning_rate": config.get(
             "hyperparameters.learning_rate", hp.get("learning_rate")
         ),
@@ -361,9 +369,7 @@ def plot_f1_by_rate(means: pd.DataFrame) -> Path:
     ax.set_xticklabels([f"{r} Hz" for r in RATE_ORDER])
     ax.set_xlabel("target_token_rate (post-CNN)")
     ax.set_ylabel("max val F1 (mean ± std over folds)")
-    ax.set_title(
-        "Token rate vs F1 (wd=0.08; 100 Hz = CW optimal baseline)"
-    )
+    ax.set_title("Token rate vs F1 (wd=0.08; 100 Hz = CW optimal baseline)")
     ax.legend(title="Species")
     ax.grid(axis="y", alpha=0.3)
     fig.tight_layout()
@@ -429,7 +435,7 @@ def main() -> None:
     print(f"Primary weight_decay: {OPTIMAL_WEIGHT_DECAY}")
 
     df = fetch_runs()
-    csv_path = FIGURES_DIR / f"{STEM}_runs.csv"
+    csv_path = CSV_DIR / f"{STEM}_runs.csv"
     df.to_csv(csv_path, index=False)
     print(f"\nSaved all runs → {csv_path}")
 
@@ -458,8 +464,8 @@ def main() -> None:
     print(
         f"\nPrimary finished cells (wd={OPTIMAL_WEIGHT_DECAY}): "
         f"{len(prim)} "
-        f"(SR={int((prim['source']=='sampling_rate').sum())}, "
-        f"100Hz baseline={int((prim['source']=='baseline_100hz').sum())})"
+        f"(SR={int((prim['source'] == 'sampling_rate').sum())}, "
+        f"100Hz baseline={int((prim['source'] == 'baseline_100hz').sum())})"
     )
 
     print("\n=== Best single-run F1 among 50/200 Hz (wd=0.08) ===")

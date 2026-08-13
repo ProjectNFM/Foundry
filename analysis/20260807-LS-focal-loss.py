@@ -21,6 +21,7 @@ import pandas as pd
 import wandb
 
 from analysis._wandb_utils import (
+    csv_dir,
     default_entity,
     figures_dir,
     unwrap_summary_value,
@@ -66,6 +67,7 @@ METRICS = list(METRIC_KEYS)
 
 STEM = Path(__file__).stem
 FIGURES_DIR = figures_dir(__file__)
+CSV_DIR = csv_dir(__file__)
 N_WORKERS = 8
 
 
@@ -125,7 +127,9 @@ def _history_maxes(run: Any, wandb_keys: list[str]) -> dict[str, float | None]:
         if key not in history.columns or history[key].dropna().empty:
             raw = run.summary.get(key)
             val_min = unwrap_summary_value(raw, "min")
-            out[key] = float(val_min) if isinstance(val_min, (int, float)) else None
+            out[key] = (
+                float(val_min) if isinstance(val_min, (int, float)) else None
+            )
         else:
             out[key] = float(history[key].max())
     return out
@@ -146,7 +150,9 @@ def _attach_metrics(run: Any, row: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
-def _fetch_one(run_id: str, species_hint: str, sweep_id: str) -> dict[str, Any] | None:
+def _fetch_one(
+    run_id: str, species_hint: str, sweep_id: str
+) -> dict[str, Any] | None:
     api = wandb.Api()
     run = api.run(_run_path(run_id))
     config = dict(run.config)
@@ -203,9 +209,9 @@ def fetch_finished_runs(api: wandb.Api | None = None) -> pd.DataFrame:
     ]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df.sort_values(["species", "f1"], ascending=[True, False]).reset_index(
-        drop=True
-    )
+    return df.sort_values(
+        ["species", "f1"], ascending=[True, False]
+    ).reset_index(drop=True)
 
 
 def fetch_baselines(api: wandb.Api | None = None) -> pd.DataFrame:
@@ -219,7 +225,9 @@ def fetch_baselines(api: wandb.Api | None = None) -> pd.DataFrame:
             "species": species,
             "run_id": run.id,
             "run_name": run.name,
-            "weight_decay": (run.config or {}).get("hyperparameters.weight_decay"),
+            "weight_decay": (run.config or {}).get(
+                "hyperparameters.weight_decay"
+            ),
             "loss": "CE",
         }
         rows.append(_attach_metrics(run, row))
@@ -230,7 +238,9 @@ def fetch_baselines(api: wandb.Api | None = None) -> pd.DataFrame:
             "species": species,
             "run_id": run.id,
             "run_name": run.name,
-            "weight_decay": (run.config or {}).get("hyperparameters.weight_decay"),
+            "weight_decay": (run.config or {}).get(
+                "hyperparameters.weight_decay"
+            ),
             "loss": "CE+CW",
         }
         rows.append(_attach_metrics(run, row))
@@ -240,7 +250,11 @@ def fetch_baselines(api: wandb.Api | None = None) -> pd.DataFrame:
 def best_per_species(
     df: pd.DataFrame, *, weight_decay: float | None = None
 ) -> pd.DataFrame:
-    sub = df if weight_decay is None else df.loc[np.isclose(df["weight_decay"], weight_decay)]
+    sub = (
+        df
+        if weight_decay is None
+        else df.loc[np.isclose(df["weight_decay"], weight_decay)]
+    )
     if sub.empty:
         return sub
     idx = sub.groupby("species")["f1"].idxmax()
@@ -299,7 +313,11 @@ def print_tables(df: pd.DataFrame, baselines: pd.DataFrame) -> None:
         b = best_per_species(df.loc[df["species"] == species], weight_decay=wd)
         if not b.empty:
             strong_rows.append(b)
-    best_strong = pd.concat(strong_rows, ignore_index=True) if strong_rows else pd.DataFrame()
+    best_strong = (
+        pd.concat(strong_rows, ignore_index=True)
+        if strong_rows
+        else pd.DataFrame()
+    )
     print(_fmt_table(best_strong))
 
     print("\n=== CE baselines (fold 0) ===")
@@ -374,7 +392,9 @@ def print_tables(df: pd.DataFrame, baselines: pd.DataFrame) -> None:
     print(_fmt_table(pd.DataFrame(contrast)))
 
     # Best F1 by gamma within each WD slice (max over alpha/label smoothing)
-    print("\n=== Best F1 by species × WD × gamma (max over alpha/label smoothing) ===")
+    print(
+        "\n=== Best F1 by species × WD × gamma (max over alpha/label smoothing) ==="
+    )
     for species in sorted(df["species"].unique()):
         sp = df.loc[df["species"] == species]
         pivot = (
@@ -384,7 +404,9 @@ def print_tables(df: pd.DataFrame, baselines: pd.DataFrame) -> None:
             .sort_index()
         )
         print(f"\n{species}:")
-        print(pivot.map(lambda x: f"{x:.4f}" if pd.notna(x) else "").to_string())
+        print(
+            pivot.map(lambda x: f"{x:.4f}" if pd.notna(x) else "").to_string()
+        )
 
     print("\n=== Top-5 focal configs per species ===")
     top = (
@@ -457,24 +479,36 @@ def plot_best_vs_baselines(df: pd.DataFrame, baselines: pd.DataFrame) -> Path:
                     float(
                         baselines.loc[
                             (baselines["species"] == species)
-                            & baselines["label"].astype(str).str.startswith("cw_"),
+                            & baselines["label"]
+                            .astype(str)
+                            .str.startswith("cw_"),
                             metric,
                         ].iloc[0]
                     )
                 )
             elif key == "focal_WD0.08":
                 out.append(
-                    float(best_wd08.loc[best_wd08["species"] == species, metric].iloc[0])
+                    float(
+                        best_wd08.loc[
+                            best_wd08["species"] == species, metric
+                        ].iloc[0]
+                    )
                 )
             elif key == "focal_strongWD":
                 out.append(
                     float(
-                        best_strong.loc[best_strong["species"] == species, metric].iloc[0]
+                        best_strong.loc[
+                            best_strong["species"] == species, metric
+                        ].iloc[0]
                     )
                 )
             else:
                 out.append(
-                    float(overall.loc[overall["species"] == species, metric].iloc[0])
+                    float(
+                        overall.loc[overall["species"] == species, metric].iloc[
+                            0
+                        ]
+                    )
                 )
         return out
 
@@ -527,14 +561,19 @@ def plot_f1_by_gamma(df: pd.DataFrame) -> Path:
             (STRONG_WD[species], "--s", f"WD={STRONG_WD[species]}"),
         ]:
             sub = sp.loc[np.isclose(sp["weight_decay"], wd)]
-            g = (
-                sub.groupby("gamma")["f1"]
-                .max()
-                .sort_index()
+            g = sub.groupby("gamma")["f1"].max().sort_index()
+            ax.plot(
+                g.index, g.values, style, label=label, linewidth=2, markersize=7
             )
-            ax.plot(g.index, g.values, style, label=label, linewidth=2, markersize=7)
             for x, y in zip(g.index, g.values):
-                ax.text(x, y + 0.002, f"{y:.3f}", ha="center", va="bottom", fontsize=7)
+                ax.text(
+                    x,
+                    y + 0.002,
+                    f"{y:.3f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                )
         ax.set_xlabel("task_loss.gamma")
         ax.set_ylabel(f"Max val {TASK} F1")
         ax.set_title(species)
@@ -618,8 +657,8 @@ def main() -> None:
         f"entity={ENTITY}, fold={FOLD}"
     )
     api = wandb.Api()
-    csv_path = FIGURES_DIR / f"{STEM}_runs.csv"
-    base_csv = FIGURES_DIR / f"{STEM}_baselines.csv"
+    csv_path = CSV_DIR / f"{STEM}_runs.csv"
+    base_csv = CSV_DIR / f"{STEM}_baselines.csv"
 
     if use_cached and csv_path.exists():
         print(f"Loading cached runs from {csv_path}")

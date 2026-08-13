@@ -16,11 +16,17 @@ This project uses a 3-stage experiment pipeline with a staged inbox workflow.
 | Stage | Skill | Trigger |
 |-------|-------|---------|
 | 1. Plan | [create-experiment](../create-experiment/SKILL.md) | "new experiment", "I want to test", "plan experiment" |
-| 2. Analyze | [run-experiment](../run-experiment/SKILL.md) | "run is done", "analyze results", WandB IDs provided |
+| 2a. Analyze runs | [run-experiment](../run-experiment/SKILL.md) | "run is done", "analyze results", WandB run IDs provided |
+| 2b. Report sweep | [report-sweep](../report-sweep/SKILL.md) | WandB group and/or sweep ID(s), "report sweep", compare minipigs vs monkeys |
 | 3. Archive | [archive-group](../archive-group/SKILL.md) | "archive", "group these", "clean inbox", "synthesize" |
 
 When the user's intent maps to one of these stages, read and follow the
 corresponding sub-skill immediately.
+
+Prefer **report-sweep** over **run-experiment** when the user supplies a
+group and/or sweep ID(s) and wants a species comparison report.
+`report-sweep` auto-resolves one vs many sweeps — do not ask the user to
+reformat IDs before invoking it.
 
 ## Directory Structure
 
@@ -38,10 +44,19 @@ experiments/
 
 ### File naming
 
-Use date-prefix with contributor initials and kebab-case slug:
-`YYYYMMDD-<initials>-<slug>.md`
+All artifacts for an experiment share the same date-prefixed stem:
+`YYYYMMDD-<initials>-<slug>`
 
-The date is the experiment start date. The slug is 3–5 words max.
+| Artifact | Pattern |
+|----------|---------|
+| Experiment report | `YYYYMMDD-<initials>-<slug>.md` |
+| Analysis script | `YYYYMMDD-<initials>-<slug>.py` |
+| Figures | `analysis/figures/YYYYMMDD-<initials>-<slug>_*.png` |
+| CSV caches | `analysis/csv/YYYYMMDD-<initials>-<slug>_*.csv` |
+
+The date is the experiment start date. The slug is 3–5 words max. Use the
+exact experiment report filename (minus `.md`) as the name for all downstream
+analysis artifacts and figures.
 
 ### Markdown template
 
@@ -89,8 +104,12 @@ Every experiment file MUST follow this structure:
    the machine-readable run ID (8-char alphanumeric).
 
 6. **Analysis scripts** live in `analysis/` and should:
+   - Use the experiment report filename stem (without `.md`) for the script name
+     (e.g. `YYYYMMDD-<initials>-<slug>_analysis.py`).
    - Use `wandb.Api()` to fetch metrics history.
-   - Save figures to `analysis/figures/`.
+   - Save figures to `analysis/figures/` with the same stem prefix.
+   - Save CSV tables/caches to `analysis/csv/` with the same stem prefix
+     (use `csv_dir` from `analysis/_wandb_utils.py`). Do not commit CSVs.
    - Print a summary table to stdout.
    - Be self-contained (no imports from the main `foundry` package).
 
