@@ -28,10 +28,10 @@ metric:
 parameters:
   model/tokenizer:
     values:
-      - per_channel_resample_cnn
+      - per_channel_resample_cnn_add
   model.atn_dropout:
     values:
-      - 0.2
+      - 0.4 #0.2
   data.split_type:
     values:
       - intrasession-block
@@ -40,7 +40,7 @@ parameters:
       - 128
   hyperparameters.learning_rate:
     values:
-      - 2.75e-5
+      - 2.5e-5 #2.75e-5
   hyperparameters.weight_decay:
     values:
       - 0.09
@@ -49,23 +49,23 @@ parameters:
       - 0
   trainer.gradient_clip_val:
     values:
-      - 0.5
+      - 1.0 #0.5
   class_weights.smoothing:
     values:
-      - 0.75
+      - 1.0 #0.75
   # Only minipig models have this: channel_emb_dim = int(embed_dim * fraction).
-  model.tokenizer.channel_emb_fraction:
-    values:
-      - 1/2
+  # model.tokenizer.channel_emb_fraction:
+  #   values:
+  #     - 1/2
   model.embed_dim:
     values:
-      - 32
+      - 64 #32
   model.depth:
     values:
-      - 2
+      - 4 #2
   model.cross_heads:
     values:
-      - 6
+      - 8 #6
   model.self_heads:
     values:
       - 6
