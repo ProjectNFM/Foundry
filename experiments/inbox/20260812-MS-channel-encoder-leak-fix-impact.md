@@ -1,6 +1,6 @@
 # Information Leak Fixes: Channel Encoder Masking + Signal Zeroing + Tokenizer Comparison
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-08-12
 **Parent experiment:** [Masking Parameter Sweep](20260811-MS-masking-parameter-sweep.md)
 **Follow-up experiments:** [Masking Parameter Sweep](20260811-MS-masking-parameter-sweep.md) (on hold), [Multi-Length Pretraining](20260811-MS-multi-length-pretraining.md) (on hold) — both paused pending these results
@@ -195,27 +195,127 @@ done
 
 ## Results
 
-TBD
+### Summary
+
+Both information leaks were confirmed as real and massive shortcuts for the
+reconstruction objective, but fixing them has negligible impact on downstream
+transfer quality. The encoder backbone was already learning useful
+representations despite the decoder exploiting the leaked information.
+
+### Pretraining losses
+
+The leak fixes cause dramatic pretraining loss increases, confirming the leaks
+were providing enormous reconstruction shortcuts:
+
+| Run | Tokenizer | Best Val Loss | Δ vs Baseline |
+|-----|-----------|:---:|:---:|
+| Baseline (no fixes) | CWT-CNN | 0.0576 | — |
+| Ch-encoder fix only | CWT-CNN | 0.0775 | +34.4% |
+| Both fixes (CWT-CNN) | CWT-CNN | 0.2838 | +392.5% |
+| Both fixes (ResampleCNN) | ResampleCNN | 0.3028 | +425.3% |
+
+The channel encoder masking fix alone increases loss by 34%. Adding signal
+zeroing raises it by an additional 266 pp (from +34% to +393%), indicating
+that the temporal embedding receptive-field bleed was the larger of the two
+leaks. All pretraining runs terminated via early stopping (`state=failed`
+reflects SLURM timeout, not training failure — all runs completed early
+stopping).
+
+### Downstream finetuning (mean F1 ± std, 3-fold CV)
+
+| Run | Kemp Sleep | PhysioNet MI | Brain Invaders P300 |
+|-----|:---:|:---:|:---:|
+| Baseline (no fixes) | 0.735 ± 0.006 | 0.882 ± 0.042 | 0.325 ± 0.021 |
+| Ch-encoder fix only | 0.736 ± 0.004 | 0.887 ± 0.042 | 0.334 ± 0.017 |
+| Both fixes (CWT-CNN) | 0.738 ± 0.000 | 0.888 ± 0.038 | 0.332 ± 0.006 |
+| Both fixes (ResampleCNN) | 0.723 ± 0.008 | 0.882 ± 0.038 | 0.310 ± 0.023 |
+
+CWT-CNN variants show small positive deltas (+0.001 to +0.009) across all
+tasks, but these are within noise given the standard deviations.
+ResampleCNN underperforms CWT-CNN on all three finetuning tasks.
+
+### Downstream linear probe (mean F1 ± std, 3-fold CV)
+
+| Run | Kemp Sleep | PhysioNet MI | Brain Invaders P300 |
+|-----|:---:|:---:|:---:|
+| Baseline (no fixes) | 0.635 ± 0.012 | 0.674 ± 0.016 | 0.299 ± 0.014 |
+| Ch-encoder fix only | 0.635 ± 0.011 | 0.673 ± 0.018 | 0.302 ± 0.018 |
+| Both fixes (CWT-CNN) | 0.632 ± 0.010 | 0.649 ± 0.029 | 0.301 ± 0.014 |
+| Both fixes (ResampleCNN) | 0.601 ± 0.015 | 0.661 ± 0.004 | 0.293 ± 0.008 |
+
+Linear probe results are flat to slightly negative. The channel encoder fix
+alone has essentially zero effect. Signal zeroing adds a small negative delta
+on PhysioNet MI linear probe (−0.024), suggesting the much harder pretraining
+objective may slightly hurt frozen-backbone representation quality at this
+training budget.
+
+### Analysis
+
+Script: `analysis/037_channel_encoder_leak_fix_impact.py`
+
+```bash
+uv run python analysis/037_channel_encoder_leak_fix_impact.py
+```
+
+### Figures
+
+![Pretraining loss curves](../../analysis/figures/037_pretrain_loss_curves.png)
+
+![Best pretraining val loss](../../analysis/figures/037_pretrain_final_loss_bar.png)
+
+![Downstream comparison grid](../../analysis/figures/037_downstream_comparison.png)
+
+![Ablation deltas vs baseline](../../analysis/figures/037_ablation_deltas.png)
+
+![Tokenizer comparison](../../analysis/figures/037_tokenizer_comparison.png)
 
 ## Conclusions
 
-TBD
+**Hypothesis 1 (reconstruction loss increases): CONFIRMED.** The channel encoder
+fix alone raised val loss by +34%, and adding signal zeroing raised it by +393%
+total. This exceeds the hypothesized 20–50% + 5–15% range — the signal zeroing
+leak was far larger than expected.
+
+**Hypothesis 2 (downstream transfer improves): PARTIALLY CONFIRMED / NEGLIGIBLE.**
+Finetuning shows tiny positive deltas for CWT-CNN leak-fixed models (+0.001 to
++0.009), but these are within noise. Linear probe is flat to slightly negative.
+The encoder backbone was already learning useful representations despite the
+decoder exploiting the leaked shortcuts — the leaks primarily made the decoder's
+job easier without degrading the encoder's learned features.
+
+**Hypothesis 3 (slower convergence, better quality): REFUTED.** The fixed models
+did not reach better representation quality despite the harder objective. The
+much harder pretraining task (5x higher loss) did not translate to improved
+downstream transfer within the same training budget.
+
+**Hypothesis 4 (tokenizer convergence at B2 scale): REFUTED.** CWT-CNN
+outperforms ResampleCNN across nearly all tasks and modes. The gap is
+particularly large on Kemp Sleep linear probe (0.632 vs 0.601, Δ = −0.032)
+and Brain Invaders P300 finetuning (0.332 vs 0.310, Δ = −0.022). CWT-CNN
+remains the preferred tokenizer.
 
 ## Notes for future experiments
 
-- If the fix significantly improves downstream transfer, all prior dynamic
-  channel embedding results (exp 018, 020, 021, data scaling) should be
-  considered as lower bounds on the method's true potential.
-- The magnitude of the leak's impact may interact with mask_ratio: at higher
-  ratios (M1–M3 from the masking sweep), the leak provides more information
-  (more masked tokens → more signal leaking into channel embeddings). Re-running
-  the full masking sweep post-fix could reveal a different optimal mask ratio.
-- Consider whether the fix changes the relative value of dynamic vs disabled
-  channel embeddings. If the fix narrows the gap (because part of the previous
-  advantage was the leak), this would need to be accounted for in future
-  architecture comparisons.
-- If ResampleCNN matches CWTCNN at B2 scale, it is the preferred tokenizer due
-  to lower computational cost (no wavelet transform).
+- **Keep both fixes as default.** They make the pretraining objective
+  honest and don't hurt downstream performance. All future pretraining
+  runs should use `disable_channel_encoder_token_mask=false` (default)
+  and `zero_masked_signal=true` (default).
+- **Resume the masking parameter sweep with fixes applied.** The leak
+  magnitude interacts with mask_ratio (more masked tokens = more leaked
+  information). Post-fix, the optimal mask_ratio and block_size may differ
+  from the pre-fix sweep results. This is the natural next experiment.
+- **Try longer pretraining.** The dramatically harder objective (5x higher
+  loss) may need more training steps to show downstream benefits. The
+  current 400k-step budget with early stopping patience=10 may be
+  insufficient for the fixed models to fully converge to better
+  representations. Consider increasing patience or max steps.
+- Prior dynamic channel embedding results (exp 018, 020, 021, data scaling)
+  had inflated reconstruction losses but apparently comparable representation
+  quality — the leaks were decoder-side shortcuts that didn't meaningfully
+  change encoder learning.
+- The fix changes the *interpretation* of reconstruction loss as a proxy for
+  representation quality. Post-fix, the loss is a more honest signal, which
+  may make it a better metric for comparing pretraining configurations.
 - Signal zeroing interaction with block_size: larger blocks zero out larger
   contiguous regions, which may reduce the amount of useful signal the tokenizer
   can extract. This could interact differently with CWT (wider receptive field)
