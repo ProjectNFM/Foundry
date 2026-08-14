@@ -29,7 +29,7 @@ suggest waiting for more results before archiving.
 
 ### Step 2: Propose Grouping (Interactive)
 
-Use `AskQuestion` to present the proposed cluster:
+Present the proposed cluster to the user and ask for confirmation:
 
 ```
 question: |

@@ -20,7 +20,7 @@ Execute analysis and fill results for a completed experiment run.
 Scan `experiments/inbox/` for files with `Status: Draft` or `Status: In Progress`.
 
 - If only one active experiment exists, confirm it with the user.
-- If multiple exist, use `AskQuestion` to let the user select:
+- If multiple exist, ask the user to select one:
 
 ```
 question: "Which experiment to analyze?"
@@ -69,7 +69,8 @@ If the script fails, debug and fix it. Iterate until it produces clean output.
 ### Step 5: Interpretation Checkpoint (Interactive)
 
 Present the metrics summary and any generated figures to the user.
-Use `AskQuestion` for structured interpretation:
+Ask the user to validate the interpretation using the following structured
+choices:
 
 ```
 question: |
