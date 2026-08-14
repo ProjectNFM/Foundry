@@ -482,9 +482,11 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         When ``session_emb_mode == "dynamic"``, also retrieves cached
         pretokenized context windows for the session.
         """
-        result, prepared = self._tokenize_core(data)
-
         actual_duration = self._get_actual_duration(data)
+        result, prepared = self._tokenize_core(
+            data, sequence_length=actual_duration
+        )
+
         targets_tensor = self.tokenizer.compute_reconstruction_targets(
             prepared.signal, prepared.sampling_rate, actual_duration
         )

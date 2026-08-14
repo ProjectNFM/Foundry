@@ -748,16 +748,28 @@ class POYOEEGModel(nn.Module):
         """
         return extract_multitask_targets(self._task_configs, data)
 
-    def _tokenize_core(self, data: Data) -> tuple[dict, PreparedSignal]:
+    def _tokenize_core(
+        self, data: Data, sequence_length: float | None = None
+    ) -> tuple[dict, PreparedSignal]:
         """Shared tokenization logic returning intermediate results.
+
+        Args:
+            data: Input data sample.
+            sequence_length: Duration used for signal normalization and
+                token-grid construction.  Defaults to ``self.sequence_length``
+                which keeps batch shapes consistent for fixed-window
+                downstream tasks.  ``MaskedPOYOEEGModel`` passes
+                ``actual_duration`` here to support variable-length
+                pretraining.
 
         Returns:
             ``(result_dict, prepared_signal)`` where *prepared_signal* is the
             :class:`PreparedSignal` contract and *result_dict* is a complete
             tokenized sample ready for collation.
         """
-        actual_duration = self._get_actual_duration(data)
-        prepared = self._prepare_signal(data, sequence_length=actual_duration)
+        if sequence_length is None:
+            sequence_length = self.sequence_length
+        prepared = self._prepare_signal(data, sequence_length=sequence_length)
 
         channel_ids = data.channels.id[prepared.modality_mask].astype(str)
         channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
@@ -766,15 +778,15 @@ class POYOEEGModel(nn.Module):
             signal=prepared.signal,
             channel_tokens=channel_tokens,
             sampling_rate=prepared.sampling_rate,
-            sequence_length=actual_duration,
+            sequence_length=sequence_length,
         )
         pretokenized["input_session_ids"] = str(data.session.id)
         input_timestamps = pretokenized.pop("input_timestamps")
 
-        effective_step = actual_duration / self._num_latent_bins
+        effective_step = sequence_length / self._num_latent_bins
         latent_index, latent_timestamps = create_linspace_latent_tokens(
             0,
-            actual_duration,
+            sequence_length,
             step=effective_step,
             num_latents_per_step=self.num_latents_per_step,
         )
@@ -901,7 +913,8 @@ def create_linspace_latent_tokens(
         ``np.ndarray`` of length ``num_steps * num_latents_per_step``.
     """
     sequence_len = end - start
-    latent_timestamps = np.arange(0, sequence_len, step) + step / 2 + start
+    num_steps = round(sequence_len / step)
+    latent_timestamps = np.arange(num_steps) * step + step / 2 + start
     latent_index = np.arange(num_latents_per_step, dtype=np.int64)
 
     T = len(latent_timestamps)
