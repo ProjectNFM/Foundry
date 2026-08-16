@@ -80,24 +80,35 @@ class NeurosoftDataModule(NeuralDataModule):
     def setup(self, stage=None):
         super().setup(stage)
         
-        downsample = DownsampleSignal(field="ecog", target_sfreq=500.0)
+        downsample = DownsampleSignal(field="ecog", target_sfreq=1000.0)
 
         notch = FilterSignal(freqs=[50.0, 100.0, 150.0], filter_types=["notch", "notch", "notch"])
 
-        bd = BalanceData(self.dataset, parent_split="train", balance_type="percentile", retain_percentile=40)
+        print("Completed downsample and notch", flush=True)
 
-        self.dataset = bd.modify_dataset(self.dataset)
+        # # Balance dataset numbers for Non-band grouped trials
+        # bd = BalanceData(self.dataset, parent_split="train", balance_type="percentile", retain_percentile=40)
+        # self.dataset = bd.modify_dataset(self.dataset)
+
+        # print("Completed balance", flush=True)
 
         # Set filter parameters 
         bcd = DetectBadChannels(field="ecog")
         bcd.fit(self.dataset, split="train")
+
+        print("Completed bad channel detection", flush=True)
 
         car = CARSignal(field="ecog")
 
         standardize = StandardizeSignal(field="ecog")
         standardize.fit(self.dataset, split="train")
 
+        print("Completed car init and standardize", flush=True)
+
         baseline = BaselineSignal(field="ecog", trials_field="acoustic_stim_trials", baseline_duration=0.25)
+
+        
+        print("Completed baseline init", flush=True)
 
         existing = (
             list(self.dataset.transform.transforms)
@@ -105,6 +116,9 @@ class NeurosoftDataModule(NeuralDataModule):
             else []
         )
         self.dataset.transform = Compose([bcd, notch, car, downsample, baseline, standardize] + existing)
+        
+        print("Completed compose", flush=True)
+
 
     def get_recording_ids(self) -> list[str]:
         return sorted(self.dataset.recording_ids)

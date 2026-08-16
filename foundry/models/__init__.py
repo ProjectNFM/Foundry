@@ -34,6 +34,8 @@ from foundry.models.baselines import (
     EEGNetEncoder,
 )
 
+from foundry.models.cortical_ssm import CorticalSSM
+
 __all__ = [
     "POYOEEGModel",
     "EEGTokenizer",
