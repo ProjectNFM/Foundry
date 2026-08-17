@@ -3,7 +3,7 @@
 **Status:** In Progress
 **Date started:** 2026-08-14
 **Parent experiment:** [Information Leak Fixes: Channel Encoder Masking + Signal Zeroing + Tokenizer Comparison](20260812-MS-channel-encoder-leak-fix-impact.md)
-**Follow-up experiments:** TBD — Neurosoft downstream benchmark
+**Follow-up experiments:** [NeuroSoft Intrasession Multisubject From-Scratch Baselines](20260817-MS-neurosoft-intrasession-baselines.md), [NeuroSoft Leave-One-Subject-Out From-Scratch Baselines](20260817-MS-neurosoft-loso-baselines.md)
 **Tags:** pretraining, mae, ieeg, kochi, neurosoft, data_composition, channel_encoder, information_leak, signal_zeroing, cwt_cnn
 
 ## Background
