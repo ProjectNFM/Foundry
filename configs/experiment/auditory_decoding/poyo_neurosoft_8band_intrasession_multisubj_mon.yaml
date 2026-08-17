@@ -11,7 +11,7 @@
 defaults:
   - override /model: poyo_eeg
   - override /model/tokenizer: per_channel_cwt_cnn
-  - override /data: neurosoft_minipigs/multisess_raw
+  - override /data: neurosoft_monkeys/multisess_raw
 
 task_configs:
   - neurosoft_acoustic_stim_8band
@@ -32,7 +32,7 @@ run:
     - ${hydra:runtime.choices.model}
     - training
     - 8band
-    - minipigs
+    - monkeys
     - 8band
   seed: 42
   log_level: INFO
@@ -63,7 +63,6 @@ trainer:
 
 class_weights:
   mode: auto
-  smoothing: 0.75
 
 stage:
   skip: true
