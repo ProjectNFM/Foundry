@@ -118,6 +118,13 @@ uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
 
 After pretraining, evaluate each checkpoint on 3 tasks × 2 modes × 3 folds = 18 runs per checkpoint:
 
+> **Launched 2026-08-17:** all 30 three-fold Slurm arrays (90 downstream
+> runs) were submitted against the `MASKING_SEQLEN_LEAK_FIXED` checkpoints.
+> The checkpoint transfer was validated for every checkpoint/configuration
+> pair before submission (93 shared state entries loaded, with no missing or
+> mismatched entries). Initial M0 folds started cleanly; P300 folds have
+> completed their first validation epoch and written checkpoints.
+
 ```bash
 # Template — replace $NAME with a restarted pretrain run name (e.g. pretrain_M1_ratio70_leak_fixed)
 for NAME in pretrain_M0_baseline_leak_fixed pretrain_M1_ratio70_leak_fixed pretrain_M2_ratio80_leak_fixed pretrain_M3_ratio90_leak_fixed pretrain_M4_block20_leak_fixed; do
