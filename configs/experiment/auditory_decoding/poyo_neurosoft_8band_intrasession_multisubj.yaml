@@ -60,3 +60,10 @@ trainer:
       mode: max
       auto_insert_metric_name: false
       filename: "best-epoch{epoch:03d}-val_f1_{val/neurosoft_acoustic_stim_8band_f1:.4f}"
+
+class_weights:
+  mode: auto
+  smoothing: 0.75
+
+stage:
+  skip: true

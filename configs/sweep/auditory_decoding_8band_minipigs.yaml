@@ -1,0 +1,91 @@
+# WandB grid sweep over FocalTaskLoss hyperparameters for 8-band auditory decoding.
+#
+# IMPORTANT: Run with an experiment that uses the focal-loss task config, e.g.:
+#
+#   wandb sweep configs/sweep/auditory_decoding_8band_focal_loss.yaml
+#   WANDB_SWEEP_EXPERIMENT=auditory_decoding/test \
+#     uv run python -m foundry.tools.wandb_sweep_agent_worker <sweep-id>
+#
+# Or via the CSCS agent helper:
+#   bash jobs/cscs_task_wandb_agent.sh <sweep-id> auditory_decoding/test
+#
+# Sweep params are injected as Hydra overrides under ``task_loss.*`` and applied
+# onto every FocalTaskLoss after the task YAML is loaded (see main.py).
+#
+# Grid size: 4 gamma × 2 label_smoothing = 8 runs.
+#
+# Metric: val/{task_name}_{metric_key}
+# Task name: neurosoft_acoustic_stim_8band (from the task YAML ``name:`` field)
+# Metric key: f1 (from metric_summary_modes)
+
+defaults:
+  - default
+
+method: grid
+metric:
+  name: val/neurosoft_acoustic_stim_8band_f1
+  goal: maximize
+parameters:
+  model/tokenizer:
+    values:
+      - per_channel_resample_cnn
+  model.atn_dropout:
+    values:
+      - 0.2
+  data.split_type:
+    values:
+      - intersubject
+  hyperparameters.batch_size:
+    values:
+      - 128
+  hyperparameters.learning_rate:
+    values:
+      - 2.75e-5
+  hyperparameters.weight_decay:
+    values:
+      - 0.08
+      - 0.09
+      - 0.10
+  hyperparameters.fold_number:
+    values:
+      - 0
+      - 1
+      - 2
+      - 3
+      - 4
+  trainer.gradient_clip_val:
+    values:
+      - 0.5
+  class_weights.smoothing:
+    values:
+      - 0.75
+  Only minipig models have this: channel_emb_dim = int(embed_dim * fraction).
+  model.tokenizer.channel_emb_fraction:
+    values:
+      - 1/2
+  model.embed_dim:
+    values:
+      - 32
+  model.depth:
+    values:
+      - 2
+  model.cross_heads:
+    values:
+      - 6
+  model.self_heads:
+    values:
+      - 6
+  # task_loss.gamma:
+  #   values:
+  #     - 0.5
+  #     - 1.0
+  #     - 1.5
+  #     - 2.0
+  # task_loss.label_smoothing:
+  #   values:
+  #     - 0.1
+  #     - 0.2
+  # task_loss.alpha_smoothing:
+  #   values:
+  #     - 0.75
+  #     - 1.00
