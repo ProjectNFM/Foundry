@@ -59,7 +59,7 @@ parameters:
   class_weights.smoothing:
     values:
       - 0.75
-  Only minipig models have this: channel_emb_dim = int(embed_dim * fraction).
+  # Only minipig models have this: channel_emb_dim = int(embed_dim * fraction).
   model.tokenizer.channel_emb_fraction:
     values:
       - 1/2
