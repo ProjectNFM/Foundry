@@ -20,6 +20,8 @@ from lightning import LightningDataModule
 from torch_brain.transforms import Compose
 
 from foundry.data.samplers import (
+    DeterministicSamplerWrapper,
+    DistributedSamplerWrapper,
     FastRandomFixedWindowSampler,
     VariableLengthBatchSampler,
 )
@@ -396,6 +398,9 @@ class NeuralDataModule(LightningDataModule):
 
         split_seed = self.seed + self._SPLIT_SEED_OFFSETS[split]
         gen = torch.Generator().manual_seed(split_seed)
+        trainer = getattr(self, "_trainer", None)
+        world_size = int(getattr(trainer, "world_size", 1))
+        global_rank = int(getattr(trainer, "global_rank", 0))
 
         if self.window_lengths is not None:
             batch_sampler = VariableLengthBatchSampler(
@@ -405,6 +410,17 @@ class NeuralDataModule(LightningDataModule):
                 drop_last=(split == "train"),
                 generator=gen,
             )
+            if split != "train":
+                batch_sampler = DeterministicSamplerWrapper(
+                    batch_sampler, split_seed
+                )
+            if world_size > 1:
+                batch_sampler = DistributedSamplerWrapper(
+                    batch_sampler,
+                    num_replicas=world_size,
+                    rank=global_rank,
+                    drop_last=(split == "train"),
+                )
             return DataLoader(
                 self.dataset,
                 batch_sampler=batch_sampler,
@@ -424,6 +440,15 @@ class NeuralDataModule(LightningDataModule):
             drop_short=True,
             generator=gen,
         )
+        if split != "train":
+            sampler = DeterministicSamplerWrapper(sampler, split_seed)
+        if world_size > 1:
+            sampler = DistributedSamplerWrapper(
+                sampler,
+                num_replicas=world_size,
+                rank=global_rank,
+                drop_last=(split == "train"),
+            )
 
         return DataLoader(
             self.dataset,

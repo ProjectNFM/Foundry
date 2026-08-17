@@ -2,7 +2,8 @@
 
 Contains :class:`FastRandomFixedWindowSampler` (vectorized drop-in for the
 upstream ``RandomFixedWindowSampler``) and :class:`VariableLengthBatchSampler`
-(per-batch random window-length selection for multi-length pretraining).
+(per-batch random window-length selection for multi-length pretraining), plus
+the rank-sharding wrapper used for both sampler forms.
 """
 
 import math
@@ -75,6 +76,113 @@ class FastRandomFixedWindowSampler(RandomFixedWindowSampler):
         for idx in perm:
             name, s, e = tuples[idx]
             yield DatasetIndex(name, s, e)
+
+
+def _reset_sampler_generator(
+    sampler: object, seed: int, seen_objects: set[int]
+) -> None:
+    """Reset generators in a sampler and any sampler it wraps."""
+    if sampler is None or id(sampler) in seen_objects:
+        return
+    seen_objects.add(id(sampler))
+
+    generator = getattr(sampler, "generator", None)
+    if isinstance(generator, torch.Generator):
+        generator.manual_seed(seed)
+
+    _reset_sampler_generator(
+        getattr(sampler, "sampler", None), seed, seen_objects
+    )
+    _reset_sampler_generator(
+        getattr(getattr(sampler, "dataset", None), "_sampler", None),
+        seed,
+        seen_objects,
+    )
+
+
+class DeterministicSamplerWrapper(torch.utils.data.Sampler):
+    """Reset a wrapped sampler immediately before each iteration.
+
+    Resetting here, rather than in a Lightning epoch callback, is safe with
+    worker prefetching because it happens before the DataLoader can request
+    the first index.
+    """
+
+    def __init__(self, sampler: torch.utils.data.Sampler, seed: int) -> None:
+        self.sampler = sampler
+        self.seed = seed
+
+    def __len__(self) -> int:
+        return len(self.sampler)
+
+    @property
+    def num_batches(self) -> int:
+        return self.sampler.num_batches
+
+    def __iter__(self):
+        _reset_sampler_generator(self.sampler, self.seed, set())
+        yield from self.sampler
+
+    def set_epoch(self, epoch: int) -> None:
+        """Forward epoch changes without changing the fixed iteration seed."""
+        set_epoch = getattr(self.sampler, "set_epoch", None)
+        if callable(set_epoch):
+            set_epoch(epoch)
+
+
+class DistributedSamplerWrapper(torch.utils.data.Sampler):
+    """Deterministically shard any sampler's yielded items across ranks.
+
+    Unlike PyTorch's :class:`~torch.utils.data.DistributedSampler`, this wraps
+    the output of another sampler, so it supports non-integer ``DatasetIndex``
+    values and complete batches from :class:`VariableLengthBatchSampler`.
+    Padding follows PyTorch's distributed-sampler behavior and gives every
+    rank the same number of items.
+    """
+
+    def __init__(
+        self,
+        sampler: torch.utils.data.Sampler,
+        num_replicas: int,
+        rank: int,
+        drop_last: bool = False,
+    ) -> None:
+        if num_replicas <= 0:
+            raise ValueError("num_replicas must be greater than zero")
+        if rank < 0 or rank >= num_replicas:
+            raise ValueError(
+                f"rank must be in [0, {num_replicas - 1}], got {rank}"
+            )
+        self.sampler = sampler
+        self.num_replicas = num_replicas
+        self.rank = rank
+        self.drop_last = drop_last
+
+    def __len__(self) -> int:
+        item_count = getattr(self.sampler, "num_batches", len(self.sampler))
+        if self.drop_last:
+            return item_count // self.num_replicas
+        return math.ceil(item_count / self.num_replicas)
+
+    def __iter__(self):
+        items = list(self.sampler)
+        per_rank = len(self)
+        total_size = per_rank * self.num_replicas
+
+        if self.drop_last:
+            items = items[:total_size]
+        elif items and len(items) < total_size:
+            padding_size = total_size - len(items)
+            repeats = math.ceil(padding_size / len(items))
+            items += (items * repeats)[:padding_size]
+
+        yield from items[self.rank : total_size : self.num_replicas]
+
+    def set_epoch(self, epoch: int) -> None:
+        """Forward epoch changes when the wrapped training sampler uses them."""
+        set_epoch = getattr(self.sampler, "set_epoch", None)
+        if callable(set_epoch):
+            set_epoch(epoch)
 
 
 class VariableLengthBatchSampler(torch.utils.data.Sampler):
@@ -151,6 +259,22 @@ class VariableLengthBatchSampler(torch.utils.data.Sampler):
                         n_windows += math.floor((end - start) / wl)
             n_batches = n_windows // self.batch_size
             total += n_batches * self.batch_size
+        return total
+
+    @property
+    def num_batches(self) -> int:
+        """Number of complete or partial batches yielded per iteration."""
+        total = 0
+        for wl in self.window_lengths:
+            n_windows = 0
+            for intervals in self.sampling_intervals.values():
+                for start, end in intervals:
+                    if end - start >= wl:
+                        n_windows += math.floor((end - start) / wl)
+            if self.drop_last:
+                total += n_windows // self.batch_size
+            else:
+                total += math.ceil(n_windows / self.batch_size)
         return total
 
     def __iter__(self) -> Iterator[list[DatasetIndex]]:
