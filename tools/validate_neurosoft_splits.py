@@ -52,12 +52,19 @@ def _intervals_overlap(first, second) -> bool:
     second_start = np.asarray(second.start)
     second_end = np.asarray(second.end)
     return bool(
-        ((first_start[:, None] < second_end) & (second_start < first_end[:, None])).any()
+        (
+            (first_start[:, None] < second_end)
+            & (second_start < first_end[:, None])
+        ).any()
     )
 
 
 def _active_recordings(intervals: dict) -> set[str]:
-    return {recording_id for recording_id, interval in intervals.items() if len(interval)}
+    return {
+        recording_id
+        for recording_id, interval in intervals.items()
+        if len(interval)
+    }
 
 
 def _make_dataset(dataset_class, root: str, recording_ids: list[str], **kwargs):
@@ -69,7 +76,9 @@ def _make_dataset(dataset_class, root: str, recording_ids: list[str], **kwargs):
     )
 
 
-def _audit_intrasession(dataset_class, root: str, recording_ids: list[str]) -> None:
+def _audit_intrasession(
+    dataset_class, root: str, recording_ids: list[str]
+) -> None:
     expected = set(recording_ids)
     for fold in range(3):
         dataset = _make_dataset(
@@ -92,19 +101,28 @@ def _audit_intrasession(dataset_class, root: str, recording_ids: list[str]) -> N
                     f"have no intervals: {missing}"
                 )
         for recording_id in recording_ids:
-            for first, second in (("train", "valid"), ("train", "test"), ("valid", "test")):
+            for first, second in (
+                ("train", "valid"),
+                ("train", "test"),
+                ("valid", "test"),
+            ):
                 if _intervals_overlap(
-                    partitions[first][recording_id], partitions[second][recording_id]
+                    partitions[first][recording_id],
+                    partitions[second][recording_id],
                 ):
                     raise AssertionError(
                         f"intrasession fold {fold} {recording_id}: {first}/{second} overlap"
                     )
-        print(f"intrasession fold {fold}: {len(expected)} recordings, disjoint train/valid/test")
+        print(
+            f"intrasession fold {fold}: {len(expected)} recordings, disjoint train/valid/test"
+        )
 
 
 def _audit_loso(dataset_class, root: str, recording_ids: list[str]) -> None:
     expected = set(recording_ids)
-    subjects = sorted({_subject(recording_id) for recording_id in recording_ids})
+    subjects = sorted(
+        {_subject(recording_id) for recording_id in recording_ids}
+    )
     for held_out_subject in subjects:
         dataset = _make_dataset(
             dataset_class,
@@ -116,7 +134,9 @@ def _audit_loso(dataset_class, root: str, recording_ids: list[str]) -> None:
         train = _active_recordings(dataset.get_sampling_intervals("train"))
         valid = _active_recordings(dataset.get_sampling_intervals("valid"))
         test = _active_recordings(dataset.get_sampling_intervals("test"))
-        expected_valid = {rid for rid in expected if _subject(rid) == held_out_subject}
+        expected_valid = {
+            rid for rid in expected if _subject(rid) == held_out_subject
+        }
         if valid != expected_valid:
             raise AssertionError(
                 f"LOSO {held_out_subject}: validation recordings are not exactly "

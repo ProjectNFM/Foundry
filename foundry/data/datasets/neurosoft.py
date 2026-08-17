@@ -30,7 +30,9 @@ class _NeurosoftLOSO:
                     for rid in self.recording_ids
                 }
             if split not in ("train", "valid", "test"):
-                raise ValueError("split must be 'train', 'valid', 'test', or None.")
+                raise ValueError(
+                    "split must be 'train', 'valid', 'test', or None."
+                )
             return self._get_loso_intervals(split)
         return super().get_sampling_intervals(split)
 
@@ -47,7 +49,9 @@ class _NeurosoftLOSO:
 
     def _get_loso_intervals(self, split: str) -> dict:
         if not self.held_out_subject:
-            raise ValueError("held_out_subject is required when split_type='loso'.")
+            raise ValueError(
+                "held_out_subject is required when split_type='loso'."
+            )
 
         subjects = {
             self._subject_from_recording_id(rid) for rid in self.recording_ids
@@ -58,7 +62,9 @@ class _NeurosoftLOSO:
                 f"dataset. Available subjects: {sorted(subjects)}."
             )
         if len(subjects) < 2:
-            raise ValueError("LOSO requires recordings from at least two subjects.")
+            raise ValueError(
+                "LOSO requires recordings from at least two subjects."
+            )
 
         result = {}
         for rid in self.recording_ids:

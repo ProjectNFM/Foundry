@@ -25,9 +25,7 @@ class _FakeNeurosoftDataset(_NeurosoftLOSO):
             "sub-01_ses-02_task-AcousStim_acq-LH_desc-raw",
             "sub-02_ses-01_task-AcousStim_acq-LH_desc-raw",
         ]
-        self._recordings = {
-            rid: _Recording(rid) for rid in self.recording_ids
-        }
+        self._recordings = {rid: _Recording(rid) for rid in self.recording_ids}
 
     def get_recording(self, recording_id):
         return self._recordings[recording_id]
@@ -44,15 +42,22 @@ def test_loso_keeps_held_out_subject_out_of_training():
     valid = dataset.get_sampling_intervals("valid")
 
     assert all(len(train[rid]) > 0 for rid in train if rid.startswith("sub-01"))
-    assert all(len(train[rid]) == 0 for rid in train if rid.startswith("sub-02"))
-    assert all(len(valid[rid]) == 0 for rid in valid if rid.startswith("sub-01"))
+    assert all(
+        len(train[rid]) == 0 for rid in train if rid.startswith("sub-02")
+    )
+    assert all(
+        len(valid[rid]) == 0 for rid in valid if rid.startswith("sub-01")
+    )
     assert all(len(valid[rid]) > 0 for rid in valid if rid.startswith("sub-02"))
 
 
 def test_loso_has_no_test_partition_under_validation_only_protocol():
     dataset = _dataset()
 
-    assert all(len(interval) == 0 for interval in dataset.get_sampling_intervals("test").values())
+    assert all(
+        len(interval) == 0
+        for interval in dataset.get_sampling_intervals("test").values()
+    )
 
 
 def test_loso_rejects_unknown_held_out_subject():
