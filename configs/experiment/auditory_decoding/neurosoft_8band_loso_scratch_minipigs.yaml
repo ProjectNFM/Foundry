@@ -74,7 +74,6 @@ hydra:
     params:
       data.held_out_subject: sub-01, sub-02, sub-03, sub-04, sub-05, sub-06, sub-07
   launcher:
-    array_parallelism: 1
     timeout_min: 720
     cpus_per_task: 4
     mem_gb: 64
