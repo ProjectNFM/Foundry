@@ -29,7 +29,7 @@ With species-optimal hyperparameters fixed for multisubject intrasession
 
 ## Hypothesis
 
-None (exploratory).
+Applying inverse-frequency class weights will improve performance (as measured by max val F1, AUROC, precision, and recall) compared to training without class weighting. However, the extent of any improvement and the optimal value of class-weight smoothing (0.5, 0.75, or 1.0) remains to be determined and will be empirically explored.
 
 ## Experiment
 
