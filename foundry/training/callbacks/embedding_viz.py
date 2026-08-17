@@ -457,9 +457,7 @@ class EmbeddingVisualizationCallback(L.Callback):
             embeddings, channel_names, trainer
         )
         if fig_scalp is not None:
-            log_dict["val/channel_embedding_pca_scalp"] = wandb.Image(
-                fig_scalp
-            )
+            log_dict["val/channel_embedding_pca_scalp"] = wandb.Image(fig_scalp)
             plt.close(fig_scalp)
 
         wandb_experiment.log(log_dict, commit=False)
@@ -597,10 +595,30 @@ class EmbeddingVisualizationCallback(L.Callback):
             ax.legend(markerscale=1.5, fontsize=8)
 
         _LABEL_SET = {
-            "fp1", "fp2", "f7", "f3", "fz", "f4", "f8",
-            "t7", "t3", "c3", "cz", "c4", "t4", "t8",
-            "p7", "t5", "p3", "pz", "p4", "t6", "p8",
-            "o1", "oz", "o2",
+            "fp1",
+            "fp2",
+            "f7",
+            "f3",
+            "fz",
+            "f4",
+            "f8",
+            "t7",
+            "t3",
+            "c3",
+            "cz",
+            "c4",
+            "t4",
+            "t8",
+            "p7",
+            "t5",
+            "p3",
+            "pz",
+            "p4",
+            "t6",
+            "p8",
+            "o1",
+            "oz",
+            "o2",
         }
         for i, n in enumerate(names):
             if n.lower() in _LABEL_SET or len(names) <= 40:
@@ -614,8 +632,7 @@ class EmbeddingVisualizationCallback(L.Callback):
                 )
 
         ax.set_title(
-            f"Channel Emb PCA — Scalp Position "
-            f"(epoch {trainer.current_epoch})"
+            f"Channel Emb PCA — Scalp Position (epoch {trainer.current_epoch})"
         )
         ax.set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.1%})")
         ax.set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.1%})")
@@ -644,23 +661,34 @@ class EmbeddingVisualizationCallback(L.Callback):
         ax.imshow(rgba, extent=[-1.3, 1.3, -1.3, 1.3], origin="lower")
 
         theta = np.linspace(0, 2 * np.pi, 100)
+        ax.plot(np.cos(theta), np.sin(theta), "k-", linewidth=0.8, alpha=0.4)
         ax.plot(
-            np.cos(theta), np.sin(theta), "k-", linewidth=0.8, alpha=0.4
-        )
-        ax.plot(
-            [-0.1, 0, 0.1], [1.0, 1.12, 1.0],
-            "k-", linewidth=0.8, alpha=0.4,
+            [-0.1, 0, 0.1],
+            [1.0, 1.12, 1.0],
+            "k-",
+            linewidth=0.8,
+            alpha=0.4,
         )
 
         ax.text(0, 1.25, "Front", ha="center", va="bottom", fontsize=8)
         ax.text(0, -1.22, "Back", ha="center", va="top", fontsize=8)
         ax.text(
-            -1.25, 0, "L", ha="right", va="center",
-            fontsize=9, weight="bold",
+            -1.25,
+            0,
+            "L",
+            ha="right",
+            va="center",
+            fontsize=9,
+            weight="bold",
         )
         ax.text(
-            1.25, 0, "R", ha="left", va="center",
-            fontsize=9, weight="bold",
+            1.25,
+            0,
+            "R",
+            ha="left",
+            va="center",
+            fontsize=9,
+            weight="bold",
         )
 
         for _, (x, y) in electrode_pos.items():

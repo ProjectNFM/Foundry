@@ -494,7 +494,9 @@ class EEGTokenizer(nn.Module):
 
         ch_emb = None
         if channel_encoder is not None:
-            ch_emb = channel_encoder(tokens, channel_mask, token_mask=token_mask)
+            ch_emb = channel_encoder(
+                tokens, channel_mask, token_mask=token_mask
+            )
         elif channel_emb_fn is not None:
             ch_emb = channel_emb_fn(channel_index)  # (B, C, D_ch)
 

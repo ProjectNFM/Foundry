@@ -132,24 +132,28 @@ def fetch_pretrain_losses(api: wandb.Api) -> pd.DataFrame:
         )
 
         for _, row in val_history.iterrows():
-            records.append({
-                "run_id": run_id,
-                "run_name": info["name"],
-                "label": info["label"],
-                "step": row.get("_step"),
-                "val_loss": row.get("val/loss"),
-                "train_loss": None,
-            })
+            records.append(
+                {
+                    "run_id": run_id,
+                    "run_name": info["name"],
+                    "label": info["label"],
+                    "step": row.get("_step"),
+                    "val_loss": row.get("val/loss"),
+                    "train_loss": None,
+                }
+            )
 
         for _, row in train_history.iterrows():
-            records.append({
-                "run_id": run_id,
-                "run_name": info["name"],
-                "label": info["label"],
-                "step": row.get("_step"),
-                "val_loss": None,
-                "train_loss": row.get("train/loss"),
-            })
+            records.append(
+                {
+                    "run_id": run_id,
+                    "run_name": info["name"],
+                    "label": info["label"],
+                    "step": row.get("_step"),
+                    "val_loss": None,
+                    "train_loss": row.get("train/loss"),
+                }
+            )
 
         best_val = (
             val_history["val/loss"].dropna().min()
@@ -177,7 +181,7 @@ def fetch_downstream_results(api: wandb.Api) -> pd.DataFrame:
 
     for (task, mode), group in DOWNSTREAM_GROUPS.items():
         metric_key = METRIC_KEYS[task]
-        prefix = DOWNSTREAM_RUN_PREFIXES[(task, mode)]
+        _ = DOWNSTREAM_RUN_PREFIXES[(task, mode)]
         print(f"\n  Fetching {task} / {mode} (group={group})...")
 
         runs = api.runs(
@@ -215,19 +219,21 @@ def fetch_downstream_results(api: wandb.Api) -> pd.DataFrame:
                 best_epoch = None
                 num_epochs = 0
 
-            records.append({
-                "task": task,
-                "mode": mode,
-                "pretrain_run_id": pretrain_run_id,
-                "pretrain_label": PRETRAIN_RUNS[pretrain_run_id]["label"],
-                "tokenizer": PRETRAIN_RUNS[pretrain_run_id]["tokenizer"],
-                "fold": fold,
-                "best_f1": best_f1,
-                "best_epoch": best_epoch,
-                "num_epochs": num_epochs,
-                "run_name": run.name,
-                "state": run.state,
-            })
+            records.append(
+                {
+                    "task": task,
+                    "mode": mode,
+                    "pretrain_run_id": pretrain_run_id,
+                    "pretrain_label": PRETRAIN_RUNS[pretrain_run_id]["label"],
+                    "tokenizer": PRETRAIN_RUNS[pretrain_run_id]["tokenizer"],
+                    "fold": fold,
+                    "best_f1": best_f1,
+                    "best_epoch": best_epoch,
+                    "num_epochs": num_epochs,
+                    "run_name": run.name,
+                    "state": run.state,
+                }
+            )
 
     return pd.DataFrame(records)
 
@@ -238,9 +244,9 @@ def summarize_downstream(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     summary = (
-        df.groupby(["task", "mode", "pretrain_run_id", "pretrain_label", "tokenizer"])[
-            "best_f1"
-        ]
+        df.groupby(
+            ["task", "mode", "pretrain_run_id", "pretrain_label", "tokenizer"]
+        )["best_f1"]
         .agg(["mean", "std", "count"])
         .reset_index()
     )
@@ -257,7 +263,9 @@ def plot_pretrain_loss_curves(pretrain_df: pd.DataFrame) -> Path:
     # Val loss
     ax = axes[0]
     for rid in RUN_ORDER:
-        subset = pretrain_df[pretrain_df["run_id"] == rid].dropna(subset=["val_loss"])
+        subset = pretrain_df[pretrain_df["run_id"] == rid].dropna(
+            subset=["val_loss"]
+        )
         if subset.empty:
             continue
         subset = subset.sort_values("step")
@@ -280,7 +288,9 @@ def plot_pretrain_loss_curves(pretrain_df: pd.DataFrame) -> Path:
     # Train loss
     ax = axes[1]
     for rid in RUN_ORDER:
-        subset = pretrain_df[pretrain_df["run_id"] == rid].dropna(subset=["train_loss"])
+        subset = pretrain_df[pretrain_df["run_id"] == rid].dropna(
+            subset=["train_loss"]
+        )
         if subset.empty:
             continue
         subset = subset.sort_values("step")
@@ -319,7 +329,9 @@ def plot_pretrain_final_loss_bar(pretrain_df: pd.DataFrame) -> Path:
     """Bar chart of best val/loss per run with % change annotations."""
     best_losses = {}
     for rid in RUN_ORDER:
-        subset = pretrain_df[pretrain_df["run_id"] == rid].dropna(subset=["val_loss"])
+        subset = pretrain_df[pretrain_df["run_id"] == rid].dropna(
+            subset=["val_loss"]
+        )
         if not subset.empty:
             best_losses[rid] = subset["val_loss"].min()
 
@@ -332,7 +344,13 @@ def plot_pretrain_final_loss_bar(pretrain_df: pd.DataFrame) -> Path:
     labels = [PRETRAIN_RUNS[r]["label"] for r in run_ids]
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    bars = ax.bar(range(len(run_ids)), losses, color=colors, edgecolor="white", linewidth=0.5)
+    bars = ax.bar(
+        range(len(run_ids)),
+        losses,
+        color=colors,
+        edgecolor="white",
+        linewidth=0.5,
+    )
 
     baseline_loss = best_losses.get("baseline")
     for bar, loss, rid in zip(bars, losses, run_ids):
@@ -381,9 +399,18 @@ def plot_downstream_comparison(summary_df: pd.DataFrame) -> Path:
             ax = axes[mode_idx, col_idx]
             task_data = sub[sub["task"] == task]
 
-            available = [r for r in RUN_ORDER if r in task_data["pretrain_run_id"].values]
+            available = [
+                r for r in RUN_ORDER if r in task_data["pretrain_run_id"].values
+            ]
             if not available:
-                ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No data",
+                    ha="center",
+                    va="center",
+                    transform=ax.transAxes,
+                )
                 continue
 
             means = []
@@ -393,7 +420,11 @@ def plot_downstream_comparison(summary_df: pd.DataFrame) -> Path:
                 row = task_data[task_data["pretrain_run_id"] == rid]
                 if not row.empty:
                     means.append(row["mean"].values[0])
-                    stds.append(row["std"].values[0] if not np.isnan(row["std"].values[0]) else 0)
+                    stds.append(
+                        row["std"].values[0]
+                        if not np.isnan(row["std"].values[0])
+                        else 0
+                    )
                 else:
                     means.append(0)
                     stds.append(0)
@@ -401,8 +432,14 @@ def plot_downstream_comparison(summary_df: pd.DataFrame) -> Path:
 
             x = np.arange(len(available))
             bars = ax.bar(
-                x, means, 0.6, yerr=stds, capsize=4,
-                color=colors, edgecolor="white", linewidth=0.5,
+                x,
+                means,
+                0.6,
+                yerr=stds,
+                capsize=4,
+                color=colors,
+                edgecolor="white",
+                linewidth=0.5,
                 error_kw=dict(lw=1),
             )
 
@@ -412,13 +449,18 @@ def plot_downstream_comparison(summary_df: pd.DataFrame) -> Path:
                         bar.get_x() + bar.get_width() / 2,
                         bar.get_height() + 0.005,
                         f"{mean:.3f}",
-                        ha="center", va="bottom", fontsize=9, fontweight="bold",
+                        ha="center",
+                        va="bottom",
+                        fontsize=9,
+                        fontweight="bold",
                     )
 
             ax.set_xticks(x)
             ax.set_xticklabels(
                 [PRETRAIN_RUNS[r]["label"] for r in available],
-                fontsize=7, rotation=20, ha="right",
+                fontsize=7,
+                rotation=20,
+                ha="right",
             )
             if col_idx == 0:
                 ax.set_ylabel(f"{mode_label}\nBest Val F1", fontsize=10)
@@ -435,7 +477,9 @@ def plot_downstream_comparison(summary_df: pd.DataFrame) -> Path:
 
     fig.suptitle(
         "Downstream Transfer — Leak Fix Impact\nFinetuning (top) · Linear Probe (bottom)",
-        fontsize=14, fontweight="bold", y=1.02,
+        fontsize=14,
+        fontweight="bold",
+        y=1.02,
     )
     plt.tight_layout()
     out = FIGURES_DIR / "037_downstream_comparison.png"
@@ -461,19 +505,31 @@ def plot_ablation_deltas(summary_df: pd.DataFrame) -> Path:
         for i, rid in enumerate(comparison_runs):
             deltas = []
             for task in TASKS:
-                baseline_row = sub[(sub["task"] == task) & (sub["pretrain_run_id"] == "baseline")]
-                run_row = sub[(sub["task"] == task) & (sub["pretrain_run_id"] == rid)]
+                baseline_row = sub[
+                    (sub["task"] == task)
+                    & (sub["pretrain_run_id"] == "baseline")
+                ]
+                run_row = sub[
+                    (sub["task"] == task) & (sub["pretrain_run_id"] == rid)
+                ]
                 if not baseline_row.empty and not run_row.empty:
-                    delta = run_row["mean"].values[0] - baseline_row["mean"].values[0]
+                    delta = (
+                        run_row["mean"].values[0]
+                        - baseline_row["mean"].values[0]
+                    )
                     deltas.append(delta)
                 else:
                     deltas.append(0)
 
             offset = (i - 1) * width
             bars = ax.bar(
-                x_pos + offset, deltas, width,
-                color=RUN_COLORS[rid], label=PRETRAIN_RUNS[rid]["label"],
-                edgecolor="white", linewidth=0.5,
+                x_pos + offset,
+                deltas,
+                width,
+                color=RUN_COLORS[rid],
+                label=PRETRAIN_RUNS[rid]["label"],
+                edgecolor="white",
+                linewidth=0.5,
             )
             for bar, d in zip(bars, deltas):
                 if d != 0:
@@ -482,7 +538,10 @@ def plot_ablation_deltas(summary_df: pd.DataFrame) -> Path:
                         bar.get_x() + bar.get_width() / 2,
                         bar.get_height() + (0.002 if d >= 0 else -0.002),
                         f"{d:+.3f}",
-                        ha="center", va=va, fontsize=8, fontweight="bold",
+                        ha="center",
+                        va=va,
+                        fontsize=8,
+                        fontweight="bold",
                     )
 
         ax.axhline(y=0, color="black", linewidth=0.8)
@@ -497,7 +556,9 @@ def plot_ablation_deltas(summary_df: pd.DataFrame) -> Path:
 
     fig.suptitle(
         "Downstream ΔF1 vs Baseline — Ablation of Leak Fixes",
-        fontsize=14, fontweight="bold", y=1.02,
+        fontsize=14,
+        fontweight="bold",
+        y=1.02,
     )
     plt.tight_layout()
     out = FIGURES_DIR / "037_ablation_deltas.png"
@@ -523,19 +584,32 @@ def plot_tokenizer_comparison(summary_df: pd.DataFrame) -> Path:
             means = []
             stds = []
             for task in TASKS:
-                row = sub[(sub["task"] == task) & (sub["pretrain_run_id"] == rid)]
+                row = sub[
+                    (sub["task"] == task) & (sub["pretrain_run_id"] == rid)
+                ]
                 if not row.empty:
                     means.append(row["mean"].values[0])
-                    stds.append(row["std"].values[0] if not np.isnan(row["std"].values[0]) else 0)
+                    stds.append(
+                        row["std"].values[0]
+                        if not np.isnan(row["std"].values[0])
+                        else 0
+                    )
                 else:
                     means.append(0)
                     stds.append(0)
 
             offset = (i - 0.5) * width
             bars = ax.bar(
-                x_pos + offset, means, width, yerr=stds, capsize=4,
-                color=RUN_COLORS[rid], label=PRETRAIN_RUNS[rid]["label"],
-                edgecolor="white", linewidth=0.5, error_kw=dict(lw=1),
+                x_pos + offset,
+                means,
+                width,
+                yerr=stds,
+                capsize=4,
+                color=RUN_COLORS[rid],
+                label=PRETRAIN_RUNS[rid]["label"],
+                edgecolor="white",
+                linewidth=0.5,
+                error_kw=dict(lw=1),
             )
             for bar, mean in zip(bars, means):
                 if mean > 0:
@@ -543,7 +617,10 @@ def plot_tokenizer_comparison(summary_df: pd.DataFrame) -> Path:
                         bar.get_x() + bar.get_width() / 2,
                         bar.get_height() + 0.005,
                         f"{mean:.3f}",
-                        ha="center", va="bottom", fontsize=9, fontweight="bold",
+                        ha="center",
+                        va="bottom",
+                        fontsize=9,
+                        fontweight="bold",
                     )
 
         ax.set_xticks(x_pos)
@@ -558,7 +635,9 @@ def plot_tokenizer_comparison(summary_df: pd.DataFrame) -> Path:
         all_means = []
         for rid in ["both_cwt", "both_resample"]:
             for task in TASKS:
-                row = sub[(sub["task"] == task) & (sub["pretrain_run_id"] == rid)]
+                row = sub[
+                    (sub["task"] == task) & (sub["pretrain_run_id"] == rid)
+                ]
                 if not row.empty:
                     all_means.append(row["mean"].values[0])
         if all_means:
@@ -566,7 +645,9 @@ def plot_tokenizer_comparison(summary_df: pd.DataFrame) -> Path:
 
     fig.suptitle(
         "Tokenizer Comparison at B2 Scale (Both Fixes Applied)\nCWT-CNN vs ResampleCNN",
-        fontsize=14, fontweight="bold", y=1.02,
+        fontsize=14,
+        fontweight="bold",
+        y=1.02,
     )
     plt.tight_layout()
     out = FIGURES_DIR / "037_tokenizer_comparison.png"
@@ -586,14 +667,20 @@ def print_pretrain_summary(pretrain_df: pd.DataFrame) -> None:
     print("=" * 90)
     header = f"  {'Run':<16} {'Label':<28} {'Tokenizer':<12} {'Best Val Loss':>14} {'Final Val Loss':>15} {'Δ vs Baseline':>14}"
     print(header)
-    print(f"  {'-'*16} {'-'*28} {'-'*12} {'-'*14} {'-'*15} {'-'*14}")
+    print(
+        f"  {'-' * 16} {'-' * 28} {'-' * 12} {'-' * 14} {'-' * 15} {'-' * 14}"
+    )
 
     baseline_best = None
     for rid in RUN_ORDER:
         info = PRETRAIN_RUNS[rid]
-        subset = pretrain_df[pretrain_df["run_id"] == rid].dropna(subset=["val_loss"])
+        subset = pretrain_df[pretrain_df["run_id"] == rid].dropna(
+            subset=["val_loss"]
+        )
         if subset.empty:
-            print(f"  {rid:<16} {info['label']:<28} {info['tokenizer']:<12} {'N/A':>14} {'N/A':>15} {'N/A':>14}")
+            print(
+                f"  {rid:<16} {info['label']:<28} {info['tokenizer']:<12} {'N/A':>14} {'N/A':>15} {'N/A':>14}"
+            )
             continue
         subset = subset.sort_values("step")
         best_loss = subset["val_loss"].min()
@@ -620,22 +707,28 @@ def print_downstream_summary(summary_df: pd.DataFrame) -> None:
         mode_label = "FINETUNING" if mode == "finetune" else "LINEAR PROBE"
         sub = summary_df[summary_df["mode"] == mode]
 
-        print(f"\n\n{'='*90}")
+        print(f"\n\n{'=' * 90}")
         print(f"  DOWNSTREAM {mode_label}")
-        print(f"{'='*90}")
+        print(f"{'=' * 90}")
 
         for task in TASKS:
             task_data = sub[sub["task"] == task]
             print(f"\n  {task}:")
-            print(f"  {'Run':<16} {'Label':<28} {'Mean F1':>8} {'± Std':>8} {'N':>3}")
-            print(f"  {'-'*16} {'-'*28} {'-'*8} {'-'*8} {'-'*3}")
+            print(
+                f"  {'Run':<16} {'Label':<28} {'Mean F1':>8} {'± Std':>8} {'N':>3}"
+            )
+            print(f"  {'-' * 16} {'-' * 28} {'-' * 8} {'-' * 8} {'-' * 3}")
 
             baseline_f1 = None
             for rid in RUN_ORDER:
                 row = task_data[task_data["pretrain_run_id"] == rid]
                 if not row.empty:
                     mean_f1 = row["mean"].values[0]
-                    std_f1 = row["std"].values[0] if not np.isnan(row["std"].values[0]) else 0
+                    std_f1 = (
+                        row["std"].values[0]
+                        if not np.isnan(row["std"].values[0])
+                        else 0
+                    )
                     n = int(row["count"].values[0])
                     if rid == "baseline":
                         baseline_f1 = mean_f1
@@ -655,14 +748,16 @@ def print_downstream_summary(summary_df: pd.DataFrame) -> None:
                     row = task_data[task_data["pretrain_run_id"] == rid]
                     if not row.empty:
                         delta = row["mean"].values[0] - baseline_f1
-                        print(f"    {PRETRAIN_RUNS[rid]['label']:<28} ΔF1 = {delta:+.3f}")
+                        print(
+                            f"    {PRETRAIN_RUNS[rid]['label']:<28} ΔF1 = {delta:+.3f}"
+                        )
 
 
 def print_key_comparisons(summary_df: pd.DataFrame) -> None:
     """Print structured comparison summaries for the 3 key questions."""
-    print(f"\n\n{'#'*90}")
+    print(f"\n\n{'#' * 90}")
     print("  KEY COMPARISONS")
-    print(f"{'#'*90}")
+    print(f"{'#' * 90}")
 
     ft = summary_df[summary_df["mode"] == "finetune"]
     lp = summary_df[summary_df["mode"] == "linear_probe"]
@@ -670,36 +765,68 @@ def print_key_comparisons(summary_df: pd.DataFrame) -> None:
     print("\n  1. LEAK FIX IMPACT (baseline → both_cwt)")
     print("  " + "-" * 60)
     for task in TASKS:
-        for mode, sub, label in [("FT", ft, "finetune"), ("LP", lp, "linear_probe")]:
-            b_row = sub[(sub["task"] == task) & (sub["pretrain_run_id"] == "baseline")]
-            f_row = sub[(sub["task"] == task) & (sub["pretrain_run_id"] == "both_cwt")]
+        for mode, sub, label in [
+            ("FT", ft, "finetune"),
+            ("LP", lp, "linear_probe"),
+        ]:
+            b_row = sub[
+                (sub["task"] == task) & (sub["pretrain_run_id"] == "baseline")
+            ]
+            f_row = sub[
+                (sub["task"] == task) & (sub["pretrain_run_id"] == "both_cwt")
+            ]
             if not b_row.empty and not f_row.empty:
                 b_val = b_row["mean"].values[0]
                 f_val = f_row["mean"].values[0]
-                print(f"    {task} ({mode}): {b_val:.3f} → {f_val:.3f} (Δ = {f_val - b_val:+.3f})")
+                print(
+                    f"    {task} ({mode}): {b_val:.3f} → {f_val:.3f} (Δ = {f_val - b_val:+.3f})"
+                )
 
     print("\n  2. SIGNAL ZEROING INCREMENTAL IMPACT (ch_fix → both_cwt)")
     print("  " + "-" * 60)
     for task in TASKS:
-        for mode, sub, label in [("FT", ft, "finetune"), ("LP", lp, "linear_probe")]:
-            c_row = sub[(sub["task"] == task) & (sub["pretrain_run_id"] == "ch_fix")]
-            f_row = sub[(sub["task"] == task) & (sub["pretrain_run_id"] == "both_cwt")]
+        for mode, sub, label in [
+            ("FT", ft, "finetune"),
+            ("LP", lp, "linear_probe"),
+        ]:
+            c_row = sub[
+                (sub["task"] == task) & (sub["pretrain_run_id"] == "ch_fix")
+            ]
+            f_row = sub[
+                (sub["task"] == task) & (sub["pretrain_run_id"] == "both_cwt")
+            ]
             if not c_row.empty and not f_row.empty:
                 c_val = c_row["mean"].values[0]
                 f_val = f_row["mean"].values[0]
-                print(f"    {task} ({mode}): {c_val:.3f} → {f_val:.3f} (Δ = {f_val - c_val:+.3f})")
+                print(
+                    f"    {task} ({mode}): {c_val:.3f} → {f_val:.3f} (Δ = {f_val - c_val:+.3f})"
+                )
 
     print("\n  3. TOKENIZER COMPARISON (both_cwt vs both_resample)")
     print("  " + "-" * 60)
     for task in TASKS:
-        for mode, sub, label in [("FT", ft, "finetune"), ("LP", lp, "linear_probe")]:
-            c_row = sub[(sub["task"] == task) & (sub["pretrain_run_id"] == "both_cwt")]
-            r_row = sub[(sub["task"] == task) & (sub["pretrain_run_id"] == "both_resample")]
+        for mode, sub, label in [
+            ("FT", ft, "finetune"),
+            ("LP", lp, "linear_probe"),
+        ]:
+            c_row = sub[
+                (sub["task"] == task) & (sub["pretrain_run_id"] == "both_cwt")
+            ]
+            r_row = sub[
+                (sub["task"] == task)
+                & (sub["pretrain_run_id"] == "both_resample")
+            ]
             if not c_row.empty and not r_row.empty:
                 c_val = c_row["mean"].values[0]
                 r_val = r_row["mean"].values[0]
                 diff = r_val - c_val
-                winner = "ResampleCNN" if diff > 0 else "CWT-CNN" if diff < 0 else "tie"
+                winner = (
+                    "ResampleCNN"
+                    if diff > 0
+                    else "CWT-CNN"
+                    if diff < 0
+                    else "tie"
+                )
                 print(
                     f"    {task} ({mode}): CWT={c_val:.3f}, Resample={r_val:.3f} "
                     f"(Δ = {diff:+.3f}, {winner})"
@@ -728,7 +855,9 @@ def main():
     print("=" * 75)
     downstream_df = fetch_downstream_results(api)
     valid = downstream_df[downstream_df["best_f1"].notna()]
-    print(f"\n  Total downstream runs: {len(downstream_df)}, with metrics: {len(valid)}")
+    print(
+        f"\n  Total downstream runs: {len(downstream_df)}, with metrics: {len(valid)}"
+    )
 
     if not valid.empty:
         print("\n  Per-fold detail:")

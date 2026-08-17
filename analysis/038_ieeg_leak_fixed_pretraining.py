@@ -95,7 +95,9 @@ def plot_pretraining(history: pd.DataFrame) -> Path | None:
     fig, ax = plt.subplots(figsize=(8, 5))
     for condition, subset in history.groupby("condition"):
         subset = subset.sort_values("step")
-        ax.plot(subset["step"], subset["val_loss"], label=condition, linewidth=1.8)
+        ax.plot(
+            subset["step"], subset["val_loss"], label=condition, linewidth=1.8
+        )
     ax.set(xlabel="Step", ylabel="Validation reconstruction loss")
     ax.set_title("Leak-fixed iEEG pretraining")
     ax.legend(title="Source configuration")
@@ -123,7 +125,9 @@ def fetch_neurosoft(api: wandb.Api, group: str) -> pd.DataFrame:
         condition = condition_from_name(run.name)
         if condition is None:
             continue
-        history = run.history(keys=[NEUROSOFT_METRIC], samples=50_000, pandas=True)
+        history = run.history(
+            keys=[NEUROSOFT_METRIC], samples=50_000, pandas=True
+        )
         scores = history.get(NEUROSOFT_METRIC, pd.Series(dtype=float)).dropna()
         if scores.empty:
             continue
@@ -145,7 +149,11 @@ def main() -> None:
     history, pretrain_summary = fetch_pretraining(api)
 
     print("\nPretraining summary")
-    print(pretrain_summary.to_string(index=False) if not pretrain_summary.empty else "No runs found.")
+    print(
+        pretrain_summary.to_string(index=False)
+        if not pretrain_summary.empty
+        else "No runs found."
+    )
     figure = plot_pretraining(history)
     if figure:
         print(f"Saved {figure}")
@@ -158,7 +166,9 @@ def main() -> None:
     if neurosoft.empty:
         print("No matching Neurosoft runs found.")
         return
-    summary = neurosoft.groupby("condition")["best_f1"].agg(["mean", "std", "count"])
+    summary = neurosoft.groupby("condition")["best_f1"].agg(
+        ["mean", "std", "count"]
+    )
     print(summary.to_string())
 
 
