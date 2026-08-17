@@ -99,7 +99,7 @@ uv run python main.py experiment=auditory_decoding/neurosoft_8band_intrasession_
 | Token rate | 100 Hz | 100 Hz | Prior sampling-rate sweep |
 | Split / folds | `intrasession-block`; 0, 1, 2 | same | This experiment |
 | Labeled sampling window | 0.5 s | same | NeuroSoft trial interval length; POYO remains a 2.0-s model |
-| Effective batch size | 128 (microbatch 16 × gradient accumulation 8) | same | Fits the cluster GPU memory budget |
+| Effective batch size | 128 (microbatch 128 × gradient accumulation 1) | same | Uses the requested 48-GB L40S GPU memory budget |
 
 Validation logs include the aggregate task metrics plus
 `val_session/<subject_session_acquisition>/...` for each recording.  Each

@@ -38,7 +38,7 @@ class_weights:
   smoothing: 1.0
 
 hyperparameters:
-  batch_size: 16
+  batch_size: 128
   sequence_length: 2.0
   patch_duration: null
   sampling_rate: 100
@@ -51,7 +51,7 @@ trainer:
   max_epochs: 1000
   precision: bf16-mixed
   gradient_clip_val: 1.0
-  accumulate_grad_batches: 8
+  accumulate_grad_batches: 1
   callbacks:
     early_stopping:
       monitor: val/neurosoft_acoustic_stim_8band_f1
@@ -72,3 +72,4 @@ hydra:
     timeout_min: 720
     cpus_per_task: 4
     mem_gb: 64
+    gres: gpu:l40s:1

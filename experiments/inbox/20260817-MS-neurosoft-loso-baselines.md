@@ -100,7 +100,7 @@ uv run python main.py experiment=auditory_decoding/neurosoft_8band_loso_scratch_
 | Token rate | 100 Hz | 100 Hz | Prior sampling-rate sweep |
 | Split | validation-only LOSO with a subject-disjoint validation set | same | This experiment |
 | Labeled sampling window | 0.5 s | same | NeuroSoft trial interval length; POYO remains a 2.0-s model |
-| Effective batch size | 128 (microbatch 16 × gradient accumulation 8) | same | Fits the cluster GPU memory budget |
+| Effective batch size | 128 (microbatch 128 × gradient accumulation 1) | same | Uses the requested 48-GB L40S GPU memory budget |
 
 The held-out recordings log aggregate validation metrics and per-recording
 `val_session/...` values, including scalar per-class F1, precision, and recall.
