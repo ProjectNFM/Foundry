@@ -98,7 +98,9 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         """
         super().__init__(*args, **kwargs)
         self.masking = masking
-        self.disable_channel_encoder_token_mask = disable_channel_encoder_token_mask
+        self.disable_channel_encoder_token_mask = (
+            disable_channel_encoder_token_mask
+        )
         self.zero_masked_signal = zero_masked_signal
 
         if not self.tokenizer.uses_per_channel:
@@ -304,12 +306,13 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         device = input_values.device
         C_pad = input_mask.shape[1]
 
-        # 1. Pre-compute N (time tokens per channel) before tokenization
-        if self._variable_time_tokens:
-            N = input_values.shape[2]
+        # 1. Pre-compute N (time tokens per channel) before tokenization.
+        # The timestamp grid is built from each sample's actual duration, so it
+        # remains authoritative for both fixed- and variable-length batches.
+        if input_timestamps.ndim == 3:
+            N = input_timestamps.shape[2]
         else:
-            sr = input_sampling_rate[0].item()
-            N = self.tokenizer.get_num_time_tokens(self.sequence_length, sr)
+            N = input_timestamps.shape[1] // C_pad
 
         if input_timestamps.ndim == 3:
             input_timestamps = input_timestamps.reshape(B, -1)

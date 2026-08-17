@@ -913,7 +913,7 @@ def create_linspace_latent_tokens(
         ``np.ndarray`` of length ``num_steps * num_latents_per_step``.
     """
     sequence_len = end - start
-    num_steps = round(sequence_len / step)
+    num_steps = max(1, round(sequence_len / step))
     latent_timestamps = np.arange(num_steps) * step + step / 2 + start
     latent_index = np.arange(num_latents_per_step, dtype=np.int64)
 

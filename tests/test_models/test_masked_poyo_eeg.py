@@ -34,6 +34,7 @@ def _build_minimal_masked_model(
     N=10,
     sequence_length=1.0,
     mask_ratio=0.5,
+    channel_emb_mode="static",
 ):
     """Build a MaskedPOYOEEGModel with minimal config for testing.
 
@@ -97,6 +98,7 @@ def _build_minimal_masked_model(
         cross_heads=2,
         self_heads=2,
         masking=masking,
+        channel_emb_mode=channel_emb_mode,
     )
 
     session_ids = ["session_0", "session_1"]
@@ -262,6 +264,36 @@ class TestMaskedModelForward:
                 break
         assert has_grad
 
+    @pytest.mark.parametrize("actual_duration", [0.2, 0.5, 1.0])
+    def test_dynamic_channel_mask_uses_actual_batch_token_count(
+        self, actual_duration
+    ):
+        """Masking and tokenization must use the same variable-length grid."""
+        configured_duration = 1.0
+        configured_num_tokens = 10
+        target_token_rate = configured_num_tokens / configured_duration
+        actual_num_tokens = round(target_token_rate * actual_duration)
+        sampling_rate = 100.0
+        num_samples = round(sampling_rate * actual_duration)
+
+        model = _build_minimal_masked_model(
+            C_pad=4,
+            N=configured_num_tokens,
+            sequence_length=configured_duration,
+            channel_emb_mode="dynamic",
+        )
+
+        result = self._run_forward(
+            model,
+            B=2,
+            C_pad=4,
+            N=actual_num_tokens,
+            T=num_samples,
+            sr=sampling_rate,
+        )
+
+        assert result.viz.num_time_tokens == actual_num_tokens
+
     def _run_forward(
         self, model, B, C_pad, N, T, sr, include_recon_targets=True
     ):
@@ -269,7 +301,7 @@ class TestMaskedModelForward:
 
         input_values = torch.randn(B, C_pad, T, device=device)
         input_timestamps = (
-            torch.linspace(0, 1.0, N, device=device)
+            torch.linspace(0, T / sr, N, device=device)
             .unsqueeze(0)
             .expand(B, -1)
             .repeat(1, C_pad)
@@ -566,14 +598,10 @@ class TestZeroMaskedSignal:
             input_channel_index=(
                 torch.arange(C_pad, device=device).unsqueeze(0).expand(B, -1)
             ),
-            input_session_index=torch.zeros(
-                B, dtype=torch.long, device=device
-            ),
+            input_session_index=torch.zeros(B, dtype=torch.long, device=device),
             input_mask=input_mask,
             input_sampling_rate=torch.full((B,), sr, device=device),
-            input_seq_len=torch.full(
-                (B,), T, dtype=torch.long, device=device
-            ),
+            input_seq_len=torch.full((B,), T, dtype=torch.long, device=device),
             latent_index=torch.from_numpy(model._latent_index)
             .unsqueeze(0)
             .expand(B, -1)
@@ -588,9 +616,7 @@ class TestZeroMaskedSignal:
             ),
             output_timestamps=torch.zeros(B, 0, device=device),
             task_index=torch.zeros(B, 0, dtype=torch.long, device=device),
-            reconstruction_targets=torch.randn(
-                B, C_pad * N, device=device
-            ),
+            reconstruction_targets=torch.randn(B, C_pad * N, device=device),
         )
 
         return batch, signal_mask
