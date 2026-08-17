@@ -1,18 +1,19 @@
 # Multi-Length Pretraining: Do Varied Temporal Scales Produce More Versatile Representations?
 
-**Status:** On hold (2026-08-12) — awaiting [Channel Encoder Leak Fix](20260812-MS-channel-encoder-leak-fix-impact.md) results
+**Status:** In Progress (restarted 2026-08-14 with both leak fixes enabled)
 **Date started:** 2026-08-11
 **Parent experiment:** [Data Scaling Group](../02-data-scaling/README.md) (builds on B2 sweet spot)
 **Follow-up experiments:** TBD
 **Tags:** pretraining, mae, masked, sequence_length, multi_scale, cwt_cnn, dynamic_ch
 
-> **On hold (2026-08-12):** This experiment uses `channel_emb_mode="dynamic"`,
+> **Restarted (2026-08-14):** This experiment uses `channel_emb_mode="dynamic"`,
 > which was affected by an information leak in the `RelativeChannelEncoder`
-> (the encoder pooled over masked tokens, giving the decoder a shortcut). A
-> [leak fix ablation](20260812-MS-channel-encoder-leak-fix-impact.md) is now
-> running to quantify the impact. This experiment is paused until those
-> results are in; it will be relaunched post-fix to ensure results reflect
-> the corrected pretraining objective.
+> (the encoder pooled over masked tokens, giving the decoder a shortcut). The completed
+> [leak fix ablation](20260812-MS-channel-encoder-leak-fix-impact.md) confirmed
+> that both fixes should remain enabled. The restarted
+> run uses explicit `disable_channel_encoder_token_mask=false` and
+> `zero_masked_signal=true` overrides in the shared pretraining config and the
+> distinct `MASKING_SEQLEN_LEAK_FIXED` WandB/checkpoint group.
 
 ## Background
 
@@ -69,7 +70,7 @@ Expected: S1 Kemp Sleep LP > M0 Kemp Sleep LP by at least +0.03 F1.
   (effective batch_size=64), lr=1e-4, warmup 2k + cosine decay over 398k steps,
   bf16-mixed, intersubject validation, early stopping patience=10
 - **Window lengths:** [1.0, 2.0, 5.0, 10.0] — per-batch random selection
-- **WandB:** `foundry_pretraining`, group `MASKING_SEQLEN`
+- **WandB:** `foundry_pretraining`, group `MASKING_SEQLEN_LEAK_FIXED`
 
 ### Code changes (implemented)
 
@@ -105,7 +106,7 @@ uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
   hyperparameters.sequence_length=10.0 \
   hyperparameters.batch_size=16 \
   trainer.accumulate_grad_batches=4 \
-  run.name=pretrain_S1_multilength run.group=MASKING_SEQLEN -m
+  run.name=pretrain_S1_multilength_leak_fixed run.group=MASKING_SEQLEN_LEAK_FIXED -m
 ```
 
 ### Launch commands — Downstream evaluation
@@ -115,21 +116,21 @@ After pretraining, evaluate on 3 tasks × 2 modes × 3 folds = 18 runs:
 ```bash
 # Kemp Sleep
 uv run python main.py experiment=sleep_staging/kemp_finetune_from_data_scaling \
-  run.pretrain_run_name=pretrain_S1_multilength run.pretrain_group=MASKING_SEQLEN -m
+  run.pretrain_run_name=pretrain_S1_multilength_leak_fixed run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
 uv run python main.py experiment=sleep_staging/kemp_linear_probe_from_data_scaling \
-  run.pretrain_run_name=pretrain_S1_multilength run.pretrain_group=MASKING_SEQLEN -m
+  run.pretrain_run_name=pretrain_S1_multilength_leak_fixed run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
 
 # PhysioNet MI
 uv run python main.py experiment=motor_imagery/physionet_finetune_from_data_scaling \
-  run.pretrain_run_name=pretrain_S1_multilength run.pretrain_group=MASKING_SEQLEN -m
+  run.pretrain_run_name=pretrain_S1_multilength_leak_fixed run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
 uv run python main.py experiment=motor_imagery/physionet_linear_probe_from_data_scaling \
-  run.pretrain_run_name=pretrain_S1_multilength run.pretrain_group=MASKING_SEQLEN -m
+  run.pretrain_run_name=pretrain_S1_multilength_leak_fixed run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
 
 # Brain Invaders P300
 uv run python main.py experiment=p300/brain_invaders_finetune_from_data_scaling \
-  run.pretrain_run_name=pretrain_S1_multilength run.pretrain_group=MASKING_SEQLEN -m
+  run.pretrain_run_name=pretrain_S1_multilength_leak_fixed run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
 uv run python main.py experiment=p300/brain_invaders_linear_probe_from_data_scaling \
-  run.pretrain_run_name=pretrain_S1_multilength run.pretrain_group=MASKING_SEQLEN -m
+  run.pretrain_run_name=pretrain_S1_multilength_leak_fixed run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
 ```
 
 ### Key config overrides

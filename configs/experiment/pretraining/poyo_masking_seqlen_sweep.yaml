@@ -32,6 +32,11 @@ model:
   zero_output_timestamps: false
   normalize_inputs: true
   channel_emb_mode: dynamic
+  # These are explicit rather than relying on constructor defaults: both
+  # experiments use dynamic channel embeddings and must train with the two
+  # information-leak fixes enabled.
+  disable_channel_encoder_token_mask: false
+  zero_masked_signal: true
   masking:
     _target_: foundry.tasks.masking.TemporalBlockMasking
     block_size: 10
@@ -45,8 +50,8 @@ data:
 run:
   name: masking_seqlen_sweep
   project: foundry_pretraining
-  group: MASKING_SEQLEN
-  tags: [pretraining, mae, masked, masking_sweep, seqlen_sweep, cwt_cnn, dynamic_ch]
+  group: MASKING_SEQLEN_LEAK_FIXED
+  tags: [pretraining, mae, masked, masking_sweep, seqlen_sweep, cwt_cnn, dynamic_ch, leak_fixed]
   log_level: INFO
   compile: default
   resume_wandb_if_name_matches: true

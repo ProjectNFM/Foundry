@@ -1,20 +1,21 @@
 # Masking Parameter Sweep: Does Harder Masking Produce Better Downstream Features?
 
-**Status:** On hold (2026-08-12) — awaiting [Channel Encoder Leak Fix](20260812-MS-channel-encoder-leak-fix-impact.md) results
+**Status:** In Progress (restarted 2026-08-14 with both leak fixes enabled)
 **Date started:** 2026-08-11
 **Parent experiment:** [Data Scaling Group](../02-data-scaling/README.md) (builds on B2 sweet spot)
 **Follow-up experiments:** [Channel Encoder Leak Fix Impact](20260812-MS-channel-encoder-leak-fix-impact.md)
 **Tags:** pretraining, mae, masked, masking_sweep, cwt_cnn, dynamic_ch
 
-> **On hold (2026-08-12):** All runs in this sweep use
+> **Restarted (2026-08-14):** All runs in this sweep use
 > `channel_emb_mode="dynamic"`, which was affected by an information leak in
 > the `RelativeChannelEncoder` (the encoder pooled over masked tokens, giving
 > the decoder a shortcut). A [leak fix ablation](20260812-MS-channel-encoder-leak-fix-impact.md)
-> is now running to quantify the impact. Because the leak interacts with
+> has completed and confirmed both fixes should remain enabled. Because the leak interacts with
 > mask_ratio (higher ratios leak more information), the optimal masking
-> configuration may shift after the fix. This sweep is paused until those
-> results are in; it will be relaunched post-fix if the leak materially
-> affects downstream transfer.
+> configuration may shift after the fix. The restarted runs therefore use explicit
+> `disable_channel_encoder_token_mask=false` and `zero_masked_signal=true`
+> overrides in the shared pretraining config, and a distinct
+> `MASKING_SEQLEN_LEAK_FIXED` WandB/checkpoint group.
 
 ## Background
 
@@ -68,7 +69,7 @@ M4 (block_size=20) will perform comparably to M0 (same ratio, different granular
 - **Task:** MAE pretraining (masked reconstruction)
 - **Training:** 400k max steps, batch_size=64, lr=1e-4, warmup 2k + cosine decay
   over 398k steps, bf16-mixed, intersubject validation, early stopping patience=10
-- **WandB:** `foundry_pretraining`, group `MASKING_SEQLEN`
+- **WandB:** `foundry_pretraining`, group `MASKING_SEQLEN_LEAK_FIXED`
 
 ### Pretraining runs
 
@@ -86,31 +87,31 @@ M4 (block_size=20) will perform comparably to M0 (same ratio, different granular
 # M0: Baseline (mask_ratio=0.5, block_size=10)
 uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
   data=openneuro/three_dataset_pretrain \
-  run.name=pretrain_M0_baseline run.group=MASKING_SEQLEN -m
+  run.name=pretrain_M0_baseline_leak_fixed run.group=MASKING_SEQLEN_LEAK_FIXED -m
 
 # M1: mask_ratio=0.7
 uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
   data=openneuro/three_dataset_pretrain \
   model.masking.mask_ratio=0.7 \
-  run.name=pretrain_M1_ratio70 run.group=MASKING_SEQLEN -m
+  run.name=pretrain_M1_ratio70_leak_fixed run.group=MASKING_SEQLEN_LEAK_FIXED -m
 
 # M2: mask_ratio=0.8
 uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
   data=openneuro/three_dataset_pretrain \
   model.masking.mask_ratio=0.8 \
-  run.name=pretrain_M2_ratio80 run.group=MASKING_SEQLEN -m
+  run.name=pretrain_M2_ratio80_leak_fixed run.group=MASKING_SEQLEN_LEAK_FIXED -m
 
 # M3: mask_ratio=0.9
 uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
   data=openneuro/three_dataset_pretrain \
   model.masking.mask_ratio=0.9 \
-  run.name=pretrain_M3_ratio90 run.group=MASKING_SEQLEN -m
+  run.name=pretrain_M3_ratio90_leak_fixed run.group=MASKING_SEQLEN_LEAK_FIXED -m
 
 # M4: block_size=20
 uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
   data=openneuro/three_dataset_pretrain \
   model.masking.block_size=20 \
-  run.name=pretrain_M4_block20 run.group=MASKING_SEQLEN -m
+  run.name=pretrain_M4_block20_leak_fixed run.group=MASKING_SEQLEN_LEAK_FIXED -m
 ```
 
 ### Launch commands — Downstream evaluation
@@ -118,23 +119,23 @@ uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
 After pretraining, evaluate each checkpoint on 3 tasks × 2 modes × 3 folds = 18 runs per checkpoint:
 
 ```bash
-# Template — replace $NAME with pretrain run name (e.g. pretrain_M1_ratio70)
-for NAME in pretrain_M0_baseline pretrain_M1_ratio70 pretrain_M2_ratio80 pretrain_M3_ratio90 pretrain_M4_block20; do
+# Template — replace $NAME with a restarted pretrain run name (e.g. pretrain_M1_ratio70_leak_fixed)
+for NAME in pretrain_M0_baseline_leak_fixed pretrain_M1_ratio70_leak_fixed pretrain_M2_ratio80_leak_fixed pretrain_M3_ratio90_leak_fixed pretrain_M4_block20_leak_fixed; do
   # Kemp Sleep
   uv run python main.py experiment=sleep_staging/kemp_finetune_from_data_scaling \
-    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN -m
+    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
   uv run python main.py experiment=sleep_staging/kemp_linear_probe_from_data_scaling \
-    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN -m
+    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
   # PhysioNet MI
   uv run python main.py experiment=motor_imagery/physionet_finetune_from_data_scaling \
-    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN -m
+    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
   uv run python main.py experiment=motor_imagery/physionet_linear_probe_from_data_scaling \
-    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN -m
+    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
   # Brain Invaders P300
   uv run python main.py experiment=p300/brain_invaders_finetune_from_data_scaling \
-    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN -m
+    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
   uv run python main.py experiment=p300/brain_invaders_linear_probe_from_data_scaling \
-    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN -m
+    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
 done
 ```
 

@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-08-12
 **Parent experiment:** [Masking Parameter Sweep](20260811-MS-masking-parameter-sweep.md)
-**Follow-up experiments:** [Masking Parameter Sweep](20260811-MS-masking-parameter-sweep.md) (on hold), [Multi-Length Pretraining](20260811-MS-multi-length-pretraining.md) (on hold) — both paused pending these results
+**Follow-up experiments:** [Masking Parameter Sweep](20260811-MS-masking-parameter-sweep.md) (on hold), [Multi-Length Pretraining](20260811-MS-multi-length-pretraining.md) (on hold), [Leak-Fixed iEEG Pretraining for Neurosoft Transfer](20260814-MS-ieeg-leak-fixed-pretraining.md)
 **Tags:** pretraining, mae, masked, dynamic_ch, channel_encoder, information_leak, bugfix, ablation, signal_zeroing, tokenizer_comparison, cwt_cnn, resample_cnn
 
 ## Background
@@ -337,4 +337,3 @@ may make it a better metric for comparing pretraining configurations.
 contiguous regions, which may reduce the amount of useful signal the tokenizer
 can extract. This could interact differently with CWT (wider receptive field)
 vs ResampleCNN (narrower receptive field).
-
