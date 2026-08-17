@@ -7,7 +7,6 @@ from typing import Any
 
 import lightning as L
 import numpy as np
-import torch
 from lightning import Trainer
 
 from foundry.training.step_output import extract_step_output
@@ -18,8 +17,8 @@ log = logging.getLogger(__name__)
 class EmbeddingVisualizationCallback(L.Callback):
     """Visualize backbone embedding structure during validation epochs.
 
-    Registers a forward hook on ``model.backbone.processor`` to capture latent
-    representations. At each validation epoch end (respecting ``every_n_epochs``),
+    Requests typed representations from the model for scheduled validation
+    epochs. At each validation epoch end (respecting ``every_n_epochs``),
     computes PCA, optional t-SNE, and silhouette score on pooled embeddings,
     logging scatter plots and metrics to W&B.
 
@@ -46,10 +45,7 @@ class EmbeddingVisualizationCallback(L.Callback):
         self.compute_tsne = compute_tsne
         self.class_names = class_names
 
-        self._hook = None
-        self._ch_hook = None
-        self._latents: torch.Tensor | None = None
-        self._ch_latents: torch.Tensor | None = None
+        self._capture_scheduled = False
         self._emb_buffer: list[np.ndarray] = []
         self._label_buffer: list[np.ndarray] = []
         self._session_buffer: list[str] = []
@@ -60,39 +56,18 @@ class EmbeddingVisualizationCallback(L.Callback):
         self._n_ch_collected = 0
         self._idx_to_channel: dict[int, str] = {}
 
-    def _hook_fn(self, module, input, output):
-        self._latents = output.detach()
-
-    def _ch_hook_fn(self, module, input, output):
-        self._ch_latents = output.detach()
-
     def on_fit_start(
         self, trainer: Trainer, pl_module: L.LightningModule
     ) -> None:
         model = pl_module.model if hasattr(pl_module, "model") else pl_module
-        if not hasattr(model, "backbone") or not hasattr(
-            model.backbone, "processor"
-        ):
+        if not getattr(model, "supports_representation_capture", False):
             log.warning(
-                "EmbeddingVisualizationCallback: model has no "
-                "backbone.processor — disabling."
+                "EmbeddingVisualizationCallback: model does not expose the "
+                "representation contract."
             )
-            return
-
-        self._hook = model.backbone.processor.register_forward_hook(
-            self._hook_fn
-        )
-
-        if (
-            getattr(model, "channel_emb_mode", None) == "dynamic"
-            and getattr(model, "relative_channel_encoder", None) is not None
-        ):
-            self._ch_hook = (
-                model.relative_channel_encoder.register_forward_hook(
-                    self._ch_hook_fn
-                )
-            )
-            vocab = getattr(model.channel_emb, "vocab", None)
+        else:
+            channel_emb = getattr(model, "channel_emb", None)
+            vocab = getattr(channel_emb, "vocab", None)
             if vocab is not None:
                 self._idx_to_channel = {
                     idx: name for name, idx in vocab.items()
@@ -100,6 +75,20 @@ class EmbeddingVisualizationCallback(L.Callback):
 
         if self.class_names is None:
             self._discover_class_names(model)
+
+    def on_validation_epoch_start(
+        self, trainer: Trainer, pl_module: L.LightningModule
+    ) -> None:
+        self._capture_scheduled = (
+            not trainer.sanity_checking
+            and self.every_n_epochs > 0
+            and trainer.current_epoch % self.every_n_epochs == 0
+        )
+        setter = getattr(
+            pl_module, "set_validation_representation_capture", None
+        )
+        if setter is not None:
+            setter(self._capture_scheduled)
 
     def _discover_class_names(self, model) -> None:
         """Auto-discover class names from task_configs if available."""
@@ -119,15 +108,19 @@ class EmbeddingVisualizationCallback(L.Callback):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
-        if self._hook is None or self._latents is None:
+        if not self._capture_scheduled:
+            return
+        step_output = extract_step_output(outputs)
+        if step_output is None or step_output.representations is None:
+            return
+        representations = step_output.representations
+        pooled = representations.backbone_representations
+        ch_embs = representations.channel_representations
+        if pooled is None:
             return
         if self._n_collected >= self.max_samples:
             return
-
-        latents = self._latents
-        pooled = latents.mean(dim=1).cpu().numpy()  # (B, embed_dim)
-
-        step_output = extract_step_output(outputs)
+        pooled = pooled.cpu().numpy()
 
         labels = None
         if step_output is not None and step_output.target_values:
@@ -153,16 +146,10 @@ class EmbeddingVisualizationCallback(L.Callback):
             self._session_buffer.extend(session_ids[:n_take])
 
         self._n_collected += n_take
-        self._latents = None
 
-        if (
-            self._ch_hook is not None
-            and self._ch_latents is not None
-            and self._n_ch_collected < self.max_samples
-        ):
-            ch_embs = self._ch_latents  # (B, C, channel_emb_dim)
+        if ch_embs is not None and self._n_ch_collected < self.max_samples:
             ch_idx = batch.get("input_channel_index")  # (B, C)
-            ch_mask = batch.get("input_mask")  # (B, C)
+            ch_mask = representations.channel_mask
             if ch_idx is not None and ch_mask is not None:
                 ch_embs_np = ch_embs.cpu().numpy()
                 ch_idx_np = ch_idx.cpu().numpy()
@@ -182,20 +169,23 @@ class EmbeddingVisualizationCallback(L.Callback):
                         self._ch_emb_buffer.append(ch_embs_np[b, c])
                         self._ch_name_buffer.append(name)
                         self._n_ch_collected += 1
-            self._ch_latents = None
 
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: L.LightningModule
     ) -> None:
-        if self._hook is None:
+        setter = getattr(
+            pl_module, "set_validation_representation_capture", None
+        )
+        if setter is not None:
+            setter(False)
+        scheduled = self._capture_scheduled
+        self._capture_scheduled = False
+        if not scheduled:
+            self._clear_buffers()
             return
         if not self._emb_buffer:
             self._clear_buffers()
             return
-        if trainer.current_epoch % self.every_n_epochs != 0:
-            self._clear_buffers()
-            return
-
         from foundry.training.callbacks import get_wandb_experiment
 
         wandb_experiment = get_wandb_experiment(trainer)
@@ -715,9 +705,8 @@ class EmbeddingVisualizationCallback(L.Callback):
     def on_fit_end(
         self, trainer: Trainer, pl_module: L.LightningModule
     ) -> None:
-        if self._hook is not None:
-            self._hook.remove()
-            self._hook = None
-        if self._ch_hook is not None:
-            self._ch_hook.remove()
-            self._ch_hook = None
+        setter = getattr(
+            pl_module, "set_validation_representation_capture", None
+        )
+        if setter is not None:
+            setter(False)

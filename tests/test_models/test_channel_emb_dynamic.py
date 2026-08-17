@@ -338,6 +338,34 @@ class TestPOYODynamicChannelEmb:
         result = model(**batch)
         assert "task_a" in result.task_outputs
 
+    @pytest.mark.parametrize("mode", ["static", "dynamic"])
+    def test_representation_contract_captures_channel_and_backbone(self, mode):
+        model = _build_model_with_channel_mode(mode)
+        batch = _make_batch(model, B=2)
+        result = model(**batch, capture_representations=True)
+
+        payload = result.representations
+        assert payload is not None
+        assert payload.channel_mode == mode
+        assert payload.channel_representations.shape == (2, 4, 16)
+        assert payload.backbone_representations.shape == (2, 64)
+        torch.testing.assert_close(payload.channel_mask, batch["input_mask"])
+
+    def test_representation_contract_marks_disabled_channel_unavailable(self):
+        model = _build_model_with_channel_mode("disabled")
+        result = model(**_make_batch(model, B=2), capture_representations=True)
+
+        payload = result.representations
+        assert payload is not None
+        assert payload.channel_mode == "disabled"
+        assert payload.channel_representations is None
+        assert payload.backbone_representations.shape == (2, 64)
+
+    def test_representation_capture_is_off_by_default(self):
+        model = _build_model_with_channel_mode("dynamic")
+        result = model(**_make_batch(model))
+        assert result.representations is None
+
     def test_relative_channel_encoder_exists(self):
         model = _build_model_with_channel_mode("dynamic")
         assert model.relative_channel_encoder is not None
@@ -426,6 +454,21 @@ class TestMaskedPOYODynamicChannelEmb:
         batch = _make_masked_batch(model)
         result = model(**batch)
         assert "masked_reconstruction" in result.task_outputs
+
+    @pytest.mark.parametrize("mode", ["static", "dynamic", "disabled"])
+    def test_representation_contract(self, mode):
+        model = _build_masked_model_with_channel_mode(mode)
+        batch = _make_masked_batch(model)
+        result = model(**batch, capture_representations=True)
+
+        payload = result.representations
+        assert payload is not None
+        assert payload.channel_mode == mode
+        assert payload.backbone_representations.shape == (2, 64)
+        if mode == "disabled":
+            assert payload.channel_representations is None
+        else:
+            assert payload.channel_representations.shape == (2, 4, 16)
 
     def test_gradients_flow_through_encoder(self):
         model = _build_masked_model_with_channel_mode("dynamic")

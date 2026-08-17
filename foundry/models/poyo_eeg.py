@@ -19,6 +19,7 @@ import torch.nn as nn
 from torch_brain.data import Data
 from torch_brain.batching import chain, pad2d, pad8
 from torch_brain.nn import InfiniteVocabEmbedding, RotaryTimeEmbedding
+from foundry.data.metadata import extract_window_metadata
 from foundry.models.backbones import PerceiverIOBackbone
 from foundry.models.readout import build_readout_router
 from foundry.models.relative_channel_encoder import RelativeChannelEncoder
@@ -31,7 +32,7 @@ from foundry.models.signal_preparation import (
     PreparedSignal,
     normalize_encoder_inputs,
 )
-from foundry.models.ssl_meta import ModelOutput
+from foundry.models.ssl_meta import ModelOutput, RepresentationPayload
 from foundry.models.tokenizer import EEGTokenizer
 from foundry.tasks.config import TaskConfig
 from foundry.tasks.targets import extract_multitask_targets
@@ -100,6 +101,7 @@ class POYOEEGModel(nn.Module):
 
     _VALID_SESSION_EMB_MODES = ("static", "dynamic", "disabled")
     _VALID_CHANNEL_EMB_MODES = ("static", "dynamic", "disabled")
+    supports_representation_capture = True
 
     def __init__(
         self,
@@ -541,6 +543,7 @@ class POYOEEGModel(nn.Module):
         output_timestamps: torch.Tensor,
         task_index: torch.Tensor,
         unpack_output: bool = False,
+        capture_representations: bool = False,
         context_values: Optional[torch.Tensor] = None,
         context_channel_index: Optional[torch.Tensor] = None,
         context_mask: Optional[torch.Tensor] = None,
@@ -562,6 +565,9 @@ class POYOEEGModel(nn.Module):
             output_timestamps: (B, n_out) timestamps for output predictions.
             task_index: (B, n_out) task/decoder indices.
             unpack_output: Whether to unpack outputs by batch sample.
+            capture_representations: Include channel and pooled backbone
+                representations in the typed output. This should only be set
+                for scheduled validation events.
             context_values: (B, W, C, T) context windows for dynamic session
                 embedding. Only used when ``session_emb_mode == "dynamic"``.
             context_channel_index: (B, W, C) channel tokens per context window.
@@ -583,7 +589,7 @@ class POYOEEGModel(nn.Module):
                 "context_sampling_rate": context_sampling_rate,
             }
 
-        inputs, session_emb, _ch_emb_cache = self._tokenize_and_add_session(
+        inputs, session_emb, ch_emb_cache = self._tokenize_and_add_session(
             input_values,
             input_channel_index,
             input_session_index,
@@ -613,7 +619,23 @@ class POYOEEGModel(nn.Module):
             queries, latents, query_ts_emb, latent_ts_emb
         )
 
-        return ModelOutput(task_outputs=self._route(output_latents, task_index))
+        representations = None
+        if capture_representations:
+            representations = RepresentationPayload(
+                channel_representations=(
+                    ch_emb_cache
+                    if self.channel_emb_mode != "disabled"
+                    else None
+                ),
+                backbone_representations=latents.mean(dim=1),
+                channel_mode=self.channel_emb_mode,
+                channel_mask=input_mask,
+            )
+
+        return ModelOutput(
+            task_outputs=self._route(output_latents, task_index),
+            representations=representations,
+        )
 
     @property
     def task_configs(self) -> dict[str, TaskConfig]:
@@ -770,6 +792,7 @@ class POYOEEGModel(nn.Module):
         if sequence_length is None:
             sequence_length = self.sequence_length
         prepared = self._prepare_signal(data, sequence_length=sequence_length)
+        sample_metadata = extract_window_metadata(data)
 
         channel_ids = data.channels.id[prepared.modality_mask].astype(str)
         channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
@@ -817,8 +840,11 @@ class POYOEEGModel(nn.Module):
             "task_index": pad8(output_task_index),
             "target_values": chain(output_values, allow_missing_keys=True),
             "target_weights": chain(output_weights, allow_missing_keys=True),
-            "session_id": data.session.id,
-            "absolute_start": data.absolute_start,
+            "dataset_id": sample_metadata.dataset_id,
+            "subject_id": sample_metadata.subject_id,
+            "session_id": sample_metadata.session_id,
+            "absolute_start": sample_metadata.absolute_start,
+            "window_duration": sample_metadata.window_duration,
         }
         return result, prepared
 

@@ -13,7 +13,7 @@ from hydra.utils import instantiate
 from foundry.models.ssl_meta import ModelOutput
 from foundry.tasks.config import TaskConfig
 from foundry.training.confusion_matrix import ConfusionMatrixTracker
-from foundry.training.step_output import StepOutput
+from foundry.training.step_output import SampleMetadata, StepOutput
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,7 @@ class FoundryModule(L.LightningModule):
         self.train_metrics = nn.ModuleDict()
         self.val_metrics = nn.ModuleDict()
         self._val_confusion_trackers: dict[str, ConfusionMatrixTracker] = {}
+        self._capture_validation_representations = False
 
         for name, cfg in model.task_configs.items():
             self._task_losses[name] = instantiate(cfg.loss)
@@ -128,14 +129,29 @@ class FoundryModule(L.LightningModule):
         """Move batch tensors to *device*, casting float64 to float32."""
         from lightning_utilities.core.apply_func import apply_to_collection
 
+        # Identity coordinates must retain their source precision for stable
+        # cross-run fingerprints. They are callback metadata, not model inputs.
+        identity_metadata = {
+            key: batch.pop(key)
+            for key in ("absolute_start", "window_duration")
+            if key in batch
+        }
+
         def _move_and_convert(tensor):
             if tensor.dtype == torch.float64:
                 tensor = tensor.float()
             return tensor.to(device, non_blocking=True)
 
-        return apply_to_collection(
+        moved = apply_to_collection(
             batch, dtype=torch.Tensor, function=_move_and_convert
         )
+        moved.update(identity_metadata)
+        return moved
+
+    def set_validation_representation_capture(self, enabled: bool) -> None:
+        """Enable model representation output for upcoming validation steps."""
+
+        self._capture_validation_representations = bool(enabled)
 
     def forward(self, **kwargs) -> Dict[str, Any]:
         return self.model(**kwargs)
@@ -170,20 +186,35 @@ class FoundryModule(L.LightningModule):
             :class:`StepOutput` with the total loss, per-task outputs,
             targets, weights, and optional SSL/reconstruction metadata.
         """
-        model_inputs, target_values, target_weights, task_index, session_id = (
-            self._unpack_batch(batch)
-        )
+        (
+            model_inputs,
+            target_values,
+            target_weights,
+            task_index,
+            sample_metadata,
+        ) = self._unpack_batch(batch)
         batch_size = task_index.shape[0]
-        model_output = self.model(**model_inputs, unpack_output=False)
+        model_kwargs: dict[str, Any] = {"unpack_output": False}
+        if getattr(self.model, "supports_representation_capture", False):
+            model_kwargs["capture_representations"] = (
+                stage == "val" and self._capture_validation_representations
+            )
+        model_output = self.model(**model_inputs, **model_kwargs)
 
         if isinstance(model_output, ModelOutput):
             outputs = model_output.task_outputs
             ssl_meta = model_output.ssl_meta
             reconstruction_viz = model_output.viz
+            representations = (
+                model_output.representations.detached()
+                if model_output.representations is not None
+                else None
+            )
         else:
             outputs = model_output
             ssl_meta = outputs.pop("_ssl_meta", None)
             reconstruction_viz = outputs.pop("_reconstruction_viz", None)
+            representations = None
         ssl_task_names: set[str] = set()
         if ssl_meta is not None:
             for task_name, meta in ssl_meta.items():
@@ -248,7 +279,9 @@ class FoundryModule(L.LightningModule):
             target_values=target_values,
             target_weights=target_weights,
             task_index=task_index,
-            session_id=session_id,
+            session_id=sample_metadata.session_id,
+            sample_metadata=sample_metadata.detached(),
+            representations=representations,
             ssl_task_names=ssl_task_names,
             reconstruction_viz=reconstruction_viz,
             reconstruction_targets=model_inputs.get("reconstruction_targets"),
@@ -514,23 +547,34 @@ class FoundryModule(L.LightningModule):
     def _unpack_batch(self, batch: Dict[str, Any]):
         """Separate target/metadata keys from model-input keys in the batch.
 
-        Pops ``target_values``, ``target_weights``, ``session_id``,
-        ``absolute_start``, and ``eval_mask`` from *batch* (mutating it
+        Pops targets and callback metadata from *batch* (mutating it
         in-place) so that the remaining dict can be passed directly as
         ``**model_inputs``.
 
         Returns:
             ``(model_inputs, target_values, target_weights, task_index,
-            session_id)`` where *model_inputs* is the modified *batch*.
+            sample_metadata)`` where *model_inputs* is the modified *batch*.
         """
         target_values = batch.pop("target_values")
         target_weights = batch.pop("target_weights")
+        dataset_id = batch.pop("dataset_id", None)
+        subject_id = batch.pop("subject_id", None)
         session_id = batch.pop("session_id", None)
-        batch.pop("absolute_start", None)
+        absolute_start = batch.pop("absolute_start", None)
+        window_duration = batch.pop("window_duration", None)
         batch.pop("eval_mask", None)
 
         task_index = batch["task_index"]
-        return batch, target_values, target_weights, task_index, session_id
+        sample_metadata = SampleMetadata(
+            dataset_id=dataset_id,
+            subject_id=subject_id,
+            session_id=session_id,
+            absolute_start=absolute_start,
+            window_duration=window_duration,
+            channel_index=batch.get("input_channel_index"),
+            channel_mask=batch.get("input_mask"),
+        )
+        return batch, target_values, target_weights, task_index, sample_metadata
 
     def _compute_task_losses(
         self,

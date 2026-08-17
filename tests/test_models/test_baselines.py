@@ -223,8 +223,11 @@ class TestBaselineTokenize:
             "task_index",
             "target_values",
             "target_weights",
+            "dataset_id",
+            "subject_id",
             "session_id",
             "absolute_start",
+            "window_duration",
         }
         assert set(tokens.keys()) == expected_keys
 

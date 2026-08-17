@@ -36,6 +36,44 @@ class _StubTaskModel(nn.Module):
         return self.router(output_embs, task_index)
 
 
+class _CaptureStubTaskModel(_StubTaskModel):
+    supports_representation_capture = True
+
+    def __init__(self, task_configs, embed_dim=8):
+        super().__init__(task_configs, embed_dim)
+        self.scale = nn.Parameter(torch.ones(()))
+        self.capture_requests: list[bool] = []
+
+    def forward(
+        self,
+        output_embs,
+        task_index=None,
+        unpack_output=False,
+        capture_representations=False,
+        input_channel_index=None,
+        input_mask=None,
+        **kwargs,
+    ):
+        from foundry.models.ssl_meta import ModelOutput, RepresentationPayload
+
+        del unpack_output, kwargs
+        self.capture_requests.append(capture_representations)
+        representations = None
+        if capture_representations:
+            batch_size = task_index.shape[0]
+            backbone = output_embs[:batch_size] * self.scale
+            representations = RepresentationPayload(
+                channel_representations=backbone.unsqueeze(1),
+                backbone_representations=backbone,
+                channel_mode="dynamic",
+                channel_mask=input_mask,
+            )
+        return ModelOutput(
+            task_outputs=self.router(output_embs, task_index),
+            representations=representations,
+        )
+
+
 def test_foundry_module_instantiates_losses_from_task_config_yaml():
     from foundry.training import FoundryModule
 
@@ -231,6 +269,47 @@ def test_transfer_batch_to_device_converts_float64_to_float32():
 
     assert moved["output_embs"].dtype == torch.float32
     assert moved["target_values"][cfg.name].dtype == torch.float32
+
+
+def test_validation_representation_capture_is_gated_and_detached():
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
+    model = _CaptureStubTaskModel({cfg.name: cfg}, embed_dim=4)
+    module = FoundryModule(model=model)
+    module.log = lambda *args, **kwargs: None
+    module.log_dict = lambda *args, **kwargs: None
+    task_idx = model.router.get_task_index_by_name(cfg.name) + 1
+
+    def make_batch():
+        return {
+            "output_embs": torch.randn(4, 4),
+            "input_channel_index": torch.tensor([[1], [2]]),
+            "input_mask": torch.ones(2, 1, dtype=torch.bool),
+            "task_index": torch.full((2, 2), task_idx),
+            "target_values": {cfg.name: torch.tensor([0, 1, 0, 1])},
+            "target_weights": {cfg.name: 1.0},
+            "dataset_id": ["dataset", "dataset"],
+            "subject_id": ["sub-1", "sub-2"],
+            "session_id": ["ses-1", "ses-2"],
+            "absolute_start": torch.tensor([0.1, 0.2], dtype=torch.float64),
+            "window_duration": torch.tensor([1.0, 1.0], dtype=torch.float64),
+        }
+
+    uncaptured = module._shared_step("val", make_batch())
+    assert uncaptured.representations is None
+
+    module.set_validation_representation_capture(True)
+    captured = module._shared_step("val", make_batch())
+    assert captured.representations is not None
+    assert not captured.representations.backbone_representations.requires_grad
+    assert captured.sample_metadata.dataset_id == ["dataset", "dataset"]
+    assert captured.sample_metadata.subject_id == ["sub-1", "sub-2"]
+    assert captured.sample_metadata.channel_index.shape == (2, 1)
+
+    training = module._shared_step("train", make_batch())
+    assert training.representations is None
+    assert model.capture_requests == [False, True, False]
 
 
 def test_wandb_metric_summaries_use_task_config_modes():

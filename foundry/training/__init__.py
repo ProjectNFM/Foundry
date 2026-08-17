@@ -10,7 +10,7 @@ from foundry.training.pretrained import (
     TransferReport,
     load_pretrained_weights,
 )
-from foundry.training.step_output import StepOutput
+from foundry.training.step_output import SampleMetadata, StepOutput
 
 __all__ = [
     "ConfusionMatrixCallback",
@@ -18,6 +18,7 @@ __all__ = [
     "ParameterWatcherCallback",
     "PretrainedTransferError",
     "ReconstructionVisualizationCallback",
+    "SampleMetadata",
     "StepOutput",
     "TransferMode",
     "TransferReport",

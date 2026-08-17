@@ -12,6 +12,7 @@ from torch_brain.data import Data
 from torch_brain.batching import chain, pad8, pad2d
 from typing import Dict, Any
 
+from foundry.data.metadata import extract_window_metadata
 from foundry.models.readout import ReadoutRouter, build_readout_router
 from foundry.tasks.config import TaskConfig
 from foundry.tasks.targets import extract_multitask_targets
@@ -177,13 +178,17 @@ class BaselineEEGModel(nn.Module):
             self._extract_targets(data)
         )
 
+        sample_metadata = extract_window_metadata(data)
         return {
             "input_values": pad2d(x),
             "task_index": pad8(output_task_index),
             "target_values": chain(output_values, allow_missing_keys=True),
             "target_weights": chain(output_weights, allow_missing_keys=True),
-            "session_id": data.session.id,
-            "absolute_start": float(data.absolute_start),
+            "dataset_id": sample_metadata.dataset_id,
+            "subject_id": sample_metadata.subject_id,
+            "session_id": sample_metadata.session_id,
+            "absolute_start": sample_metadata.absolute_start,
+            "window_duration": sample_metadata.window_duration,
         }
 
     def unpack_batch(self, batch: Dict[str, Any]) -> tuple:

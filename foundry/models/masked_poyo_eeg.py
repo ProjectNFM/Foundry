@@ -19,6 +19,7 @@ from torch_brain.batching import pad2d
 from foundry.models.poyo_eeg import POYOEEGModel
 from foundry.models.ssl_meta import (
     ModelOutput,
+    RepresentationPayload,
     ReconstructionVizMeta,
     SSLTaskMeta,
 )
@@ -239,6 +240,7 @@ class MaskedPOYOEEGModel(POYOEEGModel):
         task_index: torch.Tensor,
         reconstruction_targets: Optional[torch.Tensor] = None,
         unpack_output: bool = False,
+        capture_representations: bool = False,
         context_values: Optional[torch.Tensor] = None,
         context_channel_index: Optional[torch.Tensor] = None,
         context_mask: Optional[torch.Tensor] = None,
@@ -278,6 +280,9 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             reconstruction_targets: (B, C_pad*N) or (B, C_pad, N) z-scored targets.
                 ``None`` during inference (no target gathering).
             unpack_output: Unused (kept for API compatibility with base class).
+            capture_representations: Include channel and pooled backbone
+                representations in the typed output. This should only be set
+                for scheduled validation events.
             context_values: (B, W, C, T) context windows for dynamic session
                 embedding. Only used when ``session_emb_mode == "dynamic"``.
             context_channel_index: (B, W, C) channel tokens per context window.
@@ -470,8 +475,24 @@ class MaskedPOYOEEGModel(POYOEEGModel):
             num_time_tokens=N,
         )
 
+        representations = None
+        if capture_representations:
+            representations = RepresentationPayload(
+                channel_representations=(
+                    ch_emb_cache
+                    if self.channel_emb_mode != "disabled"
+                    else None
+                ),
+                backbone_representations=latents.mean(dim=1),
+                channel_mode=self.channel_emb_mode,
+                channel_mask=input_mask,
+            )
+
         return ModelOutput(
-            task_outputs=task_outputs, ssl_meta=ssl_meta, viz=viz
+            task_outputs=task_outputs,
+            ssl_meta=ssl_meta,
+            viz=viz,
+            representations=representations,
         )
 
     def tokenize(self, data: Data) -> dict:
