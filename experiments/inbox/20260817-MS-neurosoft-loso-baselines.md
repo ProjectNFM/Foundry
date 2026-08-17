@@ -1,6 +1,6 @@
 # NeuroSoft Leave-One-Subject-Out From-Scratch Baselines
 
-**Status:** Draft
+**Status:** In Progress
 **Date started:** 2026-08-17
 **Parent experiment:** [Leak-Fixed iEEG Pretraining for Neurosoft Transfer](20260814-MS-ieeg-leak-fixed-pretraining.md)
 **Follow-up experiments:** TBD — compare LOSO baselines with Kochi-only and Kochi + B2 leak-fixed pretraining
@@ -55,20 +55,18 @@ define the required baseline for later pretraining transfer.
   embeddings.  Run minipigs and monkeys separately.
 - **Data:** all recordings from all non-held-out subjects form the training
   pool for each species.  All recordings belonging to the held-out subject are
-  excluded from training and validation.
+  excluded from training and are used only for validation.
 - **Task:** `neurosoft_acoustic_stim_8band`, with the established
   multi-frequency eight-band label mapping.
-- **Split:** LOSO over every subject represented in the species cohort.
-  Within each LOSO fold, reserve a subject-disjoint validation partition from
-  the training subjects for early stopping, and reserve the held-out subject
-  exclusively for final test evaluation.  Record subject and recording IDs in
-  the resolved config and WandB metadata.
+- **Split:** validation-only LOSO over every subject represented in the species
+  cohort.  The held-out subject is the subject-disjoint validation partition;
+  no test pass is run.  Record the subject and recording IDs in the resolved
+  config and WandB metadata.
 - **Training:** full supervised finetuning from random initialization.  Use
   identical recipe, seed(s), early stopping, and checkpoint policy for every
   held-out subject within a species.
-- **Primary metric:** macro F1 on the held-out subject from the best
-  validation-selected checkpoint, logged as
-  `test/neurosoft_acoustic_stim_8band_f1`.  Aggregate as subject-macro mean±SD
+- **Primary metric:** macro F1 on the held-out validation subject, logged as
+  `val/neurosoft_acoustic_stim_8band_f1`.  Aggregate as subject-macro mean±SD
   and report every held-out subject; retain AUROC, precision, recall, balanced
   accuracy, and per-class metrics.
 - **WandB:** project `auditory_decoding`; group
@@ -77,9 +75,9 @@ define the required baseline for later pretraining transfer.
 ### Launch command
 
 ```bash
-# TBD — first add and validate LOSO split assignments plus best-checkpoint
-# test evaluation, then launch one run per species, held-out subject, and seed.
-uv run python main.py experiment=auditory_decoding/neurosoft_8band_loso_scratch -m
+# Queues one job for every held-out subject (seven minipigs, six monkeys).
+uv run python main.py experiment=auditory_decoding/neurosoft_8band_loso_scratch_minipigs -m
+uv run python main.py experiment=auditory_decoding/neurosoft_8band_loso_scratch_monkeys -m
 ```
 
 ### Key config overrides
@@ -100,7 +98,12 @@ uv run python main.py experiment=auditory_decoding/neurosoft_8band_loso_scratch 
 | Gradient clip | 0.5 | 1.0 | Prior optimized-HP baseline |
 | Class-weight smoothing | 0.75 | 1.0 | Prior class-weight sweep |
 | Token rate | 100 Hz | 100 Hz | Prior sampling-rate sweep |
-| Split | LOSO with subject-disjoint validation and test sets | same | This experiment |
+| Split | validation-only LOSO with a subject-disjoint validation set | same | This experiment |
+| Labeled sampling window | 0.5 s | same | NeuroSoft trial interval length; POYO remains a 2.0-s model |
+| Effective batch size | 128 (microbatch 16 × gradient accumulation 8) | same | Fits the cluster GPU memory budget |
+
+The held-out recordings log aggregate validation metrics and per-recording
+`val_session/...` values, including scalar per-class F1, precision, and recall.
 
 ## Results
 

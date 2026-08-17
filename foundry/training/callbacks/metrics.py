@@ -153,10 +153,52 @@ class SessionMetricsCallback(L.Callback):
                         value.item() if torch.is_tensor(value) else value
                     )
 
+                # Keep scalar, class-specific classification metrics alongside
+                # the macro metrics above.  This is intentionally callback-only:
+                # Lightning's ``self.log_dict`` accepts scalar metric values,
+                # whereas torchmetrics' ``average=None`` returns a vector.
+                if cfg.kind == "multiclass" and cfg.class_mapping is not None:
+                    self._add_per_class_metrics(
+                        all_metrics,
+                        short,
+                        task_name,
+                        cfg.get_class_names(),
+                        metric_preds,
+                        metric_targets,
+                    )
+
         if all_metrics and trainer.logger is not None:
             trainer.logger.log_metrics(all_metrics, step=trainer.current_epoch)
 
         self._val_session_buffers = {}
+
+    @staticmethod
+    def _add_per_class_metrics(
+        all_metrics: dict[str, float],
+        short_session_id: str,
+        task_name: str,
+        class_names: list[str],
+        preds: torch.Tensor,
+        targets: torch.Tensor,
+    ) -> None:
+        """Log F1, precision, and recall for every class in one session."""
+        from torchmetrics.classification import F1Score, Precision, Recall
+
+        num_classes = len(class_names)
+        for metric_name, metric_class in (
+            ("f1", F1Score),
+            ("precision", Precision),
+            ("recall", Recall),
+        ):
+            values = metric_class(
+                task="multiclass", num_classes=num_classes, average=None
+            )(preds, targets)
+            for class_name, value in zip(class_names, values):
+                key = (
+                    f"val_session/{short_session_id}/{task_name}_"
+                    f"{metric_name}_class_{class_name}"
+                )
+                all_metrics[key] = value.item()
 
     @staticmethod
     def _shorten_session_id(session_id: str) -> str:

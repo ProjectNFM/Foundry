@@ -1,6 +1,6 @@
 # NeuroSoft Intrasession Multisubject From-Scratch Baselines
 
-**Status:** Draft
+**Status:** In Progress
 **Date started:** 2026-08-17
 **Parent experiment:** [Leak-Fixed iEEG Pretraining for Neurosoft Transfer](20260814-MS-ieeg-leak-fixed-pretraining.md)
 **Follow-up experiments:** TBD — compare these baselines with Kochi-only and Kochi + B2 leak-fixed pretraining
@@ -74,9 +74,9 @@ architecture.
 ### Launch command
 
 ```bash
-# TBD — add the dedicated species-aware experiment config, then launch both
-# species across folds 0, 1, and 2.
-uv run python main.py experiment=auditory_decoding/neurosoft_8band_intrasession_scratch -m
+# Each command queues three independent block-fold jobs.
+uv run python main.py experiment=auditory_decoding/neurosoft_8band_intrasession_scratch_minipigs -m
+uv run python main.py experiment=auditory_decoding/neurosoft_8band_intrasession_scratch_monkeys -m
 ```
 
 ### Key config overrides
@@ -98,6 +98,13 @@ uv run python main.py experiment=auditory_decoding/neurosoft_8band_intrasession_
 | Class-weight smoothing | 0.75 | 1.0 | Prior class-weight sweep |
 | Token rate | 100 Hz | 100 Hz | Prior sampling-rate sweep |
 | Split / folds | `intrasession-block`; 0, 1, 2 | same | This experiment |
+| Labeled sampling window | 0.5 s | same | NeuroSoft trial interval length; POYO remains a 2.0-s model |
+| Effective batch size | 128 (microbatch 16 × gradient accumulation 8) | same | Fits the cluster GPU memory budget |
+
+Validation logs include the aggregate task metrics plus
+`val_session/<subject_session_acquisition>/...` for each recording.  Each
+session emits macro F1, AUROC, precision, recall, balanced accuracy, Cohen's
+kappa, and scalar per-class F1/precision/recall.
 
 ## Results
 

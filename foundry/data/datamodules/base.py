@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_INTERPOLATION_ONLY_KEYS = ("subject",)
+_INTERPOLATION_ONLY_KEYS = ("subject", "held_out_subject")
 
 
 def _disable_gc_in_worker(worker_id: int) -> None:
@@ -65,7 +65,13 @@ def normalize_data_config(data_cfg: DictConfig) -> None:
     stripped before instantiation so they are not passed to the datamodule
     constructor.
     """
-    merges = ("task_type", "split_type", "fold", "recording_ids")
+    merges = (
+        "task_type",
+        "split_type",
+        "fold",
+        "recording_ids",
+        "held_out_subject",
+    )
     if "dataset_kwargs" not in data_cfg:
         OmegaConf.update(data_cfg, "dataset_kwargs", {}, force_add=True)
 
