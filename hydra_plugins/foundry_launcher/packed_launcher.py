@@ -55,6 +55,7 @@ class PackedSubmititLauncher(BaseSubmititLauncher):
         if snapshot_json:
             from hydra_plugins.foundry_launcher.launch_snapshot import (
                 LaunchSnapshot,
+                verify_import_paths,
                 verify_snapshot,
             )
 
@@ -79,6 +80,9 @@ class PackedSubmititLauncher(BaseSubmititLauncher):
 
             if self._get_snapshot_config().get("verify_on_worker", True):
                 verify_snapshot(snapshot)
+                import foundry  # noqa: F401
+
+                verify_import_paths(snapshot.source_dir)
 
         task_id = submitit.JobEnvironment().global_rank
 

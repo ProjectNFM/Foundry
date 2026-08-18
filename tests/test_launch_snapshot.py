@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from hydra_plugins.foundry_launcher.launch_snapshot import (
     _validate_clean_repo,
     build_setup_commands,
     prepare_snapshot,
+    verify_import_paths,
     verify_snapshot,
 )
 from hydra_plugins.foundry_launcher.packed_launcher import (
@@ -179,3 +181,29 @@ def test_packed_launcher_accepts_submitit_tuple_snapshot_descriptor(
 
     assert result == "called"
     assert captured["args"][0] == ["fold=0"]
+
+
+def test_import_verification_ignores_submitit_worker_entrypoint(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    source_dir = tmp_path / "snapshot" / "source"
+    foundry_file = source_dir / "foundry" / "__init__.py"
+    launcher_file = (
+        source_dir / "hydra_plugins" / "foundry_launcher" / "__init__.py"
+    )
+    foundry_file.parent.mkdir(parents=True)
+    launcher_file.parent.mkdir(parents=True)
+    foundry_file.touch()
+    launcher_file.touch()
+
+    foundry_module = types.ModuleType("foundry")
+    foundry_module.__file__ = str(foundry_file)
+    launcher_module = types.ModuleType("hydra_plugins.foundry_launcher")
+    launcher_module.__file__ = str(launcher_file)
+    monkeypatch.setitem(sys.modules, "foundry", foundry_module)
+    monkeypatch.setitem(
+        sys.modules, "hydra_plugins.foundry_launcher", launcher_module
+    )
+    monkeypatch.setattr(sys, "argv", ["/venv/bin/submitit.core._submit"])
+
+    verify_import_paths(source_dir)

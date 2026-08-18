@@ -540,10 +540,6 @@ def verify_import_paths(source_dir: str | Path) -> None:
                 f"  {label}: loaded from {mod_file} (expected under {source_dir})"
             )
 
-    main_file = os.path.abspath(sys.argv[0]) if sys.argv else None
-    if main_file and not main_file.startswith(source_dir):
-        issues.append(f"  main.py: {main_file} (expected under {source_dir})")
-
     if issues:
         raise RuntimeError(
             "Snapshot import verification failed; application modules were "
