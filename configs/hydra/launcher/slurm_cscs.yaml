@@ -20,9 +20,12 @@ srun_args:
 additional_parameters:
   requeue: true
 setup:
-  - "set -a"
-  - "source .env"
-  - "set +a"
-  - "cd ${oc.env:SCRATCH}/Foundry"
   - "export RANK=0"
   - "rm -rf /dev/shm/${oc.env:USER}/enrootrun 2>/dev/null || true"
+
+snapshot:
+  enabled: true
+  root: ${oc.env:SCRATCH}/foundry-launches
+  require_clean_git: true
+  verify_on_worker: true
+  environment_file: ${oc.env:FOUNDRY_ENV_FILE,".env"}

@@ -23,14 +23,13 @@ Then launch with ``-m``::
 import logging
 import os
 import queue
-import shutil
 import signal
 import subprocess
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 from hydra.core.utils import (
     JobReturn,
@@ -40,7 +39,7 @@ from hydra.core.utils import (
 )
 from hydra.plugins.launcher import Launcher
 from hydra.types import HydraContext, TaskFunction
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 log = logging.getLogger(__name__)
 
@@ -55,10 +54,12 @@ class LocalGpuLauncher(Launcher):
         gpus: Optional[List[int]] = None,
         stop_on_failure: bool = False,
         only_free_gpus: bool = True,
+        snapshot: Optional[Any] = None,
     ) -> None:
         self.gpus = gpus
         self.stop_on_failure = stop_on_failure
         self.only_free_gpus = only_free_gpus
+        self._snapshot_cfg = snapshot
         self.config: Optional[DictConfig] = None
         self.task_function: Optional[TaskFunction] = None
         self.hydra_context: Optional[HydraContext] = None
@@ -137,49 +138,20 @@ class LocalGpuLauncher(Launcher):
             )
         return candidates
 
-    def _snapshot_launch_context(self, sweep_dir: Path) -> Path:
-        """Snapshot configs and source code into the sweep directory so that
-        every subprocess -- even ones queued for later -- uses the code and
-        config as they existed at launch time.
-
-        The snapshot mirrors the project root layout (``main.py``,
-        ``foundry/``, ``hydra_plugins/``, ``configs/``) so that Hydra's
-        ``@hydra.main(config_path="configs")`` resolves correctly without
-        needing ``--config-dir``.
-
-        Returns the absolute path of the snapshot directory.
-        """
-        assert self.config is not None
-        ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
-
-        snapshot = sweep_dir / ".launch_snapshot"
-        if snapshot.exists():
-            shutil.rmtree(snapshot)
-        snapshot.mkdir()
-
-        project_root = Path(sys.argv[0]).resolve().parent
-
-        for pkg in ("foundry", "hydra_plugins"):
-            pkg_dir = project_root / pkg
-            if pkg_dir.is_dir():
-                shutil.copytree(pkg_dir, snapshot / pkg, ignore=ignore)
-
-        for py_file in project_root.glob("*.py"):
-            shutil.copy2(py_file, snapshot / py_file.name)
-
-        for src in self.config.hydra.runtime.config_sources:
-            if src.schema != "file" or not src.path:
-                continue
-            src_path = Path(src.path)
-            if not src_path.is_dir():
-                continue
-            config_dest = snapshot / src_path.relative_to(project_root)
-            shutil.copytree(src_path, config_dest, ignore=ignore)
-            break
-
-        snapshot = snapshot.resolve()
-        log.info("Launch snapshot: %s", snapshot)
-        return snapshot
+    def _get_snapshot_config(self) -> dict[str, Any]:
+        """Extract snapshot settings from launcher params."""
+        raw = self._snapshot_cfg
+        if raw is None:
+            return {"enabled": False}
+        try:
+            if OmegaConf.is_config(raw):
+                return dict(OmegaConf.to_container(raw, resolve=True))
+        except Exception:
+            pass
+        try:
+            return dict(raw) if raw else {"enabled": False}
+        except Exception:
+            return {"enabled": False}
 
     def launch(
         self,
@@ -196,7 +168,43 @@ class LocalGpuLauncher(Launcher):
         sweep_dir = Path(str(self.config.hydra.sweep.dir))
         sweep_dir.mkdir(parents=True, exist_ok=True)
 
-        snapshot = self._snapshot_launch_context(sweep_dir)
+        snap_cfg = self._get_snapshot_config()
+        snapshot_enabled = snap_cfg.get("enabled", False)
+
+        if snapshot_enabled:
+            from hydra_plugins.foundry_launcher.launch_snapshot import (
+                prepare_snapshot,
+            )
+
+            project_root = Path(sys.argv[0]).resolve().parent
+            raw_root = snap_cfg.get("root")
+            if raw_root and str(raw_root) != "null":
+                snapshot_root = Path(str(raw_root))
+            else:
+                snapshot_root = sweep_dir / ".launch_snapshot_bundles"
+
+            sweep_name = str(
+                OmegaConf.select(
+                    self.config,
+                    "run.group",
+                    default=OmegaConf.select(
+                        self.config, "run.name", default="sweep"
+                    ),
+                )
+            )
+
+            snapshot = prepare_snapshot(
+                project_root=project_root,
+                snapshot_root=snapshot_root,
+                sweep_name=sweep_name,
+                job_overrides=job_overrides,
+                hydra_cfg=self.config,
+                require_clean_git=snap_cfg.get("require_clean_git", True),
+            )
+            snapshot_source = Path(snapshot.source_dir)
+        else:
+            snapshot = None
+            snapshot_source = self._legacy_snapshot(sweep_dir)
 
         gpus = self._resolve_gpus()
         num_jobs = len(job_overrides)
@@ -215,7 +223,7 @@ class LocalGpuLauncher(Launcher):
         proc_lock = threading.Lock()
         failure_event = threading.Event()
 
-        script = str(snapshot / Path(sys.argv[0]).name)
+        script = str(snapshot_source / Path(sys.argv[0]).name)
 
         def _run_one(idx: int, overrides: list[str]) -> int:
             gpu_id = gpu_pool.get()
@@ -226,8 +234,25 @@ class LocalGpuLauncher(Launcher):
                 cmd = [sys.executable, script] + overrides
                 env = {**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)}
                 env["PYTHONPATH"] = (
-                    str(snapshot) + os.pathsep + env.get("PYTHONPATH", "")
+                    str(snapshot_source)
+                    + os.pathsep
+                    + env.get("PYTHONPATH", "")
                 )
+
+                if snapshot:
+                    snapshot_env = {
+                        "FOUNDRY_SNAPSHOT_BUNDLE_DIR": snapshot.bundle_dir,
+                        "FOUNDRY_SNAPSHOT_SOURCE_DIR": snapshot.source_dir,
+                        "FOUNDRY_SNAPSHOT_MANIFEST": snapshot.manifest_path,
+                        "FOUNDRY_SNAPSHOT_GIT_SHA": snapshot.git_sha,
+                        "FOUNDRY_SNAPSHOT_SOURCE_DIGEST": snapshot.source_digest,
+                        "FOUNDRY_SNAPSHOT_BUNDLE_ID": snapshot.bundle_id,
+                        "FOUNDRY_SNAPSHOT_VERIFY_ON_WORKER": str(
+                            int(snap_cfg.get("verify_on_worker", True))
+                        ),
+                    }
+                    env.update(snapshot_env)
+
                 desc = " ".join(filter_overrides(overrides))
                 log.info("  #%d [GPU %d]: %s", idx, gpu_id, desc)
 
@@ -292,3 +317,44 @@ class LocalGpuLauncher(Launcher):
             )
 
         return []
+
+    # ------------------------------------------------------------------
+    # Legacy fallback (snapshot.enabled=false)
+    # ------------------------------------------------------------------
+
+    def _legacy_snapshot(self, sweep_dir: Path) -> Path:
+        """Copy-based snapshot for backward compatibility when the Git-based
+        snapshot is disabled."""
+        import shutil
+
+        assert self.config is not None
+        ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
+
+        snapshot = sweep_dir / ".launch_snapshot"
+        if snapshot.exists():
+            shutil.rmtree(snapshot)
+        snapshot.mkdir()
+
+        project_root = Path(sys.argv[0]).resolve().parent
+
+        for pkg in ("foundry", "hydra_plugins"):
+            pkg_dir = project_root / pkg
+            if pkg_dir.is_dir():
+                shutil.copytree(pkg_dir, snapshot / pkg, ignore=ignore)
+
+        for py_file in project_root.glob("*.py"):
+            shutil.copy2(py_file, snapshot / py_file.name)
+
+        for src in self.config.hydra.runtime.config_sources:
+            if src.schema != "file" or not src.path:
+                continue
+            src_path = Path(src.path)
+            if not src_path.is_dir():
+                continue
+            config_dest = snapshot / src_path.relative_to(project_root)
+            shutil.copytree(src_path, config_dest, ignore=ignore)
+            break
+
+        snapshot = snapshot.resolve()
+        log.info("Legacy launch snapshot: %s", snapshot)
+        return snapshot
