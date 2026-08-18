@@ -15,5 +15,4 @@ Before launching jobs:
   bypass the clean-Git check for production jobs.
 
 After submission, record the Slurm job ID and snapshot bundle path from the
-launcher output. You may safely change branches or continue other work in the
-live checkout; retries must reuse the original bundle.
+launcher output. 
