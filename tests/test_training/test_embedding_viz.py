@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from hydra import compose, initialize_config_dir
+from hydra.utils import instantiate
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
@@ -359,40 +361,33 @@ def test_default_config_uses_only_new_api_keys() -> None:
     assert not missing, f"Missing required keys in default config: {missing}"
 
 
-def _load_yaml_safe(path: str) -> dict:
-    import yaml
-
-    with open(path) as f:
-        return yaml.safe_load(f)
-
-
 @pytest.mark.parametrize(
-    "config_path",
+    ("experiment_name", "expected_frequency"),
     [
-        "configs/experiment/pretraining/poyo_masking_seqlen_sweep.yaml",
-        "configs/experiment/pretraining/poyo_data_scaling_base.yaml",
+        ("pretraining/poyo_masking_seqlen_sweep", 5),
+        ("pretraining/poyo_data_scaling_base", 1),
     ],
 )
-def test_experiment_overrides_use_new_api(config_path: str) -> None:
-    """Experiment overrides must not reference any deprecated callback keys."""
-    cfg = _load_yaml_safe(config_path)
+def test_experiment_overrides_compose_with_new_api(
+    experiment_name: str, expected_frequency: int
+) -> None:
+    """Each changed pretraining override composes and instantiates the callback.
 
-    emb_override = (
-        cfg.get("trainer", {})
-        .get("callbacks", {})
-        .get("embedding_visualization", {})
-    )
-    if not emb_override:
-        return
+    Loading an override in isolation cannot detect a stale callback key that
+    only becomes invalid after Hydra merges it with the default trainer config.
+    """
+    from pathlib import Path
 
-    deprecated = {
-        "every_n_epochs",
-        "max_samples",
-        "compute_tsne",
-        "class_names",
-    }
-    found = deprecated & set(emb_override.keys())
-    assert not found, f"Deprecated keys in {config_path}: {found}"
+    config_dir = Path("configs").resolve()
+    with initialize_config_dir(config_dir=str(config_dir), version_base=None):
+        cfg = compose(
+            config_name="config",
+            overrides=[f"experiment={experiment_name}"],
+        )
+
+    callback = instantiate(cfg.trainer.callbacks.embedding_visualization)
+    assert isinstance(callback, EmbeddingVisualizationCallback)
+    assert callback.every_n_validation_runs == expected_frequency
 
 
 def test_default_config_callback_is_instantiable() -> None:
