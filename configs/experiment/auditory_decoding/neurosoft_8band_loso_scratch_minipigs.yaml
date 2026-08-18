@@ -25,7 +25,9 @@ data:
   # while the model itself remains the 2.0-s transfer-compatible architecture.
   sequence_length: 0.5
   split_type: loso
-  held_out_subject: ???
+  # Provides a resolvable base run name while the multirun sweeper below
+  # replaces it with every eligible held-out subject.
+  held_out_subject: sub-01
   task_type: acoustic_stim
 
 stage:
