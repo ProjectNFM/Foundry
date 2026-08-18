@@ -59,10 +59,25 @@ signal diversity.
   warmup followed by cosine decay; bf16 mixed precision; intersubject
   validation; early-stopping patience 10.
 - **WandB:** project `foundry_pretraining`, group `IEEG_LEAK_FIXED_PRETRAIN`.
-- **Evaluation:** A separate Neurosoft experiment will compare both checkpoints
-  with a matched no-pretraining model using
-  `val/neurosoft_acoustic_stim_8band_f1`. The existing EEG downstream suite is
+- **Evaluation:** Full supervised finetuning on the paired, architecture-matched
+  NeuroSoft `intrasession-block` recipe.  Each initialization is evaluated for
+  minipigs and monkeys over folds 0, 1, and 2 (12 downstream jobs total),
+  alongside the paired from-scratch baseline experiment.  The primary metric is
+  `val/neurosoft_acoustic_stim_8band_f1`; the existing EEG downstream suite is
   intentionally out of scope.
+- **Checkpoint selection:** Use the best validation checkpoint from each
+  completed pretraining run, not its final training-state checkpoint:
+
+| Initialization | Checkpoint | Strict transfer validation |
+| --- | --- | --- |
+| Kochi-only | `${oc.env:SCRATCH}/runs/IEEG_LEAK_FIXED_PRETRAIN/pretrain_ieeg_kochi_fixed/checkpoints/best-step315000-val_loss_0.6941.ckpt` | Verified: 93 loaded; 0 missing or mismatched |
+| Kochi + B2 | `${oc.env:SCRATCH}/runs/IEEG_LEAK_FIXED_PRETRAIN/pretrain_ieeg_kochi_b2_fixed/checkpoints/best-step200000-val_loss_0.2815.ckpt` | Verified: 93 loaded; 0 missing or mismatched |
+
+The downstream configurations preserve the pretraining architecture
+(CWT-CNN concat tokenizer, dynamic channels, disabled session embeddings,
+256-dimensional backbone). `run.pretrained_transfer_mode=strict` is retained
+so a missing or shape-incompatible transferable tensor aborts before training
+rather than silently producing a partial initialization.
 
 ### Launch command
 
@@ -79,6 +94,28 @@ uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
   data.dataset_kwargs.brainsets=[klinzing_sleep_ds005555,shirazi_hbnr1_ds005505,pavlov_verbal_wm_ds003655,kochi_visualnaming_ds006914] \
   run.name=pretrain_ieeg_kochi_b2_fixed \
   run.group=IEEG_LEAK_FIXED_PRETRAIN -m
+
+# Downstream finetuning: each command submits three independent block folds.
+# The quoted run.name keeps Hydra's fold interpolation intact in the shell.
+uv run python main.py experiment=auditory_decoding/neurosoft_8band_intrasession_scratch_minipigs \
+  run.pretrained_checkpoint="$SCRATCH/runs/IEEG_LEAK_FIXED_PRETRAIN/pretrain_ieeg_kochi_fixed/checkpoints/best-step315000-val_loss_0.6941.ckpt" \
+  'run.name=neurosoft_8b_intrasession_kochi_fixed_minipigs_fold${hyperparameters.fold_number}' \
+  run.group=NEUROSOFT_8B_INTRASESSION_PRETRAIN_TRANSFER_MINIPIGS -m
+
+uv run python main.py experiment=auditory_decoding/neurosoft_8band_intrasession_scratch_monkeys \
+  run.pretrained_checkpoint="$SCRATCH/runs/IEEG_LEAK_FIXED_PRETRAIN/pretrain_ieeg_kochi_fixed/checkpoints/best-step315000-val_loss_0.6941.ckpt" \
+  'run.name=neurosoft_8b_intrasession_kochi_fixed_monkeys_fold${hyperparameters.fold_number}' \
+  run.group=NEUROSOFT_8B_INTRASESSION_PRETRAIN_TRANSFER_MONKEYS -m
+
+uv run python main.py experiment=auditory_decoding/neurosoft_8band_intrasession_scratch_minipigs \
+  run.pretrained_checkpoint="$SCRATCH/runs/IEEG_LEAK_FIXED_PRETRAIN/pretrain_ieeg_kochi_b2_fixed/checkpoints/best-step200000-val_loss_0.2815.ckpt" \
+  'run.name=neurosoft_8b_intrasession_kochi_b2_fixed_minipigs_fold${hyperparameters.fold_number}' \
+  run.group=NEUROSOFT_8B_INTRASESSION_PRETRAIN_TRANSFER_MINIPIGS -m
+
+uv run python main.py experiment=auditory_decoding/neurosoft_8band_intrasession_scratch_monkeys \
+  run.pretrained_checkpoint="$SCRATCH/runs/IEEG_LEAK_FIXED_PRETRAIN/pretrain_ieeg_kochi_b2_fixed/checkpoints/best-step200000-val_loss_0.2815.ckpt" \
+  'run.name=neurosoft_8b_intrasession_kochi_b2_fixed_monkeys_fold${hyperparameters.fold_number}' \
+  run.group=NEUROSOFT_8B_INTRASESSION_PRETRAIN_TRANSFER_MONKEYS -m
 ```
 
 ### Key config overrides
@@ -90,6 +127,10 @@ uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
 | `data=openneuro/three_dataset_pretrain` | B2 source list used as the base for the mixed arm |
 | `data.dataset_kwargs.brainsets=[...]` | Adds Kochi to B2 without duplicating a data config |
 | `run.group=IEEG_LEAK_FIXED_PRETRAIN` | Isolates the two checkpoints for later retrieval |
+| `run.pretrained_checkpoint=<best checkpoint>` | Initializes each downstream finetuning run from the selected pretraining arm |
+| `run.pretrained_transfer_mode=strict` | Requires an exact match for every transferable backbone tensor before training |
+| `run.group=NEUROSOFT_8B_INTRASESSION_PRETRAIN_TRANSFER_MINIPIGS` | Groups the two initializations × three folds for minipigs |
+| `run.group=NEUROSOFT_8B_INTRASESSION_PRETRAIN_TRANSFER_MONKEYS` | Groups the two initializations × three folds for monkeys |
 
 ## Results
 
@@ -100,7 +141,19 @@ Pretraining jobs submitted after three-batch GPU smoke tests completed cleanly:
 - Kochi-only: SLURM job `10375080` (`pretrain_ieeg_kochi_fixed`)
 - Kochi + B2: SLURM job `10375081` (`pretrain_ieeg_kochi_b2_fixed`)
 
-The separate Neurosoft benchmark remains pending.
+Strict downstream checkpoint-load validation passed for both checkpoints and
+both species configurations: all 93 transferable tensors load exactly, with
+zero missing or shape-mismatched tensors. The 11 excluded tensors are the
+pretraining/task-specific components deliberately outside the transfer policy.
+
+Downstream finetuning submitted on 2026-08-18 (three folds per array):
+
+| Initialization | Species | WandB / output group | SLURM array |
+| --- | --- | --- | --- |
+| Kochi-only | Minipigs | `NEUROSOFT_8B_INTRASESSION_PRETRAIN_TRANSFER_MINIPIGS` | `10402288` (`_0`–`_2`) |
+| Kochi-only | Monkeys | `NEUROSOFT_8B_INTRASESSION_PRETRAIN_TRANSFER_MONKEYS` | `10402329` (`_0`–`_2`) |
+| Kochi + B2 | Minipigs | `NEUROSOFT_8B_INTRASESSION_PRETRAIN_TRANSFER_MINIPIGS` | `10402335` (`_0`–`_2`) |
+| Kochi + B2 | Monkeys | `NEUROSOFT_8B_INTRASESSION_PRETRAIN_TRANSFER_MONKEYS` | `10402339` (`_0`–`_2`) |
 
 ### Metrics
 

@@ -122,8 +122,12 @@ def fetch_pretraining(api: wandb.Api) -> tuple[pd.DataFrame, pd.DataFrame]:
         run = matches[0]
         # W&B may store these metrics on disjoint logging steps, so fetch them
         # separately instead of relying on an inner join in one history call.
-        train_history = run.history(keys=["train/loss"], samples=50_000, pandas=True)
-        val_history = run.history(keys=["val/loss"], samples=50_000, pandas=True)
+        train_history = run.history(
+            keys=["train/loss"], samples=50_000, pandas=True
+        )
+        val_history = run.history(
+            keys=["val/loss"], samples=50_000, pandas=True
+        )
         for _, row in train_history.iterrows():
             curves.append(
                 {
@@ -153,7 +157,9 @@ def fetch_pretraining(api: wandb.Api) -> tuple[pd.DataFrame, pd.DataFrame]:
                 "block_size": info["block_size"],
                 "steps": run.summary.get("_step"),
                 "best_val_loss": values.min() if not values.empty else np.nan,
-                "final_val_loss": values.iloc[-1] if not values.empty else np.nan,
+                "final_val_loss": values.iloc[-1]
+                if not values.empty
+                else np.nan,
             }
         )
     return pd.DataFrame(curves), pd.DataFrame(summaries)
@@ -165,11 +171,15 @@ def fetch_downstream(api: wandb.Api) -> pd.DataFrame:
     entity = api.default_entity
     for (task, mode), group in DOWNSTREAM_GROUPS.items():
         metric_key = METRIC_KEYS[task]
-        matches = list(api.runs(f"{entity}/{DOWNSTREAM_PROJECT}", filters={"group": group}))
+        matches = list(
+            api.runs(f"{entity}/{DOWNSTREAM_PROJECT}", filters={"group": group})
+        )
         selected = [run for run in matches if sweep_id_from_name(run.name)]
         print(f"{task} / {mode}: {len(selected)} sweep runs found")
         for run in selected:
-            history = run.history(keys=[metric_key], samples=50_000, pandas=True)
+            history = run.history(
+                keys=[metric_key], samples=50_000, pandas=True
+            )
             values = history.get(metric_key, pd.Series(dtype=float)).dropna()
             records.append(
                 {
@@ -190,7 +200,9 @@ def fetch_downstream(api: wandb.Api) -> pd.DataFrame:
 
 def summarize_finished(downstream: pd.DataFrame) -> pd.DataFrame:
     """Summarize best F1 by condition using completed folds only."""
-    completed = downstream[(downstream["state"] == "finished") & downstream["best_f1"].notna()].copy()
+    completed = downstream[
+        (downstream["state"] == "finished") & downstream["best_f1"].notna()
+    ].copy()
     summary = (
         completed.groupby(["task", "mode", "sweep_id"])["best_f1"]
         .agg(mean="mean", std="std", n_finished="count")
@@ -198,11 +210,16 @@ def summarize_finished(downstream: pd.DataFrame) -> pd.DataFrame:
     )
     coverage = (
         downstream.groupby(["task", "mode", "sweep_id"])
-        .agg(n_found=("run_name", "count"), n_finished=("state", lambda x: (x == "finished").sum()))
+        .agg(
+            n_found=("run_name", "count"),
+            n_finished=("state", lambda x: (x == "finished").sum()),
+        )
         .reset_index()
     )
     summary = coverage.merge(
-        summary.drop(columns="n_finished"), on=["task", "mode", "sweep_id"], how="left"
+        summary.drop(columns="n_finished"),
+        on=["task", "mode", "sweep_id"],
+        how="left",
     )
     return summary
 
@@ -219,19 +236,34 @@ def plot_pretraining_curves(curves: pd.DataFrame) -> Path | None:
         train_subset = subset.dropna(subset=["step", "train_loss"])
         val_subset = subset.dropna(subset=["step", "val_loss"])
         axes[0].plot(
-            train_subset["step"], train_subset["train_loss"], label=label, color=COLORS[sweep_id]
+            train_subset["step"],
+            train_subset["train_loss"],
+            label=label,
+            color=COLORS[sweep_id],
         )
         axes[1].plot(
-            val_subset["step"], val_subset["val_loss"], label=label, color=COLORS[sweep_id], marker="o", markersize=3
+            val_subset["step"],
+            val_subset["val_loss"],
+            label=label,
+            color=COLORS[sweep_id],
+            marker="o",
+            markersize=3,
         )
-    for ax, title, ylabel in zip(axes, ["Training loss", "Validation loss"], ["MAE reconstruction loss", "MAE reconstruction loss"]):
+    for ax, title, ylabel in zip(
+        axes,
+        ["Training loss", "Validation loss"],
+        ["MAE reconstruction loss", "MAE reconstruction loss"],
+    ):
         ax.set_title(title, fontweight="bold")
         ax.set_xlabel("Pretraining step")
         ax.set_ylabel(ylabel)
         ax.grid(alpha=0.25)
         ax.spines[["top", "right"]].set_visible(False)
     axes[1].legend(fontsize=8)
-    fig.suptitle("Leak-fixed masking sweep: pretraining reconstruction loss", fontweight="bold")
+    fig.suptitle(
+        "Leak-fixed masking sweep: pretraining reconstruction loss",
+        fontweight="bold",
+    )
     fig.tight_layout()
     path = FIGURES_DIR / "040_masking_sweep_pretraining_loss.png"
     fig.savefig(path, dpi=200, bbox_inches="tight")
@@ -246,16 +278,47 @@ def plot_downstream_summary(summary: pd.DataFrame) -> Path | None:
     for row, mode in enumerate(MODES):
         for col, task in enumerate(TASKS):
             ax = axes[row, col]
-            subset = summary[(summary["task"] == task) & (summary["mode"] == mode)].set_index("sweep_id")
-            means = [subset.loc[s, "mean"] if s in subset.index else np.nan for s in RUN_ORDER]
-            stds = [subset.loc[s, "std"] if s in subset.index else np.nan for s in RUN_ORDER]
-            coverage = [subset.loc[s, "n_finished"] if s in subset.index else 0 for s in RUN_ORDER]
-            bars = ax.bar(np.arange(len(RUN_ORDER)), means, color=[COLORS[s] for s in RUN_ORDER], yerr=np.nan_to_num(stds, nan=0), capsize=3)
+            subset = summary[
+                (summary["task"] == task) & (summary["mode"] == mode)
+            ].set_index("sweep_id")
+            means = [
+                subset.loc[s, "mean"] if s in subset.index else np.nan
+                for s in RUN_ORDER
+            ]
+            stds = [
+                subset.loc[s, "std"] if s in subset.index else np.nan
+                for s in RUN_ORDER
+            ]
+            coverage = [
+                subset.loc[s, "n_finished"] if s in subset.index else 0
+                for s in RUN_ORDER
+            ]
+            bars = ax.bar(
+                np.arange(len(RUN_ORDER)),
+                means,
+                color=[COLORS[s] for s in RUN_ORDER],
+                yerr=np.nan_to_num(stds, nan=0),
+                capsize=3,
+            )
             for bar, value, n in zip(bars, means, coverage):
                 if pd.notna(value):
-                    ax.text(bar.get_x() + bar.get_width() / 2, value + 0.012, f"{value:.3f}\n(n={n})", ha="center", va="bottom", fontsize=8)
+                    ax.text(
+                        bar.get_x() + bar.get_width() / 2,
+                        value + 0.012,
+                        f"{value:.3f}\n(n={n})",
+                        ha="center",
+                        va="bottom",
+                        fontsize=8,
+                    )
                 else:
-                    ax.text(bar.get_x() + bar.get_width() / 2, 0.02, "no finished\nfold", ha="center", va="bottom", fontsize=7)
+                    ax.text(
+                        bar.get_x() + bar.get_width() / 2,
+                        0.02,
+                        "no finished\nfold",
+                        ha="center",
+                        va="bottom",
+                        fontsize=7,
+                    )
             ax.set_title(task, fontweight="bold")
             ax.set_xticks(np.arange(len(RUN_ORDER)), RUN_ORDER)
             ax.set_ylim(0, 1.05)
@@ -263,8 +326,17 @@ def plot_downstream_summary(summary: pd.DataFrame) -> Path | None:
             ax.spines[["top", "right"]].set_visible(False)
             if col == 0:
                 ax.set_ylabel(f"{mode}\nbest validation F1")
-    fig.suptitle("Downstream transfer by masking condition (finished folds only)", fontweight="bold")
-    fig.text(0.5, 0.01, "Error bars = sample standard deviation; n = completed folds contributing to each mean", ha="center", fontsize=9)
+    fig.suptitle(
+        "Downstream transfer by masking condition (finished folds only)",
+        fontweight="bold",
+    )
+    fig.text(
+        0.5,
+        0.01,
+        "Error bars = sample standard deviation; n = completed folds contributing to each mean",
+        ha="center",
+        fontsize=9,
+    )
     fig.tight_layout(rect=(0, 0.04, 1, 0.95))
     path = FIGURES_DIR / "040_masking_sweep_downstream_f1.png"
     fig.savefig(path, dpi=200, bbox_inches="tight")
@@ -279,9 +351,19 @@ def plot_delta_from_m0(summary: pd.DataFrame) -> Path | None:
     for row, mode in enumerate(MODES):
         for col, task in enumerate(TASKS):
             ax = axes[row, col]
-            subset = summary[(summary["task"] == task) & (summary["mode"] == mode)].set_index("sweep_id")
+            subset = summary[
+                (summary["task"] == task) & (summary["mode"] == mode)
+            ].set_index("sweep_id")
             if "M0" not in subset.index or pd.isna(subset.loc["M0", "mean"]):
-                ax.text(0.5, 0.5, "No completed M0 fold\nfor this comparison", transform=ax.transAxes, ha="center", va="center", fontsize=10)
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No completed M0 fold\nfor this comparison",
+                    transform=ax.transAxes,
+                    ha="center",
+                    va="center",
+                    fontsize=10,
+                )
                 ax.set_xticks([])
                 ax.set_title(task, fontweight="bold")
                 ax.spines[["top", "right"]].set_visible(False)
@@ -294,13 +376,23 @@ def plot_delta_from_m0(summary: pd.DataFrame) -> Path | None:
             bars = ax.bar(ids, deltas, color=[COLORS[s] for s in ids])
             ax.axhline(0, color="black", linewidth=0.9)
             for bar, delta in zip(bars, deltas):
-                ax.text(bar.get_x() + bar.get_width() / 2, delta + (0.004 if delta >= 0 else -0.004), f"{delta:+.3f}", ha="center", va="bottom" if delta >= 0 else "top", fontsize=8)
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    delta + (0.004 if delta >= 0 else -0.004),
+                    f"{delta:+.3f}",
+                    ha="center",
+                    va="bottom" if delta >= 0 else "top",
+                    fontsize=8,
+                )
             ax.set_title(task, fontweight="bold")
             ax.grid(axis="y", alpha=0.25)
             ax.spines[["top", "right"]].set_visible(False)
             if col == 0:
                 ax.set_ylabel(f"{mode}\nΔ best validation F1 vs M0")
-    fig.suptitle("Transfer change relative to M0 (means from finished folds only)", fontweight="bold")
+    fig.suptitle(
+        "Transfer change relative to M0 (means from finished folds only)",
+        fontweight="bold",
+    )
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     path = FIGURES_DIR / "040_masking_sweep_delta_vs_m0.png"
     fig.savefig(path, dpi=200, bbox_inches="tight")
@@ -308,20 +400,53 @@ def plot_delta_from_m0(summary: pd.DataFrame) -> Path | None:
     return path
 
 
-def print_tables(pretrain: pd.DataFrame, summary: pd.DataFrame, downstream: pd.DataFrame) -> None:
+def print_tables(
+    pretrain: pd.DataFrame, summary: pd.DataFrame, downstream: pd.DataFrame
+) -> None:
     print("\nPRETRAINING SUMMARY")
     print(pretrain.to_string(index=False, float_format=lambda x: f"{x:.5f}"))
     print("\nDOWNSTREAM F1 SUMMARY — FINISHED FOLDS ONLY")
     display = summary.copy()
-    display["f1_mean_std"] = display.apply(lambda r: "—" if pd.isna(r.get("mean")) else f"{r['mean']:.4f} ± {r['std']:.4f}" if pd.notna(r['std']) else f"{r['mean']:.4f} (one fold)", axis=1)
-    print(display[["task", "mode", "sweep_id", "f1_mean_std", "n_finished", "n_found"]].to_string(index=False))
+    display["f1_mean_std"] = display.apply(
+        lambda r: (
+            "—"
+            if pd.isna(r.get("mean"))
+            else f"{r['mean']:.4f} ± {r['std']:.4f}"
+            if pd.notna(r["std"])
+            else f"{r['mean']:.4f} (one fold)"
+        ),
+        axis=1,
+    )
+    print(
+        display[
+            ["task", "mode", "sweep_id", "f1_mean_std", "n_finished", "n_found"]
+        ].to_string(index=False)
+    )
     print("\nRUN-STATE COVERAGE")
-    coverage = pd.crosstab(downstream["state"], downstream["sweep_id"]).reindex(columns=RUN_ORDER, fill_value=0)
+    coverage = pd.crosstab(downstream["state"], downstream["sweep_id"]).reindex(
+        columns=RUN_ORDER, fill_value=0
+    )
     print(coverage.to_string())
     states = downstream[downstream["state"] != "finished"]
-    print(f"\nNon-finished runs excluded from F1 aggregates: {len(states)} / {len(downstream)}")
+    print(
+        f"\nNon-finished runs excluded from F1 aggregates: {len(states)} / {len(downstream)}"
+    )
     if not states.empty:
-        print(states[["task", "mode", "sweep_id", "fold", "state", "wandb_run_id", "last_step"]].sort_values(["task", "mode", "sweep_id", "fold"]).to_string(index=False))
+        print(
+            states[
+                [
+                    "task",
+                    "mode",
+                    "sweep_id",
+                    "fold",
+                    "state",
+                    "wandb_run_id",
+                    "last_step",
+                ]
+            ]
+            .sort_values(["task", "mode", "sweep_id", "fold"])
+            .to_string(index=False)
+        )
 
 
 def main() -> None:
@@ -332,9 +457,15 @@ def main() -> None:
     if downstream.empty:
         raise RuntimeError("No downstream sweep runs were found.")
     summary = summarize_finished(downstream)
-    curves.to_csv(RESULTS_DIR / "040_masking_sweep_pretraining_curves.csv", index=False)
-    pretrain.to_csv(RESULTS_DIR / "040_masking_sweep_pretraining.csv", index=False)
-    downstream.to_csv(RESULTS_DIR / "040_masking_sweep_per_fold.csv", index=False)
+    curves.to_csv(
+        RESULTS_DIR / "040_masking_sweep_pretraining_curves.csv", index=False
+    )
+    pretrain.to_csv(
+        RESULTS_DIR / "040_masking_sweep_pretraining.csv", index=False
+    )
+    downstream.to_csv(
+        RESULTS_DIR / "040_masking_sweep_per_fold.csv", index=False
+    )
     summary.to_csv(RESULTS_DIR / "040_masking_sweep_summary.csv", index=False)
     print_tables(pretrain, summary, downstream)
     figures = [

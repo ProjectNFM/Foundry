@@ -41,6 +41,9 @@ hyperparameters:
   batch_size: 128
   sequence_length: 2.0
   patch_duration: null
+  # Required by the dynamic per-channel tokenizer.  ``null`` retains the
+  # variable-channel behavior used during leak-fixed pretraining.
+  num_channels: null
   sampling_rate: 100
   fold_number: 0
   num_workers: 4
