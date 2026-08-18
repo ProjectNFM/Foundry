@@ -175,9 +175,18 @@ uv run python analysis/20260818-LS-singlesess-eegnet-gru-baselines.py --cached
 
 ![AUROC: session EEGNet/GRU vs POYO session, subject, and best multi](../../analysis/figures/20260818-LS-singlesess-eegnet-gru-baselines_auroc_by_model.png)
 
-![Matched-session F1: EEGNet and GRU vs session POYO](../../analysis/figures/20260818-LS-singlesess-eegnet-gru-baselines_f1_matched_vs_poyo.png)
+![Per-session F1: EEGNet and GRU vs best multi-subject POYO](../../analysis/figures/20260818-LS-singlesess-eegnet-gru-baselines_f1_vs_poyo_multi.png)
 
-**Supplementary — per-session bars (excl. outliers):**
+![Per-session AUROC: EEGNet and GRU vs best multi-subject POYO](../../analysis/figures/20260818-LS-singlesess-eegnet-gru-baselines_auroc_vs_poyo_multi.png)
+
+Best multi-subject POYO is one pooled run per species, so the scatter
+x-value is constant within a panel. Points above the identity line are
+sessions where that baseline’s fold-mean beats the pooled POYO score.
+
+**Supplementary — per-session bars (excl. outliers):** EEGNet / GRU /
+session POYO plus that session’s **single-subject POYO** (hatched
+purple; repeated across the subject’s sessions) and the **best
+multi-subject POYO** (hatched green; repeated across the species).
 
 ![Per-session F1](../../analysis/figures/20260818-LS-singlesess-eegnet-gru-baselines_supp_f1_per_session.png)
 
@@ -191,17 +200,20 @@ EEGNet/GRU on **both** F1 and AUROC is **partial**: **refuted on F1**,
 the expected unfair low-data loss.
 
 - **Matched session protocol (low data):** EEGNet and GRU outperform
-  session POYO on mean F1 and AUROC for both species. The matched-session
-  F1 scatter sits mostly above the identity line — consistent with a
-  transformer trained in a low-data regime.
+  session POYO on mean F1 and AUROC for both species — the expected
+  unfair comparison for a transformer trained in a low-data regime.
 - **Vs single-subject POYO:** session EEGNet/GRU still win on F1; AUROC
   is mixed (minipigs baselines slightly ahead; monkeys ≈ tied).
   Single-subject pooling is not a high enough data regime for POYO to
   outperform the traditional baselines.
 - **Vs best multi-subject POYO:** session EEGNet (minipigs, ΔF1 +0.184)
-  and session GRU (monkeys, ΔF1 +0.032) remain higher on F1, but best
-  multi-subject POYO wins AUROC — slightly in minipigs (0.801 vs EEGNet
-  0.771) and by a large margin in monkeys (0.892 vs ~0.56–0.59).
+  and session GRU (monkeys, ΔF1 +0.032) remain higher on mean F1, but
+  best multi-subject POYO wins AUROC — slightly in minipigs (0.801 vs
+  EEGNet 0.771) and by a large margin in monkeys (0.892 vs ~0.56–0.59).
+  Per-session scatters vs that pooled score: on F1, most minipig
+  sessions sit above identity (EEGNet 30/41, GRU 25/41) while monkeys
+  are split (11/25, 13/25); on AUROC, pooled POYO is above most
+  sessions, especially in monkeys (EEGNet 1/25, GRU 6/25 above).
 - **Caveats:** session vs pooled protocols differ; EEGNet/GRU HPs were
   tuned but patience is 20 vs POYO 50; monkey session F1 can look
   strong while AUROC is near chance (see supplementary per-session

@@ -8,6 +8,9 @@ references from this thread:
 2. Opt-HP **single-subject** POYO (mean across subjects)
 3. **Best multi-subject** POYO (reduced-capacity fold-0 winners)
 
+Per-session scatterplots compare each baseline to (3), not to each
+other. Per-session bars add (2) and (3) next to the session models.
+
 Usage:
     uv run python analysis/20260818-LS-singlesess-eegnet-gru-baselines.py
     uv run python analysis/20260818-LS-singlesess-eegnet-gru-baselines.py --cached
@@ -81,6 +84,29 @@ CONDITION_COLORS = {
     "poyo_sess": "#4C72B0",
     "poyo_subj": "#8172B2",
     "poyo_multi": "#55A868",
+}
+
+PER_SESSION_MODELS = ["eegnet", "gru", "poyo", "poyo_subj", "poyo_multi"]
+PER_SESSION_LABELS = {
+    "eegnet": "EEGNet",
+    "gru": "GRU",
+    "poyo": "POYO (session)",
+    "poyo_subj": "POYO (subject)",
+    "poyo_multi": "POYO multi (best)",
+}
+PER_SESSION_COLORS = {
+    "eegnet": CONDITION_COLORS["eegnet"],
+    "gru": CONDITION_COLORS["gru"],
+    "poyo": CONDITION_COLORS["poyo_sess"],
+    "poyo_subj": CONDITION_COLORS["poyo_subj"],
+    "poyo_multi": CONDITION_COLORS["poyo_multi"],
+}
+PER_SESSION_HATCH = {
+    "eegnet": None,
+    "gru": None,
+    "poyo": None,
+    "poyo_subj": "///",
+    "poyo_multi": "xx",
 }
 
 STEM = Path(__file__).stem
@@ -867,28 +893,98 @@ def _short_session(session: str) -> str:
     return session[:18]
 
 
+def _subject_from_session(session: str) -> str:
+    return str(session).split("_")[0]
+
+
+def attach_poyo_refs(
+    session_df: pd.DataFrame,
+    subj_units: pd.DataFrame,
+    multi: pd.DataFrame,
+) -> pd.DataFrame:
+    """Repeat subject-level and best multi-subject POYO next to each session."""
+    keep = session_df.copy()
+    keep["model"] = keep["model"].astype(str)
+    seen = keep[["species", "session"]].drop_duplicates()
+    subj_idx = subj_units.set_index(["species", "subject"])
+    multi_idx = multi.set_index("species")
+    extra: list[dict[str, Any]] = []
+    for _, rec in seen.iterrows():
+        species = rec["species"]
+        session = rec["session"]
+        subject = _subject_from_session(session)
+        if (species, subject) in subj_idx.index:
+            srow = subj_idx.loc[(species, subject)]
+            if isinstance(srow, pd.DataFrame):
+                srow = srow.iloc[0]
+            row: dict[str, Any] = {
+                "species": species,
+                "model": "poyo_subj",
+                "session": session,
+                "n_folds": int(srow["n_folds"]),
+                "is_outlier": False,
+                "outlier_reason": "",
+            }
+            for m in METRICS:
+                row[f"{m}_mean"] = float(srow[f"{m}_mean"])
+                std_val = srow[f"{m}_std"]
+                row[f"{m}_std"] = (
+                    float(std_val) if pd.notna(std_val) else np.nan
+                )
+            extra.append(row)
+        if species in multi_idx.index:
+            mrow = multi_idx.loc[species]
+            if isinstance(mrow, pd.DataFrame):
+                mrow = mrow.iloc[0]
+            row = {
+                "species": species,
+                "model": "poyo_multi",
+                "session": session,
+                "n_folds": 1,
+                "is_outlier": False,
+                "outlier_reason": "",
+            }
+            for m in METRICS:
+                val = mrow[m] if m in mrow.index else np.nan
+                row[f"{m}_mean"] = float(val) if pd.notna(val) else np.nan
+                row[f"{m}_std"] = np.nan
+            extra.append(row)
+    if not extra:
+        return keep
+    return pd.concat([keep, pd.DataFrame(extra)], ignore_index=True)
+
+
 def plot_per_session_bars(
-    session_df: pd.DataFrame, metric: str, stem_suffix: str
+    session_df: pd.DataFrame,
+    subj_units: pd.DataFrame,
+    multi: pd.DataFrame,
+    metric: str,
+    stem_suffix: str,
 ) -> Path:
     flagged = flag_outliers(session_df)
     keep = flagged[~flagged["is_outlier"]].copy()
+    keep = attach_poyo_refs(keep, subj_units, multi)
     keep["short"] = keep["session"].map(_short_session)
-    fig, axes = plt.subplots(2, 1, figsize=(16, 8.5), sharey=False)
-    width = 0.25
+    fig, axes = plt.subplots(2, 1, figsize=(18, 9.0), sharey=False)
+    n_models = len(PER_SESSION_MODELS)
+    width = 0.15
+    offsets = (np.arange(n_models) - (n_models - 1) / 2) * width
     ylabels = {
         "f1": "Fold-mean max val F1",
         "auroc": "Fold-mean max val AUROC",
     }
     titles = {
-        "f1": "Per-session F1 (excl. outliers)",
-        "auroc": "Per-session AUROC (excl. outliers)",
+        "f1": "Per-session F1 vs POYO subject / best multi (excl. outliers)",
+        "auroc": (
+            "Per-session AUROC vs POYO subject / best multi (excl. outliers)"
+        ),
     }
     col = f"{metric}_mean"
     for ax, species in zip(axes, SPECIES_ORDER):
         sub = keep[keep["species"] == species]
         sessions = sorted(sub["short"].unique())
         x = np.arange(len(sessions))
-        for i, model in enumerate(MODEL_ORDER):
+        for i, model in enumerate(PER_SESSION_MODELS):
             means = []
             stds = []
             g = sub[sub["model"] == model].set_index("short")
@@ -901,25 +997,31 @@ def plot_per_session_bars(
                     means.append(np.nan)
                     stds.append(0.0)
             ax.bar(
-                x + (i - 1) * width,
+                x + offsets[i],
                 means,
                 width,
                 yerr=stds,
-                capsize=1.5,
-                label=MODEL_LABELS[model],
-                color=MODEL_COLORS[model],
+                capsize=1.2,
+                label=PER_SESSION_LABELS[model],
+                color=PER_SESSION_COLORS[model],
+                hatch=PER_SESSION_HATCH[model],
                 edgecolor="white",
                 linewidth=0.3,
-                error_kw=dict(lw=0.6),
+                error_kw=dict(lw=0.5),
             )
         ax.set_xticks(x)
         ax.set_xticklabels(sessions, rotation=90, fontsize=6.5)
         ax.set_title(species)
         ax.set_ylabel(ylabels[metric])
-        ax.legend(frameon=False, fontsize=8, loc="upper right")
+        ax.legend(
+            frameon=False,
+            fontsize=7.5,
+            loc="upper right",
+            ncol=2,
+        )
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
-        ax.set_xlim(-0.6, len(sessions) - 0.4)
+        ax.set_xlim(-0.7, len(sessions) - 0.3)
     fig.suptitle(titles[metric], y=1.01)
     fig.tight_layout()
     out = FIGURES_DIR / f"{STEM}_{stem_suffix}.png"
@@ -929,54 +1031,80 @@ def plot_per_session_bars(
     return out
 
 
-def plot_matched_pairs(session_df: pd.DataFrame) -> Path:
+def plot_vs_poyo_multi(
+    session_df: pd.DataFrame,
+    multi: pd.DataFrame,
+    metric: str,
+    stem_suffix: str,
+) -> Path:
+    """Per-session EEGNet and GRU vs the species-level best multi-subj POYO.
+
+    Multi-subject POYO is one pooled run per species, so x is constant
+    within a panel. Points above the identity line beat that pooled score.
+    """
     flagged = flag_outliers(session_df)
-    keep = flagged[~flagged["is_outlier"]]
+    keep = flagged[~flagged["is_outlier"]].copy()
+    keep["model"] = keep["model"].astype(str)
+    multi_idx = multi.set_index("species")
+    col = f"{metric}_mean"
+    metric_label = "F1" if metric == "f1" else "AUROC"
+    baselines = ["eegnet", "gru"]
     fig, axes = plt.subplots(
-        1, 2, figsize=(10.5, 4.8), sharey=True, sharex=True
+        2, 2, figsize=(10.5, 9.2), sharex=True, sharey=True
     )
-    for ax, species in zip(axes, SPECIES_ORDER):
-        sub = keep[keep["species"] == species]
-        wide = sub.pivot(index="session", columns="model", values="f1_mean")
-        wide = wide.dropna(how="any")
-        missing = [m for m in MODEL_ORDER if m not in wide.columns]
-        if missing:
-            continue
-        ax.scatter(
-            wide["poyo"],
-            wide["eegnet"],
-            c=MODEL_COLORS["eegnet"],
-            s=28,
-            alpha=0.8,
-            label="EEGNet",
-            edgecolors="white",
-            linewidths=0.3,
-        )
-        ax.scatter(
-            wide["poyo"],
-            wide["gru"],
-            c=MODEL_COLORS["gru"],
-            s=28,
-            alpha=0.8,
-            label="GRU",
-            marker="s",
-            edgecolors="white",
-            linewidths=0.3,
-        )
-        lims = [0, max(0.2, float(np.nanmax(wide.to_numpy())) * 1.05)]
-        ax.plot(lims, lims, color="0.5", ls="--", lw=1, zorder=0)
-        ax.set_xlim(lims)
-        ax.set_ylim(lims)
-        ax.set_title(f"{species} (n={len(wide)} sessions)")
-        ax.set_xlabel("POYO fold-mean F1")
-        ax.legend(frameon=False, fontsize=8)
-        ax.set_aspect("equal", adjustable="box")
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-    axes[0].set_ylabel("Baseline fold-mean F1")
-    fig.suptitle("Matched-session F1: baselines vs POYO", y=1.02)
+    rng = np.random.default_rng(0)
+    for row, baseline in enumerate(baselines):
+        for col_i, species in enumerate(SPECIES_ORDER):
+            ax = axes[row, col_i]
+            if species not in multi_idx.index:
+                continue
+            mrow = multi_idx.loc[species]
+            if isinstance(mrow, pd.DataFrame):
+                mrow = mrow.iloc[0]
+            poyo_val = float(mrow[metric])
+            sub = keep[
+                (keep["species"] == species) & (keep["model"] == baseline)
+            ]
+            y = sub[col].dropna().to_numpy(dtype=float)
+            if len(y) == 0:
+                continue
+            x = np.full_like(y, poyo_val)
+            x = x + rng.uniform(-0.012, 0.012, size=len(y))
+            n_above = int(np.sum(y > poyo_val))
+            ax.scatter(
+                x,
+                y,
+                c=MODEL_COLORS[baseline],
+                s=32,
+                alpha=0.8,
+                edgecolors="white",
+                linewidths=0.3,
+                zorder=3,
+            )
+            lims = [0.0, 1.0]
+            ax.plot(lims, lims, color="0.5", ls="--", lw=1, zorder=0)
+            ax.axvline(poyo_val, color="0.65", ls=":", lw=0.9, zorder=1)
+            ax.set_xlim(lims)
+            ax.set_ylim(lims)
+            ax.set_title(
+                f"{species} · {MODEL_LABELS[baseline]} "
+                f"(n={len(y)}, {n_above} above)"
+            )
+            ax.set_aspect("equal", adjustable="box")
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            if row == 1:
+                ax.set_xlabel(f"Best multi-subject POYO {metric_label}")
+            if col_i == 0:
+                ax.set_ylabel(
+                    f"Session {MODEL_LABELS[baseline]} {metric_label}"
+                )
+    fig.suptitle(
+        f"Per-session {metric_label}: EEGNet / GRU vs best multi-subject POYO",
+        y=1.01,
+    )
     fig.tight_layout()
-    out = FIGURES_DIR / f"{STEM}_f1_matched_vs_poyo.png"
+    out = FIGURES_DIR / f"{STEM}_{stem_suffix}.png"
     fig.savefig(out, dpi=200, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved: {out}")
@@ -1058,9 +1186,14 @@ def main() -> None:
         "EEGNet / GRU session means vs POYO session, subject, and best multi",
         "auroc_by_model",
     )
-    plot_per_session_bars(session_df, "f1", "supp_f1_per_session")
-    plot_per_session_bars(session_df, "auroc", "supp_auroc_per_session")
-    plot_matched_pairs(session_df)
+    plot_per_session_bars(
+        session_df, subj_units, multi, "f1", "supp_f1_per_session"
+    )
+    plot_per_session_bars(
+        session_df, subj_units, multi, "auroc", "supp_auroc_per_session"
+    )
+    plot_vs_poyo_multi(session_df, multi, "f1", "f1_vs_poyo_multi")
+    plot_vs_poyo_multi(session_df, multi, "auroc", "auroc_vs_poyo_multi")
 
     csv_sessions = CSV_DIR / f"{STEM}_sessions.csv"
     csv_summary = CSV_DIR / f"{STEM}_summary.csv"
