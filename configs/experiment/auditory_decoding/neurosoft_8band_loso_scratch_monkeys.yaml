@@ -35,6 +35,7 @@ run:
   tags: [neurosoft, 8band, loso, scratch, monkeys, cwt_cnn, validation_only]
   seed: 42
   log_level: INFO
+  pretrained_checkpoint: null
 
 class_weights:
   mode: auto
