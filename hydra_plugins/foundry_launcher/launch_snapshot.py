@@ -450,12 +450,9 @@ def build_setup_commands(
 
     if environment_file:
         resolved = os.path.abspath(environment_file)
-        commands.extend(
-            [
-                "set -a",
-                f'source "{resolved}" || true',
-                "set +a",
-            ]
+        commands.append(
+            f'if [ -f "{resolved}" ]; then set -a; source "{resolved}"; '
+            "set +a; fi"
         )
 
     if existing_setup:

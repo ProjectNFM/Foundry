@@ -49,7 +49,7 @@ class PackedSubmititLauncher(BaseSubmititLauncher):
 
         # When tasks_per_node > 1, map_array batches all params into lists.
         # All entries are identical — extract the first one.
-        if isinstance(snapshot_json, list):
+        if isinstance(snapshot_json, (list, tuple)):
             snapshot_json = snapshot_json[0] if snapshot_json else None
 
         if snapshot_json:

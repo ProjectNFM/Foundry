@@ -16,6 +16,9 @@ from hydra_plugins.foundry_launcher.launch_snapshot import (
     prepare_snapshot,
     verify_snapshot,
 )
+from hydra_plugins.foundry_launcher.packed_launcher import (
+    PackedSubmititLauncher,
+)
 
 
 def test_hydra_plugin_discovery_imports_snapshot_module() -> None:
@@ -139,8 +142,40 @@ def test_worker_setup_uses_snapshot_and_explicit_environment_file(
         verify_on_worker=False,
     )
 
-    assert f'source "{env_file}" || true' in commands
+    assert commands[0] == (
+        f'if [ -f "{env_file}" ]; then set -a; source "{env_file}"; set +a; fi'
+    )
     assert "source .env || true" not in commands
     assert "cd /tmp/Foundry" not in commands
     assert f'cd "{snapshot.source_dir}"' in commands
     assert 'export FOUNDRY_SNAPSHOT_VERIFY_ON_WORKER="0"' in commands
+
+
+def test_packed_launcher_accepts_submitit_tuple_snapshot_descriptor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Submitit map-array batches each argument as a tuple for one task."""
+    captured = {}
+
+    def fake_call(self, *args):
+        captured["args"] = args
+        return "called"
+
+    monkeypatch.setattr(PackedSubmititLauncher, "__call__", fake_call)
+    monkeypatch.setattr(
+        "submitit.JobEnvironment",
+        lambda: type("Job", (), {"global_rank": 0})(),
+    )
+
+    launcher = object.__new__(PackedSubmititLauncher)
+    result = launcher.launch_batch(
+        [["fold=0"]],
+        ["hydra.sweep.dir"],
+        [0],
+        ["job_id_for_0"],
+        [{}],
+        (None,),
+    )
+
+    assert result == "called"
+    assert captured["args"][0] == ["fold=0"]
