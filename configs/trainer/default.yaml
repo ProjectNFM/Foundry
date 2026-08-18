@@ -57,9 +57,16 @@ callbacks:
     log_gradients: true
   embedding_visualization:
     _target_: foundry.training.callbacks.EmbeddingVisualizationCallback
-    max_samples: 2048
-    every_n_epochs: 5
-    compute_tsne: false
+    every_n_validation_runs: 5
+    sample_seed: ${run.seed}
+    window_fraction: 0.10
+    min_windows: 256
+    max_windows: 2048
+    max_channel_observations: 16384
+    max_sessions_per_dataset: 8
+    min_windows_per_session: 16
+    max_recording_panels: 8
+    min_positioned_channels: 9
   learning_rate_monitor:
       _target_: lightning.pytorch.callbacks.LearningRateMonitor
       logging_interval: step

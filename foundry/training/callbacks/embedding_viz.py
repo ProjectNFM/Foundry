@@ -534,40 +534,8 @@ class EmbeddingVisualizationCallback(L.Callback):
         min_windows_per_session: int = 16,
         max_recording_panels: int = 8,
         min_positioned_channels: int = 9,
-        # Deprecated parameters (Phase 6 will remove these from configs)
-        every_n_epochs: int | None = None,
-        max_samples: int | None = None,
-        compute_tsne: bool | None = None,
-        class_names: list[str] | None = None,
     ):
         super().__init__()
-
-        if every_n_epochs is not None:
-            log.warning(
-                "EmbeddingVisualizationCallback: 'every_n_epochs' is deprecated, "
-                "use 'every_n_validation_runs' instead. Mapping every_n_epochs=%d "
-                "to every_n_validation_runs=%d.",
-                every_n_epochs,
-                every_n_epochs,
-            )
-            every_n_validation_runs = every_n_epochs
-        if max_samples is not None:
-            log.warning(
-                "EmbeddingVisualizationCallback: 'max_samples' is deprecated, "
-                "use 'max_windows' instead."
-            )
-            max_windows = max_samples
-        if compute_tsne is not None:
-            log.warning(
-                "EmbeddingVisualizationCallback: 'compute_tsne' is deprecated "
-                "and ignored. t-SNE has been removed."
-            )
-        if class_names is not None:
-            log.warning(
-                "EmbeddingVisualizationCallback: 'class_names' is deprecated. "
-                "Class names are now discovered from task configs."
-            )
-
         self.every_n_validation_runs = every_n_validation_runs
         self.min_positioned_channels = min_positioned_channels
 

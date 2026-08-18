@@ -87,7 +87,7 @@ trainer:
     reconstruction_visualization:
       log_every_n_steps: 1000
     embedding_visualization:
-      every_n_epochs: 5
+      every_n_validation_runs: 5
 
 stage:
   skip: false
