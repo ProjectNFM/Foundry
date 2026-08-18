@@ -1,6 +1,6 @@
 # Masking Parameter Sweep: Does Harder Masking Produce Better Downstream Features?
 
-**Status:** In Progress (restarted 2026-08-14 with both leak fixes enabled)
+**Status:** Completed
 **Date started:** 2026-08-11
 **Parent experiment:** [Data Scaling Group](../02-data-scaling/README.md) (builds on B2 sweet spot)
 **Follow-up experiments:** [Channel Encoder Leak Fix Impact](20260812-MS-channel-encoder-leak-fix-impact.md)
@@ -161,12 +161,90 @@ done
 
 ## Results
 
-TBD
+### Summary
+
+The leak-fixed masking sweep does not support the predicted benefit of harder
+masking. Increasing the mask ratio from 0.5 (M0) to 0.7–0.9 (M1–M3) increased
+the MAE reconstruction loss monotonically, but did not improve downstream
+transfer. Across the fully completed three-fold evaluations, M0 was best or
+effectively tied on PhysioNet MI and Brain Invaders P300. M4 (the larger
+block-size control) was similarly neutral: it was slightly higher on MI
+finetuning but lower on MI linear probing and P300 linear probing.
+
+Kemp Sleep results are not usable for the finetuning comparison: none of the
+15 sleep-finetuning folds finished. Its linear-probe results are incomplete and
+are below M0 for the conditions with completed folds. The aggregate metrics
+below therefore use only W&B runs whose state is `finished`; they do not treat
+failed or running runs as zero scores.
+
+### Metrics
+
+Best validation F1 across finished folds (mean ± sample standard deviation;
+`n` is the number of completed folds contributing to the mean):
+
+| Task | Mode | M0: 0.5 / 10 | M1: 0.7 / 10 | M2: 0.8 / 10 | M3: 0.9 / 10 | M4: 0.5 / 20 |
+|---|---|---:|---:|---:|---:|---:|
+| PhysioNet MI | Finetune | 0.8842 ± 0.0422 (n=3) | 0.8842 ± 0.0368 (n=3) | 0.8806 ± 0.0479 (n=3) | 0.8838 ± 0.0442 (n=3) | 0.8901 ± 0.0409 (n=3) |
+| PhysioNet MI | Linear probe | 0.6527 ± 0.0381 (n=3) | 0.6519 ± 0.0277 (n=3) | 0.6466 ± 0.0332 (n=3) | 0.6495 ± 0.0325 (n=3) | 0.6452 ± 0.0294 (n=3) |
+| Brain Invaders P300 | Finetune | 0.3337 ± 0.0210 (n=3) | 0.3319 ± 0.0233 (n=3) | 0.3274 ± 0.0199 (n=3) | 0.3254 ± 0.0191 (n=3) | 0.3329 ± 0.0213 (n=3) |
+| Brain Invaders P300 | Linear probe | 0.3001 ± 0.0169 (n=3) | 0.3035 ± 0.0124 (n=3) | 0.3005 ± 0.0126 (n=3) | 0.2943 ± 0.0100 (n=3) | 0.2951 ± 0.0109 (n=3) |
+| Kemp Sleep | Finetune | no finished folds | no finished folds | no finished folds | no finished folds | no finished folds |
+| Kemp Sleep | Linear probe | 0.6362 ± 0.0108 (n=3) | 0.6104 (n=1) | 0.6158 ± 0.0033 (n=2) | 0.5541 (n=1) | no finished folds |
+
+Pretraining reconstruction loss increased with masking difficulty: best
+validation loss was 0.2463 (M0), 0.3593 (M1), 0.4379 (M2), 0.5469 (M3), and
+0.3010 (M4). This confirms that the sweep increased the difficulty of the
+pretext task, but does not establish that the higher-ratio tasks were too hard
+to learn useful representations.
+
+**Run-completion caveat.** The downstream failure inventory records 67 finished,
+21 failed, and 2 W&B runs still marked `running` out of 90 expected runs. The
+23 non-finished runs were concentrated in Kemp Sleep. Recorded terminal signals
+were DataLoader worker `ValueError`s (8), timeout/requeue failures (7),
+`SIGTERM` (6), and the 2 lingering W&B states; this is evidence of run state,
+not a root-cause diagnosis. See the [failure evidence report](../../analysis/results/039_masking_parameter_sweep_failure_report.md)
+and its accompanying CSV for per-run evidence.
+
+### Analysis
+
+All values and figures are reproduced by:
+
+```bash
+uv run python analysis/040_masking_parameter_sweep.py
+```
+
+The script queries the `MASKING_SEQLEN_LEAK_FIXED` W&B group, saves resolved
+per-fold results and summaries under `analysis/results/`, and excludes
+non-finished folds from F1 aggregates while reporting their coverage.
+
+### Figures
+
+![Leak-fixed masking sweep pretraining loss](../../analysis/figures/040_masking_sweep_pretraining_loss.png)
+
+![Downstream F1 by masking condition](../../analysis/figures/040_masking_sweep_downstream_f1.png)
+
+![Downstream F1 delta versus M0](../../analysis/figures/040_masking_sweep_delta_vs_m0.png)
 
 ## Conclusions
 
-TBD
+The hypothesis is **refuted**. Harder temporal masking (mask ratios 0.7–0.9)
+did not yield better downstream representations than the 0.5 baseline. In the
+two tasks with complete finetuning and linear-probe coverage, higher ratios
+were neutral to modestly worse, with the largest consistent declines at M3.
+The M0 versus M4 control also provides no evidence that larger temporal blocks
+improve transfer at the same 0.5 masking ratio. These conclusions exclude Kemp
+Sleep finetuning and treat its incomplete linear-probe evidence as suggestive
+rather than confirmatory, owing to the documented run failures.
 
 ## Notes for future experiments
 
-TBD
+- Test whether higher-ratio masking becomes counterproductive because the
+  reconstruction task is too difficult. First measure reconstruction quality
+  at the masked-token level (rather than only aggregate loss) and relate it to
+  downstream F1 across a denser ratio sweep between 0.5 and 0.8.
+- Separate *mask fraction* from *available context*: compare high-ratio masking
+  with longer input sequences or a curriculum that starts at 0.5 and increases
+  the ratio after stable reconstruction learning.
+- Before revisiting Kemp Sleep comparisons, resolve the data-loading and job
+  termination issues documented in the failure inventory so all three folds can
+  finish under a consistent protocol.
