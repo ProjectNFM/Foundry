@@ -191,8 +191,16 @@ Downstream finetuning submitted on 2026-08-18 (three folds per array):
 | Kochi + B2 | Monkeys | `NEUROSOFT_8B_INTRASESSION_PRETRAIN_TRANSFER_MONKEYS` | `10402339` (`_0`–`_2`) |
 
 LOSO strict transfer validation also passed for both checkpoints and both
-species (93 loaded transferable tensors; zero missing or mismatched). The four
-production LOSO arrays are pending submission on the `long` partition.
+species (93 loaded transferable tensors; zero missing or mismatched).
+
+LOSO finetuning submitted on 2026-08-18 to the `long` partition:
+
+| Initialization | Species | WandB / output group | SLURM array | Immutable snapshot bundle |
+| --- | --- | --- | --- | --- |
+| Kochi-only | Minipigs | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS` | `10402889` (`_0`–`_6`) | `/network/scratch/s/sobralm/foundry-launches/20260818T183152_NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS_da3e9e92_299ef08f` |
+| Kochi-only | Monkeys | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS` | `10402891` (`_0`–`_5`) | `/network/scratch/s/sobralm/foundry-launches/20260818T183226_NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS_da3e9e92_47d3870b` |
+| Kochi + B2 | Minipigs | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS` | `10402897` (`_0`–`_6`) | `/network/scratch/s/sobralm/foundry-launches/20260818T183337_NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS_da3e9e92_88769676` |
+| Kochi + B2 | Monkeys | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS` | `10402903` (`_0`–`_5`) | `/network/scratch/s/sobralm/foundry-launches/20260818T183415_NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS_da3e9e92_8a102ca5` |
 
 ### Metrics
 
