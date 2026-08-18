@@ -5,8 +5,6 @@ that every multirun task executes the exact code that was committed when the
 sweep was launched — regardless of later branch switches or edits.
 """
 
-from __future__ import annotations
-
 import datetime
 import hashlib
 import json
@@ -54,11 +52,11 @@ class LaunchSnapshot:
         return json.dumps(self.to_dict(), indent=2)
 
     @classmethod
-    def from_json(cls, text: str) -> LaunchSnapshot:
+    def from_json(cls, text: str) -> "LaunchSnapshot":
         return cls(**json.loads(text))
 
     @classmethod
-    def from_file(cls, path: str | Path) -> LaunchSnapshot:
+    def from_file(cls, path: str | Path) -> "LaunchSnapshot":
         return cls.from_json(Path(path).read_text())
 
 

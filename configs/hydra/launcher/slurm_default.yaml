@@ -1,5 +1,5 @@
 defaults:
-  - submitit_slurm
+  - foundry_submitit_slurm
 
 _target_: hydra_plugins.foundry_launcher.packed_launcher.SlurmLauncher
 name: ${run.group}

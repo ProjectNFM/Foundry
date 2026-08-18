@@ -1,7 +1,9 @@
 """Tests for immutable launcher source snapshots."""
 
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -14,6 +16,26 @@ from hydra_plugins.foundry_launcher.launch_snapshot import (
     prepare_snapshot,
     verify_snapshot,
 )
+
+
+def test_hydra_plugin_discovery_imports_snapshot_module() -> None:
+    """Hydra executes plugin modules without always inserting sys.modules."""
+    cmd = [
+        sys.executable,
+        "main.py",
+        "--cfg",
+        "job",
+        "experiment=pretraining/poyo_data_scaling_base",
+    ]
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "MNE_DONTWRITE_HOME": "true"},
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def _run_git(repo: Path, *args: str) -> None:

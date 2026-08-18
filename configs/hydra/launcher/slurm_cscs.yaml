@@ -1,3 +1,6 @@
+defaults:
+  - foundry_submitit_slurm
+
 _target_: hydra_plugins.foundry_launcher.packed_launcher.SlurmLauncher
 submitit_folder: ${hydra.sweep.dir}/slurm_logs/%j
 stderr_to_stdout: true
