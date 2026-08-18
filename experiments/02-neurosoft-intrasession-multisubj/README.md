@@ -1,7 +1,7 @@
 # NeuroSoft Intrasession Multisubject Decoding
 
-**Experiments:** 9
-**Date range:** 2026-07-29 to 2026-08-11
+**Experiments:** 10
+**Date range:** 2026-07-29 to 2026-08-18
 **Contributors:** LS
 
 ## Overarching Question
@@ -27,7 +27,9 @@ harder for minipigs but nearly neutral for monkeys (fold 0).
 **Pure-frequency** labels helped monkeys slightly and not minipigs. The
 biggest lever was **reducing capacity**: very small models for minipigs,
 mid-size for monkeys. Stacking focal on that small model did not yield a
-clean combined win.
+clean combined win. Session-level **EEGNet and GRU** still beat even
+the best pooled POYO on mean F1 (though not on AUROC, especially in
+monkeys).
 
 ## Key Takeaways
 
@@ -96,6 +98,7 @@ clean combined win.
 | 7 | [Model capacity](./20260805-LS-model-capacity.md) | Confirmed (best-config) | Best F1 0.394 / 0.538 |
 | 8 | [Focal loss](./20260807-LS-focal-loss.md) | Partial / small vs CW | ΔF1 vs CW ≈ +0.001 / +0.010 |
 | 9 | [Capacity + focal](./20260811-LS-capacity-focal.md) | Refuted (no combined win) | vs small-cap CE +0.001 / −0.022 |
+| 10 | [EEGNet / GRU session baselines](./20260818-LS-singlesess-eegnet-gru-baselines.md) | Refuted (baselines win F1) | Session EEGNet/GRU F1 0.58 / 0.57 vs best POYO 0.39 / 0.54 |
 
 ## Open Questions
 
@@ -104,6 +107,9 @@ clean combined win.
 - Does representation learning **transfer across species**, and under
   which protocols (zero-shot, few-shot, joint training, shared vs
   species-specific heads)?
+- Can **EEGNet / GRU** at single-subject or multi-subject pooling match
+  or beat their strong session-level F1, and does HP-tuning close the
+  remaining AUROC gap vs pooled POYO?
 - How to further **reduce overfitting** on this NeuroSoft setup—e.g.
   **channel dropout / channel dropping**, temporal or amplitude jitter,
   mixup / cutmix-style trial mixing, stronger weight decay or dropout

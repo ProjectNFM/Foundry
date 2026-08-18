@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-08-12
 **Parent experiment:** [Intrasession Multisubject HP Search (Minipigs vs Monkeys)](20260717-LS-intrasession-multisubj-hp.md)
-**Follow-up experiments:** [Class-Weight Smoothing (Intrasession Multisubject)](20260729-LS-class-weight-smoothing.md), [Post-CNN Sampling Rate (Intrasession Multisubject)](20260803-LS-sampling-rate.md), [Causal vs Block Split (Intrasession Multisubject)](20260805-LS-causal-split.md), [Model Capacity / Size Ablation (Intrasession Multisubject)](20260805-LS-model-capacity.md), TBD (multispecies co-training / cross-species transfer)
+**Follow-up experiments:** [Class-Weight Smoothing (Intrasession Multisubject)](20260729-LS-class-weight-smoothing.md), [Post-CNN Sampling Rate (Intrasession Multisubject)](20260803-LS-sampling-rate.md), [Causal vs Block Split (Intrasession Multisubject)](20260805-LS-causal-split.md), [Model Capacity / Size Ablation (Intrasession Multisubject)](20260805-LS-model-capacity.md), [Session-Level EEGNet / GRU vs POYO](20260818-LS-singlesess-eegnet-gru-baselines.md), TBD (multispecies co-training / cross-species transfer)
 **Tags:** sweep, minipigs, monkeys, neurosoft, 8band, intrasession, singlesession, singlesubject, multisubject, baseline, auditory_decoding
 
 ## Background
