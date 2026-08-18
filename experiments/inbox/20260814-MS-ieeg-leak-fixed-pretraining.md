@@ -202,6 +202,24 @@ LOSO finetuning submitted on 2026-08-18 to the `long` partition:
 | Kochi + B2 | Minipigs | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS` | `10402897` (`_0`–`_6`) | `/network/scratch/s/sobralm/foundry-launches/20260818T183337_NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS_da3e9e92_88769676` |
 | Kochi + B2 | Monkeys | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS` | `10402903` (`_0`–`_5`) | `/network/scratch/s/sobralm/foundry-launches/20260818T183415_NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS_da3e9e92_8a102ca5` |
 
+The initial LOSO submission failed for 22 of 26 jobs due to a Hydra struct
+validation error: the LOSO scratch experiment configs did not include
+`pretrained_checkpoint` in their `run:` section, so the packed snapshot
+launcher rejected the `run.pretrained_checkpoint=...` override when
+re-composing the sweep config on the compute node. Four Kochi-only Minipig
+jobs (`10402889_0`–`_3`, subjects sub-01 through sub-04) survived by reaching
+config loading before the failure window.
+
+Fix: added `pretrained_checkpoint: null` to both LOSO experiment configs
+(commit `e2f86ea`). Re-launched the 22 failed jobs on 2026-08-18:
+
+| Initialization | Species | WandB / output group | SLURM array | Subjects | Immutable snapshot bundle |
+| --- | --- | --- | --- | --- | --- |
+| Kochi-only | Minipigs | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS` | `10408396` (`_0`–`_2`) | sub-05, sub-06, sub-07 | `/network/scratch/s/sobralm/foundry-launches/20260818T211955_NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS_e2f86eac_2181d364` |
+| Kochi-only | Monkeys | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS` | `10408397` (`_0`–`_5`) | sub-01–sub-06 | `/network/scratch/s/sobralm/foundry-launches/20260818T212024_NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS_e2f86eac_b33df0a4` |
+| Kochi + B2 | Minipigs | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS` | `10408400` (`_0`–`_6`) | sub-01–sub-07 | `/network/scratch/s/sobralm/foundry-launches/20260818T212045_NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS_e2f86eac_b34d38ee` |
+| Kochi + B2 | Monkeys | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS` | `10408402` (`_0`–`_5`) | sub-01–sub-06 | `/network/scratch/s/sobralm/foundry-launches/20260818T212105_NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS_e2f86eac_4b746c6b` |
+
 ### Metrics
 
 TBD — record each pretraining run's best `val/loss`, WandB run name and ID, and
