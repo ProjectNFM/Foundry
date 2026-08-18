@@ -18,10 +18,11 @@ Those comparisons are all within POYO. This report adds **non-foundation**
 session-level baselines — EEGNet and a bidirectional GRU — from
 `NEUROSOFT_INTRASESSION_SINGLESESS`. Each EEGNet/GRU/POYO-session run
 trains and evaluates on **one recording**, so those three are
-protocol-matched. Single-subject and multi-subject POYO are **not**
-protocol-matched; they are the thread’s existing POYO references, so we
-can still ask whether session-averaged CNN/RNN scores sit above or below
-the POYO recipes already reported.
+protocol-matched. Transformer POYO typically needs more training data
+than CNN/RNN baselines, so that matched session comparison is an unfair
+low-data test; single-subject and
+multi-subject POYO are the fairer high-data references, even though they
+are not protocol-matched to session EEGNet/GRU.
 
 ## Question
 
@@ -32,11 +33,12 @@ multi-subject** POYO (reduced-capacity fold-0 winners)?
 
 ## Hypothesis
 
-Session-averaged EEGNet and GRU remain below the best multi-subject
-POYO on max-val F1 (pooling is the larger lever than swapping in a
-smaller convolutional / recurrent model). Relative to session and
-subject POYO, the direction is less clear *a priori*; the prediction
-is that opt-HP POYO still wins those matched or closer comparisons.
+Transformer-based POYO typically needs more training data than CNN/RNN
+models, so comparing it to EEGNet/GRU at the **single-session**
+(low-data) regime is unfair.
+Given enough data — single-subject or, especially, **multi-subject**
+pooling — POYO should **outperform** those traditional session-level
+baselines on **both F1 and AUROC**.
 
 ## Experiment
 
@@ -67,13 +69,14 @@ Finished primary session runs: 41×3 folds × 3 models (minipigs) and
 | Model | Config | Notes |
 |-------|--------|--------|
 | POYO-EEG | opt-HP singlesess (resample CNN; species HPs from parent) | `bs=128`, patience 50 |
-| EEGNet | `configs/experiment/auditory_decoding/eegnet_neurosoft_8band_intrasession_singlesess.yaml` | F1=8, D=2, F2=16; `lr=0.015`, `wd=0.018`, `bs=16`, patience 20 |
-| GRU | `configs/experiment/auditory_decoding/gru_neurosoft_8band_intrasession_singlesess.yaml` | 2-layer bidirectional, hidden 128; `lr=0.0015`, `wd=0.018`, `bs=16`, patience 20 |
+| EEGNet | `configs/experiment/auditory_decoding/eegnet_neurosoft_8band_intrasession_singlesess.yaml` | opt-HP: F1=8, D=2, F2=16; `lr=0.015`, `wd=0.018`, `bs=16`, patience 20 |
+| GRU | `configs/experiment/auditory_decoding/gru_neurosoft_8band_intrasession_singlesess.yaml` | opt-HP: 2-layer bidirectional, hidden 128; `lr=0.0015`, `wd=0.018`, `bs=16`, patience 20 |
 
 Repo YAMLs for EEGNet/GRU are minipigs-templated; monkey runs in the
 group use the same architectures with `neurosoft_monkeys` data / tags.
-EEGNet/GRU HPs were **not** swept. Non-opt POYO in the same group (45
-minipig runs) is excluded from the primary tables.
+EEGNet/GRU HPs were selected by a prior hyperparameter search (values
+above). Non-opt POYO in the same group (45 minipig runs) is excluded
+from the primary tables.
 
 ### Launch command
 
@@ -94,7 +97,8 @@ wandb agent <entity>/auditory_decoding/aycfxm9b   # subject monkeys
 
 See YAMLs above. POYO uses species-optimal tokenizer / lr / WD / dropout
 from the [HP search](20260717-LS-intrasession-multisubj-hp.md); EEGNet
-and GRU use the baseline YAML HPs (not swept).
+and GRU use HPs selected by a prior search (architecture, `lr`, `wd`
+in the session YAMLs).
 
 ## Results
 
@@ -106,7 +110,9 @@ monkeys GRU 0.571 vs POYO 0.394). They also beat **single-subject** POYO
 on F1. Versus the **best multi-subject** POYO, session EEGNet (minipigs)
 and session GRU (monkeys) are still higher on F1, but best multi-subject
 POYO has the highest AUROC in both species — by a wide margin in monkeys
-(0.892 vs ~0.56–0.59).
+(0.892 vs ~0.56–0.59). That F1/AUROC split is the main result: pooled
+POYO ranks well, but does not convert those scores into competitive
+hard-label F1.
 
 Session-level F1 and AUROC can disagree, especially in monkeys: several
 high-F1 sessions have AUROC near 0.35. Minipig session AUROC is more
@@ -179,35 +185,54 @@ uv run python analysis/20260818-LS-singlesess-eegnet-gru-baselines.py --cached
 
 ## Conclusions
 
-The hypothesis that opt-HP POYO beats EEGNet and GRU, and that those
-baselines stay below the best multi-subject POYO on F1, is **refuted**.
+The hypothesis that high-data POYO should **outperform** session
+EEGNet/GRU on **both** F1 and AUROC is **partial**: **refuted on F1**,
+**supported on AUROC** for multi-subject POYO. Session-level POYO is
+the expected unfair low-data loss.
 
-- **Matched session protocol:** EEGNet and GRU outperform session POYO
-  on mean F1 and AUROC for both species (table and F1/AUROC bar figures).
-  The matched-session scatter sits mostly above the identity line.
+- **Matched session protocol (low data):** EEGNet and GRU outperform
+  session POYO on mean F1 and AUROC for both species. The matched-session
+  F1 scatter sits mostly above the identity line — consistent with a
+  transformer trained in a low-data regime.
 - **Vs single-subject POYO:** session EEGNet/GRU still win on F1; AUROC
-  is mixed (minipigs baselines slightly ahead; monkeys ≈ tied with
-  subject POYO).
+  is mixed (minipigs baselines slightly ahead; monkeys ≈ tied).
+  Single-subject pooling is not a high enough data regime for POYO to
+  outperform the traditional baselines.
 - **Vs best multi-subject POYO:** session EEGNet (minipigs, ΔF1 +0.184)
   and session GRU (monkeys, ΔF1 +0.032) remain higher on F1, but best
   multi-subject POYO wins AUROC — slightly in minipigs (0.801 vs EEGNet
   0.771) and by a large margin in monkeys (0.892 vs ~0.56–0.59).
-- **Caveats:** EEGNet/GRU were not HP-swept (patience 20 vs POYO 50);
-  session vs pooled protocols differ; monkey session F1 can look strong
-  while AUROC is near chance (see supplementary per-session AUROC).
+- **Caveats:** session vs pooled protocols differ; EEGNet/GRU HPs were
+  tuned but patience is 20 vs POYO 50; monkey session F1 can look
+  strong while AUROC is near chance (see supplementary per-session
+  AUROC).
 
-Pooling still improves POYO’s **ranking** metric (AUROC). It has not
-produced a multi-subject F1 that beats these simple session-level
-CNN/RNN baselines.
+**Interpretation (F1 vs AUROC).** High AUROC with lower F1 means POYO
+ranks positives above negatives well, but the default hard-decision
+threshold (typically 0.5) is a poor operating point — or the scores
+are uncalibrated. AUROC is threshold-free ranking; F1 is computed
+after converting probabilities into class labels. In an 8-class
+problem that default cut is rarely optimal, so False Positives /
+False Negatives inflate even when ranking is strong.
+
+Pooling still improves POYO’s **ranking**. It has not yet produced a
+multi-subject F1 that beats these session-level CNN/RNN baselines.
 
 ## Notes for future experiments
 
+- **Tune classification thresholds:** search per-class probability
+  thresholds (cross-validation) to maximize F1 instead of using 0.5.
+- **Calibrate scores:** if probabilities cluster at the extremes or
+  the middle, apply Platt scaling or isotonic regression before
+  thresholding.
+- **Class imbalance:** F1 depends on precision/recall; for rare
+  bands, report Precision-Recall AUC (PR-AUC) as a complement to
+  AUROC.
 - Train **EEGNet and GRU at single-subject and multi-subject** pooling
   so the architecture comparison is protocol-matched to the POYO thread.
-- **HP-search** EEGNet/GRU (lr, WD, patience, width) before treating
-  the current YAML defaults as a ceiling.
 - Inspect monkey sessions with **high F1 and low AUROC** (possible
   collapse / class imbalance artifacts) before using session F1 as a
   scoreboard.
 - Treat session-level EEGNet (minipigs) and GRU (monkeys) as a
-  **practical F1 ceiling** that pooled POYO still needs to beat.
+  **practical F1 ceiling** that pooled POYO still needs to beat, after
+  threshold/calibration work.
