@@ -1,6 +1,6 @@
 # Multi-Length Pretraining: Do Varied Temporal Scales Produce More Versatile Representations?
 
-**Status:** In Progress (restarted 2026-08-14 with both leak fixes enabled)
+**Status:** In Progress (pretraining completed; downstream evaluation launched 2026-08-18)
 **Date started:** 2026-08-11
 **Parent experiment:** [Data Scaling Group](../02-data-scaling/README.md) (builds on B2 sweet spot)
 **Follow-up experiments:** TBD
@@ -111,7 +111,9 @@ uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
 
 ### Launch commands — Downstream evaluation
 
-After pretraining, evaluate on 3 tasks × 2 modes × 3 folds = 18 runs:
+After pretraining, evaluate on 3 tasks × 2 modes × 3 folds = 18 runs. These
+were submitted on 2026-08-18 to the `long` partition with
+`FOUNDRY_SNAPSHOT_ROOT=/network/scratch/s/sobralm/foundry-launches`:
 
 ```bash
 # Kemp Sleep
@@ -132,6 +134,22 @@ uv run python main.py experiment=p300/brain_invaders_finetune_from_data_scaling 
 uv run python main.py experiment=p300/brain_invaders_linear_probe_from_data_scaling \
   run.pretrain_run_name=pretrain_S1_multilength_leak_fixed run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
 ```
+
+### Downstream evaluation submissions
+
+All arrays use the completed checkpoint at
+`/network/scratch/s/sobralm/runs/MASKING_SEQLEN_LEAK_FIXED/pretrain_S1_multilength_leak_fixed/checkpoints/last.ckpt`,
+were submitted from Git commit `82591abe605679f368851a1364be01549ff7fc14`, and
+contain folds 0–2.
+
+| Task | Mode | Slurm array | Immutable snapshot bundle |
+|---|---|---|---|
+| Kemp Sleep | Finetune | `10408257_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260818T210404_KEMP_FT_DATA_SCALING_82591abe_41f8801d` |
+| Kemp Sleep | Linear probe | `10408259_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260818T210440_KEMP_LP_DATA_SCALING_82591abe_4d645d81` |
+| PhysioNet MI | Finetune | `10408263_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260818T210459_PHYSIONET_FT_DATA_SCALING_82591abe_91638d6d` |
+| PhysioNet MI | Linear probe | `10408266_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260818T210526_PHYSIONET_LP_DATA_SCALING_82591abe_0c64943f` |
+| Brain Invaders P300 | Finetune | `10408268_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260818T210551_BI_P300_FT_DATA_SCALING_82591abe_4de777a1` |
+| Brain Invaders P300 | Linear probe | `10408270_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260818T210609_BI_P300_LP_DATA_SCALING_82591abe_b8e7cd47` |
 
 ### Key config overrides
 
@@ -157,7 +175,9 @@ uv run python main.py experiment=p300/brain_invaders_linear_probe_from_data_scal
 
 ## Results
 
-TBD
+Pretraining completed for `pretrain_S1_multilength_leak_fixed`. Downstream
+evaluation is in progress; see the submission table above. Results will be
+analyzed after all 18 fold runs have finished.
 
 ## Conclusions
 
