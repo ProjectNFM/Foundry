@@ -59,12 +59,13 @@ signal diversity.
   warmup followed by cosine decay; bf16 mixed precision; intersubject
   validation; early-stopping patience 10.
 - **WandB:** project `foundry_pretraining`, group `IEEG_LEAK_FIXED_PRETRAIN`.
-- **Evaluation:** Full supervised finetuning on the paired, architecture-matched
-  NeuroSoft `intrasession-block` recipe.  Each initialization is evaluated for
-  minipigs and monkeys over folds 0, 1, and 2 (12 downstream jobs total),
-  alongside the paired from-scratch baseline experiment.  The primary metric is
-  `val/neurosoft_acoustic_stim_8band_f1`; the existing EEG downstream suite is
-  intentionally out of scope.
+- **Evaluation:** Full supervised finetuning on paired, architecture-matched
+  NeuroSoft recipes. Each initialization is evaluated for minipigs and monkeys
+  over three `intrasession-block` folds (12 jobs) and every fixed LOSO subject
+  assignment (seven minipigs plus six monkeys per initialization; 26 jobs),
+  alongside the paired from-scratch baselines. The 38 downstream transfer jobs
+  use `val/neurosoft_acoustic_stim_8band_f1` as their primary metric; the
+  existing EEG downstream suite is intentionally out of scope.
 - **Checkpoint selection:** Use the best validation checkpoint from each
   completed pretraining run, not its final training-state checkpoint:
 
@@ -116,6 +117,37 @@ uv run python main.py experiment=auditory_decoding/neurosoft_8band_intrasession_
   run.pretrained_checkpoint="$SCRATCH/runs/IEEG_LEAK_FIXED_PRETRAIN/pretrain_ieeg_kochi_b2_fixed/checkpoints/best-step200000-val_loss_0.2815.ckpt" \
   'run.name=neurosoft_8b_intrasession_kochi_b2_fixed_monkeys_fold${hyperparameters.fold_number}' \
   run.group=NEUROSOFT_8B_INTRASESSION_PRETRAIN_TRANSFER_MONKEYS -m
+
+# LOSO transfer finetuning. Each minipig command submits seven held-out
+# subjects; each monkey command submits six. Snapshots are stored on shared
+# scratch and the arrays run in the long partition.
+FOUNDRY_SNAPSHOT_ROOT=/network/scratch/s/sobralm/foundry-launches \
+  uv run python main.py experiment=auditory_decoding/neurosoft_8band_loso_scratch_minipigs \
+  run.pretrained_checkpoint="$SCRATCH/runs/IEEG_LEAK_FIXED_PRETRAIN/pretrain_ieeg_kochi_fixed/checkpoints/best-step315000-val_loss_0.6941.ckpt" \
+  'run.name=neurosoft_8b_loso_kochi_fixed_minipigs_${data.held_out_subject}' \
+  run.group=NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS \
+  +hydra.launcher.additional_parameters.partition=long -m
+
+FOUNDRY_SNAPSHOT_ROOT=/network/scratch/s/sobralm/foundry-launches \
+  uv run python main.py experiment=auditory_decoding/neurosoft_8band_loso_scratch_monkeys \
+  run.pretrained_checkpoint="$SCRATCH/runs/IEEG_LEAK_FIXED_PRETRAIN/pretrain_ieeg_kochi_fixed/checkpoints/best-step315000-val_loss_0.6941.ckpt" \
+  'run.name=neurosoft_8b_loso_kochi_fixed_monkeys_${data.held_out_subject}' \
+  run.group=NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS \
+  +hydra.launcher.additional_parameters.partition=long -m
+
+FOUNDRY_SNAPSHOT_ROOT=/network/scratch/s/sobralm/foundry-launches \
+  uv run python main.py experiment=auditory_decoding/neurosoft_8band_loso_scratch_minipigs \
+  run.pretrained_checkpoint="$SCRATCH/runs/IEEG_LEAK_FIXED_PRETRAIN/pretrain_ieeg_kochi_b2_fixed/checkpoints/best-step200000-val_loss_0.2815.ckpt" \
+  'run.name=neurosoft_8b_loso_kochi_b2_fixed_minipigs_${data.held_out_subject}' \
+  run.group=NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS \
+  +hydra.launcher.additional_parameters.partition=long -m
+
+FOUNDRY_SNAPSHOT_ROOT=/network/scratch/s/sobralm/foundry-launches \
+  uv run python main.py experiment=auditory_decoding/neurosoft_8band_loso_scratch_monkeys \
+  run.pretrained_checkpoint="$SCRATCH/runs/IEEG_LEAK_FIXED_PRETRAIN/pretrain_ieeg_kochi_b2_fixed/checkpoints/best-step200000-val_loss_0.2815.ckpt" \
+  'run.name=neurosoft_8b_loso_kochi_b2_fixed_monkeys_${data.held_out_subject}' \
+  run.group=NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS \
+  +hydra.launcher.additional_parameters.partition=long -m
 ```
 
 ### Key config overrides
@@ -131,6 +163,9 @@ uv run python main.py experiment=auditory_decoding/neurosoft_8band_intrasession_
 | `run.pretrained_transfer_mode=strict` | Requires an exact match for every transferable backbone tensor before training |
 | `run.group=NEUROSOFT_8B_INTRASESSION_PRETRAIN_TRANSFER_MINIPIGS` | Groups the two initializations × three folds for minipigs |
 | `run.group=NEUROSOFT_8B_INTRASESSION_PRETRAIN_TRANSFER_MONKEYS` | Groups the two initializations × three folds for monkeys |
+| `run.group=NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS` | Groups both initializations over seven held-out minipig subjects |
+| `run.group=NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS` | Groups both initializations over six held-out monkey subjects |
+| `hydra.launcher.additional_parameters.partition=long` | Uses the required long partition for the LOSO production arrays |
 
 ## Results
 
@@ -154,6 +189,10 @@ Downstream finetuning submitted on 2026-08-18 (three folds per array):
 | Kochi-only | Monkeys | `NEUROSOFT_8B_INTRASESSION_PRETRAIN_TRANSFER_MONKEYS` | `10402329` (`_0`–`_2`) |
 | Kochi + B2 | Minipigs | `NEUROSOFT_8B_INTRASESSION_PRETRAIN_TRANSFER_MINIPIGS` | `10402335` (`_0`–`_2`) |
 | Kochi + B2 | Monkeys | `NEUROSOFT_8B_INTRASESSION_PRETRAIN_TRANSFER_MONKEYS` | `10402339` (`_0`–`_2`) |
+
+LOSO strict transfer validation also passed for both checkpoints and both
+species (93 loaded transferable tensors; zero missing or mismatched). The four
+production LOSO arrays are pending submission on the `long` partition.
 
 ### Metrics
 
