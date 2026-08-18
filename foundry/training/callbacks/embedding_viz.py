@@ -1,60 +1,600 @@
-"""Embedding visualization callback for monitoring representation structure."""
+"""Embedding visualization callback for monitoring representation structure.
+
+Orchestrates deterministic observation selection (Phase 3), cosine-based
+metrics (Phase 4), and figure generation for both channel and backbone
+representation families.  Every scheduled, non-sanity validation event emits
+the complete applicable output set under stable W&B keys.
+"""
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import math
 from typing import Any
 
 import lightning as L
 import numpy as np
+import torch
 from lightning import Trainer
+from sklearn.decomposition import PCA
 
+from foundry.training.callbacks.embedding_metrics import (
+    compute_backbone_silhouettes,
+    compute_channel_metrics,
+    compute_norm_statistics,
+    cosine_distance_matrix,
+    format_backbone_silhouettes_for_logging,
+    format_channel_metrics_for_logging,
+    get_electrode_positions_3d,
+    normalize_electrode_name,
+    normalize_representations,
+)
+from foundry.training.callbacks.observation_selector import (
+    ObservationIdentity,
+    RankObservations,
+    SelectionConfig,
+    SelectedObservations,
+    build_identities_from_metadata,
+    gather_and_deduplicate,
+    hierarchical_select_windows,
+    select_channel_observations,
+)
 from foundry.training.step_output import extract_step_output
 
 log = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Deterministic PCA utility
+# ---------------------------------------------------------------------------
+
+
+def fit_deterministic_pca(
+    vectors: np.ndarray, n_components: int = 2, seed: int = 0
+) -> tuple[np.ndarray, PCA]:
+    """Fit PCA on L2-normalized vectors with a deterministic solver.
+
+    Returns the transformed 2D coordinates and the fitted PCA object
+    (for explained-variance reporting).
+    """
+    n_components = min(n_components, vectors.shape[0], vectors.shape[1])
+    if n_components < 1:
+        return np.zeros((vectors.shape[0], 2)), PCA(n_components=2)
+    pca = PCA(n_components=n_components, random_state=seed)
+    coords = pca.fit_transform(vectors)
+    if coords.shape[1] < 2:
+        coords = np.column_stack([coords, np.zeros(len(coords))])
+    return coords, pca
+
+
+# ---------------------------------------------------------------------------
+# Stable color utilities
+# ---------------------------------------------------------------------------
+
+_QUALITATIVE_HEX = [
+    "#e41a1c",
+    "#377eb8",
+    "#4daf4a",
+    "#984ea3",
+    "#ff7f00",
+    "#a65628",
+    "#f781bf",
+    "#999999",
+    "#66c2a5",
+    "#fc8d62",
+    "#8da0cb",
+    "#e78ac3",
+    "#a6d854",
+    "#ffd92f",
+    "#e5c494",
+    "#b3b3b3",
+    "#1b9e77",
+    "#d95f02",
+    "#7570b3",
+    "#e7298a",
+]
+
+
+def stable_color_map(names: list[str]) -> dict[str, str]:
+    """Map group names to stable hex colors derived from their names.
+
+    The hash-based assignment means a group's color does not change when
+    another group is absent from an event or a run.
+    """
+    return {
+        name: _QUALITATIVE_HEX[
+            int.from_bytes(
+                hashlib.sha256(name.encode("utf-8")).digest()[:8], "little"
+            )
+            % len(_QUALITATIVE_HEX)
+        ]
+        for name in set(names)
+    }
+
+
+def labels_to_colors(
+    labels: np.ndarray, color_map: dict[str, str]
+) -> list[str]:
+    """Convert an array of string labels to a list of hex colors."""
+    return [color_map.get(str(lb), "#cccccc") for lb in labels]
+
+
+# ---------------------------------------------------------------------------
+# Scalp colorwheel utilities (adapted from old callback)
+# ---------------------------------------------------------------------------
+
+
+def _scalp_hsv_color(
+    x: np.ndarray, y: np.ndarray, max_dist: float
+) -> np.ndarray:
+    """HSV scalp-position color for arrays of x, y coordinates.
+
+    Returns an (N, 3) RGB array.
+    """
+    from matplotlib.colors import hsv_to_rgb
+
+    angles = np.arctan2(y, x)
+    hues = (angles + np.pi) / (2 * np.pi)
+    sats = np.clip(np.sqrt(x**2 + y**2) / max(max_dist, 1e-8), 0.15, 1.0)
+    hsv = np.stack([hues, sats, np.full_like(hues, 0.85)], axis=-1)
+    return hsv_to_rgb(hsv.reshape(-1, 1, 3)).reshape(-1, 3)
+
+
+def _draw_scalp_colorwheel(ax, electrode_pos_2d: dict, max_dist: float):
+    """Circular colorwheel legend matching the HSV scalp encoding."""
+    from matplotlib.colors import hsv_to_rgb
+
+    n = 256
+    lin = np.linspace(-1, 1, n)
+    X, Y = np.meshgrid(lin, lin)
+    R = np.sqrt(X**2 + Y**2)
+    T = np.arctan2(Y, X)
+
+    H = (T + np.pi) / (2 * np.pi)
+    S = np.clip(R, 0.15, 1.0)
+    V = np.full_like(H, 0.85)
+    rgb_img = hsv_to_rgb(np.stack([H, S, V], axis=-1))
+
+    alpha = np.where(R <= 1.0, 1.0, 0.0)
+    rgba = np.concatenate([rgb_img, alpha[..., np.newaxis]], axis=-1)
+    ax.imshow(rgba, extent=[-1.3, 1.3, -1.3, 1.3], origin="lower")
+
+    theta = np.linspace(0, 2 * np.pi, 100)
+    ax.plot(np.cos(theta), np.sin(theta), "k-", linewidth=0.8, alpha=0.4)
+    ax.plot([-0.1, 0, 0.1], [1.0, 1.12, 1.0], "k-", linewidth=0.8, alpha=0.4)
+    ax.text(0, 1.25, "Front", ha="center", va="bottom", fontsize=8)
+    ax.text(0, -1.22, "Back", ha="center", va="top", fontsize=8)
+    ax.text(-1.25, 0, "L", ha="right", va="center", fontsize=9, weight="bold")
+    ax.text(1.25, 0, "R", ha="left", va="center", fontsize=9, weight="bold")
+
+    for _, (x, y) in electrode_pos_2d.items():
+        xn = x / max_dist if max_dist > 0 else 0
+        yn = y / max_dist if max_dist > 0 else 0
+        if xn**2 + yn**2 <= 1.05:
+            ax.plot(xn, yn, "k.", markersize=1.5, alpha=0.3)
+
+    ax.set_xlim(-1.5, 1.5)
+    ax.set_ylim(-1.5, 1.5)
+    ax.set_aspect("equal")
+    ax.axis("off")
+    ax.set_title("Scalp Position\n(color key)", fontsize=9)
+
+
+# ---------------------------------------------------------------------------
+# Channel figures (Section 9)
+# ---------------------------------------------------------------------------
+
+
+def make_channel_recording_figure(
+    coords_2d: np.ndarray,
+    recording_ids: np.ndarray,
+    channel_ids: np.ndarray,
+    pca: PCA,
+    channel_mode: str,
+    max_panels: int,
+    event_label: str,
+    seed: int,
+):
+    """Small-multiple PCA by recording, colored by channel identity (Section 9.1)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from foundry.training.callbacks.observation_selector import stable_key_hash
+
+    unique_recs = sorted(
+        set(recording_ids),
+        key=lambda r: stable_key_hash(str(r), seed),
+    )
+    selected_recs = unique_recs[:max_panels]
+    n_panels = len(selected_recs)
+    if n_panels == 0:
+        return None
+
+    ncols = min(4, n_panels)
+    nrows = math.ceil(n_panels / ncols)
+    fig, axes = plt.subplots(
+        nrows, ncols, figsize=(4 * ncols, 4 * nrows), squeeze=False
+    )
+
+    for panel_idx, rec_id in enumerate(selected_recs):
+        ax = axes[panel_idx // ncols, panel_idx % ncols]
+        rec_mask = recording_ids == rec_id
+        rec_coords = coords_2d[rec_mask]
+        rec_channels = channel_ids[rec_mask]
+
+        unique_ch = sorted(set(rec_channels))
+        cmap = stable_color_map(unique_ch)
+
+        for ch in unique_ch:
+            ch_mask = rec_channels == ch
+            color = cmap[ch]
+            parts = str(ch).split("/")
+            short_name = parts[-1] if len(parts) > 1 else ch
+            ax.scatter(
+                rec_coords[ch_mask, 0],
+                rec_coords[ch_mask, 1],
+                c=color,
+                label=short_name,
+                alpha=0.5,
+                s=12,
+            )
+
+        short_rec = str(rec_id)
+        if len(short_rec) > 40:
+            short_rec = "..." + short_rec[-37:]
+        ax.set_title(short_rec, fontsize=8)
+        if len(unique_ch) <= 12:
+            ax.legend(fontsize=5, markerscale=2, loc="best")
+
+    for panel_idx in range(n_panels, nrows * ncols):
+        axes[panel_idx // ncols, panel_idx % ncols].axis("off")
+
+    ev = pca.explained_variance_ratio_
+    pc1 = ev[0] if len(ev) > 0 else 0.0
+    pc2 = ev[1] if len(ev) > 1 else 0.0
+    mode_label = "static (1 pt/ch)" if channel_mode == "static" else "dynamic"
+    fig.suptitle(
+        f"Channel PCA by Recording — {mode_label} [{event_label}]\n"
+        f"PC1 {pc1:.1%}, PC2 {pc2:.1%}  |  "
+        f"{len(coords_2d)} obs, {n_panels} recordings",
+        fontsize=10,
+    )
+    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    return fig
+
+
+def make_channel_canonical_figure(
+    coords_2d: np.ndarray,
+    channel_ids: np.ndarray,
+    pca: PCA,
+    event_label: str,
+):
+    """Global channel PCA colored by canonical electrode name (Section 9.2)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    canonical = np.array(
+        [normalize_electrode_name(str(ch)) for ch in channel_ids]
+    )
+    unique_canonical = sorted(set(canonical))
+    cmap = stable_color_map(unique_canonical)
+
+    fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+    for name in unique_canonical:
+        mask = canonical == name
+        ax.scatter(
+            coords_2d[mask, 0],
+            coords_2d[mask, 1],
+            c=cmap[name],
+            label=name if len(unique_canonical) <= 30 else None,
+            alpha=0.4,
+            s=10,
+        )
+
+    ev = pca.explained_variance_ratio_
+    ax.set_xlabel(f"PC1 ({ev[0] if len(ev) > 0 else 0.0:.1%})")
+    ax.set_ylabel(f"PC2 ({ev[1] if len(ev) > 1 else 0.0:.1%})")
+    ax.set_title(
+        f"Channel PCA — Canonical Electrode [{event_label}]\n"
+        f"{len(coords_2d)} obs, {len(unique_canonical)} electrodes"
+    )
+    if len(unique_canonical) <= 30:
+        ax.legend(fontsize=6, markerscale=2, ncol=2, loc="best")
+    fig.tight_layout()
+    return fig
+
+
+def make_channel_anatomy_figure(
+    coords_2d: np.ndarray,
+    channel_ids: np.ndarray,
+    positions_3d: dict[str, np.ndarray],
+    pca: PCA,
+    event_label: str,
+):
+    """PCA colored by scalp position for channels with resolved anatomy (Section 9.3)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    canonical = np.array(
+        [normalize_electrode_name(str(ch)) for ch in channel_ids]
+    )
+
+    electrode_pos_2d = _get_electrode_positions_2d(positions_3d)
+
+    resolved_mask = np.array([c in electrode_pos_2d for c in canonical])
+    n_resolved = int(np.sum(resolved_mask))
+    if n_resolved == 0:
+        return None
+
+    fig = plt.figure(figsize=(11, 8), layout="constrained")
+    gs = fig.add_gridspec(1, 2, width_ratios=[4, 1], wspace=0.12)
+    ax = fig.add_subplot(gs[0])
+    ax_leg = fig.add_subplot(gs[1])
+
+    xs = np.zeros(len(canonical))
+    ys = np.zeros(len(canonical))
+    for i, c in enumerate(canonical):
+        if c in electrode_pos_2d:
+            xs[i], ys[i] = electrode_pos_2d[c]
+
+    max_d = (
+        np.sqrt(xs[resolved_mask] ** 2 + ys[resolved_mask] ** 2).max() or 1.0
+    )
+    rgb = _scalp_hsv_color(xs, ys, max_d)
+
+    ax.scatter(
+        coords_2d[resolved_mask, 0],
+        coords_2d[resolved_mask, 1],
+        c=rgb[resolved_mask],
+        s=30,
+        edgecolors="k",
+        linewidths=0.3,
+        alpha=0.85,
+        zorder=3,
+    )
+    if (~resolved_mask).any():
+        ax.scatter(
+            coords_2d[~resolved_mask, 0],
+            coords_2d[~resolved_mask, 1],
+            c="lightgray",
+            s=15,
+            alpha=0.4,
+            label="no position",
+            zorder=2,
+        )
+        ax.legend(markerscale=1.5, fontsize=8)
+
+    ev = pca.explained_variance_ratio_
+    ax.set_xlabel(f"PC1 ({ev[0] if len(ev) > 0 else 0.0:.1%})")
+    ax.set_ylabel(f"PC2 ({ev[1] if len(ev) > 1 else 0.0:.1%})")
+    ax.set_title(
+        f"Channel PCA — Anatomical Position [{event_label}]\n"
+        f"{n_resolved} resolved, {int(np.sum(~resolved_mask))} unresolved"
+    )
+
+    _draw_scalp_colorwheel(ax_leg, electrode_pos_2d, max_d)
+    return fig
+
+
+def _get_electrode_positions_2d(
+    positions_3d: dict[str, np.ndarray],
+) -> dict[str, tuple[float, float]]:
+    """Project 3D electrode positions to 2D (x, y) by dropping z."""
+    return {
+        name: (float(pos[0]), float(pos[1]))
+        for name, pos in positions_3d.items()
+    }
+
+
+def make_norm_distribution_figure(
+    norms: np.ndarray, family: str, event_label: str
+):
+    """Histogram of raw L2 norms for a representation family."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    valid = norms[np.isfinite(norms) & (norms > 0)]
+    if len(valid) == 0:
+        return None
+
+    fig, ax = plt.subplots(1, 1, figsize=(7, 4))
+    ax.hist(
+        valid, bins=min(50, max(10, len(valid) // 20)), edgecolor="k", alpha=0.7
+    )
+    stats = compute_norm_statistics(norms)
+    ax.axvline(
+        stats.get("median", 0),
+        color="red",
+        linestyle="--",
+        label=f"median={stats.get('median', 0):.3f}",
+    )
+    ax.set_xlabel("L2 Norm")
+    ax.set_ylabel("Count")
+    ax.set_title(
+        f"{family} Norm Distribution [{event_label}]\n"
+        f"N={len(valid)}, mean={stats.get('mean', 0):.3f}, std={stats.get('std', 0):.3f}"
+    )
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    return fig
+
+
+def normalization_counts_for_logging(family: str, result) -> dict[str, int]:
+    """Return raw-vector validity counters under the family-specific key."""
+    prefix = f"val/embedding_viz/{family}/normalization"
+    return {
+        f"{prefix}/n_total": result.n_total,
+        f"{prefix}/n_valid": result.n_valid,
+        f"{prefix}/n_zero": result.n_zero,
+        f"{prefix}/n_nonfinite": result.n_nonfinite,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Backbone figures (Section 10)
+# ---------------------------------------------------------------------------
+
+
+def make_backbone_pca_figure(
+    coords_2d: np.ndarray,
+    labels: np.ndarray,
+    label_name: str,
+    pca: PCA,
+    event_label: str,
+    class_names: list[str] | None = None,
+):
+    """PCA scatter for backbone representations colored by a grouping."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    str_labels = np.array([str(lb) for lb in labels])
+    unique_labels = sorted(set(str_labels))
+    cmap = stable_color_map(unique_labels)
+
+    fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+    for lb in unique_labels:
+        mask = str_labels == lb
+        display_name = lb
+        if class_names is not None:
+            try:
+                idx = int(lb)
+                if 0 <= idx < len(class_names):
+                    display_name = class_names[idx]
+            except (ValueError, TypeError):
+                pass
+        ax.scatter(
+            coords_2d[mask, 0],
+            coords_2d[mask, 1],
+            c=cmap[lb],
+            label=display_name if len(unique_labels) <= 30 else None,
+            alpha=0.4,
+            s=10,
+        )
+
+    ev = pca.explained_variance_ratio_
+    ax.set_xlabel(f"PC1 ({ev[0] if len(ev) > 0 else 0.0:.1%})")
+    ax.set_ylabel(f"PC2 ({ev[1] if len(ev) > 1 else 0.0:.1%})")
+    ax.set_title(
+        f"Backbone PCA — {label_name} [{event_label}]\n"
+        f"{len(coords_2d)} windows, {len(unique_labels)} groups"
+    )
+    if len(unique_labels) <= 30:
+        ax.legend(fontsize=7, markerscale=2, ncol=2, loc="best")
+    fig.tight_layout()
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Callback
+# ---------------------------------------------------------------------------
+
 
 class EmbeddingVisualizationCallback(L.Callback):
-    """Visualize backbone embedding structure during validation epochs.
+    """Visualize channel and backbone representation structure during validation.
 
-    Requests typed representations from the model for scheduled validation
-    epochs. At each validation epoch end (respecting ``every_n_epochs``),
-    computes PCA, optional t-SNE, and silhouette score on pooled embeddings,
-    logging scatter plots and metrics to W&B.
-
-    When no classification labels are available (e.g. during MAE pretraining),
-    embeddings are colored by session ID instead.
+    Integrates the deterministic observation selector (Phase 3) and cosine-based
+    metrics (Phase 4) to produce a complete, reproducible set of figures and
+    scalar metrics at every scheduled validation event.
 
     Args:
-        max_samples: Maximum samples to buffer per validation epoch.
-        every_n_epochs: How often to compute and log visualizations.
-        compute_tsne: Whether to compute t-SNE (slower, off by default).
-        class_names: Optional list of class names for legend labels.
+        every_n_validation_runs: Emit outputs every N complete, non-sanity
+            validation passes.  The first complete pass is event 1.
+        sample_seed: Seed for deterministic observation selection.
+        window_fraction: Fraction of validation windows to select.
+        min_windows: Minimum window budget.
+        max_windows: Maximum window budget.
+        max_channel_observations: Cap on total (window, channel) vectors.
+        max_sessions_per_dataset: Maximum sessions selected per dataset.
+        min_windows_per_session: Minimum windows per selected session.
+        max_recording_panels: Maximum recording panels in the small-multiple
+            channel figure.
+        min_positioned_channels: Minimum resolved channel positions for
+            anatomical output.
     """
 
     def __init__(
         self,
-        max_samples: int = 2048,
-        every_n_epochs: int = 1,
-        compute_tsne: bool = False,
+        every_n_validation_runs: int = 5,
+        sample_seed: int = 42,
+        window_fraction: float = 0.10,
+        min_windows: int = 256,
+        max_windows: int = 2048,
+        max_channel_observations: int = 16384,
+        max_sessions_per_dataset: int = 8,
+        min_windows_per_session: int = 16,
+        max_recording_panels: int = 8,
+        min_positioned_channels: int = 9,
+        # Deprecated parameters (Phase 6 will remove these from configs)
+        every_n_epochs: int | None = None,
+        max_samples: int | None = None,
+        compute_tsne: bool | None = None,
         class_names: list[str] | None = None,
     ):
         super().__init__()
-        self.max_samples = max_samples
-        self.every_n_epochs = every_n_epochs
-        self.compute_tsne = compute_tsne
-        self.class_names = class_names
 
+        if every_n_epochs is not None:
+            log.warning(
+                "EmbeddingVisualizationCallback: 'every_n_epochs' is deprecated, "
+                "use 'every_n_validation_runs' instead. Mapping every_n_epochs=%d "
+                "to every_n_validation_runs=%d.",
+                every_n_epochs,
+                every_n_epochs,
+            )
+            every_n_validation_runs = every_n_epochs
+        if max_samples is not None:
+            log.warning(
+                "EmbeddingVisualizationCallback: 'max_samples' is deprecated, "
+                "use 'max_windows' instead."
+            )
+            max_windows = max_samples
+        if compute_tsne is not None:
+            log.warning(
+                "EmbeddingVisualizationCallback: 'compute_tsne' is deprecated "
+                "and ignored. t-SNE has been removed."
+            )
+        if class_names is not None:
+            log.warning(
+                "EmbeddingVisualizationCallback: 'class_names' is deprecated. "
+                "Class names are now discovered from task configs."
+            )
+
+        self.every_n_validation_runs = every_n_validation_runs
+        self.min_positioned_channels = min_positioned_channels
+
+        self._selection_config = SelectionConfig(
+            seed=sample_seed,
+            window_fraction=window_fraction,
+            min_windows=min_windows,
+            max_windows=max_windows,
+            max_channel_observations=max_channel_observations,
+            max_sessions_per_dataset=max_sessions_per_dataset,
+            min_windows_per_session=min_windows_per_session,
+            max_recording_panels=max_recording_panels,
+        )
+
+        self._validation_run_count = 0
         self._capture_scheduled = False
-        self._emb_buffer: list[np.ndarray] = []
-        self._label_buffer: list[np.ndarray] = []
-        self._session_buffer: list[str] = []
-        self._n_collected = 0
-
-        self._ch_emb_buffer: list[np.ndarray] = []
-        self._ch_name_buffer: list[str] = []
-        self._n_ch_collected = 0
         self._idx_to_channel: dict[int, str] = {}
+        self._task_class_names: dict[str, list[str]] = {}
+
+        self._rank_obs: RankObservations | None = None
+        self._local_identities: list[ObservationIdentity] = []
+        self._local_channel_counts: list[int] = []
+        self._sample_metadata_lists: dict[str, list] = {}
+
+    # ------------------------------------------------------------------
+    # Lifecycle hooks
+    # ------------------------------------------------------------------
 
     def on_fit_start(
         self, trainer: Trainer, pl_module: L.LightningModule
@@ -73,31 +613,45 @@ class EmbeddingVisualizationCallback(L.Callback):
                     idx: name for name, idx in vocab.items()
                 }
 
-        if self.class_names is None:
-            self._discover_class_names(model)
+        self._discover_task_class_names(model)
+
+    def _discover_task_class_names(self, model) -> None:
+        """Extract class names per task from TaskConfig.class_mapping."""
+        if not hasattr(model, "task_configs"):
+            return
+        for task_name, cfg in model.task_configs.items():
+            if hasattr(cfg, "get_class_names"):
+                names = cfg.get_class_names()
+                if names is not None:
+                    self._task_class_names[task_name] = names
 
     def on_validation_epoch_start(
         self, trainer: Trainer, pl_module: L.LightningModule
     ) -> None:
-        self._capture_scheduled = (
-            not trainer.sanity_checking
-            and self.every_n_epochs > 0
-            and trainer.current_epoch % self.every_n_epochs == 0
-        )
+        is_sanity = getattr(trainer, "sanity_checking", False)
+
+        if is_sanity:
+            self._capture_scheduled = False
+        else:
+            self._validation_run_count += 1
+            self._capture_scheduled = (
+                self.every_n_validation_runs > 0
+                and self._validation_run_count % self.every_n_validation_runs
+                == 0
+            )
+
         setter = getattr(
             pl_module, "set_validation_representation_capture", None
         )
         if setter is not None:
             setter(self._capture_scheduled)
 
-    def _discover_class_names(self, model) -> None:
-        """Auto-discover class names from task_configs if available."""
-        if not hasattr(model, "task_configs"):
-            return
-        for cfg in model.task_configs.values():
-            if hasattr(cfg, "class_mapping") and cfg.class_mapping is not None:
-                self.class_names = cfg.get_class_names()
-                return
+        if self._capture_scheduled:
+            self._clear_buffers()
+
+    # ------------------------------------------------------------------
+    # Per-batch accumulation
+    # ------------------------------------------------------------------
 
     def on_validation_batch_end(
         self,
@@ -110,65 +664,184 @@ class EmbeddingVisualizationCallback(L.Callback):
     ) -> None:
         if not self._capture_scheduled:
             return
+
         step_output = extract_step_output(outputs)
-        if step_output is None or step_output.representations is None:
+        if step_output is None:
             return
-        representations = step_output.representations
-        pooled = representations.backbone_representations
-        ch_embs = representations.channel_representations
-        if pooled is None:
+
+        meta = step_output.sample_metadata
+        if meta is None or meta.dataset_id is None:
             return
-        if self._n_collected >= self.max_samples:
-            return
-        pooled = pooled.cpu().numpy()
 
-        labels = None
-        if step_output is not None and step_output.target_values:
-            for task_name, targets in step_output.target_values.items():
-                if "sleep" in task_name:
-                    labels = targets.cpu().numpy()
-                    break
-            if labels is None:
-                first_targets = next(iter(step_output.target_values.values()))
-                labels = first_targets.cpu().numpy()
+        identities = build_identities_from_metadata(
+            meta.dataset_id,
+            meta.subject_id or ["__unknown__"] * len(meta.dataset_id),
+            meta.session_id or ["__unknown__"] * len(meta.dataset_id),
+            meta.absolute_start
+            if meta.absolute_start is not None
+            else np.zeros(len(meta.dataset_id)),
+            meta.window_duration
+            if meta.window_duration is not None
+            else np.zeros(len(meta.dataset_id)),
+        )
 
-        session_ids = None
-        if step_output is not None and step_output.session_id is not None:
-            session_ids = step_output.session_id
+        B = len(identities)
+        reps = step_output.representations
+        backbone = reps.backbone_representations if reps is not None else None
+        ch_reps = reps.channel_representations if reps is not None else None
+        ch_mask = reps.channel_mask if reps is not None else None
 
-        remaining = self.max_samples - self._n_collected
-        n_take = min(pooled.shape[0], remaining)
+        channel_counts = []
+        if (
+            ch_reps is not None
+            and ch_mask is not None
+            and ch_mask.shape == ch_reps.shape[:2]
+        ):
+            ch_mask_np = ch_mask.cpu().numpy().astype(bool)
+            for b in range(B):
+                channel_counts.append(int(ch_mask_np[b].sum()))
+        elif ch_reps is not None:
+            channel_counts = [ch_reps.shape[1]] * B
+        else:
+            channel_counts = [0] * B
 
-        self._emb_buffer.append(pooled[:n_take])
-        if labels is not None:
-            self._label_buffer.append(labels[:n_take])
-        if session_ids is not None:
-            self._session_buffer.extend(session_ids[:n_take])
+        self._local_identities.extend(identities)
+        self._local_channel_counts.extend(channel_counts)
 
-        self._n_collected += n_take
+        if self._rank_obs is None:
+            self._rank_obs = RankObservations(
+                identities=[],
+                backbone_representations=None,
+                channel_representations=None,
+                channel_counts=[],
+                target_values={},
+            )
 
-        if ch_embs is not None and self._n_ch_collected < self.max_samples:
-            ch_idx = batch.get("input_channel_index")  # (B, C)
-            ch_mask = representations.channel_mask
-            if ch_idx is not None and ch_mask is not None:
-                ch_embs_np = ch_embs.cpu().numpy()
-                ch_idx_np = ch_idx.cpu().numpy()
-                ch_mask_np = ch_mask.cpu().numpy().astype(bool)
-                for b in range(ch_embs_np.shape[0]):
-                    if self._n_ch_collected >= self.max_samples:
-                        break
-                    for c in range(ch_embs_np.shape[1]):
-                        if not ch_mask_np[b, c]:
-                            continue
-                        if self._n_ch_collected >= self.max_samples:
-                            break
-                        token_idx = int(ch_idx_np[b, c])
-                        name = self._idx_to_channel.get(
-                            token_idx, f"channel_{token_idx}"
-                        )
-                        self._ch_emb_buffer.append(ch_embs_np[b, c])
-                        self._ch_name_buffer.append(name)
-                        self._n_ch_collected += 1
+        self._rank_obs.identities.extend(identities)
+        self._rank_obs.channel_counts.extend(channel_counts)
+
+        for task_name, targets in (step_output.target_values or {}).items():
+            t_cpu = targets.detach().cpu()
+            if task_name not in self._rank_obs.target_values:
+                self._rank_obs.target_values[task_name] = t_cpu
+            else:
+                self._rank_obs.target_values[task_name] = torch.cat(
+                    [self._rank_obs.target_values[task_name], t_cpu], dim=0
+                )
+
+        if backbone is not None:
+            bb_cpu = backbone.detach().cpu()
+            if self._rank_obs.backbone_representations is None:
+                self._rank_obs.backbone_representations = bb_cpu
+            else:
+                self._rank_obs.backbone_representations = torch.cat(
+                    [self._rank_obs.backbone_representations, bb_cpu], dim=0
+                )
+
+        if ch_reps is not None:
+            ch_cpu = ch_reps.detach().cpu()
+            if ch_mask is None:
+                ch_mask_cpu = torch.ones(B, ch_cpu.shape[1], dtype=torch.bool)
+            else:
+                ch_mask_cpu = ch_mask.detach().cpu().bool()
+                if ch_mask_cpu.shape != ch_cpu.shape[:2]:
+                    log.warning(
+                        "EmbeddingVisualizationCallback: channel mask shape %s "
+                        "does not match channel representations %s; using an "
+                        "all-valid mask.",
+                        tuple(ch_mask_cpu.shape),
+                        tuple(ch_cpu.shape[:2]),
+                    )
+                    ch_mask_cpu = torch.ones(
+                        B, ch_cpu.shape[1], dtype=torch.bool
+                    )
+            channel_indices = meta.channel_index
+            if channel_indices is None:
+                ch_idx_cpu = torch.arange(ch_cpu.shape[1]).expand(B, -1)
+            else:
+                ch_idx_cpu = channel_indices.detach().cpu()
+                if ch_idx_cpu.ndim == 1:
+                    ch_idx_cpu = ch_idx_cpu.unsqueeze(0).expand(B, -1)
+                if ch_idx_cpu.shape != ch_cpu.shape[:2]:
+                    log.warning(
+                        "EmbeddingVisualizationCallback: channel index shape %s "
+                        "does not match channel representations %s; using "
+                        "positional channel identifiers.",
+                        tuple(ch_idx_cpu.shape),
+                        tuple(ch_cpu.shape[:2]),
+                    )
+                    ch_idx_cpu = torch.arange(ch_cpu.shape[1]).expand(B, -1)
+            if self._rank_obs.channel_representations is None:
+                self._rank_obs.channel_representations = ch_cpu
+                self._rank_obs.channel_indices = ch_idx_cpu
+                self._rank_obs.channel_masks = ch_mask_cpu
+            else:
+                max_c = max(
+                    self._rank_obs.channel_representations.shape[1],
+                    ch_cpu.shape[1],
+                )
+                if self._rank_obs.channel_representations.shape[1] < max_c:
+                    old = self._rank_obs.channel_representations
+                    pad = old.new_zeros(
+                        old.shape[0], max_c - old.shape[1], old.shape[2]
+                    )
+                    self._rank_obs.channel_representations = torch.cat(
+                        [old, pad], dim=1
+                    )
+                if ch_cpu.shape[1] < max_c:
+                    pad = ch_cpu.new_zeros(
+                        ch_cpu.shape[0],
+                        max_c - ch_cpu.shape[1],
+                        ch_cpu.shape[2],
+                    )
+                    ch_cpu = torch.cat([ch_cpu, pad], dim=1)
+                old_indices = self._rank_obs.channel_indices
+                if old_indices is None:
+                    old_indices = torch.zeros(
+                        self._rank_obs.channel_representations.shape[0],
+                        self._rank_obs.channel_representations.shape[1],
+                        dtype=ch_idx_cpu.dtype,
+                    )
+                if old_indices.shape[1] < max_c:
+                    old_indices = torch.nn.functional.pad(
+                        old_indices, (0, max_c - old_indices.shape[1])
+                    )
+                if ch_idx_cpu.shape[1] < max_c:
+                    ch_idx_cpu = torch.nn.functional.pad(
+                        ch_idx_cpu, (0, max_c - ch_idx_cpu.shape[1])
+                    )
+                old_masks = self._rank_obs.channel_masks
+                if old_masks is None:
+                    old_masks = torch.ones(
+                        self._rank_obs.channel_representations.shape[0],
+                        self._rank_obs.channel_representations.shape[1],
+                        dtype=torch.bool,
+                    )
+                if old_masks.shape[1] < max_c:
+                    old_masks = torch.nn.functional.pad(
+                        old_masks, (0, max_c - old_masks.shape[1])
+                    )
+                if ch_mask_cpu.shape[1] < max_c:
+                    ch_mask_cpu = torch.nn.functional.pad(
+                        ch_mask_cpu, (0, max_c - ch_mask_cpu.shape[1])
+                    )
+                self._rank_obs.channel_representations = torch.cat(
+                    [self._rank_obs.channel_representations, ch_cpu], dim=0
+                )
+                self._rank_obs.channel_indices = torch.cat(
+                    [old_indices, ch_idx_cpu], dim=0
+                )
+                self._rank_obs.channel_masks = torch.cat(
+                    [old_masks, ch_mask_cpu], dim=0
+                )
+
+        self._sample_metadata_lists.setdefault("channel_mode", []).append(
+            reps.channel_mode if reps is not None else None
+        )
+
+    # ------------------------------------------------------------------
+    # End-of-validation orchestration
+    # ------------------------------------------------------------------
 
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: L.LightningModule
@@ -178,529 +851,493 @@ class EmbeddingVisualizationCallback(L.Callback):
         )
         if setter is not None:
             setter(False)
+
         scheduled = self._capture_scheduled
         self._capture_scheduled = False
-        if not scheduled:
+
+        if (
+            not scheduled
+            or self._rank_obs is None
+            or not self._rank_obs.identities
+        ):
             self._clear_buffers()
             return
-        if not self._emb_buffer:
+
+        world_size = trainer.world_size if hasattr(trainer, "world_size") else 1
+        global_rank = (
+            trainer.global_rank if hasattr(trainer, "global_rank") else 0
+        )
+
+        merged = gather_and_deduplicate(
+            self._rank_obs, world_size=world_size, rank=global_rank
+        )
+
+        if merged is None:
             self._clear_buffers()
             return
+
         from foundry.training.callbacks import get_wandb_experiment
 
         wandb_experiment = get_wandb_experiment(trainer)
-        if wandb_experiment is None:
+
+        try:
+            self._process_and_log(merged, trainer, wandb_experiment)
+        except Exception:
+            log.exception(
+                "EmbeddingVisualizationCallback: error during processing"
+            )
+        finally:
             self._clear_buffers()
-            return
 
-        embeddings = np.concatenate(self._emb_buffer, axis=0)
-        labels = (
-            np.concatenate(self._label_buffer, axis=0)
-            if self._label_buffer
-            else None
-        )
-        session_ids = self._session_buffer if self._session_buffer else None
-
-        self._compute_and_log(
-            embeddings, labels, session_ids, wandb_experiment, trainer
-        )
-        self._log_channel_embeddings(wandb_experiment, trainer)
-        self._clear_buffers()
-
-    def _compute_and_log(
+    def _process_and_log(
         self,
-        embeddings: np.ndarray,
-        labels: np.ndarray | None,
-        session_ids: list[str] | None,
-        wandb_experiment,
+        merged: RankObservations,
         trainer: Trainer,
+        wandb_experiment,
     ) -> None:
         import matplotlib
 
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        from sklearn.decomposition import PCA
 
         try:
             import wandb
         except ImportError:
-            return
+            wandb = None
 
-        n_components_50 = min(50, embeddings.shape[1], embeddings.shape[0])
-        pca_50 = PCA(n_components=n_components_50)
-        emb_pca50 = pca_50.fit_transform(embeddings)
+        config = self._selection_config
+        step_label = f"step {trainer.global_step}"
 
-        n_components_2 = min(2, n_components_50)
-        pca_2 = PCA(n_components=n_components_2)
-        emb_pca2 = pca_2.fit_transform(embeddings)
+        selection = hierarchical_select_windows(merged.identities, config)
 
-        use_class_labels = (
-            labels is not None
-            and self.class_names is not None
-            and labels.max() >= 0
-        )
+        channel_mode = self._resolve_channel_mode()
 
-        if use_class_labels:
-            valid_mask = labels >= 0
-            plot_labels = labels[valid_mask]
-            plot_emb2 = emb_pca2[valid_mask]
-            plot_emb50 = emb_pca50[valid_mask]
-        else:
-            valid_mask = np.ones(len(embeddings), dtype=bool)
-            plot_emb2 = emb_pca2
-            plot_emb50 = emb_pca50
-            plot_labels = None
-
-        log_dict = {}
-
-        # Silhouette score
-        color_labels, label_names = self._get_color_labels(
-            plot_labels, session_ids, valid_mask
-        )
-        if color_labels is not None and len(np.unique(color_labels)) > 1:
-            from sklearn.metrics import silhouette_score
-
-            try:
-                sil = silhouette_score(plot_emb50, color_labels)
-                log_dict["val/embedding_silhouette"] = sil
-            except Exception:
-                pass
-
-        # PCA scatter
-        fig = self._make_scatter(
-            plot_emb2,
-            color_labels,
-            title=f"PCA (epoch {trainer.current_epoch})",
-            xlabel=f"PC1 ({pca_50.explained_variance_ratio_[0]:.1%})",
-            ylabel=f"PC2 ({pca_50.explained_variance_ratio_[1]:.1%})",
-            label_names=label_names,
-        )
-        log_dict["val/embedding_pca"] = wandb.Image(fig)
-        plt.close(fig)
-
-        # t-SNE scatter (optional)
-        if self.compute_tsne:
-            from sklearn.manifold import TSNE
-
-            tsne = TSNE(
-                n_components=2,
-                perplexity=min(30, len(plot_emb50) - 1),
-                max_iter=1000,
-                random_state=42,
-                init="pca",
+        ch_window_indices = []
+        if (
+            merged.channel_representations is not None
+            and channel_mode != "disabled"
+        ):
+            ch_window_indices = select_channel_observations(
+                selection.window_indices,
+                merged.identities,
+                merged.channel_counts,
+                config,
             )
-            emb_tsne = tsne.fit_transform(plot_emb50)
-            fig_tsne = self._make_scatter(
-                emb_tsne,
-                color_labels,
-                title=f"t-SNE (epoch {trainer.current_epoch})",
-                xlabel="t-SNE 1",
-                ylabel="t-SNE 2",
-                label_names=label_names,
+            selection.channel_window_indices = ch_window_indices
+            selection.channel_observation_count = sum(
+                merged.channel_counts[i] for i in ch_window_indices
             )
-            log_dict["val/embedding_tsne"] = wandb.Image(fig_tsne)
-            plt.close(fig_tsne)
 
-        wandb_experiment.log(log_dict, commit=False)
+        log_dict: dict[str, Any] = {}
+        prefix = "val/embedding_viz"
 
-    @staticmethod
-    def _extract_dataset_prefix(namespaced_id: str) -> str:
-        """Return dataset prefix from a namespaced ID (everything before first '/')."""
-        return (
-            namespaced_id.split("/")[0]
-            if "/" in namespaced_id
-            else namespaced_id
+        log_dict[f"{prefix}/sample/window_count"] = selection.window_count
+        log_dict[f"{prefix}/sample/channel_observation_count"] = (
+            selection.channel_observation_count
+        )
+        log_dict[f"{prefix}/sample/fingerprint"] = selection.fingerprint
+
+        # ----- Backbone analysis -----
+        backbone_available = (
+            merged.backbone_representations is not None
+            and selection.window_count > 0
         )
 
-    def _get_color_labels(
+        if backbone_available:
+            bb_selected = merged.backbone_representations[
+                selection.window_indices
+            ]
+            bb_np = bb_selected.numpy()
+            bb_norm_result = normalize_representations(bb_np)
+            log_dict.update(
+                normalization_counts_for_logging("backbone", bb_norm_result)
+            )
+
+            if bb_norm_result.n_valid >= 2:
+                bb_coords, bb_pca = fit_deterministic_pca(
+                    bb_norm_result.vectors, n_components=2, seed=config.seed
+                )
+                bb_dist_matrix = cosine_distance_matrix(bb_norm_result.vectors)
+
+                valid_indices = np.where(bb_norm_result.valid_mask)[0]
+
+                dataset_labels = np.array(
+                    [
+                        merged.identities[
+                            selection.window_indices[i]
+                        ].dataset_id
+                        for i in valid_indices
+                    ]
+                )
+                subject_labels = np.array(
+                    [
+                        merged.identities[
+                            selection.window_indices[i]
+                        ].subject_id
+                        for i in valid_indices
+                    ]
+                )
+                session_labels = np.array(
+                    [
+                        merged.identities[
+                            selection.window_indices[i]
+                        ].session_id
+                        for i in valid_indices
+                    ]
+                )
+
+                groupings: dict[str, np.ndarray] = {
+                    "dataset": dataset_labels,
+                    "subject": subject_labels,
+                    "session": session_labels,
+                }
+
+                for view_name, view_labels in [
+                    ("dataset", dataset_labels),
+                    ("subject", subject_labels),
+                    ("session", session_labels),
+                ]:
+                    fig = make_backbone_pca_figure(
+                        bb_coords,
+                        view_labels,
+                        view_name.capitalize(),
+                        bb_pca,
+                        step_label,
+                    )
+                    if fig is not None and wandb is not None:
+                        log_dict[f"{prefix}/backbone/pca_{view_name}"] = (
+                            wandb.Image(fig)
+                        )
+                    if fig is not None:
+                        plt.close(fig)
+
+                task_target_labels = self._extract_task_labels(
+                    merged, selection, valid_indices
+                )
+                for task_name, (
+                    task_labels,
+                    task_mask,
+                    class_names,
+                ) in task_target_labels.items():
+                    task_valid = task_mask
+                    if task_valid.sum() < 2:
+                        continue
+                    task_coords = bb_coords[task_valid]
+                    task_lbl = task_labels[task_valid]
+                    fig = make_backbone_pca_figure(
+                        task_coords,
+                        task_lbl,
+                        task_name,
+                        bb_pca,
+                        step_label,
+                        class_names=class_names,
+                    )
+                    if fig is not None and wandb is not None:
+                        log_dict[f"{prefix}/backbone/pca_task/{task_name}"] = (
+                            wandb.Image(fig)
+                        )
+                    if fig is not None:
+                        plt.close(fig)
+
+                    groupings[f"task/{task_name}"] = np.where(
+                        task_valid,
+                        task_labels,
+                        np.array([-1] * len(task_labels)),
+                    )
+
+                silhouettes = compute_backbone_silhouettes(
+                    bb_dist_matrix, groupings
+                )
+                log_dict.update(
+                    format_backbone_silhouettes_for_logging(silhouettes)
+                )
+
+            fig_norm = make_norm_distribution_figure(
+                bb_norm_result.norms, "Backbone", step_label
+            )
+            if fig_norm is not None and wandb is not None:
+                log_dict[f"{prefix}/backbone/norm_distribution"] = wandb.Image(
+                    fig_norm
+                )
+            if fig_norm is not None:
+                plt.close(fig_norm)
+
+        # ----- Channel analysis -----
+        channel_available = (
+            merged.channel_representations is not None
+            and channel_mode not in ("disabled", None)
+            and len(ch_window_indices) > 0
+        )
+
+        if channel_available:
+            (
+                ch_flat_vecs,
+                ch_flat_recording_ids,
+                ch_flat_channel_ids,
+                ch_flat_window_ids,
+            ) = self._flatten_channel_observations(merged, ch_window_indices)
+
+            if len(ch_flat_vecs) > 0:
+                ch_norm_result = normalize_representations(ch_flat_vecs)
+                log_dict.update(
+                    normalization_counts_for_logging("channel", ch_norm_result)
+                )
+
+                if ch_norm_result.n_valid >= 2:
+                    valid_mask = ch_norm_result.valid_mask
+                    ch_recording_valid = ch_flat_recording_ids[valid_mask]
+                    ch_channel_valid = ch_flat_channel_ids[valid_mask]
+                    ch_window_valid = ch_flat_window_ids[valid_mask]
+
+                    ch_coords, ch_pca = fit_deterministic_pca(
+                        ch_norm_result.vectors, n_components=2, seed=config.seed
+                    )
+
+                    fig_rec = make_channel_recording_figure(
+                        ch_coords,
+                        ch_recording_valid,
+                        ch_channel_valid,
+                        ch_pca,
+                        channel_mode,
+                        config.max_recording_panels,
+                        step_label,
+                        config.seed,
+                    )
+                    if fig_rec is not None and wandb is not None:
+                        log_dict[f"{prefix}/channel/pca_by_recording"] = (
+                            wandb.Image(fig_rec)
+                        )
+                    if fig_rec is not None:
+                        plt.close(fig_rec)
+
+                    fig_canon = make_channel_canonical_figure(
+                        ch_coords,
+                        ch_channel_valid,
+                        ch_pca,
+                        step_label,
+                    )
+                    if fig_canon is not None and wandb is not None:
+                        log_dict[
+                            f"{prefix}/channel/pca_canonical_electrode"
+                        ] = wandb.Image(fig_canon)
+                    if fig_canon is not None:
+                        plt.close(fig_canon)
+
+                    positions_3d = get_electrode_positions_3d()
+                    canonical_labels = np.array(
+                        [
+                            normalize_electrode_name(str(ch))
+                            for ch in ch_channel_valid
+                        ]
+                    )
+                    n_positioned = len(
+                        {c for c in canonical_labels if c in positions_3d}
+                    )
+                    has_positions = n_positioned >= self.min_positioned_channels
+
+                    if has_positions:
+                        fig_anat = make_channel_anatomy_figure(
+                            ch_coords,
+                            ch_channel_valid,
+                            positions_3d,
+                            ch_pca,
+                            step_label,
+                        )
+                        if fig_anat is not None and wandb is not None:
+                            log_dict[f"{prefix}/channel/pca_anatomy"] = (
+                                wandb.Image(fig_anat)
+                            )
+                        if fig_anat is not None:
+                            plt.close(fig_anat)
+
+                    channel_metrics = compute_channel_metrics(
+                        ch_norm_result.vectors,
+                        ch_recording_valid,
+                        ch_channel_valid,
+                        channel_mode,
+                        window_ids=ch_window_valid,
+                        positions_3d=positions_3d if has_positions else None,
+                        min_positioned=self.min_positioned_channels,
+                    )
+                    log_dict.update(
+                        format_channel_metrics_for_logging(channel_metrics)
+                    )
+
+                fig_ch_norm = make_norm_distribution_figure(
+                    ch_norm_result.norms, "Channel", step_label
+                )
+                if fig_ch_norm is not None and wandb is not None:
+                    log_dict[f"{prefix}/channel/norm_distribution"] = (
+                        wandb.Image(fig_ch_norm)
+                    )
+                if fig_ch_norm is not None:
+                    plt.close(fig_ch_norm)
+
+        # ----- Availability counters -----
+        log_dict[f"{prefix}/availability/backbone"] = int(backbone_available)
+        log_dict[f"{prefix}/availability/channel"] = int(channel_available)
+        log_dict[f"{prefix}/availability/channel_mode"] = channel_mode or "none"
+
+        # ----- Log to W&B -----
+        if wandb_experiment is not None and log_dict:
+            wandb_experiment.log(log_dict, commit=False)
+
+        log.info(
+            "EmbeddingVisualizationCallback: logged %d items at %s "
+            "(fingerprint=%s, windows=%d, channel_obs=%d)",
+            len(log_dict),
+            step_label,
+            selection.fingerprint,
+            selection.window_count,
+            selection.channel_observation_count,
+        )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_channel_mode(self) -> str:
+        """Resolve the channel mode from accumulated metadata."""
+        modes = self._sample_metadata_lists.get("channel_mode", [])
+        modes = [m for m in modes if m is not None]
+        if not modes:
+            return "disabled"
+        return modes[0]
+
+    def _flatten_channel_observations(
         self,
-        class_labels: np.ndarray | None,
-        session_ids: list[str] | None,
-        valid_mask: np.ndarray,
-    ) -> tuple[np.ndarray | None, list[str] | None]:
-        """Return integer labels for coloring and corresponding display names.
+        merged: RankObservations,
+        ch_window_indices: list[int],
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Flatten (window, channel) tensor to per-observation arrays.
 
-        Prefers class labels when available; otherwise groups by dataset prefix
-        extracted from session IDs.
+        Returns (vectors, recording_ids, channel_ids, window_ids).
         """
-        if class_labels is not None and self.class_names is not None:
-            return class_labels, self.class_names
-        if session_ids:
-            filtered = [s for s, v in zip(session_ids, valid_mask) if v]
-            prefixes = [self._extract_dataset_prefix(s) for s in filtered]
-            unique_prefixes = sorted(set(prefixes))
-            prefix_to_idx = {p: i for i, p in enumerate(unique_prefixes)}
-            int_labels = np.array([prefix_to_idx[p] for p in prefixes])
-            return int_labels, unique_prefixes
-        return None, None
+        ch_reps = merged.channel_representations
+        if ch_reps is None:
+            return np.empty((0, 1)), np.array([]), np.array([]), np.array([])
 
-    def _make_scatter(
-        self,
-        emb_2d: np.ndarray,
-        labels: np.ndarray | None,
-        title: str,
-        xlabel: str,
-        ylabel: str,
-        label_names: list[str] | None = None,
-    ):
-        import matplotlib.pyplot as plt
+        full_ch_idx = merged.channel_indices
+        full_ch_mask = merged.channel_masks
 
-        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+        vectors_list = []
+        recording_ids_list = []
+        channel_ids_list = []
+        window_ids_list = []
 
-        if labels is None:
-            ax.scatter(emb_2d[:, 0], emb_2d[:, 1], alpha=0.4, s=8)
-        else:
-            unique_labels = sorted(np.unique(labels))
-            colors = plt.cm.Set1(np.linspace(0, 1, max(len(unique_labels), 1)))
-            for idx, lbl in enumerate(unique_labels):
-                mask = labels == lbl
-                if label_names is not None and lbl < len(label_names):
-                    name = label_names[lbl]
+        ch_reps_np = ch_reps.numpy()
+
+        for win_idx in ch_window_indices:
+            identity = merged.identities[win_idx]
+            n_valid = merged.channel_counts[win_idx]
+
+            if full_ch_mask is not None:
+                mask = full_ch_mask[win_idx].numpy().astype(bool)
+            else:
+                mask = np.zeros(ch_reps_np.shape[1], dtype=bool)
+                mask[: min(n_valid, ch_reps_np.shape[1])] = True
+
+            for c in range(ch_reps_np.shape[1]):
+                if c >= len(mask) or not mask[c]:
+                    continue
+
+                vec = ch_reps_np[win_idx, c]
+                vectors_list.append(vec)
+                recording_id = (
+                    f"{identity.dataset_id}/{identity.subject_id}/"
+                    f"{identity.session_id}"
+                )
+                recording_ids_list.append(recording_id)
+
+                if full_ch_idx is not None and win_idx < full_ch_idx.shape[0]:
+                    token_idx = int(full_ch_idx[win_idx, c].item())
+                    ch_name = self._idx_to_channel.get(
+                        token_idx, f"channel_{token_idx}"
+                    )
                 else:
-                    name = f"Group {lbl}"
-                ax.scatter(
-                    emb_2d[mask, 0],
-                    emb_2d[mask, 1],
-                    c=[colors[idx]],
-                    label=name,
-                    alpha=0.4,
-                    s=8,
+                    ch_name = f"channel_{c}"
+                channel_ids_list.append(ch_name)
+
+                win_id = (
+                    f"{identity.session_id}/"
+                    f"{identity.absolute_start:.6f}/"
+                    f"{identity.window_duration:.6f}"
                 )
-            ax.legend(markerscale=3, fontsize=8)
+                window_ids_list.append(win_id)
 
-        ax.set_title(title)
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(ylabel)
-        fig.tight_layout()
-        return fig
+        if not vectors_list:
+            return np.empty((0, 1)), np.array([]), np.array([]), np.array([])
 
-    def _log_channel_embeddings(
-        self, wandb_experiment, trainer: Trainer
-    ) -> None:
-        """Reduce buffered dynamic channel embeddings and log scatter to W&B."""
-        if not self._ch_emb_buffer:
-            return
+        if self._resolve_channel_mode() == "static":
+            # Static lookup vectors do not vary by window. Keep one point per
+            # validation-observed recording/channel pair instead of weighting a
+            # channel by how often its recording was sampled.
+            keep = []
+            seen = set()
+            for i, key in enumerate(
+                zip(recording_ids_list, channel_ids_list, strict=True)
+            ):
+                if key not in seen:
+                    seen.add(key)
+                    keep.append(i)
+            vectors_list = [vectors_list[i] for i in keep]
+            recording_ids_list = [recording_ids_list[i] for i in keep]
+            channel_ids_list = [channel_ids_list[i] for i in keep]
+            window_ids_list = [window_ids_list[i] for i in keep]
 
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        from sklearn.decomposition import PCA
-
-        try:
-            import wandb
-        except ImportError:
-            return
-
-        embeddings = np.stack(self._ch_emb_buffer, axis=0)  # (N, ch_emb_dim)
-        channel_names = self._ch_name_buffer
-
-        prefixes = [self._extract_dataset_prefix(n) for n in channel_names]
-        unique_prefixes = sorted(set(prefixes))
-        prefix_to_idx = {p: i for i, p in enumerate(unique_prefixes)}
-        color_labels = np.array([prefix_to_idx[p] for p in prefixes])
-
-        n_components = min(2, embeddings.shape[1], embeddings.shape[0])
-        pca = PCA(n_components=n_components)
-        emb_pca2 = pca.fit_transform(embeddings)
-
-        log_dict = {}
-
-        fig = self._make_scatter(
-            emb_pca2,
-            color_labels,
-            title=f"Channel Emb PCA (epoch {trainer.current_epoch})",
-            xlabel=f"PC1 ({pca.explained_variance_ratio_[0]:.1%})",
-            ylabel=f"PC2 ({pca.explained_variance_ratio_[1]:.1%})",
-            label_names=unique_prefixes,
+        return (
+            np.array(vectors_list),
+            np.array(recording_ids_list),
+            np.array(channel_ids_list),
+            np.array(window_ids_list),
         )
-        log_dict["val/channel_embedding_pca"] = wandb.Image(fig)
-        plt.close(fig)
 
-        if self.compute_tsne and embeddings.shape[0] > 2:
-            from sklearn.manifold import TSNE
-
-            n_pca = min(50, embeddings.shape[1], embeddings.shape[0])
-            pca_50 = PCA(n_components=n_pca)
-            emb_pca50 = pca_50.fit_transform(embeddings)
-
-            tsne = TSNE(
-                n_components=2,
-                perplexity=min(30, len(emb_pca50) - 1),
-                max_iter=1000,
-                random_state=42,
-                init="pca",
-            )
-            emb_tsne = tsne.fit_transform(emb_pca50)
-            fig_tsne = self._make_scatter(
-                emb_tsne,
-                color_labels,
-                title=f"Channel Emb t-SNE (epoch {trainer.current_epoch})",
-                xlabel="t-SNE 1",
-                ylabel="t-SNE 2",
-                label_names=unique_prefixes,
-            )
-            log_dict["val/channel_embedding_tsne"] = wandb.Image(fig_tsne)
-            plt.close(fig_tsne)
-
-        fig_scalp = self._make_channel_scalp_scatter(
-            embeddings, channel_names, trainer
-        )
-        if fig_scalp is not None:
-            log_dict["val/channel_embedding_pca_scalp"] = wandb.Image(fig_scalp)
-            plt.close(fig_scalp)
-
-        wandb_experiment.log(log_dict, commit=False)
-
-    @classmethod
-    def _get_electrode_positions_2d(
-        cls,
-    ) -> dict[str, tuple[float, float]]:
-        """2D scalp positions for standard EEG electrodes via MNE montages.
-
-        Cached after first call.  Returns ``{lowercase_name: (x, y)}`` where
-        *x* is left(−)/right(+) and *y* is posterior(−)/anterior(+), in
-        meters.
-        """
-        cached = getattr(cls, "_electrode_pos_cache", None)
-        if cached is not None:
-            return cached
-
-        try:
-            import mne
-
-            mne.set_log_level("ERROR")
-        except ImportError:
-            log.info(
-                "MNE not installed — skipping scalp-position channel plot."
-            )
-            cls._electrode_pos_cache = {}
-            return cls._electrode_pos_cache
-
-        positions: dict[str, tuple[float, float]] = {}
-        for montage_name in ("standard_1020", "standard_1005"):
-            try:
-                montage = mne.channels.make_standard_montage(montage_name)
-                for ch, xyz in montage.get_positions()["ch_pos"].items():
-                    key = ch.lower()
-                    if key not in positions:
-                        positions[key] = (float(xyz[0]), float(xyz[1]))
-            except Exception:
-                continue
-
-        cls._electrode_pos_cache = positions
-        return positions
-
-    @staticmethod
-    def _extract_electrode_name(namespaced_id: str) -> str:
-        """Bare electrode name from a namespaced channel ID.
-
-        ``'dataset_name/sub-01/Fp1'`` → ``'Fp1'``
-        """
-        parts = namespaced_id.split("/")
-        return parts[-1] if len(parts) > 1 else namespaced_id
-
-    def _make_channel_scalp_scatter(
+    def _extract_task_labels(
         self,
-        embeddings: np.ndarray,
-        channel_names: list[str],
-        trainer: "Trainer",
-    ):
-        """Averaged-per-electrode PCA colored by 2D scalp position.
+        merged: RankObservations,
+        selection: SelectedObservations,
+        valid_indices: np.ndarray,
+    ) -> dict[str, tuple[np.ndarray, np.ndarray, list[str] | None]]:
+        """Extract per-task class labels for valid backbone windows.
 
-        Groups buffered channel embeddings by bare electrode name,
-        averages, runs PCA, and colors each dot with an HSV colorwheel
-        encoding of the electrode's scalp coordinates.  A colorwheel
-        legend is drawn alongside.
-
-        Returns the figure, or ``None`` when positions cannot be resolved.
+        Returns {task_name: (labels, valid_mask, class_names)}.
+        Only includes windows with a single valid, non-negative class label.
         """
-        from collections import defaultdict
+        result = {}
+        for task_name, all_targets in merged.target_values.items():
+            selected_targets = all_targets[selection.window_indices]
+            valid_targets = selected_targets[valid_indices]
 
-        import matplotlib.pyplot as plt
-        from matplotlib.colors import hsv_to_rgb as _hsv
-        from sklearn.decomposition import PCA
+            target_rows = valid_targets.numpy()
+            if target_rows.ndim == 1:
+                target_rows = target_rows[:, np.newaxis]
+            else:
+                target_rows = target_rows.reshape(target_rows.shape[0], -1)
 
-        electrode_pos = self._get_electrode_positions_2d()
-        if not electrode_pos:
-            return None
-
-        groups: dict[str, list[np.ndarray]] = defaultdict(list)
-        for name, emb in zip(channel_names, embeddings):
-            groups[self._extract_electrode_name(name)].append(emb)
-
-        names = sorted(groups)
-        avg = np.array([np.mean(groups[n], axis=0) for n in names])
-
-        if avg.shape[0] < 3:
-            return None
-
-        pca = PCA(n_components=min(2, *avg.shape))
-        coords = pca.fit_transform(avg)
-
-        xs = np.zeros(len(names))
-        ys = np.zeros(len(names))
-        matched = np.zeros(len(names), dtype=bool)
-        for i, n in enumerate(names):
-            key = n.lower()
-            if key in electrode_pos:
-                xs[i], ys[i] = electrode_pos[key]
-                matched[i] = True
-
-        if matched.sum() < 3:
-            return None
-
-        max_d = np.sqrt(xs[matched] ** 2 + ys[matched] ** 2).max() or 1.0
-        angles = np.arctan2(ys, xs)
-        hues = (angles + np.pi) / (2 * np.pi)
-        sats = np.clip(np.sqrt(xs**2 + ys**2) / max_d, 0.15, 1.0)
-        hsv = np.stack([hues, sats, np.full_like(hues, 0.85)], axis=-1)
-        rgb = _hsv(hsv.reshape(-1, 1, 3)).reshape(-1, 3)
-
-        fig = plt.figure(figsize=(11, 8), layout="constrained")
-        gs = fig.add_gridspec(1, 2, width_ratios=[4, 1], wspace=0.12)
-        ax = fig.add_subplot(gs[0])
-        ax_leg = fig.add_subplot(gs[1])
-
-        ax.scatter(
-            coords[matched, 0],
-            coords[matched, 1],
-            c=rgb[matched],
-            s=50,
-            edgecolors="k",
-            linewidths=0.3,
-            alpha=0.85,
-            zorder=3,
-        )
-        if (~matched).any():
-            ax.scatter(
-                coords[~matched, 0],
-                coords[~matched, 1],
-                c="lightgray",
-                s=25,
-                alpha=0.5,
-                label="no position",
-                zorder=2,
+            valid_values = target_rows >= 0
+            n_valid_values = valid_values.sum(axis=1)
+            labels = (
+                np.where(valid_values, target_rows, -1).max(axis=1).astype(int)
             )
-            ax.legend(markerscale=1.5, fontsize=8)
+            task_valid = n_valid_values > 0
+            for i, row in enumerate(target_rows):
+                row_values = row[valid_values[i]]
+                if len(row_values) > 1 and not np.all(
+                    row_values == row_values[0]
+                ):
+                    task_valid[i] = False
+            class_names = self._task_class_names.get(task_name)
 
-        _LABEL_SET = {
-            "fp1",
-            "fp2",
-            "f7",
-            "f3",
-            "fz",
-            "f4",
-            "f8",
-            "t7",
-            "t3",
-            "c3",
-            "cz",
-            "c4",
-            "t4",
-            "t8",
-            "p7",
-            "t5",
-            "p3",
-            "pz",
-            "p4",
-            "t6",
-            "p8",
-            "o1",
-            "oz",
-            "o2",
-        }
-        for i, n in enumerate(names):
-            if n.lower() in _LABEL_SET or len(names) <= 40:
-                ax.annotate(
-                    n,
-                    (coords[i, 0], coords[i, 1]),
-                    fontsize=6,
-                    alpha=0.8,
-                    xytext=(4, 4),
-                    textcoords="offset points",
-                )
+            if task_valid.sum() >= 2:
+                result[task_name] = (labels, task_valid, class_names)
 
-        ax.set_title(
-            f"Channel Emb PCA — Scalp Position (epoch {trainer.current_epoch})"
-        )
-        ax.set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.1%})")
-        ax.set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.1%})")
-
-        self._draw_scalp_colorwheel(ax_leg, electrode_pos, max_d)
-        return fig
-
-    @staticmethod
-    def _draw_scalp_colorwheel(ax, electrode_pos, max_dist):
-        """Circular colorwheel legend matching the HSV scalp encoding."""
-        from matplotlib.colors import hsv_to_rgb as _hsv
-
-        n = 256
-        lin = np.linspace(-1, 1, n)
-        X, Y = np.meshgrid(lin, lin)
-        R = np.sqrt(X**2 + Y**2)
-        T = np.arctan2(Y, X)
-
-        H = (T + np.pi) / (2 * np.pi)
-        S = np.clip(R, 0.15, 1.0)
-        V = np.full_like(H, 0.85)
-        rgb_img = _hsv(np.stack([H, S, V], axis=-1))
-
-        alpha = np.where(R <= 1.0, 1.0, 0.0)
-        rgba = np.concatenate([rgb_img, alpha[..., np.newaxis]], axis=-1)
-        ax.imshow(rgba, extent=[-1.3, 1.3, -1.3, 1.3], origin="lower")
-
-        theta = np.linspace(0, 2 * np.pi, 100)
-        ax.plot(np.cos(theta), np.sin(theta), "k-", linewidth=0.8, alpha=0.4)
-        ax.plot(
-            [-0.1, 0, 0.1],
-            [1.0, 1.12, 1.0],
-            "k-",
-            linewidth=0.8,
-            alpha=0.4,
-        )
-
-        ax.text(0, 1.25, "Front", ha="center", va="bottom", fontsize=8)
-        ax.text(0, -1.22, "Back", ha="center", va="top", fontsize=8)
-        ax.text(
-            -1.25,
-            0,
-            "L",
-            ha="right",
-            va="center",
-            fontsize=9,
-            weight="bold",
-        )
-        ax.text(
-            1.25,
-            0,
-            "R",
-            ha="left",
-            va="center",
-            fontsize=9,
-            weight="bold",
-        )
-
-        for _, (x, y) in electrode_pos.items():
-            xn = x / max_dist if max_dist > 0 else 0
-            yn = y / max_dist if max_dist > 0 else 0
-            if xn**2 + yn**2 <= 1.05:
-                ax.plot(xn, yn, "k.", markersize=1.5, alpha=0.3)
-
-        ax.set_xlim(-1.5, 1.5)
-        ax.set_ylim(-1.5, 1.5)
-        ax.set_aspect("equal")
-        ax.axis("off")
-        ax.set_title("Scalp Position\n(color key)", fontsize=9)
+        return result
 
     def _clear_buffers(self) -> None:
-        self._emb_buffer = []
-        self._label_buffer = []
-        self._session_buffer = []
-        self._n_collected = 0
-        self._ch_emb_buffer = []
-        self._ch_name_buffer = []
-        self._n_ch_collected = 0
+        self._rank_obs = None
+        self._local_identities = []
+        self._local_channel_counts = []
+        self._sample_metadata_lists = {}
 
     def on_fit_end(
         self, trainer: Trainer, pl_module: L.LightningModule
@@ -710,3 +1347,4 @@ class EmbeddingVisualizationCallback(L.Callback):
         )
         if setter is not None:
             setter(False)
+        self._clear_buffers()

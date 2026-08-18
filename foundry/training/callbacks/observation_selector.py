@@ -453,6 +453,8 @@ class RankObservations:
     identities: list[ObservationIdentity]
     backbone_representations: torch.Tensor | None = None
     channel_representations: torch.Tensor | None = None
+    channel_indices: torch.Tensor | None = None
+    channel_masks: torch.Tensor | None = None
     channel_counts: list[int] = field(default_factory=list)
     target_values: dict[str, torch.Tensor] = field(default_factory=dict)
 
@@ -540,6 +542,8 @@ def _merge_rank_observations(
     merged.channel_representations = _stack_optional_rows(
         rows, "channel_representations"
     )
+    merged.channel_indices = _stack_optional_rows(rows, "channel_indices")
+    merged.channel_masks = _stack_optional_rows(rows, "channel_masks")
     return merged
 
 
@@ -550,7 +554,12 @@ def _validate_rank_observations(
     n_rows = len(observation.identities)
     if len(observation.channel_counts) not in (0, n_rows):
         raise ValueError("channel_counts must have one entry per identity")
-    for name in ("backbone_representations", "channel_representations"):
+    for name in (
+        "backbone_representations",
+        "channel_representations",
+        "channel_indices",
+        "channel_masks",
+    ):
         value = getattr(observation, name)
         if value is not None and value.shape[0] != n_rows:
             raise ValueError(f"{name} must have one row per identity")
@@ -576,11 +585,11 @@ def _stack_optional_rows(
     try:
         return torch.stack(row_tensors)
     except RuntimeError as error:
-        # Channel tensors have shape (C, D) per window and C may differ between
-        # ranks. Preserve all vectors by padding C; channel_counts identifies
-        # the valid prefix of each resulting row.
+        # Channel tensors have shape (C, ...) per window and C may differ between
+        # ranks. Preserve all values by padding C; channel_counts identifies the
+        # valid prefix of each resulting row.
         if not all(
-            value.ndim == 2 and value.shape[1:] == row_tensors[0].shape[1:]
+            value.ndim >= 1 and value.shape[1:] == row_tensors[0].shape[1:]
             for value in row_tensors
         ):
             raise ValueError(
