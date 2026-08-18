@@ -218,6 +218,14 @@ def make_channel_recording_figure(
         nrows, ncols, figsize=(4 * ncols, 4 * nrows), squeeze=False
     )
 
+    # Small multiples share one PCA frame semantically.  Explicitly apply the
+    # global limits because Matplotlib otherwise auto-scales every recording
+    # independently and makes cluster spread incomparable across panels.
+    x_min, x_max = float(coords_2d[:, 0].min()), float(coords_2d[:, 0].max())
+    y_min, y_max = float(coords_2d[:, 1].min()), float(coords_2d[:, 1].max())
+    x_pad = max((x_max - x_min) * 0.05, 1e-6)
+    y_pad = max((y_max - y_min) * 0.05, 1e-6)
+
     for panel_idx, rec_id in enumerate(selected_recs):
         ax = axes[panel_idx // ncols, panel_idx % ncols]
         rec_mask = recording_ids == rec_id
@@ -245,6 +253,8 @@ def make_channel_recording_figure(
         if len(short_rec) > 40:
             short_rec = "..." + short_rec[-37:]
         ax.set_title(short_rec, fontsize=8)
+        ax.set_xlim(x_min - x_pad, x_max + x_pad)
+        ax.set_ylim(y_min - y_pad, y_max + y_pad)
         if len(unique_ch) <= 12:
             ax.legend(fontsize=5, markerscale=2, loc="best")
 
@@ -314,12 +324,36 @@ def make_channel_anatomy_figure(
     positions_3d: dict[str, np.ndarray],
     pca: PCA,
     event_label: str,
+    recording_ids: np.ndarray | None = None,
 ):
-    """PCA colored by scalp position for channels with resolved anatomy (Section 9.3)."""
+    """Plot recording-specific channel centroids colored by scalp position.
+
+    Dynamic observations are reduced to one PCA-space centroid per
+    ``(recording, channel)`` pair.  Static inputs already contain one point per
+    pair, so the same code path preserves their semantics.
+    """
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+
+    if recording_ids is not None:
+        recording_ids = np.asarray(recording_ids)
+        if len(recording_ids) != len(channel_ids):
+            raise ValueError(
+                "recording_ids and channel_ids must have equal length"
+            )
+        grouped_coords: list[np.ndarray] = []
+        grouped_channels: list[str] = []
+        for recording_id, channel_id in sorted(
+            set(zip(recording_ids, channel_ids, strict=True)),
+            key=lambda pair: (str(pair[0]), str(pair[1])),
+        ):
+            mask = (recording_ids == recording_id) & (channel_ids == channel_id)
+            grouped_coords.append(coords_2d[mask].mean(axis=0))
+            grouped_channels.append(str(channel_id))
+        coords_2d = np.asarray(grouped_coords)
+        channel_ids = np.asarray(grouped_channels)
 
     canonical = np.array(
         [normalize_electrode_name(str(ch)) for ch in channel_ids]
@@ -375,7 +409,8 @@ def make_channel_anatomy_figure(
     ax.set_ylabel(f"PC2 ({ev[1] if len(ev) > 1 else 0.0:.1%})")
     ax.set_title(
         f"Channel PCA — Anatomical Position [{event_label}]\n"
-        f"{n_resolved} resolved, {int(np.sum(~resolved_mask))} unresolved"
+        f"{n_resolved} resolved centroids, "
+        f"{int(np.sum(~resolved_mask))} unresolved centroids"
     )
 
     _draw_scalp_colorwheel(ax_leg, electrode_pos_2d, max_d)
@@ -390,6 +425,27 @@ def _get_electrode_positions_2d(
         name: (float(pos[0]), float(pos[1]))
         for name, pos in positions_3d.items()
     }
+
+
+def has_eligible_anatomy_recording(
+    recording_ids: np.ndarray,
+    channel_ids: np.ndarray,
+    positions_3d: dict[str, np.ndarray],
+    min_positioned_channels: int,
+) -> bool:
+    """Return whether one recording has enough distinct resolved electrodes."""
+    recording_ids = np.asarray(recording_ids)
+    channel_ids = np.asarray(channel_ids)
+    for recording_id in np.unique(recording_ids):
+        mask = recording_ids == recording_id
+        resolved = {
+            normalize_electrode_name(str(channel_id))
+            for channel_id in channel_ids[mask]
+            if normalize_electrode_name(str(channel_id)) in positions_3d
+        }
+        if len(resolved) >= min_positioned_channels:
+            return True
+    return False
 
 
 def make_norm_distribution_figure(
@@ -554,6 +610,7 @@ class EmbeddingVisualizationCallback(L.Callback):
         self._capture_scheduled = False
         self._idx_to_channel: dict[int, str] = {}
         self._task_class_names: dict[str, list[str]] = {}
+        self._classification_tasks: set[str] = set()
 
         self._rank_obs: RankObservations | None = None
         self._local_identities: list[ObservationIdentity] = []
@@ -588,6 +645,9 @@ class EmbeddingVisualizationCallback(L.Callback):
         if not hasattr(model, "task_configs"):
             return
         for task_name, cfg in model.task_configs.items():
+            if getattr(cfg, "kind", None) not in ("binary", "multiclass"):
+                continue
+            self._classification_tasks.add(task_name)
             if hasattr(cfg, "get_class_names"):
                 names = cfg.get_class_names()
                 if names is not None:
@@ -872,6 +932,7 @@ class EmbeddingVisualizationCallback(L.Callback):
             import wandb
         except ImportError:
             wandb = None
+        can_convert_images = wandb is not None and wandb_experiment is not None
 
         config = self._selection_config
         step_label = f"step {trainer.global_step}"
@@ -972,7 +1033,7 @@ class EmbeddingVisualizationCallback(L.Callback):
                         bb_pca,
                         step_label,
                     )
-                    if fig is not None and wandb is not None:
+                    if fig is not None and can_convert_images:
                         log_dict[f"{prefix}/backbone/pca_{view_name}"] = (
                             wandb.Image(fig)
                         )
@@ -1000,7 +1061,7 @@ class EmbeddingVisualizationCallback(L.Callback):
                         step_label,
                         class_names=class_names,
                     )
-                    if fig is not None and wandb is not None:
+                    if fig is not None and can_convert_images:
                         log_dict[f"{prefix}/backbone/pca_task/{task_name}"] = (
                             wandb.Image(fig)
                         )
@@ -1023,7 +1084,7 @@ class EmbeddingVisualizationCallback(L.Callback):
             fig_norm = make_norm_distribution_figure(
                 bb_norm_result.norms, "Backbone", step_label
             )
-            if fig_norm is not None and wandb is not None:
+            if fig_norm is not None and can_convert_images:
                 log_dict[f"{prefix}/backbone/norm_distribution"] = wandb.Image(
                     fig_norm
                 )
@@ -1046,6 +1107,12 @@ class EmbeddingVisualizationCallback(L.Callback):
             ) = self._flatten_channel_observations(merged, ch_window_indices)
 
             if len(ch_flat_vecs) > 0:
+                # Static representations are deduplicated during flattening;
+                # report the number of points actually analyzed and plotted.
+                selection.channel_observation_count = len(ch_flat_vecs)
+                log_dict[f"{prefix}/sample/channel_observation_count"] = len(
+                    ch_flat_vecs
+                )
                 ch_norm_result = normalize_representations(ch_flat_vecs)
                 log_dict.update(
                     normalization_counts_for_logging("channel", ch_norm_result)
@@ -1071,7 +1138,7 @@ class EmbeddingVisualizationCallback(L.Callback):
                         step_label,
                         config.seed,
                     )
-                    if fig_rec is not None and wandb is not None:
+                    if fig_rec is not None and can_convert_images:
                         log_dict[f"{prefix}/channel/pca_by_recording"] = (
                             wandb.Image(fig_rec)
                         )
@@ -1084,7 +1151,7 @@ class EmbeddingVisualizationCallback(L.Callback):
                         ch_pca,
                         step_label,
                     )
-                    if fig_canon is not None and wandb is not None:
+                    if fig_canon is not None and can_convert_images:
                         log_dict[
                             f"{prefix}/channel/pca_canonical_electrode"
                         ] = wandb.Image(fig_canon)
@@ -1092,16 +1159,12 @@ class EmbeddingVisualizationCallback(L.Callback):
                         plt.close(fig_canon)
 
                     positions_3d = get_electrode_positions_3d()
-                    canonical_labels = np.array(
-                        [
-                            normalize_electrode_name(str(ch))
-                            for ch in ch_channel_valid
-                        ]
+                    has_positions = has_eligible_anatomy_recording(
+                        ch_recording_valid,
+                        ch_channel_valid,
+                        positions_3d,
+                        self.min_positioned_channels,
                     )
-                    n_positioned = len(
-                        {c for c in canonical_labels if c in positions_3d}
-                    )
-                    has_positions = n_positioned >= self.min_positioned_channels
 
                     if has_positions:
                         fig_anat = make_channel_anatomy_figure(
@@ -1110,8 +1173,9 @@ class EmbeddingVisualizationCallback(L.Callback):
                             positions_3d,
                             ch_pca,
                             step_label,
+                            recording_ids=ch_recording_valid,
                         )
-                        if fig_anat is not None and wandb is not None:
+                        if fig_anat is not None and can_convert_images:
                             log_dict[f"{prefix}/channel/pca_anatomy"] = (
                                 wandb.Image(fig_anat)
                             )
@@ -1134,7 +1198,7 @@ class EmbeddingVisualizationCallback(L.Callback):
                 fig_ch_norm = make_norm_distribution_figure(
                     ch_norm_result.norms, "Channel", step_label
                 )
-                if fig_ch_norm is not None and wandb is not None:
+                if fig_ch_norm is not None and can_convert_images:
                     log_dict[f"{prefix}/channel/norm_distribution"] = (
                         wandb.Image(fig_ch_norm)
                     )
@@ -1273,6 +1337,8 @@ class EmbeddingVisualizationCallback(L.Callback):
         """
         result = {}
         for task_name, all_targets in merged.target_values.items():
+            if task_name not in self._classification_tasks:
+                continue
             selected_targets = all_targets[selection.window_indices]
             valid_targets = selected_targets[valid_indices]
 

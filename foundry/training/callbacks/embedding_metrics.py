@@ -394,16 +394,20 @@ def channel_temporal_consistency(
             total_channels += 1
             total_obs += n_ch
 
-            obs_sims: list[float] = []
-            for i in range(n_ch):
-                others = np.delete(ch_vectors, i, axis=0)
-                centroid = others.mean(axis=0)
-                c_norm = np.linalg.norm(centroid)
-                if c_norm > 0:
-                    centroid /= c_norm
-                sim = float(ch_vectors[i] @ centroid)
-                obs_sims.append(sim)
-
+            # All leave-one-out centroids are available from one channel sum.
+            # This preserves the exact estimator while avoiding one allocation
+            # and reduction per observation.
+            loo_centroids = (
+                ch_vectors.sum(axis=0, keepdims=True) - ch_vectors
+            ) / (n_ch - 1)
+            loo_norms = np.linalg.norm(loo_centroids, axis=1, keepdims=True)
+            loo_centroids = np.divide(
+                loo_centroids,
+                loo_norms,
+                out=np.zeros_like(loo_centroids),
+                where=loo_norms > 0,
+            )
+            obs_sims = np.sum(ch_vectors * loo_centroids, axis=1)
             channel_scores.append(float(np.mean(obs_sims)))
 
         if channel_scores:
@@ -516,45 +520,41 @@ def channel_within_recording_separability(
 
         channel_accuracies: list[float] = []
         channel_margins: list[float] = []
+        channel_vectors = {
+            ch: rec_vectors[rec_channels == ch] for ch in eligible_channels
+        }
+        channel_centroids = []
+        for ch in eligible_channels:
+            centroid = channel_vectors[ch].mean(axis=0)
+            norm = np.linalg.norm(centroid)
+            channel_centroids.append(centroid / norm if norm > 0 else centroid)
+        channel_centroids_arr = np.asarray(channel_centroids)
 
-        for ch_id in eligible_channels:
-            ch_mask = rec_channels == ch_id
-            ch_indices = np.where(ch_mask)[0]
-            n_ch = len(ch_indices)
+        for channel_position, ch_id in enumerate(eligible_channels):
+            vectors = channel_vectors[ch_id]
+            n_ch = len(vectors)
             total_channels += 1
             total_obs += n_ch
 
-            obs_correct: list[bool] = []
-            obs_margins: list[float] = []
+            loo_centroids = (vectors.sum(axis=0, keepdims=True) - vectors) / (
+                n_ch - 1
+            )
+            loo_norms = np.linalg.norm(loo_centroids, axis=1, keepdims=True)
+            loo_centroids = np.divide(
+                loo_centroids,
+                loo_norms,
+                out=np.zeros_like(loo_centroids),
+                where=loo_norms > 0,
+            )
+            own_similarities = np.sum(vectors * loo_centroids, axis=1)
+            other_centroids = np.delete(
+                channel_centroids_arr, channel_position, axis=0
+            )
+            best_other_similarities = (vectors @ other_centroids.T).max(axis=1)
+            margins = own_similarities - best_other_similarities
 
-            for i_local, i_global in enumerate(ch_indices):
-                other_ch_vectors = np.delete(
-                    rec_vectors[ch_mask], i_local, axis=0
-                )
-                own_centroid = other_ch_vectors.mean(axis=0)
-                own_norm = np.linalg.norm(own_centroid)
-                if own_norm > 0:
-                    own_centroid /= own_norm
-                own_sim = float(rec_vectors[i_global] @ own_centroid)
-
-                best_other_sim = -np.inf
-                for other_ch in eligible_channels:
-                    if other_ch == ch_id:
-                        continue
-                    other_vecs = rec_vectors[rec_channels == other_ch]
-                    other_cent = other_vecs.mean(axis=0)
-                    o_norm = np.linalg.norm(other_cent)
-                    if o_norm > 0:
-                        other_cent /= o_norm
-                    sim = float(rec_vectors[i_global] @ other_cent)
-                    best_other_sim = max(best_other_sim, sim)
-
-                is_correct = own_sim > best_other_sim
-                obs_correct.append(is_correct)
-                obs_margins.append(own_sim - best_other_sim)
-
-            channel_accuracies.append(float(np.mean(obs_correct)))
-            channel_margins.append(float(np.mean(obs_margins)))
+            channel_accuracies.append(float(np.mean(margins > 0)))
+            channel_margins.append(float(np.mean(margins)))
 
         if channel_accuracies:
             recording_accuracies.append(float(np.mean(channel_accuracies)))
@@ -684,11 +684,49 @@ def channel_canonical_consistency(
             n_excluded_electrodes=n_excluded,
         )
 
+    eligible_labels = sorted(eligible)
+    eligible_positions = {
+        label: position for position, label in enumerate(eligible_labels)
+    }
+    global_sums: dict[str, np.ndarray] = {}
+    global_counts: dict[str, int] = {}
+    recording_sums: dict[tuple[str, str], np.ndarray] = {}
+    recording_counts: dict[tuple[str, str], int] = {}
+    for key, centroid in recording_channel_centroids.items():
+        rec_id, _ = key
+        label = channel_labels[key]
+        if label not in eligible:
+            continue
+        global_sums[label] = (
+            global_sums.get(label, np.zeros_like(centroid)) + centroid
+        )
+        global_counts[label] = global_counts.get(label, 0) + 1
+        rec_label = (rec_id, label)
+        recording_sums[rec_label] = (
+            recording_sums.get(rec_label, np.zeros_like(centroid)) + centroid
+        )
+        recording_counts[rec_label] = recording_counts.get(rec_label, 0) + 1
+
+    prototype_cache: dict[str, np.ndarray] = {}
+    for rec_id in np.unique(recording_ids):
+        prototypes = []
+        for label in eligible_labels:
+            rec_label = (str(rec_id), label)
+            prototype = global_sums[label] - recording_sums.get(
+                rec_label, np.zeros_like(global_sums[label])
+            )
+            count = global_counts[label] - recording_counts.get(rec_label, 0)
+            if count > 0:
+                prototype = prototype / count
+            norm = np.linalg.norm(prototype)
+            prototypes.append(prototype / norm if norm > 0 else prototype)
+        prototype_cache[str(rec_id)] = np.asarray(prototypes)
+
     electrode_accuracies: list[float] = []
     electrode_margins: list[float] = []
     total_centroids = 0
 
-    for electrode, recordings in eligible.items():
+    for electrode in eligible_labels:
         centroid_correct: list[bool] = []
         centroid_margins: list[float] = []
 
@@ -699,35 +737,10 @@ def channel_canonical_consistency(
             target_centroid = recording_channel_centroids[
                 (target_rec, target_channel)
             ]
-
-            def leave_one_recording_out_prototype(label: str) -> np.ndarray:
-                other_centroids = [
-                    centroid
-                    for (
-                        rec,
-                        channel,
-                    ), centroid in recording_channel_centroids.items()
-                    if rec != target_rec
-                    and channel_labels[(rec, channel)] == label
-                ]
-                prototype = np.mean(other_centroids, axis=0)
-                prototype_norm = np.linalg.norm(prototype)
-                if prototype_norm > 0:
-                    prototype /= prototype_norm
-                return prototype
-
-            canonical_centroid = leave_one_recording_out_prototype(electrode)
-            own_sim = float(target_centroid @ canonical_centroid)
-
-            other_sims = [
-                float(
-                    target_centroid
-                    @ leave_one_recording_out_prototype(other_electrode)
-                )
-                for other_electrode in eligible
-                if other_electrode != electrode
-            ]
-            best_other_sim = max(other_sims)
+            similarities = prototype_cache[target_rec] @ target_centroid
+            own_position = eligible_positions[electrode]
+            own_sim = float(similarities[own_position])
+            best_other_sim = float(np.delete(similarities, own_position).max())
 
             centroid_correct.append(own_sim > best_other_sim)
             centroid_margins.append(own_sim - best_other_sim)

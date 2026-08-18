@@ -13,13 +13,13 @@
 # Phase 2 — From-scratch CWT-CNN HP search (fold 0, 12 runs):
 #   uv run python main.py experiment=sleep_staging/poyo_kemp_finetune_hp_search \
 #       run.pretrained_checkpoint=null \
-#       'run.name=kemp_scratch_hp_lr${hyperparameters.learning_rate}_wu${module.warmup_epochs}' \
+#       'run.name=kemp_scratch_hp_lr${hyperparameters.learning_rate}_wu${module.warmup}' \
 #       run.group=KEMP_SCRATCH_HP_SEARCH \
 #       'run.tags=[sleep_staging,poyo,kemp,scratch,hp_search,exp009]' -m
 #
 # Phase 3 — 3-fold validation of best configs (after Phase 1 & 2):
 #   uv run python main.py experiment=sleep_staging/poyo_kemp_finetune_hp_search \
-#       hyperparameters.learning_rate=<best_lr> module.warmup_epochs=<best_wu> \
+#       hyperparameters.learning_rate=<best_lr> module.warmup=<best_wu> \
 #       'hyperparameters.fold_number=0,1,2' -m
 #   (repeat for scratch with pretrained_checkpoint=null overrides)
 
@@ -44,7 +44,7 @@ data:
   task_type: sleep_stage
 
 run:
-  name: kemp_finetune_hp_lr${hyperparameters.learning_rate}_wu${module.warmup_epochs}
+  name: kemp_finetune_hp_lr${hyperparameters.learning_rate}_wu${module.warmup}
   group: KEMP_FINETUNE_HP_SEARCH
   tags: [sleep_staging, poyo, kemp, finetuning, hp_search, exp009]
   log_level: INFO
@@ -54,7 +54,7 @@ run:
   freeze_pretrained: false
 
 module:
-  warmup_epochs: 0
+  warmup: 0
 
 class_weights:
   mode: auto
@@ -90,7 +90,7 @@ hydra:
   sweeper:
     params:
       hyperparameters.learning_rate: 1e-5, 3e-5, 5e-5, 1e-4
-      module.warmup_epochs: 0, 5, 10
+      module.warmup: 0, 5, 10
   launcher:
     tasks_per_node: 1
     cpus_per_task: 6

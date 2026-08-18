@@ -58,7 +58,7 @@ callbacks:
   embedding_visualization:
     _target_: foundry.training.callbacks.EmbeddingVisualizationCallback
     every_n_validation_runs: 5
-    sample_seed: ${run.seed}
+    sample_seed: ${oc.select:run.seed,42}
     window_fraction: 0.10
     min_windows: 256
     max_windows: 2048

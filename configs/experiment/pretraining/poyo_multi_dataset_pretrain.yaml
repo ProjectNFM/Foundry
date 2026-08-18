@@ -20,7 +20,7 @@ data:
   task_type: null
 
 module:
-  warmup_epochs: 0
+  warmup: 0
 
 run:
   name: poyo_multi_dataset_pretrain

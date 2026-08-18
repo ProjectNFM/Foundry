@@ -34,7 +34,7 @@ data:
   pin_memory: false
 
 module:
-  warmup_epochs: 0
+  warmup: 0
 
 run:
   name: pretrain_sessemb_${model.session_emb.session_emb_mode}

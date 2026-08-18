@@ -23,14 +23,17 @@ from hydra.utils import instantiate
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+from sklearn.decomposition import PCA
 import torch
 
 from foundry.models.ssl_meta import RepresentationPayload
 from foundry.training.callbacks.embedding_viz import (
     EmbeddingVisualizationCallback,
     fit_deterministic_pca,
+    has_eligible_anatomy_recording,
     make_backbone_pca_figure,
     make_channel_anatomy_figure,
+    make_channel_recording_figure,
     stable_color_map,
 )
 from foundry.training.callbacks.observation_selector import (
@@ -254,6 +257,7 @@ def test_unavailable_representations_still_emit_availability() -> None:
 def test_task_labels_exclude_conflicting_multi_target_windows() -> None:
     """Multi-target task views retain only windows with an unambiguous class."""
     callback = EmbeddingVisualizationCallback()
+    callback._classification_tasks = {"stage"}
     observations = RankObservations(
         identities=[_identity(0.0), _identity(2.0), _identity(4.0)],
         target_values={
@@ -272,6 +276,25 @@ def test_task_labels_exclude_conflicting_multi_target_windows() -> None:
 
     assert list(labels) == [1, 2, 3]
     assert list(valid) == [True, False, True]
+
+
+def test_task_labels_skip_non_classification_tasks() -> None:
+    """Continuous pretraining targets never produce class-colored views."""
+    callback = EmbeddingVisualizationCallback()
+    observations = RankObservations(
+        identities=[_identity(0.0), _identity(2.0)],
+        target_values={"masked_reconstruction": torch.tensor([[0.1], [0.2]])},
+    )
+    selection = SelectedObservations(
+        window_identities=observations.identities,
+        window_indices=[0, 1],
+        fingerprint="test",
+    )
+
+    assert (
+        callback._extract_task_labels(observations, selection, np.array([0, 1]))
+        == {}
+    )
 
 
 def test_single_feature_pca_figures_are_renderable() -> None:
@@ -530,6 +553,7 @@ def test_downstream_classification_single_task() -> None:
     cb._task_class_names = {
         "sleep_stage": ["W", "N1", "N2", "N3", "REM"],
     }
+    cb._classification_tasks = {"sleep_stage"}
 
     experiment = FakeExperiment()
     trainer = FakeTrainer(step=100)
@@ -739,6 +763,66 @@ def test_anatomy_threshold_below_nine() -> None:
     plt.close(fig)
 
 
+def test_anatomy_eligibility_is_required_within_one_recording() -> None:
+    """Resolved channels cannot be pooled across recordings to pass the gate."""
+    electrodes = np.array(
+        ["fp1", "fp2", "f3", "f4", "c3", "c4", "p3", "p4", "o1", "o2"]
+    )
+    positions = {name: np.ones(3) for name in electrodes}
+    recording_ids = np.array(["rec-a"] * 5 + ["rec-b"] * 5)
+
+    assert not has_eligible_anatomy_recording(
+        recording_ids, electrodes, positions, min_positioned_channels=9
+    )
+
+
+def test_anatomy_figure_uses_recording_channel_centroids() -> None:
+    """Repeated dynamic windows become one point per recording/channel pair."""
+    coords = np.array([[0.0, 0.0], [2.0, 0.0], [0.0, 2.0], [2.0, 2.0]])
+    channel_ids = np.array(["fp1", "fp1", "fp2", "fp2"])
+    recording_ids = np.array(["rec", "rec", "rec", "rec"])
+    positions = {
+        "fp1": np.array([-0.1, 0.1, 0.0]),
+        "fp2": np.array([0.1, 0.1, 0.0]),
+    }
+    pca = PCA(n_components=2).fit(coords)
+
+    fig = make_channel_anatomy_figure(
+        coords,
+        channel_ids,
+        positions,
+        pca,
+        "step 1",
+        recording_ids=recording_ids,
+    )
+
+    assert len(fig.axes[0].collections[0].get_offsets()) == 2
+    plt.close(fig)
+
+
+def test_recording_panels_share_global_pca_limits() -> None:
+    """Recording panels use the same PCA coordinate frame and scale."""
+    coords = np.array([[0.0, 0.0], [1.0, 1.0], [10.0, 10.0], [11.0, 11.0]])
+    recording_ids = np.array(["a", "a", "b", "b"])
+    channel_ids = np.array(["fp1", "fp2", "fp1", "fp2"])
+    pca = PCA(n_components=2).fit(coords)
+
+    fig = make_channel_recording_figure(
+        coords,
+        recording_ids,
+        channel_ids,
+        pca,
+        "dynamic",
+        8,
+        "step 1",
+        42,
+    )
+
+    assert fig.axes[0].get_xlim() == fig.axes[1].get_xlim()
+    assert fig.axes[0].get_ylim() == fig.axes[1].get_ylim()
+    plt.close(fig)
+
+
 def test_callback_anatomy_gated_by_min_positioned_channels() -> None:
     """The callback-level anatomy gate uses min_positioned_channels threshold.
 
@@ -869,6 +953,31 @@ def test_callback_works_without_wandb_logger() -> None:
         cb.on_validation_epoch_end(trainer, module)
 
     assert cb._rank_obs is None, "Buffers should be cleared after epoch end"
+
+
+def test_callback_skips_image_conversion_without_wandb_logger() -> None:
+    """No-logger validation does not pay W&B image-conversion overhead."""
+    cb = EmbeddingVisualizationCallback(
+        every_n_validation_runs=1, min_windows=1, max_windows=256
+    )
+    observations = RankObservations(
+        identities=[_identity(0.0), _identity(2.0)],
+        backbone_representations=torch.randn(2, 8),
+    )
+
+    with patch("wandb.Image") as image:
+        cb._process_and_log(observations, FakeTrainer(), None)
+
+    image.assert_not_called()
+
+
+def test_static_sample_count_matches_deduplicated_points() -> None:
+    """Static sample coverage reports plotted channel identities, not repeats."""
+    logged = _run_callback_smoke(
+        "static", n_batches=3, batch_size=4, n_channels=4
+    )
+
+    assert logged["val/embedding_viz/sample/channel_observation_count"] == 4
 
 
 def test_callback_clears_buffers_after_processing() -> None:

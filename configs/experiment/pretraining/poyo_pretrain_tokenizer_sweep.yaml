@@ -35,7 +35,7 @@ data:
   task_type: null
 
 module:
-  warmup_epochs: 0
+  warmup: 0
 
 run:
   name: pretrain_tokenizer_${hydra:runtime.choices.model/tokenizer}
