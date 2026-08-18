@@ -8,8 +8,9 @@ references from this thread:
 2. Opt-HP **single-subject** POYO (mean across subjects)
 3. **Best multi-subject** POYO (reduced-capacity fold-0 winners)
 
-Per-session scatterplots compare each baseline to (3), not to each
-other. Per-session bars add (2) and (3) next to the session models.
+Per-session scatterplots and supplementary bars use ``val_session/``
+history-max metrics from (2) and (3), matched to the same recordings
+as EEGNet/GRU — not the pooled run summary.
 
 Usage:
     uv run python analysis/20260818-LS-singlesess-eegnet-gru-baselines.py
@@ -101,18 +102,12 @@ PER_SESSION_COLORS = {
     "poyo_subj": CONDITION_COLORS["poyo_subj"],
     "poyo_multi": CONDITION_COLORS["poyo_multi"],
 }
-PER_SESSION_HATCH = {
-    "eegnet": None,
-    "gru": None,
-    "poyo": None,
-    "poyo_subj": "///",
-    "poyo_multi": "xx",
-}
-
 STEM = Path(__file__).stem
 FIGURES_DIR = figures_dir(__file__)
 CSV_DIR = csv_dir(__file__)
 N_WORKERS = 8
+HISTORY_BATCH = 30
+VAL_SESSION_PREFIX = "val_session/"
 
 
 def _run_path(run_id: str, project: str = PROJECT) -> str:
@@ -236,6 +231,130 @@ def _history_maxes(run: Any, wandb_keys: list[str]) -> dict[str, float | None]:
         else:
             out[key] = float(history[key].max())
     return out
+
+
+def _history_maxes_batched(
+    run: Any, wandb_keys: list[str], batch_size: int = HISTORY_BATCH
+) -> dict[str, float | None]:
+    out: dict[str, float | None] = {}
+    for i in range(0, len(wandb_keys), batch_size):
+        out.update(_history_maxes(run, wandb_keys[i : i + batch_size]))
+    return out
+
+
+def _shorten_session_id(session_id: str) -> str:
+    """Keep sub-/ses-/acq- segments (same as SessionMetricsCallback)."""
+    parts = str(session_id).split("_")
+    keep = [p for p in parts if p.startswith(("sub-", "ses-", "acq-"))]
+    return "_".join(keep) if keep else str(session_id)
+
+
+def _parse_val_session_keys(summary: Any) -> dict[str, dict[str, str]]:
+    """Map short session id → {metric: wandb key} for val_session logs."""
+    task_prefix = f"{TASK}_"
+    parsed: dict[str, dict[str, str]] = {}
+    for key in summary.keys():
+        key_s = str(key)
+        if not key_s.startswith(VAL_SESSION_PREFIX):
+            continue
+        parts = key_s.split("/")
+        if len(parts) != 3:
+            continue
+        _, sid, rest = parts
+        if not rest.startswith(task_prefix):
+            continue
+        metric = rest[len(task_prefix) :]
+        if metric not in METRIC_KEYS:
+            continue
+        parsed.setdefault(sid, {})[metric] = key_s
+    return parsed
+
+
+def val_session_rows_from_run(
+    run: Any,
+    *,
+    species: str,
+    model: str,
+    fold: int | None = None,
+    subject: str | None = None,
+) -> list[dict[str, Any]]:
+    parsed = _parse_val_session_keys(run.summary)
+    wandb_keys = [k for mmap in parsed.values() for k in mmap.values()]
+    maxes = _history_maxes_batched(run, wandb_keys)
+    rows: list[dict[str, Any]] = []
+    for sid, mmap in parsed.items():
+        row: dict[str, Any] = {
+            "run_id": run.id,
+            "species": species,
+            "model": model,
+            "session": sid,
+            "session_key": sid,
+            "subject": subject or sid.split("_")[0],
+            "fold": fold,
+        }
+        for metric in METRICS:
+            key = mmap.get(metric)
+            val = maxes.get(key) if key else None
+            if val is None and key is not None:
+                val = _summary_max(run, key)
+            row[metric] = val
+        rows.append(row)
+    return rows
+
+
+def fetch_multisubj_session_metrics(
+    api: wandb.Api | None = None,
+) -> pd.DataFrame:
+    if api is None:
+        api = wandb.Api()
+    rows: list[dict[str, Any]] = []
+    for species, run_id in MULTISUBJ_BEST_POYO.items():
+        run = api.run(_run_path(run_id))
+        part = val_session_rows_from_run(
+            run, species=species, model="poyo_multi", fold=0
+        )
+        print(f"  val_session multi {species} ({run_id}): {len(part)} sessions")
+        rows.extend(part)
+    return pd.DataFrame(rows)
+
+
+def _fetch_one_val_sessions(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    api = wandb.Api()
+    run = api.run(_run_path(str(payload["run_id"])))
+    fold = payload.get("fold")
+    try:
+        fold_i = int(fold) if fold is not None and pd.notna(fold) else None
+    except (TypeError, ValueError):
+        fold_i = None
+    return val_session_rows_from_run(
+        run,
+        species=str(payload["species"]),
+        model="poyo_subj",
+        fold=fold_i,
+        subject=payload.get("subject"),
+    )
+
+
+def fetch_singlesubj_session_metrics(
+    subj_runs: pd.DataFrame, api: wandb.Api | None = None
+) -> pd.DataFrame:
+    del api
+    work = subj_runs[subj_runs["state"] == "finished"].copy()
+    payloads = work[["run_id", "species", "fold", "subject"]].to_dict("records")
+    print(
+        f"Fetching val_session metrics for {len(payloads)} single-subject "
+        f"POYO runs ({N_WORKERS} workers)..."
+    )
+    rows: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=N_WORKERS) as pool:
+        futures = [pool.submit(_fetch_one_val_sessions, p) for p in payloads]
+        done = 0
+        for fut in as_completed(futures):
+            rows.extend(fut.result())
+            done += 1
+            if done % 10 == 0 or done == len(payloads):
+                print(f"  {done}/{len(payloads)}")
+    return pd.DataFrame(rows)
 
 
 def _row_from_run(run: Any) -> dict[str, Any]:
@@ -447,10 +566,42 @@ def fold_means_by_session(df: pd.DataFrame) -> pd.DataFrame:
             row[f"{m}_n"] = int(len(vals))
         rows.append(row)
     out = pd.DataFrame(rows)
-    out["model"] = pd.Categorical(
-        out["model"], categories=MODEL_ORDER, ordered=True
-    )
+    if out.empty:
+        return out
+    present = [m for m in MODEL_ORDER if m in set(out["model"].astype(str))]
+    if present:
+        out["model"] = pd.Categorical(
+            out["model"], categories=MODEL_ORDER, ordered=True
+        )
     return out.reset_index(drop=True)
+
+
+def fold_means_from_session_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Fold-mean val_session metrics; ``session`` is already the short id."""
+    if df.empty:
+        return df.copy()
+    work = df.copy()
+    work["session"] = work["session"].astype(str)
+    grouped = work.groupby(
+        ["species", "model", "session"], observed=True, dropna=False
+    )
+    rows: list[dict[str, Any]] = []
+    for (species, model, session), g in grouped:
+        row: dict[str, Any] = {
+            "species": species,
+            "model": str(model),
+            "session": session,
+            "n_folds": int(g["fold"].nunique(dropna=True)),
+        }
+        for m in METRICS:
+            vals = pd.to_numeric(g[m], errors="coerce").dropna()
+            row[f"{m}_mean"] = float(vals.mean()) if len(vals) else np.nan
+            row[f"{m}_std"] = (
+                float(vals.std(ddof=1)) if len(vals) > 1 else np.nan
+            )
+            row[f"{m}_n"] = int(len(vals))
+        rows.append(row)
+    return pd.DataFrame(rows)
 
 
 def flag_outliers(session_df: pd.DataFrame) -> pd.DataFrame:
@@ -897,74 +1048,51 @@ def _subject_from_session(session: str) -> str:
     return str(session).split("_")[0]
 
 
-def attach_poyo_refs(
+def attach_poyo_session_metrics(
     session_df: pd.DataFrame,
-    subj_units: pd.DataFrame,
-    multi: pd.DataFrame,
+    subj_sess: pd.DataFrame,
+    multi_sess: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Repeat subject-level and best multi-subject POYO next to each session."""
+    """Add per-session POYO subject / multi bars for sessions already plotted."""
     keep = session_df.copy()
     keep["model"] = keep["model"].astype(str)
-    seen = keep[["species", "session"]].drop_duplicates()
-    subj_idx = subj_units.set_index(["species", "subject"])
-    multi_idx = multi.set_index("species")
-    extra: list[dict[str, Any]] = []
-    for _, rec in seen.iterrows():
-        species = rec["species"]
-        session = rec["session"]
-        subject = _subject_from_session(session)
-        if (species, subject) in subj_idx.index:
-            srow = subj_idx.loc[(species, subject)]
-            if isinstance(srow, pd.DataFrame):
-                srow = srow.iloc[0]
-            row: dict[str, Any] = {
-                "species": species,
-                "model": "poyo_subj",
-                "session": session,
-                "n_folds": int(srow["n_folds"]),
-                "is_outlier": False,
-                "outlier_reason": "",
-            }
-            for m in METRICS:
-                row[f"{m}_mean"] = float(srow[f"{m}_mean"])
-                std_val = srow[f"{m}_std"]
-                row[f"{m}_std"] = (
-                    float(std_val) if pd.notna(std_val) else np.nan
-                )
-            extra.append(row)
-        if species in multi_idx.index:
-            mrow = multi_idx.loc[species]
-            if isinstance(mrow, pd.DataFrame):
-                mrow = mrow.iloc[0]
-            row = {
-                "species": species,
-                "model": "poyo_multi",
-                "session": session,
-                "n_folds": 1,
-                "is_outlier": False,
-                "outlier_reason": "",
-            }
-            for m in METRICS:
-                val = mrow[m] if m in mrow.index else np.nan
-                row[f"{m}_mean"] = float(val) if pd.notna(val) else np.nan
-                row[f"{m}_std"] = np.nan
-            extra.append(row)
-    if not extra:
+    keep["session_key"] = keep["session"].map(_shorten_session_id)
+    keep_keys = set(zip(keep["species"].astype(str), keep["session_key"]))
+
+    extras = []
+    for extra, model_name in (
+        (subj_sess, "poyo_subj"),
+        (multi_sess, "poyo_multi"),
+    ):
+        if extra is None or extra.empty:
+            continue
+        part = extra.copy()
+        part["model"] = model_name
+        part["session_key"] = part["session"].map(_shorten_session_id)
+        mask = [
+            (str(sp), sk) in keep_keys
+            for sp, sk in zip(part["species"], part["session_key"])
+        ]
+        extras.append(part.loc[mask])
+    if not extras:
         return keep
-    return pd.concat([keep, pd.DataFrame(extra)], ignore_index=True)
+    return pd.concat([keep, *extras], ignore_index=True)
 
 
 def plot_per_session_bars(
     session_df: pd.DataFrame,
-    subj_units: pd.DataFrame,
-    multi: pd.DataFrame,
+    subj_sess: pd.DataFrame,
+    multi_sess: pd.DataFrame,
     metric: str,
     stem_suffix: str,
 ) -> Path:
     flagged = flag_outliers(session_df)
     keep = flagged[~flagged["is_outlier"]].copy()
-    keep = attach_poyo_refs(keep, subj_units, multi)
+    keep = attach_poyo_session_metrics(keep, subj_sess, multi_sess)
     keep["short"] = keep["session"].map(_short_session)
+    keep = keep.drop_duplicates(
+        subset=["species", "model", "short"], keep="first"
+    )
     fig, axes = plt.subplots(2, 1, figsize=(18, 9.0), sharey=False)
     n_models = len(PER_SESSION_MODELS)
     width = 0.15
@@ -974,10 +1102,8 @@ def plot_per_session_bars(
         "auroc": "Fold-mean max val AUROC",
     }
     titles = {
-        "f1": "Per-session F1 vs POYO subject / best multi (excl. outliers)",
-        "auroc": (
-            "Per-session AUROC vs POYO subject / best multi (excl. outliers)"
-        ),
+        "f1": "Per-session F1 (excl. outliers)",
+        "auroc": "Per-session AUROC (excl. outliers)",
     }
     col = f"{metric}_mean"
     for ax, species in zip(axes, SPECIES_ORDER):
@@ -1004,7 +1130,6 @@ def plot_per_session_bars(
                 capsize=1.2,
                 label=PER_SESSION_LABELS[model],
                 color=PER_SESSION_COLORS[model],
-                hatch=PER_SESSION_HATCH[model],
                 edgecolor="white",
                 linewidth=0.3,
                 error_kw=dict(lw=0.5),
@@ -1033,68 +1158,64 @@ def plot_per_session_bars(
 
 def plot_vs_poyo_multi(
     session_df: pd.DataFrame,
-    multi: pd.DataFrame,
+    multi_sess: pd.DataFrame,
     metric: str,
     stem_suffix: str,
 ) -> Path:
-    """Per-session EEGNet and GRU vs the species-level best multi-subj POYO.
-
-    Multi-subject POYO is one pooled run per species, so x is constant
-    within a panel. Points above the identity line beat that pooled score.
-    """
+    """Per-session EEGNet / GRU vs per-session best multi-subject POYO."""
     flagged = flag_outliers(session_df)
     keep = flagged[~flagged["is_outlier"]].copy()
     keep["model"] = keep["model"].astype(str)
-    multi_idx = multi.set_index("species")
+    keep["session_key"] = keep["session"].map(_shorten_session_id)
+    multi_s = multi_sess.copy()
+    multi_s["session_key"] = multi_s["session"].map(_shorten_session_id)
     col = f"{metric}_mean"
+    poyo_col = f"poyo_{metric}"
     metric_label = "F1" if metric == "f1" else "AUROC"
     baselines = ["eegnet", "gru"]
     fig, axes = plt.subplots(
         2, 2, figsize=(10.5, 9.2), sharex=True, sharey=True
     )
-    rng = np.random.default_rng(0)
     for row, baseline in enumerate(baselines):
         for col_i, species in enumerate(SPECIES_ORDER):
             ax = axes[row, col_i]
-            if species not in multi_idx.index:
-                continue
-            mrow = multi_idx.loc[species]
-            if isinstance(mrow, pd.DataFrame):
-                mrow = mrow.iloc[0]
-            poyo_val = float(mrow[metric])
-            sub = keep[
+            left = keep[
                 (keep["species"] == species) & (keep["model"] == baseline)
-            ]
-            y = sub[col].dropna().to_numpy(dtype=float)
-            if len(y) == 0:
-                continue
-            x = np.full_like(y, poyo_val)
-            x = x + rng.uniform(-0.012, 0.012, size=len(y))
-            n_above = int(np.sum(y > poyo_val))
-            ax.scatter(
-                x,
-                y,
-                c=MODEL_COLORS[baseline],
-                s=32,
-                alpha=0.8,
-                edgecolors="white",
-                linewidths=0.3,
-                zorder=3,
+            ][["session_key", col]]
+            right = multi_s[multi_s["species"] == species][
+                ["session_key", col]
+            ].rename(columns={col: poyo_col})
+            merged = left.merge(right, on="session_key", how="inner")
+            merged = merged.dropna(subset=[col, poyo_col])
+            n_above = (
+                int((merged[col] > merged[poyo_col]).sum())
+                if len(merged)
+                else 0
             )
+            if len(merged):
+                ax.scatter(
+                    merged[poyo_col],
+                    merged[col],
+                    c=MODEL_COLORS[baseline],
+                    s=32,
+                    alpha=0.8,
+                    edgecolors="white",
+                    linewidths=0.3,
+                    zorder=3,
+                )
             lims = [0.0, 1.0]
             ax.plot(lims, lims, color="0.5", ls="--", lw=1, zorder=0)
-            ax.axvline(poyo_val, color="0.65", ls=":", lw=0.9, zorder=1)
             ax.set_xlim(lims)
             ax.set_ylim(lims)
             ax.set_title(
                 f"{species} · {MODEL_LABELS[baseline]} "
-                f"(n={len(y)}, {n_above} above)"
+                f"(n={len(merged)}, {n_above} above)"
             )
             ax.set_aspect("equal", adjustable="box")
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
             if row == 1:
-                ax.set_xlabel(f"Best multi-subject POYO {metric_label}")
+                ax.set_xlabel(f"Best multi-subject POYO session {metric_label}")
             if col_i == 0:
                 ax.set_ylabel(
                     f"Session {MODEL_LABELS[baseline]} {metric_label}"
@@ -1125,6 +1246,8 @@ def main() -> None:
     csv_runs = CSV_DIR / f"{STEM}_runs.csv"
     csv_multi = CSV_DIR / f"{STEM}_multisubj_best.csv"
     csv_subj = CSV_DIR / f"{STEM}_poyo_singlesubj_runs.csv"
+    csv_multi_val = CSV_DIR / f"{STEM}_poyo_multisubj_val_sessions.csv"
+    csv_subj_val = CSV_DIR / f"{STEM}_poyo_singlesubj_val_sessions.csv"
     if (
         use_cached
         and csv_runs.exists()
@@ -1157,6 +1280,18 @@ def main() -> None:
     multi.to_csv(csv_multi, index=False)
     subj_runs.to_csv(csv_subj, index=False)
 
+    if use_cached and csv_multi_val.exists() and csv_subj_val.exists():
+        print(f"Loading cached val_session tables from {csv_multi_val}")
+        multi_val = pd.read_csv(csv_multi_val)
+        subj_val = pd.read_csv(csv_subj_val)
+    else:
+        api = wandb.Api()
+        print("Fetching per-session val_session metrics (history max)...")
+        multi_val = fetch_multisubj_session_metrics(api)
+        subj_val = fetch_singlesubj_session_metrics(subj_runs, api)
+        multi_val.to_csv(csv_multi_val, index=False)
+        subj_val.to_csv(csv_subj_val, index=False)
+
     primary = primary_runs(raw)
     print_inventory(raw, primary)
     session_df = fold_means_by_session(primary)
@@ -1169,8 +1304,21 @@ def main() -> None:
     subj_units = fold_means_by_subject(subj_runs)
     subj_sum = subject_summary(subj_units)
     comparison = comparison_table(summary, subj_sum, multi)
+    multi_sess = fold_means_from_session_rows(multi_val)
+    subj_sess = fold_means_from_session_rows(subj_val)
 
     print_tables(summary, matched, best, outliers, comparison, subj_units)
+    print("\n=== val_session coverage (best multi / single-subject POYO) ===")
+    for label, df in (
+        ("poyo_multi", multi_sess),
+        ("poyo_subj", subj_sess),
+    ):
+        if df.empty:
+            print(f"  {label}: (none)")
+            continue
+        counts = df.groupby("species").size()
+        for species, n in counts.items():
+            print(f"  {label} {species}: {int(n)} sessions")
 
     plot_comparison_bars(
         comparison,
@@ -1187,24 +1335,28 @@ def main() -> None:
         "auroc_by_model",
     )
     plot_per_session_bars(
-        session_df, subj_units, multi, "f1", "supp_f1_per_session"
+        session_df, subj_sess, multi_sess, "f1", "supp_f1_per_session"
     )
     plot_per_session_bars(
-        session_df, subj_units, multi, "auroc", "supp_auroc_per_session"
+        session_df, subj_sess, multi_sess, "auroc", "supp_auroc_per_session"
     )
-    plot_vs_poyo_multi(session_df, multi, "f1", "f1_vs_poyo_multi")
-    plot_vs_poyo_multi(session_df, multi, "auroc", "auroc_vs_poyo_multi")
+    plot_vs_poyo_multi(session_df, multi_sess, "f1", "f1_vs_poyo_multi")
+    plot_vs_poyo_multi(session_df, multi_sess, "auroc", "auroc_vs_poyo_multi")
 
     csv_sessions = CSV_DIR / f"{STEM}_sessions.csv"
     csv_summary = CSV_DIR / f"{STEM}_summary.csv"
     csv_matched = CSV_DIR / f"{STEM}_matched.csv"
     csv_comparison = CSV_DIR / f"{STEM}_comparison.csv"
     csv_subj_units = CSV_DIR / f"{STEM}_poyo_singlesubj_units.csv"
+    csv_multi_sess = CSV_DIR / f"{STEM}_poyo_multisubj_session_means.csv"
+    csv_subj_sess = CSV_DIR / f"{STEM}_poyo_singlesubj_session_means.csv"
     flagged.to_csv(csv_sessions, index=False)
     summary.to_csv(csv_summary, index=False)
     matched.to_csv(csv_matched, index=False)
     comparison.to_csv(csv_comparison, index=False)
     subj_units.to_csv(csv_subj_units, index=False)
+    multi_sess.to_csv(csv_multi_sess, index=False)
+    subj_sess.to_csv(csv_subj_sess, index=False)
     print(f"Saved: {csv_runs}")
     print(f"Saved: {csv_sessions}")
     print(f"Saved: {csv_summary}")
@@ -1213,6 +1365,10 @@ def main() -> None:
     print(f"Saved: {csv_subj}")
     print(f"Saved: {csv_subj_units}")
     print(f"Saved: {csv_multi}")
+    print(f"Saved: {csv_multi_val}")
+    print(f"Saved: {csv_subj_val}")
+    print(f"Saved: {csv_multi_sess}")
+    print(f"Saved: {csv_subj_sess}")
 
 
 if __name__ == "__main__":
