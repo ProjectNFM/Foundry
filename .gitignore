@@ -240,3 +240,5 @@ docs/figures/cwt_stability/
 docs/reports/**/main.pdf
 
 /.scratch/
+
+.snapshots
