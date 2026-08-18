@@ -245,7 +245,11 @@ def prepare_snapshot(
 
     # --- base config ---
     base_config_path = manifests_dir / "resolved-base-config.yaml"
-    base_config_path.write_text(OmegaConf.to_yaml(hydra_cfg, resolve=True))
+    # The launcher-time Hydra config still contains deferred values such as
+    # `${hydra.job.num}`. Resolving it here aborts staging before Submitit has
+    # assigned those values; the per-task Hydra output remains the resolved
+    # configuration record.
+    base_config_path.write_text(OmegaConf.to_yaml(hydra_cfg, resolve=False))
 
     # --- submitted overrides ---
     overrides_path = manifests_dir / "submitted-overrides.txt"

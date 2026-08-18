@@ -102,6 +102,21 @@ def test_prepare_snapshot_seals_complete_git_archive(
     assert descriptor["git_sha"] == snapshot.git_sha
 
 
+def test_prepare_snapshot_preserves_deferred_hydra_values(
+    project_repo: Path, tmp_path: Path
+) -> None:
+    snapshot = prepare_snapshot(
+        project_root=project_repo,
+        snapshot_root=tmp_path / "bundles",
+        sweep_name="deferred-values",
+        job_overrides=[["fold=0"]],
+        hydra_cfg=OmegaConf.create({"hydra": {"job": {"num": "???"}}}),
+    )
+
+    base_config = Path(snapshot.base_config_path).read_text()
+    assert "num: ???" in base_config
+
+
 def test_worker_setup_uses_snapshot_and_explicit_environment_file(
     project_repo: Path, tmp_path: Path
 ) -> None:
