@@ -29,8 +29,6 @@ data:
   split_type: intersubject
   task_type: p300
 
-stage:
-  skip: true
 
 run:
   name: bi_p300_hp_poyo_lr${hyperparameters.learning_rate}_cw-${class_weights.mode}_dim${model.embed_dim}
@@ -88,4 +86,3 @@ hydra:
       - "source .env"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment p300/brain_invaders_hp_search_poyo"

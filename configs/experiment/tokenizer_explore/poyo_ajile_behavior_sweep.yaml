@@ -7,9 +7,8 @@
 # bundle that many sweep jobs into one SLURM allocation, cutting queue wait
 # time and quota usage.
 #
-# Data staging is done once per node in the launcher's setup commands, before
-# any of the packed tasks start.  Each task then skips its own staging step
-# (stage.skip: true) and reads directly from the pre-staged path.
+# Each packed task enters the application staging step. A node-local lock
+# serializes the first copy/extract; later tasks reuse the staged recordings.
 #
 # Local dry-run (single combo, no SLURM):
 #   uv run python main.py experiment=tokenizer_explore/poyo_ajile_behavior_sweep
@@ -33,7 +32,6 @@ model:
       num_channels: 94
 
 data:
-  root: ${oc.env:SLURM_TMPDIR}/brainsets/processed
   split_type: intrasession
   task_type: behavior
 
@@ -66,11 +64,6 @@ trainer:
       auto_insert_metric_name: false
       filename: "best-epoch{epoch:03d}-val_f1_{val/ajile_active_behavior_f1:.4f}"
 
-# No need to stage in main as staging is done in the launcher's setup commands.
-stage:
-  skip: true
-
-
 class_weights:
   mode: auto
   smoothing: 0.5
@@ -89,4 +82,3 @@ hydra:
       - "source .env"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment tokenizer_explore/poyo_ajile_behavior_sweep"

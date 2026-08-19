@@ -29,8 +29,6 @@ data:
   split_type: intersubject
   task_type: p300
 
-stage:
-  skip: true
 
 _pretrain_ckpt_suffix:
   disabled: ""
@@ -95,4 +93,3 @@ hydra:
       - "source .env"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment p300/brain_invaders_finetune_from_2ds_pretrain"

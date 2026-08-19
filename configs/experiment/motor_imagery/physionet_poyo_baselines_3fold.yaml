@@ -29,8 +29,6 @@ data:
   split_type: intersubject
   task_type: motor_imagery
 
-stage:
-  skip: true
 
 run:
   name: physionet_mi_final_${hydra:runtime.choices.model/tokenizer}_ch-${model.channel_emb_mode}_fold${hyperparameters.fold_number}
@@ -89,4 +87,3 @@ hydra:
       - "source .env || true"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment motor_imagery/physionet_poyo_baselines_3fold"

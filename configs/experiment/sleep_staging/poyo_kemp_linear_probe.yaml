@@ -36,12 +36,9 @@ model:
   normalize_inputs: true
 
 data:
-  root: ${oc.env:SLURM_TMPDIR}/brainsets/processed
   split_type: intersubject
   task_type: sleep_stage
 
-stage:
-  skip: true
 
 run:
   name: kemp_linear_probe_${hydra:runtime.choices.model/tokenizer}_${run.init_mode}
@@ -104,4 +101,3 @@ hydra:
       - "source .env"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment sleep_staging/poyo_kemp_linear_probe"

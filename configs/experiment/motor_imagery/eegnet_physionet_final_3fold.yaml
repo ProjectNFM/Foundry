@@ -26,8 +26,6 @@ data:
   split_type: intersubject
   task_type: motor_imagery
 
-stage:
-  skip: true
 
 run:
   name: physionet_mi_eegnet_final_fold${hyperparameters.fold_number}
@@ -80,4 +78,3 @@ hydra:
       - "source .env || true"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment motor_imagery/eegnet_physionet_final_3fold"

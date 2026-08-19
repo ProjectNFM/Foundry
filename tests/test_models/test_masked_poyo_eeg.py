@@ -34,6 +34,7 @@ def _build_minimal_masked_model(
     N=10,
     sequence_length=1.0,
     mask_ratio=0.5,
+    channel_emb_mode="static",
 ):
     """Build a MaskedPOYOEEGModel with minimal config for testing.
 
@@ -97,6 +98,7 @@ def _build_minimal_masked_model(
         cross_heads=2,
         self_heads=2,
         masking=masking,
+        channel_emb_mode=channel_emb_mode,
     )
 
     session_ids = ["session_0", "session_1"]
@@ -262,6 +264,36 @@ class TestMaskedModelForward:
                 break
         assert has_grad
 
+    @pytest.mark.parametrize("actual_duration", [0.2, 0.5, 1.0])
+    def test_dynamic_channel_mask_uses_actual_batch_token_count(
+        self, actual_duration
+    ):
+        """Masking and tokenization must use the same variable-length grid."""
+        configured_duration = 1.0
+        configured_num_tokens = 10
+        target_token_rate = configured_num_tokens / configured_duration
+        actual_num_tokens = round(target_token_rate * actual_duration)
+        sampling_rate = 100.0
+        num_samples = round(sampling_rate * actual_duration)
+
+        model = _build_minimal_masked_model(
+            C_pad=4,
+            N=configured_num_tokens,
+            sequence_length=configured_duration,
+            channel_emb_mode="dynamic",
+        )
+
+        result = self._run_forward(
+            model,
+            B=2,
+            C_pad=4,
+            N=actual_num_tokens,
+            T=num_samples,
+            sr=sampling_rate,
+        )
+
+        assert result.viz.num_time_tokens == actual_num_tokens
+
     def _run_forward(
         self, model, B, C_pad, N, T, sr, include_recon_targets=True
     ):
@@ -269,7 +301,7 @@ class TestMaskedModelForward:
 
         input_values = torch.randn(B, C_pad, T, device=device)
         input_timestamps = (
-            torch.linspace(0, 1.0, N, device=device)
+            torch.linspace(0, T / sr, N, device=device)
             .unsqueeze(0)
             .expand(B, -1)
             .repeat(1, C_pad)
@@ -403,6 +435,124 @@ class TestMaskedModelTokenize:
         )
 
 
+class TestDynamicDurationTokenize:
+    """Tokenization adapts to actual window duration from Data.start/end."""
+
+    def _make_data(
+        self, duration, channel_ids, channel_types, sr=100.0, start=0.0
+    ):
+        end = start + duration
+        num_samples = round(sr * duration)
+        n_ch = len(channel_ids)
+        signal = np.random.randn(num_samples, n_ch).astype(np.float32)
+        eeg = RegularTimeSeries(
+            signal=signal, sampling_rate=sr, domain_start=start
+        )
+        data = Data(eeg=eeg, domain=Interval(start, end))
+        data.channels = _MockChannels(channel_ids, types=channel_types)
+        data.session = _MockSession("session_0")
+        data._absolute_start = start
+        return data
+
+    def test_latent_count_constant_across_durations(self):
+        """_tokenize_core produces the same number of latent tokens
+        regardless of the actual window duration."""
+        base_seq_len = 1.0
+        latent_step = 0.5
+        num_latents_per_step = 2
+        C_pad = 4
+        N = 10
+
+        model = _build_minimal_masked_model(
+            C_pad=C_pad,
+            N=N,
+            sequence_length=base_seq_len,
+            mask_ratio=0.5,
+        )
+        model._num_latent_bins = round(base_seq_len / latent_step)
+
+        channel_ids = [f"ch_{i}" for i in range(C_pad)]
+        channel_types = ["EEG"] * C_pad
+        expected_latent_count = model._num_latent_bins * num_latents_per_step
+
+        for duration in [0.5, 1.0, 2.0, 5.0]:
+            data = self._make_data(
+                duration, channel_ids, channel_types, sr=100.0
+            )
+            result, _ = model._tokenize_core(data)
+
+            assert len(result["latent_index"]) == expected_latent_count, (
+                f"Duration {duration}s produced "
+                f"{len(result['latent_index'])} latent tokens, "
+                f"expected {expected_latent_count}"
+            )
+            assert len(result["latent_timestamps"]) == expected_latent_count
+
+    def test_prepare_signal_uses_actual_duration(self):
+        """_prepare_signal respects the explicit sequence_length argument."""
+        C_pad = 4
+        N = 10
+
+        model = _build_minimal_masked_model(
+            C_pad=C_pad, N=N, sequence_length=1.0
+        )
+
+        channel_ids = [f"ch_{i}" for i in range(C_pad)]
+        channel_types = ["EEG"] * C_pad
+
+        data_2s = self._make_data(2.0, channel_ids, channel_types, sr=100.0)
+
+        prepared_default = model._prepare_signal(data_2s)
+        assert prepared_default.num_samples == round(100.0 * 2.0)
+
+        prepared_explicit = model._prepare_signal(data_2s, sequence_length=1.0)
+        assert prepared_explicit.num_samples == round(100.0 * 1.0)
+
+    def test_get_actual_duration_fallback(self):
+        """_get_actual_duration returns self.sequence_length when
+        Data has no domain."""
+        model = _build_minimal_masked_model(sequence_length=1.0)
+
+        data = Data()
+        data.channels = _MockChannels(["ch_0"], types=["EEG"])
+        data.session = _MockSession("session_0")
+
+        assert model._get_actual_duration(data) == 1.0
+
+    def test_get_actual_duration_from_data(self):
+        """_get_actual_duration derives duration from Data.domain."""
+        model = _build_minimal_masked_model(sequence_length=1.0)
+
+        data = Data(domain=Interval(10.0, 15.0))
+        data.channels = _MockChannels(["ch_0"], types=["EEG"])
+        data.session = _MockSession("session_0")
+
+        assert model._get_actual_duration(data) == 5.0
+
+    def test_masked_tokenize_uses_actual_duration(self):
+        """MaskedPOYOEEGModel.tokenize() produces reconstruction targets
+        that match the actual window duration, not self.sequence_length."""
+        C_pad = 4
+        N = 10
+        base_seq_len = 1.0
+
+        model = _build_minimal_masked_model(
+            C_pad=C_pad, N=N, sequence_length=base_seq_len
+        )
+
+        channel_ids = [f"ch_{i}" for i in range(C_pad)]
+        channel_types = ["EEG"] * C_pad
+
+        data = self._make_data(
+            base_seq_len, channel_ids, channel_types, sr=100.0
+        )
+        result = model.tokenize(data)
+
+        assert "reconstruction_targets" in result
+        assert "latent_index" in result
+        assert "latent_timestamps" in result
+
+
 class TestComputeVisibleIndicesProperties:
     def test_preserves_token_order(self):
         total = 20
@@ -411,3 +561,116 @@ class TestComputeVisibleIndicesProperties:
 
         diffs = visible[0, 1:] - visible[0, :-1]
         assert (diffs > 0).all(), "Visible indices should be in ascending order"
+
+
+class TestZeroMaskedSignal:
+    """Verify that zero_masked_signal prevents temporal embedding leakage."""
+
+    def _make_batch_and_mask(self, model, B=2, C_pad=4, N=10, T=100, sr=100.0):
+        device = next(model.parameters()).device
+        input_mask = torch.ones(B, C_pad, dtype=torch.bool, device=device)
+
+        torch.manual_seed(42)
+        mask_indices, _ = model.masking(
+            num_channels=C_pad,
+            num_time_tokens=N,
+            channel_mask=input_mask,
+            device=device,
+        )
+
+        masked_grid = torch.zeros(B, C_pad * N, dtype=torch.bool, device=device)
+        masked_grid.scatter_(1, mask_indices, True)
+        masked_grid = masked_grid.reshape(B, C_pad, N)
+        signal_mask = torch.nn.functional.interpolate(
+            masked_grid.float(), size=T, mode="nearest"
+        ).bool()
+
+        input_values = torch.randn(B, C_pad, T, device=device)
+
+        batch = dict(
+            input_values=input_values,
+            input_timestamps=(
+                torch.linspace(0, 1.0, N, device=device)
+                .unsqueeze(0)
+                .expand(B, -1)
+                .repeat(1, C_pad)
+            ),
+            input_channel_index=(
+                torch.arange(C_pad, device=device).unsqueeze(0).expand(B, -1)
+            ),
+            input_session_index=torch.zeros(B, dtype=torch.long, device=device),
+            input_mask=input_mask,
+            input_sampling_rate=torch.full((B,), sr, device=device),
+            input_seq_len=torch.full((B,), T, dtype=torch.long, device=device),
+            latent_index=torch.from_numpy(model._latent_index)
+            .unsqueeze(0)
+            .expand(B, -1)
+            .to(device),
+            latent_timestamps=torch.from_numpy(model._latent_timestamps)
+            .unsqueeze(0)
+            .expand(B, -1)
+            .float()
+            .to(device),
+            output_session_index=torch.zeros(
+                B, 0, dtype=torch.long, device=device
+            ),
+            output_timestamps=torch.zeros(B, 0, device=device),
+            task_index=torch.zeros(B, 0, dtype=torch.long, device=device),
+            reconstruction_targets=torch.randn(B, C_pad * N, device=device),
+        )
+
+        return batch, signal_mask
+
+    def test_corrupting_masked_signal_does_not_change_output(self):
+        """With zero_masked_signal=True, changing the raw signal at masked
+        positions must not affect model output, since those positions are
+        zeroed before the temporal embedding processes them."""
+        model = _build_minimal_masked_model()
+        model.zero_masked_signal = True
+        model.eval()
+
+        batch, signal_mask = self._make_batch_and_mask(model)
+
+        corrupted_values = batch["input_values"].clone()
+        corrupted_values[signal_mask] += 1000.0
+        corrupted_batch = {**batch, "input_values": corrupted_values}
+
+        torch.manual_seed(42)
+        with torch.no_grad():
+            result_orig = model(**batch)
+
+        torch.manual_seed(42)
+        with torch.no_grad():
+            result_corrupted = model(**corrupted_batch)
+
+        torch.testing.assert_close(
+            result_orig.task_outputs["masked_reconstruction"],
+            result_corrupted.task_outputs["masked_reconstruction"],
+        )
+
+    def test_without_zero_masked_signal_corruption_changes_output(self):
+        """Without signal zeroing, the temporal embedding's receptive field
+        leaks masked signal values into visible token embeddings, so
+        corrupting masked positions changes the output."""
+        model = _build_minimal_masked_model()
+        model.zero_masked_signal = False
+        model.eval()
+
+        batch, signal_mask = self._make_batch_and_mask(model)
+
+        corrupted_values = batch["input_values"].clone()
+        corrupted_values[signal_mask] += 1000.0
+        corrupted_batch = {**batch, "input_values": corrupted_values}
+
+        torch.manual_seed(42)
+        with torch.no_grad():
+            result_orig = model(**batch)
+
+        torch.manual_seed(42)
+        with torch.no_grad():
+            result_corrupted = model(**corrupted_batch)
+
+        assert not torch.allclose(
+            result_orig.task_outputs["masked_reconstruction"],
+            result_corrupted.task_outputs["masked_reconstruction"],
+        )

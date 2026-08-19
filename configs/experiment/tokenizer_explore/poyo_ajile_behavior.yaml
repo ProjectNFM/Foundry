@@ -46,5 +46,4 @@ hydra:
       - "source .env"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment tokenizer_explore/poyo_ajile_behavior"
 

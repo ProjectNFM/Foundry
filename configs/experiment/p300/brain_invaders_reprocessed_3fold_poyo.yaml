@@ -32,8 +32,6 @@ data:
   split_type: intersubject
   task_type: p300
 
-stage:
-  skip: true
 
 run:
   name: bi_p300_reproc_${data.split_type}_${hydra:runtime.choices.model/tokenizer}_ch-${model.channel_emb_mode}_fold${hyperparameters.fold_number}
@@ -92,4 +90,3 @@ hydra:
       - "source .env"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment p300/brain_invaders_reprocessed_3fold_poyo"

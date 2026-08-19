@@ -33,7 +33,11 @@ extract:
   max_batches: null
 
 stage:
-  skip: false
+  # Stage from shared storage when a node-local destination is available.
+  # Local runs without SLURM_TMPDIR continue to use data.root directly.
+  mode: node_local
+  destination_root: null
+  compress: false
 
 class_weights:
   mode: none
@@ -49,6 +53,9 @@ run:
   resume_if_checkpoint_exists: false
   # Transfer mode for pretrained weight loading: "strict" (default) raises
   # on missing/mismatched keys; "permissive" loads what it can and warns.
+  # Null selects random initialization; downstream transfer experiments set
+  # this to a Lightning pretraining checkpoint.
+  pretrained_checkpoint: null
   pretrained_transfer_mode: strict
   # Freeze the pretrained weights during training.
   freeze_pretrained: false

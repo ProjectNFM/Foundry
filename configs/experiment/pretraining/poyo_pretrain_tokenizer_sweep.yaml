@@ -3,9 +3,8 @@
 # Pretraining tokenizer sweep: compare ResampleCNN, CWTCNN, and
 # PerTimestepPerChannel on masked reconstruction (fixed batch_size=100).
 #
-# Data staging is done once per node in the launcher's setup commands, before
-# any task starts. Each task then skips its own staging step (stage.skip: true)
-# and reads directly from the pre-staged path.
+# Packed tasks stage through the application using a node-local lock, so only
+# missing recordings are copied while every task gets the staged data root.
 #
 # Local dry-run (single tokenizer, no SLURM):
 #   uv run python main.py experiment=pretraining/poyo_pretrain_tokenizer_sweep model/tokenizer=per_channel_resample_cnn
@@ -30,7 +29,6 @@ model:
     mask_ratio: 0.5
 
 data:
-  root: ${oc.env:SLURM_TMPDIR}/brainsets/processed
   split_type: intrasession
   task_type: null
 
@@ -66,8 +64,6 @@ trainer:
       auto_insert_metric_name: false
       filename: "best-epoch{epoch:03d}-val_loss_{val/loss:.4f}"
 
-stage:
-  skip: false
 
 hydra:
   sweeper:
@@ -83,4 +79,3 @@ hydra:
       - "source .env"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment pretraining/poyo_pretrain_tokenizer_sweep"

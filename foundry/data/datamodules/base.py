@@ -19,7 +19,10 @@ from torch_brain.samplers import RandomFixedWindowSampler
 from lightning import LightningDataModule
 from torch_brain.transforms import Compose
 
-from foundry.data.samplers import FastRandomFixedWindowSampler
+from foundry.data.samplers import (
+    FastRandomFixedWindowSampler,
+    VariableLengthBatchSampler,
+)
 from foundry.tasks.class_weights import compute_class_weights_for_tasks
 from foundry.tasks.classification_mapping import (
     filter_intervals_by_mapping,
@@ -32,7 +35,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_INTERPOLATION_ONLY_KEYS = ("subject",)
+_INTERPOLATION_ONLY_KEYS = ("subject", "held_out_subject")
 
 
 def _disable_gc_in_worker(worker_id: int) -> None:
@@ -62,7 +65,13 @@ def normalize_data_config(data_cfg: DictConfig) -> None:
     stripped before instantiation so they are not passed to the datamodule
     constructor.
     """
-    merges = ("task_type", "split_type", "fold", "recording_ids")
+    merges = (
+        "task_type",
+        "split_type",
+        "fold",
+        "recording_ids",
+        "held_out_subject",
+    )
     if "dataset_kwargs" not in data_cfg:
         OmegaConf.update(data_cfg, "dataset_kwargs", {}, force_add=True)
 
@@ -128,6 +137,7 @@ class NeuralDataModule(LightningDataModule):
         task_configs: Optional[dict[str, "TaskConfig"]] = None,
         sampler_class: Optional[Type[RandomFixedWindowSampler]] = None,
         session_pct: Optional[dict[str, float]] = None,
+        window_lengths: Optional[list[float]] = None,
     ):
         """Initialize the data module.
 
@@ -138,6 +148,8 @@ class NeuralDataModule(LightningDataModule):
             num_workers: Number of data-loading worker processes.
             pin_memory: Whether to pin GPU memory in the DataLoader.
             sequence_length: Duration of each sampling window in seconds.
+                When ``window_lengths`` is provided this is ignored for
+                sampling (the maximum window length is used instead).
             transforms: Optional list of transforms applied before tokenization.
             tokenizer: Optional tokenizer callable (e.g. ``model.tokenize``)
                 appended to the transform pipeline.
@@ -154,6 +166,11 @@ class NeuralDataModule(LightningDataModule):
                 :class:`FastRandomFixedWindowSampler`.
             session_pct: Per-split fraction of sessions to keep, e.g.
                 ``{"train": 0.5, "valid": 1.0}``.
+            window_lengths: Optional list of window durations in seconds for
+                multi-length training.  When provided, a
+                :class:`VariableLengthBatchSampler` is used instead of the
+                regular sampler.  Each batch randomly selects one length so
+                all samples within a batch share the same duration.
         """
         super().__init__()
         if isinstance(dataset_class, str):
@@ -171,6 +188,7 @@ class NeuralDataModule(LightningDataModule):
             if sampler_class is not None
             else FastRandomFixedWindowSampler
         )
+        self.window_lengths = sorted(window_lengths) if window_lengths else None
         self._task_configs = task_configs
 
         for key, val in (
@@ -377,11 +395,34 @@ class NeuralDataModule(LightningDataModule):
             )
 
         split_seed = self.seed + self._SPLIT_SEED_OFFSETS[split]
+        gen = torch.Generator().manual_seed(split_seed)
+
+        if self.window_lengths is not None:
+            batch_sampler = VariableLengthBatchSampler(
+                sampling_intervals=sampling_intervals,
+                window_lengths=self.window_lengths,
+                batch_size=self.batch_size,
+                drop_last=(split == "train"),
+                generator=gen,
+            )
+            return DataLoader(
+                self.dataset,
+                batch_sampler=batch_sampler,
+                num_workers=self.num_workers,
+                pin_memory=self.pin_memory,
+                collate_fn=collate,
+                persistent_workers=self.num_workers > 0,
+                prefetch_factor=2 if self.num_workers > 0 else None,
+                worker_init_fn=_disable_gc_in_worker
+                if self.num_workers > 0
+                else None,
+            )
+
         sampler = self.sampler_class(
             sampling_intervals=sampling_intervals,
             window_length=self.sequence_length,
             drop_short=True,
-            generator=torch.Generator().manual_seed(split_seed),
+            generator=gen,
         )
 
         return DataLoader(

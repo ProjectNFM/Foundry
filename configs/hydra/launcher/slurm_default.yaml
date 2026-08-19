@@ -1,5 +1,5 @@
 defaults:
-  - submitit_slurm
+  - foundry_submitit_slurm
 
 _target_: hydra_plugins.foundry_launcher.packed_launcher.SlurmLauncher
 name: ${run.group}
@@ -17,7 +17,13 @@ additional_parameters:
   requeue: true
 setup:
   - "ulimit -n 65536"
-  - "set -a"
-  - "source .env || true"
-  - "set +a"
   - "export RANK=0"
+
+snapshot:
+  enabled: true
+  # Set FOUNDRY_SNAPSHOT_ROOT to a compute-node-visible shared directory when
+  # the checkout itself is not shared. Null falls back to <checkout>/.snapshots.
+  root: ${oc.env:FOUNDRY_SNAPSHOT_ROOT,null}
+  require_clean_git: true
+  verify_on_worker: true
+  environment_file: ${oc.env:FOUNDRY_ENV_FILE,".env"}

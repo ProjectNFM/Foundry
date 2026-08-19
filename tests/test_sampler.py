@@ -1,4 +1,4 @@
-"""Tests for FastRandomFixedWindowSampler.
+"""Tests for FastRandomFixedWindowSampler and VariableLengthBatchSampler.
 
 Covers correctness, determinism, edge cases, no global mutation, and
 performance relative to the upstream RandomFixedWindowSampler.
@@ -12,7 +12,10 @@ from torch_brain.data import Interval
 from torch_brain.datasets import DatasetIndex
 from torch_brain.samplers import RandomFixedWindowSampler
 
-from foundry.data.samplers import FastRandomFixedWindowSampler
+from foundry.data.samplers import (
+    FastRandomFixedWindowSampler,
+    VariableLengthBatchSampler,
+)
 
 
 def _collect(sampler):
@@ -336,3 +339,243 @@ class TestPerformance:
             f"Fast sampler took {elapsed:.2f}s for {n_sessions} sessions — "
             f"expected < 10s"
         )
+
+
+# ===========================================================================
+# VariableLengthBatchSampler
+# ===========================================================================
+
+
+def _collect_batches(sampler):
+    """Drain a batch sampler and return a list of lists of (id, start, end)."""
+    return [
+        [(idx.recording_id, idx.start, idx.end) for idx in batch]
+        for batch in sampler
+    ]
+
+
+class TestVariableLengthBatchSamplerBasic:
+    """Core contract: batches are uniform-duration and contain DatasetIndex."""
+
+    @pytest.fixture
+    def intervals(self):
+        return _make_intervals(
+            ("sess_a", [(0.0, 50.0)]),
+            ("sess_b", [(0.0, 100.0)]),
+        )
+
+    def test_yields_lists_of_dataset_index(self, intervals):
+        sampler = VariableLengthBatchSampler(
+            sampling_intervals=intervals,
+            window_lengths=[2.0, 5.0],
+            batch_size=4,
+            generator=torch.Generator().manual_seed(42),
+        )
+        for batch in sampler:
+            assert isinstance(batch, list)
+            for item in batch:
+                assert isinstance(item, DatasetIndex)
+
+    def test_uniform_duration_within_batch(self, intervals):
+        """Every item in a batch must have the same window duration."""
+        sampler = VariableLengthBatchSampler(
+            sampling_intervals=intervals,
+            window_lengths=[1.0, 2.0, 5.0, 10.0],
+            batch_size=4,
+            generator=torch.Generator().manual_seed(0),
+        )
+        for batch in sampler:
+            durations = [idx.end - idx.start for idx in batch]
+            for d in durations:
+                assert abs(d - durations[0]) < 1e-9, (
+                    f"Non-uniform batch: {durations}"
+                )
+
+    def test_batch_size_respected(self, intervals):
+        bs = 8
+        sampler = VariableLengthBatchSampler(
+            sampling_intervals=intervals,
+            window_lengths=[2.0, 5.0],
+            batch_size=bs,
+            drop_last=True,
+            generator=torch.Generator().manual_seed(0),
+        )
+        for batch in sampler:
+            assert len(batch) == bs
+
+    def test_all_requested_lengths_appear(self, intervals):
+        """Over enough data, batches for every requested length should appear."""
+        lengths = [1.0, 2.0, 5.0, 10.0]
+        sampler = VariableLengthBatchSampler(
+            sampling_intervals=intervals,
+            window_lengths=lengths,
+            batch_size=4,
+            generator=torch.Generator().manual_seed(0),
+        )
+        seen_lengths = set()
+        for batch in sampler:
+            d = round(batch[0].end - batch[0].start, 6)
+            seen_lengths.add(d)
+        assert seen_lengths == set(lengths)
+
+
+class TestVariableLengthBatchSamplerDeterminism:
+    def test_same_seed_same_output(self):
+        intervals = _make_intervals(("s", [(0.0, 50.0)]))
+        results = []
+        for _ in range(3):
+            gen = torch.Generator().manual_seed(42)
+            sampler = VariableLengthBatchSampler(
+                sampling_intervals=intervals,
+                window_lengths=[2.0, 5.0],
+                batch_size=4,
+                generator=gen,
+            )
+            results.append(_collect_batches(sampler))
+        assert results[0] == results[1] == results[2]
+
+    def test_different_seeds_differ(self):
+        intervals = _make_intervals(("s", [(0.0, 50.0)]))
+        outputs = []
+        for seed in [42, 43]:
+            gen = torch.Generator().manual_seed(seed)
+            sampler = VariableLengthBatchSampler(
+                sampling_intervals=intervals,
+                window_lengths=[2.0, 5.0],
+                batch_size=4,
+                generator=gen,
+            )
+            outputs.append(_collect_batches(sampler))
+        assert outputs[0] != outputs[1]
+
+
+class TestVariableLengthBatchSamplerEdgeCases:
+    def test_single_length_equivalent_to_fixed(self):
+        """With one length, should produce the same windows as FastRandomFixedWindowSampler."""
+        intervals = _make_intervals(("s", [(0.0, 30.0)]))
+        wl = 5.0
+        bs = 4
+        seed = 99
+
+        gen_var = torch.Generator().manual_seed(seed)
+        var_sampler = VariableLengthBatchSampler(
+            sampling_intervals=intervals,
+            window_lengths=[wl],
+            batch_size=bs,
+            drop_last=True,
+            generator=gen_var,
+        )
+        var_windows = sorted(
+            (idx.recording_id, idx.start, idx.end)
+            for batch in var_sampler
+            for idx in batch
+        )
+
+        gen_fixed = torch.Generator().manual_seed(seed)
+        fixed_sampler = FastRandomFixedWindowSampler(
+            sampling_intervals=intervals,
+            window_length=wl,
+            generator=gen_fixed,
+            drop_short=True,
+        )
+        fixed_windows = sorted(_collect(fixed_sampler))
+
+        n_full = (len(fixed_windows) // bs) * bs
+        fixed_windows_truncated = sorted(fixed_windows[:n_full])
+
+        assert len(var_windows) == len(fixed_windows_truncated)
+
+    def test_short_intervals_dropped_for_long_windows(self):
+        """Intervals shorter than a window length are skipped for that length."""
+        intervals = _make_intervals(
+            ("short", [(0.0, 3.0)]),
+            ("long", [(0.0, 50.0)]),
+        )
+        sampler = VariableLengthBatchSampler(
+            sampling_intervals=intervals,
+            window_lengths=[5.0, 10.0],
+            batch_size=2,
+            generator=torch.Generator().manual_seed(0),
+        )
+        for batch in sampler:
+            for idx in batch:
+                assert idx.recording_id == "long"
+
+    def test_window_boundaries_within_interval(self):
+        """All windows must stay within the original interval bounds."""
+        intervals = _make_intervals(
+            ("s", [(0.0, 37.3)]),
+            ("t", [(100.0, 155.7)]),
+        )
+        sampler = VariableLengthBatchSampler(
+            sampling_intervals=intervals,
+            window_lengths=[1.0, 5.0, 10.0],
+            batch_size=2,
+            generator=torch.Generator().manual_seed(7),
+        )
+        for batch in sampler:
+            for idx in batch:
+                wl = idx.end - idx.start
+                assert wl > 0
+                if idx.recording_id == "s":
+                    assert idx.start >= 0.0 - 1e-9
+                    assert idx.end <= 37.3 + 1e-9
+                else:
+                    assert idx.start >= 100.0 - 1e-9
+                    assert idx.end <= 155.7 + 1e-9
+
+    def test_drop_last_false_includes_remainder(self):
+        """With drop_last=False, incomplete trailing batches are included."""
+        intervals = _make_intervals(("s", [(0.0, 11.0)]))
+        sampler_drop = VariableLengthBatchSampler(
+            sampling_intervals=intervals,
+            window_lengths=[5.0],
+            batch_size=64,
+            drop_last=True,
+            generator=torch.Generator().manual_seed(0),
+        )
+        sampler_keep = VariableLengthBatchSampler(
+            sampling_intervals=intervals,
+            window_lengths=[5.0],
+            batch_size=64,
+            drop_last=False,
+            generator=torch.Generator().manual_seed(0),
+        )
+        batches_drop = list(sampler_drop)
+        batches_keep = list(sampler_keep)
+        assert len(batches_drop) == 0
+        assert len(batches_keep) == 1
+
+    def test_len_matches_actual_yield(self):
+        intervals = _make_intervals(
+            ("a", [(0.0, 50.0)]),
+            ("b", [(0.0, 30.0)]),
+        )
+        sampler = VariableLengthBatchSampler(
+            sampling_intervals=intervals,
+            window_lengths=[1.0, 2.0, 5.0],
+            batch_size=4,
+            drop_last=True,
+            generator=torch.Generator().manual_seed(0),
+        )
+        total_samples = sum(len(batch) for batch in sampler)
+        assert total_samples == len(sampler)
+
+    def test_multiple_sessions(self):
+        """Windows from multiple sessions appear across batches."""
+        intervals = _make_intervals(
+            ("a", [(0.0, 20.0)]),
+            ("b", [(0.0, 20.0)]),
+            ("c", [(0.0, 20.0)]),
+        )
+        sampler = VariableLengthBatchSampler(
+            sampling_intervals=intervals,
+            window_lengths=[2.0, 5.0],
+            batch_size=2,
+            generator=torch.Generator().manual_seed(7),
+        )
+        all_sessions = set()
+        for batch in sampler:
+            for idx in batch:
+                all_sessions.add(idx.recording_id)
+        assert all_sessions == {"a", "b", "c"}

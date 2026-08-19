@@ -27,7 +27,7 @@ Also check `experiments/_legacy/` for historical context if relevant.
 
 ### Step 2: Grill-Me Interview
 
-Use the `AskQuestion` tool for structured choices and conversational
+Ask the user structured questions with explicit choices and use conversational
 follow-ups for open-ended answers. Conduct 4–6 rounds:
 
 **Round 1 — Lineage:**

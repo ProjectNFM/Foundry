@@ -139,6 +139,8 @@ class POYOEEGModel(nn.Module):
         self.normalize_inputs = normalize_inputs
         self.disable_session_emb = disable_session_emb
         self._task_configs = TaskConfig.normalize_task_configs(task_configs)
+
+        self._num_latent_bins = round(self.sequence_length / self.latent_step)
         self._latent_index, self._latent_timestamps = (
             create_linspace_latent_tokens(
                 0,
@@ -272,8 +274,15 @@ class POYOEEGModel(nn.Module):
         input_session_ids=None,
         input_channel_counts: Optional[torch.Tensor] = None,
         context_kwargs: dict[str, torch.Tensor] | None = None,
+        token_mask: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
         """GPU tokenization + session embedding addition.
+
+        Args:
+            token_mask: Optional (B, C, N) boolean mask for the channel
+                encoder. When provided, only True positions contribute to
+                channel embedding computation. Used by MaskedPOYOEEGModel
+                to prevent masked tokens from leaking into embeddings.
 
         Returns:
             ``(inputs, session_emb, ch_emb_cache)`` where *inputs* has shape
@@ -291,6 +300,7 @@ class POYOEEGModel(nn.Module):
             input_channel_counts=input_channel_counts,
             channel_emb_fn=self._get_channel_emb_fn(),
             channel_encoder=self.relative_channel_encoder,
+            token_mask=token_mask,
         )
 
         session_emb = self._compute_session_embedding(
@@ -637,7 +647,23 @@ class POYOEEGModel(nn.Module):
             "Data must have an 'eeg', 'ecog', 'seeg', or 'ieeg' field"
         )
 
-    def _prepare_signal(self, data: Data) -> PreparedSignal:
+    def _get_actual_duration(self, data: Data) -> float:
+        """Derive the actual window duration from the Data object.
+
+        Falls back to ``self.sequence_length`` when start/end are not set.
+        """
+        if (
+            hasattr(data, "start")
+            and hasattr(data, "end")
+            and data.start is not None
+            and data.end is not None
+        ):
+            return float(data.end - data.start)
+        return self.sequence_length
+
+    def _prepare_signal(
+        self, data: Data, sequence_length: float | None = None
+    ) -> PreparedSignal:
         """Filter by modality, sanitize, normalize length, and optionally z-score.
 
         Shared logic used by both ``tokenize()`` and subclass target computation.
@@ -650,11 +676,17 @@ class POYOEEGModel(nn.Module):
 
         Args:
             data: Input data sample.
+            sequence_length: Target duration in seconds. When ``None``
+                (default), uses the actual window duration from ``data``
+                or falls back to ``self.sequence_length``.
 
         Returns:
             :class:`PreparedSignal` containing the length-normalized,
             sanitized signal and token-grid metadata.
         """
+        if sequence_length is None:
+            sequence_length = self._get_actual_duration(data)
+
         signal_source, default_type, sampling_rate = (
             self._resolve_signal_source(data)
         )
@@ -677,7 +709,7 @@ class POYOEEGModel(nn.Module):
             signal = normalize_encoder_inputs(signal)
 
         return self.tokenizer.prepare_signal(
-            signal, sampling_rate, self.sequence_length, modality_mask
+            signal, sampling_rate, sequence_length, modality_mask
         )
 
     def _infer_sampling_rate_from_timestamps(
@@ -716,15 +748,28 @@ class POYOEEGModel(nn.Module):
         """
         return extract_multitask_targets(self._task_configs, data)
 
-    def _tokenize_core(self, data: Data) -> tuple[dict, PreparedSignal]:
+    def _tokenize_core(
+        self, data: Data, sequence_length: float | None = None
+    ) -> tuple[dict, PreparedSignal]:
         """Shared tokenization logic returning intermediate results.
+
+        Args:
+            data: Input data sample.
+            sequence_length: Duration used for signal normalization and
+                token-grid construction.  Defaults to ``self.sequence_length``
+                which keeps batch shapes consistent for fixed-window
+                downstream tasks.  ``MaskedPOYOEEGModel`` passes
+                ``actual_duration`` here to support variable-length
+                pretraining.
 
         Returns:
             ``(result_dict, prepared_signal)`` where *prepared_signal* is the
             :class:`PreparedSignal` contract and *result_dict* is a complete
             tokenized sample ready for collation.
         """
-        prepared = self._prepare_signal(data)
+        if sequence_length is None:
+            sequence_length = self.sequence_length
+        prepared = self._prepare_signal(data, sequence_length=sequence_length)
 
         channel_ids = data.channels.id[prepared.modality_mask].astype(str)
         channel_tokens = np.asarray(self.channel_emb.tokenizer(channel_ids))
@@ -733,13 +778,18 @@ class POYOEEGModel(nn.Module):
             signal=prepared.signal,
             channel_tokens=channel_tokens,
             sampling_rate=prepared.sampling_rate,
-            sequence_length=self.sequence_length,
+            sequence_length=sequence_length,
         )
         pretokenized["input_session_ids"] = str(data.session.id)
         input_timestamps = pretokenized.pop("input_timestamps")
 
-        latent_index = self._latent_index
-        latent_timestamps = self._latent_timestamps
+        effective_step = sequence_length / self._num_latent_bins
+        latent_index, latent_timestamps = create_linspace_latent_tokens(
+            0,
+            sequence_length,
+            step=effective_step,
+            num_latents_per_step=self.num_latents_per_step,
+        )
 
         input_session_index = self.session_emb.tokenizer(data.session.id)
 
@@ -863,7 +913,8 @@ def create_linspace_latent_tokens(
         ``np.ndarray`` of length ``num_steps * num_latents_per_step``.
     """
     sequence_len = end - start
-    latent_timestamps = np.arange(0, sequence_len, step) + step / 2 + start
+    num_steps = max(1, round(sequence_len / step))
+    latent_timestamps = np.arange(num_steps) * step + step / 2 + start
     latent_index = np.arange(num_latents_per_step, dtype=np.int64)
 
     T = len(latent_timestamps)

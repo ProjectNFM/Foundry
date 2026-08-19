@@ -1,0 +1,83 @@
+# @package _global_
+#
+# Architecture-matched scratch control for NeuroSoft minipigs.  The multirun
+# submits one independent job for each existing intrasession block fold.
+
+defaults:
+  - override /model: poyo_eeg
+  - override /model/tokenizer: per_channel_cwt_cnn
+  - override /model/session_emb: disabled
+  - override /data: neurosoft_minipigs/multisess_raw
+  - override /hydra/launcher: slurm_default
+
+task_configs:
+  - neurosoft_acoustic_stim_8band
+
+model:
+  zero_output_timestamps: true
+  normalize_inputs: true
+  channel_emb_mode: dynamic
+
+data:
+  root: ${oc.env:SCRATCH}/brainsets/processed
+  # Acoustic-stimulus trial intervals are 0.5 s.  Keep the model's 2.0-s
+  # latent architecture above, but sample a valid labeled window per batch.
+  sequence_length: 0.5
+  split_type: intrasession-block
+  task_type: acoustic_stim
+
+stage:
+  mode: direct
+
+run:
+  project: auditory_decoding
+  name: neurosoft_8b_intrasession_scratch_minipigs_fold${hyperparameters.fold_number}
+  group: NEUROSOFT_8B_INTRASESSION_SCRATCH_BASELINES
+  tags: [neurosoft, 8band, intrasession, multisubject, scratch, minipigs, cwt_cnn]
+  seed: 42
+  log_level: INFO
+
+class_weights:
+  mode: auto
+  smoothing: 0.75
+
+hyperparameters:
+  # 128-example batches use the requested 48-GB L40S GPU while preserving
+  # the intended effective batch size of 128 without accumulation.
+  batch_size: 128
+  sequence_length: 2.0
+  patch_duration: null
+  # Required by the dynamic per-channel tokenizer.  ``null`` retains the
+  # variable-channel behavior used during leak-fixed pretraining.
+  num_channels: null
+  sampling_rate: 100
+  fold_number: 0
+  num_workers: 4
+  learning_rate: 2.75e-5
+  weight_decay: 0.08
+
+trainer:
+  max_epochs: 1000
+  precision: bf16-mixed
+  gradient_clip_val: 0.5
+  accumulate_grad_batches: 1
+  callbacks:
+    early_stopping:
+      monitor: val/neurosoft_acoustic_stim_8band_f1
+      mode: max
+      patience: 50
+    model_checkpoint:
+      monitor: val/neurosoft_acoustic_stim_8band_f1
+      mode: max
+      auto_insert_metric_name: false
+      filename: best-epoch{epoch:03d}-val_f1_{val/neurosoft_acoustic_stim_8band_f1:.4f}
+
+hydra:
+  sweeper:
+    params:
+      hyperparameters.fold_number: 0, 1, 2
+  launcher:
+    timeout_min: 720
+    cpus_per_task: 4
+    mem_gb: 64
+    gres: gpu:l40s:1

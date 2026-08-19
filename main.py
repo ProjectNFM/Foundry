@@ -18,16 +18,16 @@ from rich.logging import RichHandler
 from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
 from foundry.data.datamodules.base import normalize_data_config
 from foundry.seed import set_seed
-from foundry.tools.stage_data import stage_data
+from foundry.tools.stage_data import (
+    DEFAULT_COMPRESSED_ROOT,
+    DEFAULT_SOURCE_ROOT,
+    destination_lock,
+    stage_data,
+)
 from foundry.training.pretrained import TransferMode, load_pretrained_weights
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 logger = logging.getLogger(__name__)
-
-os.environ.setdefault("SLURM_TMPDIR", "/tmp")
-
-DEFAULT_SOURCE_ROOT = "../scratch/brainsets/processed"
-DEFAULT_COMPRESSED_ROOT = "../scratch/brainsets/compressed"
 
 
 def setup_logging(log_level: str):
@@ -160,25 +160,44 @@ def _finish_active_wandb_run(exit_code: int = 0) -> None:
 
 
 def _stage_data_if_needed(cfg: DictConfig) -> None:
-    slurm_tmpdir = Path(os.environ.get("SLURM_TMPDIR", "/tmp"))
-    if not slurm_tmpdir.exists():
+    mode = str(OmegaConf.select(cfg, "stage.mode", default="node_local"))
+    if mode == "direct":
+        logger.info(
+            "Data staging disabled (stage.mode=direct); using %s", cfg.data.root
+        )
+        return
+    if mode != "node_local":
+        raise ValueError(
+            f"Unsupported stage.mode={mode!r}; expected 'node_local' or 'direct'."
+        )
+
+    dest_root = OmegaConf.select(cfg, "stage.destination_root", default=None)
+    if dest_root is None:
+        dest_root = os.environ.get("SLURM_TMPDIR")
+    if not dest_root:
+        logger.info(
+            "No node-local staging destination is available; using configured "
+            "data.root=%s",
+            cfg.data.root,
+        )
         return
 
-    stage_cfg = OmegaConf.to_container(
-        cfg.get("stage", OmegaConf.create({})), resolve=True
+    source_root = OmegaConf.select(
+        cfg, "stage.source_root", default=DEFAULT_SOURCE_ROOT
     )
-    if stage_cfg.get("skip", False):
-        return
+    compressed_root = OmegaConf.select(
+        cfg, "stage.compressed_root", default=DEFAULT_COMPRESSED_ROOT
+    )
+    compress = bool(OmegaConf.select(cfg, "stage.compress", default=False))
 
-    new_root = stage_data(
-        data_cfg=cfg.data,
-        source_root=stage_cfg.get("source_root", DEFAULT_SOURCE_ROOT),
-        compressed_root=stage_cfg.get(
-            "compressed_root", DEFAULT_COMPRESSED_ROOT
-        ),
-        dest_root=slurm_tmpdir,
-        compress=stage_cfg.get("compress", False),
-    )
+    with destination_lock(dest_root):
+        new_root = stage_data(
+            data_cfg=cfg.data,
+            source_root=source_root,
+            compressed_root=compressed_root,
+            dest_root=dest_root,
+            compress=compress,
+        )
     OmegaConf.update(cfg, "data.root", new_root)
     logger.info("Data staged to %s", new_root)
 
@@ -556,6 +575,14 @@ def _log_config_to_wandb(trainer, cfg: DictConfig):
         if array_task_id:
             config_to_log["slurm_array_task_id"] = array_task_id
 
+    from hydra_plugins.foundry_launcher.launch_snapshot import (
+        get_snapshot_provenance_for_wandb,
+    )
+
+    provenance = get_snapshot_provenance_for_wandb()
+    if provenance:
+        config_to_log.update(provenance)
+
     trainer.logger.experiment.config.update(
         config_to_log, allow_val_change=True
     )
@@ -602,6 +629,80 @@ def _inject_sweep_hyperparams(cfg: DictConfig) -> None:
             )
 
 
+# -- Snapshot provenance ----------------------------------------------------
+
+
+def _log_snapshot_provenance() -> None:
+    """Log snapshot identity at startup and verify imports if active."""
+    bundle_dir = os.environ.get("FOUNDRY_SNAPSHOT_BUNDLE_DIR")
+    if not bundle_dir:
+        return
+
+    git_sha = os.environ.get("FOUNDRY_SNAPSHOT_GIT_SHA", "unknown")
+    source_dir = os.environ.get("FOUNDRY_SNAPSHOT_SOURCE_DIR", "unknown")
+    bundle_id = os.environ.get("FOUNDRY_SNAPSHOT_BUNDLE_ID", "unknown")
+    source_digest = os.environ.get("FOUNDRY_SNAPSHOT_SOURCE_DIGEST", "unknown")
+    manifest = os.environ.get("FOUNDRY_SNAPSHOT_MANIFEST", "unknown")
+
+    logger.info(
+        "Snapshot provenance:\n"
+        "  Bundle ID      : %s\n"
+        "  Git SHA        : %s\n"
+        "  Source digest  : %s\n"
+        "  Source dir     : %s\n"
+        "  Manifest       : %s\n"
+        "  SLURM job      : %s (task %s, restart %s)",
+        bundle_id,
+        git_sha,
+        source_digest[:16] if len(source_digest) > 16 else source_digest,
+        source_dir,
+        manifest,
+        os.environ.get("SLURM_JOB_ID", "n/a"),
+        os.environ.get("SLURM_ARRAY_TASK_ID", "n/a"),
+        os.environ.get("SLURM_RESTART_COUNT", "0"),
+    )
+
+    from hydra_plugins.foundry_launcher.launch_snapshot import (
+        LaunchSnapshot,
+        verify_snapshot,
+        verify_import_paths,
+    )
+
+    if os.environ.get("FOUNDRY_SNAPSHOT_VERIFY_ON_WORKER", "1") == "1":
+        descriptor_path = Path(manifest).with_name("snapshot-descriptor.json")
+        verify_snapshot(LaunchSnapshot.from_json(descriptor_path.read_text()))
+    verify_import_paths(source_dir)
+
+
+def _write_snapshot_task_provenance(output_dir: str) -> None:
+    """Write snapshot provenance after Hydra has created the task output dir."""
+    manifest_path = os.environ.get("FOUNDRY_SNAPSHOT_MANIFEST")
+    if not manifest_path:
+        return
+
+    from hydra_plugins.foundry_launcher.launch_snapshot import (
+        LaunchSnapshot,
+        write_task_provenance,
+    )
+
+    snapshot = LaunchSnapshot.from_json(
+        Path(manifest_path).with_name("snapshot-descriptor.json").read_text()
+    )
+    task_index = int(HydraConfig.get().job.num)
+    task_config_path = (
+        Path(snapshot.bundle_dir)
+        / "task-configs"
+        / f"task_{task_index:04d}.json"
+    )
+    task_overrides = []
+    if task_config_path.is_file():
+        import json
+
+        task_overrides = json.loads(task_config_path.read_text())["overrides"]
+
+    write_task_provenance(snapshot, task_index, task_overrides, output_dir)
+
+
 # -- Entry point ------------------------------------------------------------
 
 
@@ -638,11 +739,14 @@ def main(cfg: DictConfig):
             slurm_restart_count,
         )
 
+    _log_snapshot_provenance()
+
     using_wandb_logger = _is_wandb_logger_enabled(cfg)
     if using_wandb_logger:
         _finish_active_wandb_run()
 
     output_dir, checkpoint_dir = _configure_output_paths(cfg)
+    _write_snapshot_task_provenance(output_dir)
     _configure_wandb(cfg, output_dir)
 
     # Inject WandB sweep hyperparameters if running under sweep

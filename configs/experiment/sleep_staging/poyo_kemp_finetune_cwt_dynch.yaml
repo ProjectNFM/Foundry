@@ -40,12 +40,9 @@ model:
   channel_emb_mode: disabled
 
 data:
-  root: ${oc.env:SLURM_TMPDIR}/brainsets/processed
   split_type: intersubject
   task_type: sleep_stage
 
-stage:
-  skip: true
 
 run:
   name: kemp_022_${run.init_mode}_${hydra:runtime.choices.model/tokenizer}_ch_${model.channel_emb_mode}
@@ -106,4 +103,3 @@ hydra:
       - "source .env"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment sleep_staging/poyo_kemp_finetune_cwt_dynch"

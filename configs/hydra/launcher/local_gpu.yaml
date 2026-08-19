@@ -10,3 +10,10 @@ only_free_gpus: true
 
 # When true, pending jobs are skipped once any job exits with a non-zero code.
 stop_on_failure: false
+
+snapshot:
+  enabled: true
+  root: null
+  require_clean_git: true
+  verify_on_worker: true
+  environment_file: null

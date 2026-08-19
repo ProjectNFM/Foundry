@@ -1,0 +1,91 @@
+task,mode,sweep_id,fold,run_name,wandb_run_id,state,last_step,best_f1,num_metric_points
+Kemp Sleep,Finetune,M0,2,kemp_ft_pretrain_M0_baseline_leak_fixed_fold2,974feca9,failed,135514,0.7359940409660339,7
+Kemp Sleep,Finetune,M1,1,kemp_ft_pretrain_M1_ratio70_leak_fixed_fold1,e399af69,failed,133769,0.7393654584884644,10
+Kemp Sleep,Finetune,M1,0,kemp_ft_pretrain_M1_ratio70_leak_fixed_fold0,3a4fca52,failed,135714,0.739638090133667,8
+Kemp Sleep,Finetune,M0,0,kemp_ft_pretrain_M0_baseline_leak_fixed_fold0,f8306882,failed,136338,0.7429913282394409,8
+Kemp Sleep,Finetune,M0,1,kemp_ft_pretrain_M0_baseline_leak_fixed_fold1,b9967277,failed,132872,0.7474575638771057,10
+Kemp Sleep,Finetune,M2,0,kemp_ft_pretrain_M2_ratio80_leak_fixed_fold0,0d868a0a,failed,133820,0.7436535954475403,8
+Kemp Sleep,Finetune,M1,2,kemp_ft_pretrain_M1_ratio70_leak_fixed_fold2,95f7c4d4,failed,135798,0.7306472063064575,7
+Kemp Sleep,Finetune,M2,1,kemp_ft_pretrain_M2_ratio80_leak_fixed_fold1,d761b806,failed,131767,0.7422661781311035,10
+Kemp Sleep,Finetune,M2,2,kemp_ft_pretrain_M2_ratio80_leak_fixed_fold2,2b5cac4e,failed,134247,0.7321344614028931,7
+Kemp Sleep,Finetune,M3,1,kemp_ft_pretrain_M3_ratio90_leak_fixed_fold1,479ec60a,failed,101,,0
+Kemp Sleep,Finetune,M3,2,kemp_ft_pretrain_M3_ratio90_leak_fixed_fold2,4f2ad2e1,failed,7,,0
+Kemp Sleep,Finetune,M3,0,kemp_ft_pretrain_M3_ratio90_leak_fixed_fold0,d6aa8396,failed,131364,0.7388882637023926,8
+Kemp Sleep,Finetune,M4,0,kemp_ft_pretrain_M4_block20_leak_fixed_fold0,74c5e30a,running,82774,0.7416418790817261,5
+Kemp Sleep,Finetune,M4,1,kemp_ft_pretrain_M4_block20_leak_fixed_fold1,04a30e99,failed,101,,0
+Kemp Sleep,Finetune,M4,2,kemp_ft_pretrain_M4_block20_leak_fixed_fold2,87659dff,failed,7,,0
+Kemp Sleep,Linear probe,M0,2,kemp_lp_pretrain_M0_baseline_leak_fixed_fold2,24ec1167,finished,380881,0.6239898204803467,20
+Kemp Sleep,Linear probe,M0,0,kemp_lp_pretrain_M0_baseline_leak_fixed_fold0,33f7a8e0,finished,269553,0.6443473100662231,17
+Kemp Sleep,Linear probe,M0,1,kemp_lp_pretrain_M0_baseline_leak_fixed_fold1,9a9510c4,finished,221205,0.640410304069519,17
+Kemp Sleep,Linear probe,M1,0,kemp_lp_pretrain_M1_ratio70_leak_fixed_fold0,54b4b5b7,failed,381073,0.6062915325164795,24
+Kemp Sleep,Linear probe,M1,2,kemp_lp_pretrain_M1_ratio70_leak_fixed_fold2,bc54e5fe,failed,383165,0.5792969465255737,20
+Kemp Sleep,Linear probe,M1,1,kemp_lp_pretrain_M1_ratio70_leak_fixed_fold1,6fb79840,finished,169157,0.6103626489639282,13
+Kemp Sleep,Linear probe,M2,0,kemp_lp_pretrain_M2_ratio80_leak_fixed_fold0,b12629e3,finished,269553,0.613535463809967,17
+Kemp Sleep,Linear probe,M2,2,kemp_lp_pretrain_M2_ratio80_leak_fixed_fold2,af29156a,finished,380881,0.618137538433075,20
+Kemp Sleep,Linear probe,M2,1,kemp_lp_pretrain_M2_ratio80_leak_fixed_fold1,53081a3b,failed,368335,0.6468065977096558,28
+Kemp Sleep,Linear probe,M3,0,kemp_lp_pretrain_M3_ratio90_leak_fixed_fold0,41b9d152,finished,269553,0.5540711879730225,17
+Kemp Sleep,Linear probe,M3,2,kemp_lp_pretrain_M3_ratio90_leak_fixed_fold2,6bbf4183,failed,7,,0
+Kemp Sleep,Linear probe,M3,1,kemp_lp_pretrain_M3_ratio90_leak_fixed_fold1,a51af1d2,failed,101,,0
+Kemp Sleep,Linear probe,M4,0,kemp_lp_pretrain_M4_block20_leak_fixed_fold0,109cea76,running,221981,0.647307813167572,13
+Kemp Sleep,Linear probe,M4,2,kemp_lp_pretrain_M4_block20_leak_fixed_fold2,5e5de750,failed,7,,0
+Kemp Sleep,Linear probe,M4,1,kemp_lp_pretrain_M4_block20_leak_fixed_fold1,87d84b9d,failed,101,,0
+PhysioNet MI,Finetune,M0,0,physionet_ft_pretrain_M0_baseline_leak_fixed_fold0,0c3ef959,finished,154957,0.9328426718711853,111
+PhysioNet MI,Finetune,M0,2,physionet_ft_pretrain_M0_baseline_leak_fixed_fold2,72275dc6,finished,188189,0.8576850295066833,143
+PhysioNet MI,Finetune,M0,1,physionet_ft_pretrain_M0_baseline_leak_fixed_fold1,8f989d6e,finished,110647,0.8619313836097717,81
+PhysioNet MI,Finetune,M1,2,physionet_ft_pretrain_M1_ratio70_leak_fixed_fold2,4ba3c9dc,finished,134233,0.8529411554336548,102
+PhysioNet MI,Finetune,M1,0,physionet_ft_pretrain_M1_ratio70_leak_fixed_fold0,b6814c2f,finished,198233,0.9248120188713074,142
+PhysioNet MI,Finetune,M1,1,physionet_ft_pretrain_M1_ratio70_leak_fixed_fold1,3a811146,finished,252711,0.8748018741607666,185
+PhysioNet MI,Finetune,M2,0,physionet_ft_pretrain_M2_ratio80_leak_fixed_fold0,2d698d15,finished,223361,0.933456540107727,160
+PhysioNet MI,Finetune,M2,1,physionet_ft_pretrain_M2_ratio80_leak_fixed_fold1,e4f28188,finished,181679,0.8682539463043213,133
+PhysioNet MI,Finetune,M2,2,physionet_ft_pretrain_M2_ratio80_leak_fixed_fold2,b1990ba6,finished,101333,0.8401486873626709,77
+PhysioNet MI,Finetune,M3,0,physionet_ft_pretrain_M3_ratio90_leak_fixed_fold0,32d8b7c1,finished,390881,0.9304912090301514,280
+PhysioNet MI,Finetune,M3,1,physionet_ft_pretrain_M3_ratio90_leak_fixed_fold1,de33245a,finished,299155,0.8784000277519226,219
+PhysioNet MI,Finetune,M3,2,physionet_ft_pretrain_M3_ratio90_leak_fixed_fold2,9b7d65bd,finished,110545,0.8424976468086243,84
+PhysioNet MI,Finetune,M4,0,physionet_ft_pretrain_M4_block20_leak_fixed_fold0,77d9ab65,finished,205213,0.9309701323509216,147
+PhysioNet MI,Finetune,M4,2,physionet_ft_pretrain_M4_block20_leak_fixed_fold2,c0c69603,finished,146077,0.849213719367981,111
+PhysioNet MI,Finetune,M4,1,physionet_ft_pretrain_M4_block20_leak_fixed_fold1,fcd7c109,finished,333305,0.8899755477905273,244
+PhysioNet MI,Linear probe,M0,1,physionet_lp_pretrain_M0_baseline_leak_fixed_fold1,5004226f,finished,38249,0.6714565753936768,28
+PhysioNet MI,Linear probe,M0,2,physionet_lp_pretrain_M0_baseline_leak_fixed_fold2,d3b938bf,finished,17109,0.6088495850563049,13
+PhysioNet MI,Linear probe,M0,0,physionet_lp_pretrain_M0_baseline_leak_fixed_fold0,c8e87c98,finished,19545,0.6776859760284424,14
+PhysioNet MI,Linear probe,M1,2,physionet_lp_pretrain_M1_ratio70_leak_fixed_fold2,2b18e4aa,finished,17109,0.6217789053916931,13
+PhysioNet MI,Linear probe,M1,1,physionet_lp_pretrain_M1_ratio70_leak_fixed_fold1,c42b4a0a,finished,24589,0.6763110160827637,18
+PhysioNet MI,Linear probe,M1,0,physionet_lp_pretrain_M1_ratio70_leak_fixed_fold0,097d5d8a,finished,19545,0.6576454639434814,14
+PhysioNet MI,Linear probe,M2,2,physionet_lp_pretrain_M2_ratio80_leak_fixed_fold2,7aa90cbd,finished,22373,0.6083333492279053,17
+PhysioNet MI,Linear probe,M2,1,physionet_lp_pretrain_M2_ratio80_leak_fixed_fold1,a85012d7,finished,38249,0.6683971285820007,28
+PhysioNet MI,Linear probe,M2,0,physionet_lp_pretrain_M2_ratio80_leak_fixed_fold0,070d9fda,finished,19545,0.663065493106842,14
+PhysioNet MI,Linear probe,M3,2,physionet_lp_pretrain_M3_ratio90_leak_fixed_fold2,b9a47f27,finished,19741,0.6121164560317993,15
+PhysioNet MI,Linear probe,M3,1,physionet_lp_pretrain_M3_ratio90_leak_fixed_fold1,72c758ca,finished,24589,0.6713124513626099,18
+PhysioNet MI,Linear probe,M3,0,physionet_lp_pretrain_M3_ratio90_leak_fixed_fold0,c094dcfb,finished,19545,0.6650062203407288,14
+PhysioNet MI,Linear probe,M4,2,physionet_lp_pretrain_M4_block20_leak_fixed_fold2,fbd14a5f,finished,17109,0.6119521856307983,13
+PhysioNet MI,Linear probe,M4,0,physionet_lp_pretrain_M4_block20_leak_fixed_fold0,f8c806b7,finished,19545,0.6562073826789856,14
+PhysioNet MI,Linear probe,M4,1,physionet_lp_pretrain_M4_block20_leak_fixed_fold1,d1b585e2,finished,38249,0.6674938201904297,28
+Brain Invaders P300,Finetune,M0,0,bi_ft_pretrain_M0_baseline_leak_fixed_fold0,785a0901,finished,56897,0.31991133093833923,56
+Brain Invaders P300,Finetune,M0,2,bi_ft_pretrain_M0_baseline_leak_fixed_fold2,93f64dc0,finished,57133,0.3232044279575348,54
+Brain Invaders P300,Finetune,M0,1,bi_ft_pretrain_M0_baseline_leak_fixed_fold1,cf43c427,finished,68581,0.3578399419784546,54
+Brain Invaders P300,Finetune,M1,1,bi_ft_pretrain_M1_ratio70_leak_fixed_fold1,b8b1c2a8,finished,68581,0.35811248421669006,54
+Brain Invaders P300,Finetune,M1,0,bi_ft_pretrain_M1_ratio70_leak_fixed_fold0,da074b54,finished,56897,0.32430505752563477,56
+Brain Invaders P300,Finetune,M1,2,bi_ft_pretrain_M1_ratio70_leak_fixed_fold2,9f8fd4ec,finished,57133,0.31339511275291443,54
+Brain Invaders P300,Finetune,M2,0,bi_ft_pretrain_M2_ratio80_leak_fixed_fold0,7fe60f62,finished,54865,0.3178294599056244,54
+Brain Invaders P300,Finetune,M2,1,bi_ft_pretrain_M2_ratio80_leak_fixed_fold1,4c7d7b13,finished,64771,0.3502945899963379,51
+Brain Invaders P300,Finetune,M2,2,bi_ft_pretrain_M2_ratio80_leak_fixed_fold2,567815f6,finished,57133,0.31402528285980225,54
+Brain Invaders P300,Finetune,M3,0,bi_ft_pretrain_M3_ratio90_leak_fixed_fold0,49e5648d,finished,58929,0.3136323094367981,58
+Brain Invaders P300,Finetune,M3,2,bi_ft_pretrain_M3_ratio90_leak_fixed_fold2,6f808a13,finished,59249,0.31511253118515015,56
+Brain Invaders P300,Finetune,M3,1,bi_ft_pretrain_M3_ratio90_leak_fixed_fold1,62897187,finished,69851,0.3473861813545227,55
+Brain Invaders P300,Finetune,M4,0,bi_ft_pretrain_M4_block20_leak_fixed_fold0,cf721d05,finished,54865,0.3260108232498169,54
+Brain Invaders P300,Finetune,M4,1,bi_ft_pretrain_M4_block20_leak_fixed_fold1,cb672215,finished,68581,0.3566967248916626,54
+Brain Invaders P300,Finetune,M4,2,bi_ft_pretrain_M4_block20_leak_fixed_fold2,adb1300c,finished,60307,0.31585150957107544,57
+Brain Invaders P300,Linear probe,M0,1,bi_lp_pretrain_M0_baseline_leak_fixed_fold1,1ebd493c,finished,33021,0.3187499940395355,26
+Brain Invaders P300,Linear probe,M0,0,bi_lp_pretrain_M0_baseline_leak_fixed_fold0,291e0144,finished,11177,0.28567206859588623,11
+Brain Invaders P300,Linear probe,M0,2,bi_lp_pretrain_M0_baseline_leak_fixed_fold2,2e92f99e,finished,17987,0.2958410084247589,17
+Brain Invaders P300,Linear probe,M1,2,bi_lp_pretrain_M1_ratio70_leak_fixed_fold2,641d39ec,finished,35973,0.3069767355918884,34
+Brain Invaders P300,Linear probe,M1,1,bi_lp_pretrain_M1_ratio70_leak_fixed_fold1,61bea0be,finished,33021,0.3137103021144867,26
+Brain Invaders P300,Linear probe,M1,0,bi_lp_pretrain_M1_ratio70_leak_fixed_fold0,d1bd80f3,finished,30481,0.2897440493106842,30
+Brain Invaders P300,Linear probe,M2,0,bi_lp_pretrain_M2_ratio80_leak_fixed_fold0,08000431,finished,21337,0.28754207491874695,21
+Brain Invaders P300,Linear probe,M2,1,bi_lp_pretrain_M2_ratio80_leak_fixed_fold1,8128d1c1,finished,22861,0.3012457489967346,18
+Brain Invaders P300,Linear probe,M2,2,bi_lp_pretrain_M2_ratio80_leak_fixed_fold2,f9165f8e,finished,28567,0.3127571940422058,27
+Brain Invaders P300,Linear probe,M3,0,bi_lp_pretrain_M3_ratio90_leak_fixed_fold0,ca08bd0a,finished,25401,0.28616851568222046,25
+Brain Invaders P300,Linear probe,M3,2,bi_lp_pretrain_M3_ratio90_leak_fixed_fold2,3e7c9ab1,finished,17987,0.2912454903125763,17
+Brain Invaders P300,Linear probe,M3,1,bi_lp_pretrain_M3_ratio90_leak_fixed_fold1,9f389c7e,finished,58421,0.30547264218330383,46
+Brain Invaders P300,Linear probe,M4,1,bi_lp_pretrain_M4_block20_leak_fixed_fold1,ef17831f,finished,33021,0.3071613311767578,26
+Brain Invaders P300,Linear probe,M4,0,bi_lp_pretrain_M4_block20_leak_fixed_fold0,f949c3b5,finished,11177,0.2859654128551483,11
+Brain Invaders P300,Linear probe,M4,2,bi_lp_pretrain_M4_block20_leak_fixed_fold2,b1e12297,finished,16929,0.2921651303768158,16

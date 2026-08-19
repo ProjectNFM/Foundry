@@ -32,8 +32,6 @@ data:
   split_type: intersubject
   task_type: sleep_stage
 
-stage:
-  skip: true
 
 run:
   name: kemp_023_${hydra:runtime.choices.model/tokenizer}_ch-${model.channel_emb_mode}_fold${hyperparameters.fold_number}
@@ -91,4 +89,3 @@ hydra:
       - "source .env"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment sleep_staging/kemp_30s_baselines"

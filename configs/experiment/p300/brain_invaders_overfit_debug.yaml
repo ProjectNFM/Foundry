@@ -29,7 +29,7 @@ data:
     epoch_duration: 1.0
 
 stage:
-  skip: true
+  mode: direct
 
 run:
   name: bi_p300_overfit_sub001_zscore_NEWRUN

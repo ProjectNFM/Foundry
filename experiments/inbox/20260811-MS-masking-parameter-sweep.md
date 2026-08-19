@@ -1,0 +1,250 @@
+# Masking Parameter Sweep: Does Harder Masking Produce Better Downstream Features?
+
+**Status:** Completed
+**Date started:** 2026-08-11
+**Parent experiment:** [Data Scaling Group](../02-data-scaling/README.md) (builds on B2 sweet spot)
+**Follow-up experiments:** [Channel Encoder Leak Fix Impact](20260812-MS-channel-encoder-leak-fix-impact.md)
+**Tags:** pretraining, mae, masked, masking_sweep, cwt_cnn, dynamic_ch
+
+> **Restarted (2026-08-14):** All runs in this sweep use
+> `channel_emb_mode="dynamic"`, which was affected by an information leak in
+> the `RelativeChannelEncoder` (the encoder pooled over masked tokens, giving
+> the decoder a shortcut). A [leak fix ablation](20260812-MS-channel-encoder-leak-fix-impact.md)
+> has completed and confirmed both fixes should remain enabled. Because the leak interacts with
+> mask_ratio (higher ratios leak more information), the optimal masking
+> configuration may shift after the fix. The restarted runs therefore use explicit
+> `disable_channel_encoder_token_mask=false` and `zero_masked_signal=true`
+> overrides in the shared pretraining config, and a distinct
+> `MASKING_SEQLEN_LEAK_FIXED` WandB/checkpoint group.
+
+## Background
+
+The [data scaling experiments](../02-data-scaling/README.md) established that B2
+(Klinzing + Shirazi + Pavlov, ~37k ch·h) is the pretraining sweet spot — the only
+configuration that beats the EEGNet baseline on motor imagery (FT F1 = 0.891 vs
+0.887). All 12 data-scaling runs used identical masking parameters
+(TemporalBlockMasking, mask_ratio=0.5, block_size=10) inherited from the initial
+two-dataset pretrain.
+
+The group's [open questions](../02-data-scaling/README.md#open-questions) explicitly
+flag masking strategy as an unexplored axis: "Alternative strategies — or simply
+different ratios — could produce fundamentally different representations." In the
+vision MAE literature, higher mask ratios (e.g. 75%) are standard and often
+outperform lower ratios. The current 50% ratio was chosen as a conservative default
+but has never been validated against alternatives.
+
+This experiment holds the data fixed at B2 and varies the masking parameters using
+a one-factor-at-a-time star design around the baseline configuration.
+
+Two structural changes are introduced for all runs (vs. previous B2):
+1. **Intersubject validation** (`split_type=intersubject`) — uses held-out subjects
+   instead of held-out time segments, preventing overfitting to training subjects.
+2. **Doubled compute budget** (400k max steps) — with tighter early stopping
+   (patience=10), most runs will stop well before 400k. The doubled budget ensures
+   no run is artificially truncated.
+
+## Question
+
+Does increasing the mask ratio beyond 0.5 — forcing the model to reconstruct more
+tokens from sparser context — produce better downstream representations for sleep
+staging, motor imagery, and P300 detection? Does block size matter independently
+of masking difficulty?
+
+## Hypothesis
+
+Higher mask ratios (0.7–0.8) will improve downstream F1 for finetuning and linear
+probing, with an optimal point around 0.7–0.8 beyond which performance degrades.
+Block size changes (10 → 20) will have a smaller effect than ratio changes, since
+the overall fraction of masked tokens stays the same.
+
+Expected ordering for finetuning: M1 (0.7) ≈ M2 (0.8) > M0 (0.5) > M3 (0.9).
+M4 (block_size=20) will perform comparably to M0 (same ratio, different granularity).
+
+## Experiment
+
+### Setup
+
+- **Model:** POYO CWT-CNN + dynamic channel embeddings, session_emb disabled
+- **Data:** B2 = Klinzing + Shirazi + Pavlov (`three_dataset_pretrain.yaml`)
+- **Task:** MAE pretraining (masked reconstruction)
+- **Training:** 400k max steps, batch_size=64, lr=1e-4, warmup 2k + cosine decay
+  over 398k steps, bf16-mixed, intersubject validation, early stopping patience=10
+- **WandB:** `foundry_pretraining`, group `MASKING_SEQLEN_LEAK_FIXED`
+
+### Pretraining runs
+
+| Run | mask_ratio | block_size | Notes |
+|-----|:---:|:---:|-------|
+| M0 (baseline) | 0.5 | 10 | Shared control (same as original B2 but with intersubject val + 400k steps) |
+| M1 | 0.7 | 10 | Harder reconstruction task |
+| M2 | 0.8 | 10 | Much harder; forces longer-range prediction |
+| M3 | 0.9 | 10 | Near-extreme; only 10% context remains |
+| M4 | 0.5 | 20 | Coarser temporal blocks; larger masked spans |
+
+### Launch commands — Pretraining
+
+```bash
+# M0: Baseline (mask_ratio=0.5, block_size=10)
+uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
+  data=openneuro/three_dataset_pretrain \
+  run.name=pretrain_M0_baseline_leak_fixed run.group=MASKING_SEQLEN_LEAK_FIXED -m
+
+# M1: mask_ratio=0.7
+uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
+  data=openneuro/three_dataset_pretrain \
+  model.masking.mask_ratio=0.7 \
+  run.name=pretrain_M1_ratio70_leak_fixed run.group=MASKING_SEQLEN_LEAK_FIXED -m
+
+# M2: mask_ratio=0.8
+uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
+  data=openneuro/three_dataset_pretrain \
+  model.masking.mask_ratio=0.8 \
+  run.name=pretrain_M2_ratio80_leak_fixed run.group=MASKING_SEQLEN_LEAK_FIXED -m
+
+# M3: mask_ratio=0.9
+uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
+  data=openneuro/three_dataset_pretrain \
+  model.masking.mask_ratio=0.9 \
+  run.name=pretrain_M3_ratio90_leak_fixed run.group=MASKING_SEQLEN_LEAK_FIXED -m
+
+# M4: block_size=20
+uv run python main.py experiment=pretraining/poyo_masking_seqlen_sweep \
+  data=openneuro/three_dataset_pretrain \
+  model.masking.block_size=20 \
+  run.name=pretrain_M4_block20_leak_fixed run.group=MASKING_SEQLEN_LEAK_FIXED -m
+```
+
+### Launch commands — Downstream evaluation
+
+After pretraining, evaluate each checkpoint on 3 tasks × 2 modes × 3 folds = 18 runs per checkpoint:
+
+> **Launched 2026-08-17:** all 30 three-fold Slurm arrays (90 downstream
+> runs) were submitted against the `MASKING_SEQLEN_LEAK_FIXED` checkpoints.
+> The checkpoint transfer was validated for every checkpoint/configuration
+> pair before submission (93 shared state entries loaded, with no missing or
+> mismatched entries). Initial M0 folds started cleanly; P300 folds have
+> completed their first validation epoch and written checkpoints.
+
+```bash
+# Template — replace $NAME with a restarted pretrain run name (e.g. pretrain_M1_ratio70_leak_fixed)
+for NAME in pretrain_M0_baseline_leak_fixed pretrain_M1_ratio70_leak_fixed pretrain_M2_ratio80_leak_fixed pretrain_M3_ratio90_leak_fixed pretrain_M4_block20_leak_fixed; do
+  # Kemp Sleep
+  uv run python main.py experiment=sleep_staging/kemp_finetune_from_data_scaling \
+    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
+  uv run python main.py experiment=sleep_staging/kemp_linear_probe_from_data_scaling \
+    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
+  # PhysioNet MI
+  uv run python main.py experiment=motor_imagery/physionet_finetune_from_data_scaling \
+    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
+  uv run python main.py experiment=motor_imagery/physionet_linear_probe_from_data_scaling \
+    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
+  # Brain Invaders P300
+  uv run python main.py experiment=p300/brain_invaders_finetune_from_data_scaling \
+    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
+  uv run python main.py experiment=p300/brain_invaders_linear_probe_from_data_scaling \
+    run.pretrain_run_name=$NAME run.pretrain_group=MASKING_SEQLEN_LEAK_FIXED -m
+done
+```
+
+### Key config overrides
+
+| Config | Purpose |
+|--------|---------|
+| `configs/experiment/pretraining/poyo_masking_seqlen_sweep.yaml` | Base pretraining config (intersubject, patience=10, 400k steps) |
+| `configs/data/openneuro/three_dataset_pretrain.yaml` | B2 data (3 brainsets) |
+
+### Key comparisons
+
+- **M0 → M1 → M2 → M3:** Monotonic mask_ratio increase (0.5, 0.7, 0.8, 0.9). Tests whether harder reconstruction improves or eventually degrades downstream transfer.
+- **M0 vs M4:** Same mask_ratio (0.5) but different block granularity (10 vs 20 timesteps). Isolates the effect of temporal block structure.
+- **M0 vs original B2:** Same data and masking but intersubject val + 400k steps. Tests whether the structural changes (longer training, tighter validation) affect the result.
+
+## Results
+
+### Summary
+
+The leak-fixed masking sweep does not support the predicted benefit of harder
+masking. Increasing the mask ratio from 0.5 (M0) to 0.7–0.9 (M1–M3) increased
+the MAE reconstruction loss monotonically, but did not improve downstream
+transfer. Across the fully completed three-fold evaluations, M0 was best or
+effectively tied on PhysioNet MI and Brain Invaders P300. M4 (the larger
+block-size control) was similarly neutral: it was slightly higher on MI
+finetuning but lower on MI linear probing and P300 linear probing.
+
+Kemp Sleep results are not usable for the finetuning comparison: none of the
+15 sleep-finetuning folds finished. Its linear-probe results are incomplete and
+are below M0 for the conditions with completed folds. The aggregate metrics
+below therefore use only W&B runs whose state is `finished`; they do not treat
+failed or running runs as zero scores.
+
+### Metrics
+
+Best validation F1 across finished folds (mean ± sample standard deviation;
+`n` is the number of completed folds contributing to the mean):
+
+| Task | Mode | M0: 0.5 / 10 | M1: 0.7 / 10 | M2: 0.8 / 10 | M3: 0.9 / 10 | M4: 0.5 / 20 |
+|---|---|---:|---:|---:|---:|---:|
+| PhysioNet MI | Finetune | 0.8842 ± 0.0422 (n=3) | 0.8842 ± 0.0368 (n=3) | 0.8806 ± 0.0479 (n=3) | 0.8838 ± 0.0442 (n=3) | 0.8901 ± 0.0409 (n=3) |
+| PhysioNet MI | Linear probe | 0.6527 ± 0.0381 (n=3) | 0.6519 ± 0.0277 (n=3) | 0.6466 ± 0.0332 (n=3) | 0.6495 ± 0.0325 (n=3) | 0.6452 ± 0.0294 (n=3) |
+| Brain Invaders P300 | Finetune | 0.3337 ± 0.0210 (n=3) | 0.3319 ± 0.0233 (n=3) | 0.3274 ± 0.0199 (n=3) | 0.3254 ± 0.0191 (n=3) | 0.3329 ± 0.0213 (n=3) |
+| Brain Invaders P300 | Linear probe | 0.3001 ± 0.0169 (n=3) | 0.3035 ± 0.0124 (n=3) | 0.3005 ± 0.0126 (n=3) | 0.2943 ± 0.0100 (n=3) | 0.2951 ± 0.0109 (n=3) |
+| Kemp Sleep | Finetune | no finished folds | no finished folds | no finished folds | no finished folds | no finished folds |
+| Kemp Sleep | Linear probe | 0.6362 ± 0.0108 (n=3) | 0.6104 (n=1) | 0.6158 ± 0.0033 (n=2) | 0.5541 (n=1) | no finished folds |
+
+Pretraining reconstruction loss increased with masking difficulty: best
+validation loss was 0.2463 (M0), 0.3593 (M1), 0.4379 (M2), 0.5469 (M3), and
+0.3010 (M4). This confirms that the sweep increased the difficulty of the
+pretext task, but does not establish that the higher-ratio tasks were too hard
+to learn useful representations.
+
+**Run-completion caveat.** The downstream failure inventory records 67 finished,
+21 failed, and 2 W&B runs still marked `running` out of 90 expected runs. The
+23 non-finished runs were concentrated in Kemp Sleep. Recorded terminal signals
+were DataLoader worker `ValueError`s (8), timeout/requeue failures (7),
+`SIGTERM` (6), and the 2 lingering W&B states; this is evidence of run state,
+not a root-cause diagnosis. See the [failure evidence report](../../analysis/results/039_masking_parameter_sweep_failure_report.md)
+and its accompanying CSV for per-run evidence.
+
+### Analysis
+
+All values and figures are reproduced by:
+
+```bash
+uv run python analysis/040_masking_parameter_sweep.py
+```
+
+The script queries the `MASKING_SEQLEN_LEAK_FIXED` W&B group, saves resolved
+per-fold results and summaries under `analysis/results/`, and excludes
+non-finished folds from F1 aggregates while reporting their coverage.
+
+### Figures
+
+![Leak-fixed masking sweep pretraining loss](../../analysis/figures/040_masking_sweep_pretraining_loss.png)
+
+![Downstream F1 by masking condition](../../analysis/figures/040_masking_sweep_downstream_f1.png)
+
+![Downstream F1 delta versus M0](../../analysis/figures/040_masking_sweep_delta_vs_m0.png)
+
+## Conclusions
+
+The hypothesis is **refuted**. Harder temporal masking (mask ratios 0.7–0.9)
+did not yield better downstream representations than the 0.5 baseline. In the
+two tasks with complete finetuning and linear-probe coverage, higher ratios
+were neutral to modestly worse, with the largest consistent declines at M3.
+The M0 versus M4 control also provides no evidence that larger temporal blocks
+improve transfer at the same 0.5 masking ratio. These conclusions exclude Kemp
+Sleep finetuning and treat its incomplete linear-probe evidence as suggestive
+rather than confirmatory, owing to the documented run failures.
+
+## Notes for future experiments
+
+- Test whether higher-ratio masking becomes counterproductive because the
+  reconstruction task is too difficult. First measure reconstruction quality
+  at the masked-token level (rather than only aggregate loss) and relate it to
+  downstream F1 across a denser ratio sweep between 0.5 and 0.8.
+- Separate *mask fraction* from *available context*: compare high-ratio masking
+  with longer input sequences or a curriculum that starts at 0.5 and increases
+  the ratio after stable reconstruction learning.
+- Before revisiting Kemp Sleep comparisons, resolve the data-loading and job
+  termination issues documented in the failure inventory so all three folds can
+  finish under a consistent protocol.

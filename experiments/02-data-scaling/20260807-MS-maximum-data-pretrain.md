@@ -64,7 +64,7 @@ SLURM_TMPDIR on Mila L40S nodes typically provides ~800G-1TB of local NVMe stora
 Staging 733G is tight but should be feasible on most nodes. If staging fails:
 1. Request a node with `--tmp` flag for larger local storage
 2. Consider running from network storage with `data.root=./data/processed/` and
-   `stage.skip=true` (slower but no staging needed)
+   `stage.mode=direct` (slower but no staging needed)
 3. As a fallback, compress archives with `stage.compress=true` for smaller transfers
 
 **Test staging first** with a dry-run before launching the full training job.

@@ -88,6 +88,25 @@ a data scaling issue.
 | 5 | [Paradigm Diversity (D1-D3)](./20260807-MS-paradigm-diversity-pretrain.md) | Mostly refuted | D1 MI: 0.725 (catastrophic) |
 | 6 | [Maximum Data (E1)](./20260807-MS-maximum-data-pretrain.md) | Partially refuted | E1 < B2 on MI and Sleep |
 
+## Caveat: Channel Encoder Information Leak (2026-08-12)
+
+All pretraining runs in this group used `channel_emb_mode="dynamic"`, which
+contained an information leak in the `RelativeChannelEncoder`: the encoder's
+temporal pooling attended over **all** token embeddings — including masked
+reconstruction targets — giving the decoder a shortcut to lower loss without
+the backbone learning richer representations. This leak was discovered and
+fixed on 2026-08-12 (see [Channel Encoder Leak Fix Impact](../inbox/20260812-MS-channel-encoder-leak-fix-impact.md)).
+
+**Impact on these results:** Every pretraining checkpoint in this group
+benefited from the leak, meaning reconstruction losses were artificially low
+and the downstream transfer numbers may not reflect the model's true
+representation quality. If the leak fix ablation shows a material
+improvement in downstream transfer, all 12 pretraining configurations and
+their 216 downstream runs should be considered for rerunning with the
+corrected code. Until then, the findings here (B2 sweet spot, diversity >
+volume, etc.) remain directionally valid but the absolute numbers should be
+interpreted with this caveat.
+
 ## Open Questions
 
 - **Why is B2 the sweet spot?** Pavlov's working memory paradigm (19ch, 156
@@ -101,12 +120,14 @@ a data scaling issue.
   ChannelMasking (spatial), or hybrid approaches — could produce fundamentally
   different representations. The optimal masking strategy likely depends on
   which downstream task the representations need to support.
+  → Follow-up: [Masking Parameter Sweep](../inbox/20260811-MS-masking-parameter-sweep.md)
 
 - **Sequence length mismatch.** All pretraining used 2s windows, but downstream
   tasks range from 1s (P300) to 30s (Sleep). Representations learned on 2s
   windows may miss longer-range temporal structure critical for sleep staging
   (spindles, K-complexes, slow waves). Training on varied sequence lengths or
   longer windows could yield more versatile representations.
+  → Follow-up: [Multi-Length Pretraining](../inbox/20260811-MS-multi-length-pretraining.md)
 
 - **Data augmentation.** None of the pretraining runs used data augmentation.
   Standard EEG augmentations (time shift, amplitude scaling, channel dropout,

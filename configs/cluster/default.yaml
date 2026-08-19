@@ -5,3 +5,7 @@ hydra:
   sweep:
     dir: ${oc.env:SCRATCH,./outputs}/runs/${run.group}
     subdir: ${run.name}
+
+stage:
+  source_root: ${oc.env:SCRATCH,../scratch}/brainsets/processed
+  compressed_root: ${oc.env:SCRATCH,../scratch}/brainsets/compressed

@@ -470,6 +470,8 @@ class TestEdgeCases:
             "kochi_visualnaming_ds006914",
             "pavlov_verbal_wm_ds003655",
             "getzmann_resting_ds005385",
+            "pavlov_verbal_wm_ds003655",
+            "getzmann_resting_ds005385",
         }
 
     def test_registry_maps_to_correct_classes(self):
@@ -484,6 +486,14 @@ class TestEdgeCases:
         assert (
             OPENNEURO_BRAINSET_REGISTRY["kochi_visualnaming_ds006914"]
             is KochiVisualNamingDS006914
+        )
+        assert (
+            OPENNEURO_BRAINSET_REGISTRY["pavlov_verbal_wm_ds003655"]
+            is PavlovVerbalWmDS003655
+        )
+        assert (
+            OPENNEURO_BRAINSET_REGISTRY["getzmann_resting_ds005385"]
+            is GetzmannRestingDS005385
         )
         assert (
             OPENNEURO_BRAINSET_REGISTRY["pavlov_verbal_wm_ds003655"]

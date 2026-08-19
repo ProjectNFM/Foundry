@@ -30,8 +30,6 @@ data:
   split_type: intersubject
   task_type: motor_imagery
 
-stage:
-  skip: true
 
 run:
   name: physionet_mi_hp_poyo_lr${hyperparameters.learning_rate}_bs${hyperparameters.batch_size}_cw-${class_weights.mode}_dim${model.embed_dim}
@@ -90,4 +88,3 @@ hydra:
       - "source .env"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment motor_imagery/physionet_hp_search_poyo"

@@ -1,0 +1,6 @@
+sweep_id,run_name,wandb_run_id,state,mask_ratio,block_size,steps,best_val_loss,final_val_loss
+M0,pretrain_M0_baseline_leak_fixed,bacae998,failed,0.5,10,458405,0.24633507430553436,0.24740177392959595
+M1,pretrain_M1_ratio70_leak_fixed,47a093d9,failed,0.7,10,440046,0.359292209148407,0.359292209148407
+M2,pretrain_M2_ratio80_leak_fixed,c331aa9d,failed,0.8,10,439335,0.43793609738349915,0.4396871328353882
+M3,pretrain_M3_ratio90_leak_fixed,e8a9dd98,failed,0.9,10,431039,0.5468626618385315,0.5468626618385315
+M4,pretrain_M4_block20_leak_fixed,740f8d0e,failed,0.5,20,459789,0.30096912384033203,0.30156415700912476

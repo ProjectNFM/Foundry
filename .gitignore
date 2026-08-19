@@ -241,3 +241,5 @@ analysis/csv/
 docs/reports/**/main.pdf
 
 /.scratch/
+
+.snapshots
