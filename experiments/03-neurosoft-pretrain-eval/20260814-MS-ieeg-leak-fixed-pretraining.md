@@ -1,14 +1,14 @@
 # Leak-Fixed iEEG Pretraining for Neurosoft Transfer
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-08-14
-**Parent experiment:** [Information Leak Fixes: Channel Encoder Masking + Signal Zeroing + Tokenizer Comparison](20260812-MS-channel-encoder-leak-fix-impact.md)
+**Parent experiment:** [Information Leak Fixes: Channel Encoder Masking + Signal Zeroing + Tokenizer Comparison](../inbox/20260812-MS-channel-encoder-leak-fix-impact.md)
 **Follow-up experiments:** [NeuroSoft Intrasession Multisubject From-Scratch Baselines](20260817-MS-neurosoft-intrasession-baselines.md), [NeuroSoft Leave-One-Subject-Out From-Scratch Baselines](20260817-MS-neurosoft-loso-baselines.md)
 **Tags:** pretraining, mae, ieeg, kochi, neurosoft, data_composition, channel_encoder, information_leak, signal_zeroing, cwt_cnn
 
 ## Background
 
-The [information-leak fix experiment](20260812-MS-channel-encoder-leak-fix-impact.md)
+The [information-leak fix experiment](../inbox/20260812-MS-channel-encoder-leak-fix-impact.md)
 showed that masking channel-encoder pooling and zeroing masked raw signal remove
 large decoder-side shortcuts.  Both are now the default and must be retained for
 all new pretraining.  Although the fixes substantially increase reconstruction
@@ -207,46 +207,115 @@ validation error: the LOSO scratch experiment configs did not include
 `pretrained_checkpoint` in their `run:` section, so the packed snapshot
 launcher rejected the `run.pretrained_checkpoint=...` override when
 re-composing the sweep config on the compute node. Four Kochi-only Minipig
-jobs (`10402889_0`–`_3`, subjects sub-01 through sub-04) survived by reaching
-config loading before the failure window.
+jobs (`10402889_0`–`_3`, subjects sub-01 through sub-04) completed before the
+failure window.
 
 Fix: added `pretrained_checkpoint: null` to both LOSO experiment configs
-(commit `e2f86ea`). Re-launched the 22 failed jobs on 2026-08-18:
+(commit `e2f86ea`). Re-launched the 22 failed jobs on 2026-08-18, but these
+were subsequently cancelled on 2026-08-19 due to a data staging bug. The LOSO
+transfer evaluation has been dropped; only the 4 completed Kochi-only Minipig
+runs (sub-01–sub-04) remain.
 
-| Initialization | Species | WandB / output group | SLURM array | Subjects | Immutable snapshot bundle |
+| Initialization | Species | WandB / output group | SLURM array | Subjects | Status |
 | --- | --- | --- | --- | --- | --- |
-| Kochi-only | Minipigs | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS` | `10408396` (`_0`–`_2`) | sub-05, sub-06, sub-07 | `/network/scratch/s/sobralm/foundry-launches/20260818T211955_NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS_e2f86eac_2181d364` |
-| Kochi-only | Monkeys | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS` | `10408397` (`_0`–`_5`) | sub-01–sub-06 | `/network/scratch/s/sobralm/foundry-launches/20260818T212024_NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS_e2f86eac_b33df0a4` |
-| Kochi + B2 | Minipigs | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS` | `10408400` (`_0`–`_6`) | sub-01–sub-07 | `/network/scratch/s/sobralm/foundry-launches/20260818T212045_NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS_e2f86eac_b34d38ee` |
-| Kochi + B2 | Monkeys | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS` | `10408402` (`_0`–`_5`) | sub-01–sub-06 | `/network/scratch/s/sobralm/foundry-launches/20260818T212105_NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS_e2f86eac_4b746c6b` |
+| Kochi-only | Minipigs | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS` | `10408396` (`_0`–`_2`) | sub-05, sub-06, sub-07 | Cancelled |
+| Kochi-only | Monkeys | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS` | `10408397` (`_0`–`_5`) | sub-01–sub-06 | Cancelled |
+| Kochi + B2 | Minipigs | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MINIPIGS` | `10408400` (`_0`–`_6`) | sub-01–sub-07 | Cancelled |
+| Kochi + B2 | Monkeys | `NEUROSOFT_8B_LOSO_PRETRAIN_TRANSFER_MONKEYS` | `10408402` (`_0`–`_5`) | sub-01–sub-06 | Cancelled |
 
 ### Metrics
 
-TBD — record each pretraining run's best `val/loss`, WandB run name and ID, and
-the Neurosoft benchmark's mean ± standard deviation of
-`val/neurosoft_acoustic_stim_8band_f1` for Kochi-only, Kochi + B2, and no
-pretraining.
+#### Intrasession transfer comparison (best val F1, 3 block folds)
+
+| Species | Scratch | Kochi-only | Kochi + B2 |
+| --- | --- | --- | --- |
+| Minipigs | 0.2695 ± 0.0041 (n=3) | **0.3238 ± 0.0049** (n=3) | 0.3037 ± 0.0124 (n=2) |
+| Monkeys | 0.2638 ± 0.0076 (n=3) | 0.2887 ± 0.0052 (n=3) | **0.3021 ± 0.0012** (n=3) |
+
+Relative improvement over scratch:
+
+| Species | Kochi-only | Kochi + B2 |
+| --- | --- | --- |
+| Minipigs | +20% (+0.054 absolute) | +13% (+0.034 absolute) |
+| Monkeys | +9% (+0.025 absolute) | +15% (+0.038 absolute) |
+
+Note: Kochi + B2 minipig fold 0 did not complete; the mean is from 2 folds.
+
+#### LOSO scratch vs transfer comparison
+
+LOSO scratch baselines (from [the paired LOSO baseline experiment](20260817-MS-neurosoft-loso-baselines.md))
+are now available for all subjects, enabling a direct comparison.
+
+**Species-level summary:**
+
+| Species | Condition | Mean F1 ± Std | Subjects |
+| --- | --- | --- | --- |
+| Minipigs | Scratch | 0.1241 ± 0.0131 | 7 |
+| Minipigs | Kochi-only | 0.1292 ± 0.0104 | 3 (sub-01–03) |
+| Monkeys | Scratch | 0.1262 ± 0.0228 | 6 |
+
+Only three Kochi-only minipig transfer runs completed before the remaining
+LOSO jobs were cancelled. No monkey or Kochi + B2 LOSO transfer runs are
+available. The paired per-subject comparison on these three shared subjects:
+
+| Subject | Scratch | Kochi-only | Delta |
+| --- | --- | --- | --- |
+| sub-01 | 0.1159 | 0.1172 | +0.0013 |
+| sub-02 | 0.1330 | 0.1344 | +0.0014 |
+| sub-03 | 0.1356 | 0.1360 | +0.0004 |
+| **Mean** | **0.1281** | **0.1292** | **+0.0010** |
+
+The Kochi-only transfer delta on these three subjects is negligible
+(+0.001 F1), well within noise. Both scratch and transfer hover at
+eight-class chance level (0.125), confirming that pretraining does not
+meaningfully lift LOSO performance in the available data.
 
 ### Analysis
+
+```bash
+uv run python analysis/041_neurosoft_intrasession_loso_results.py
+```
+
+Pretraining loss curves remain available via:
 
 ```bash
 uv run python analysis/038_ieeg_leak_fixed_pretraining.py
 ```
 
-The script fetches pretraining history from WandB now. Once the Neurosoft
-benchmark has been created, pass its WandB group with `--neurosoft-group` to add
-the Kochi-only, Kochi + B2, and no-pretraining comparison.
-
 ### Figures
 
-TBD — generated by `analysis/038_ieeg_leak_fixed_pretraining.py`.
+![Intrasession comparison](../../analysis/figures/041_neurosoft_intrasession_comparison.png)
+
+![Training curves](../../analysis/figures/041_neurosoft_training_curves.png)
+
+![LOSO comparison minipigs](../../analysis/figures/041_neurosoft_loso_comparison_minipigs.png)
+
+![LOSO comparison monkeys](../../analysis/figures/041_neurosoft_loso_comparison_monkeys.png)
 
 ## Conclusions
 
-TBD
+Hypothesis partially confirmed. Both leak-fixed pretrained initializations
+improve intrasession NeuroSoft F1 over the matched scratch control for both
+species — pretraining consistently helps. However, the predicted Kochi-only
+advantage holds only for minipigs (+20% vs +13% for Kochi + B2). For monkeys,
+the pattern reverses: Kochi + B2 provides stronger transfer (+15%) than
+Kochi-only (+9%), suggesting the additional scalp-EEG volume benefits the
+monkey-specific channel geometry more than source specificity does.
+
+With the LOSO scratch baselines now available, the picture for cross-subject
+generalization is clear: pretraining provides **no meaningful LOSO benefit**.
+The 3 paired Kochi-only minipig subjects show a negligible +0.001 F1 delta
+over scratch, and both conditions sit at eight-class chance level (~0.125).
+The intrasession transfer benefit (+9–20% over scratch) does not carry over
+to the leave-one-subject-out regime, where subject-specific channel layouts
+and physiology dominate the signal.
 
 ## Notes for future experiments
 
-TBD — create the Neurosoft benchmark experiment with matched optimization,
-split, and seeds for all three initialization conditions. Record the resulting
-WandB group and run IDs here.
+- Investigate whether the pretraining transfer delta persists at a higher
+  baseline F1 using Laura's optimized downstream recipe (higher capacity,
+  Resample-CNN), to determine whether the benefit is architecture-dependent or
+  additive.
+- The at-chance LOSO results for both scratch and pretrained models suggest that
+  cross-subject generalization may require explicit channel-alignment strategies
+  or substantially more training subjects rather than pretraining alone.

@@ -1,6 +1,6 @@
 # NeuroSoft Intrasession Multisubject From-Scratch Baselines
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-08-17
 **Parent experiment:** [Leak-Fixed iEEG Pretraining for Neurosoft Transfer](20260814-MS-ieeg-leak-fixed-pretraining.md)
 **Follow-up experiments:** TBD — compare these baselines with Kochi-only and Kochi + B2 leak-fixed pretraining
@@ -108,13 +108,54 @@ kappa, and scalar per-class F1/precision/recall.
 
 ## Results
 
-TBD
+### Summary
+
+All six scratch baseline runs (3 folds × 2 species) completed successfully.
+
+| Species | Fold 0 | Fold 1 | Fold 2 | Mean ± Std |
+| --- | --- | --- | --- | --- |
+| Minipigs | 0.2742 | 0.2664 | 0.2680 | 0.2695 ± 0.0041 |
+| Monkeys | 0.2635 | 0.2564 | 0.2716 | 0.2638 ± 0.0076 |
+
+These architecture-matched scratch baselines are lower than the prior
+Resample-CNN capacity peaks (0.394 minipigs, 0.538 monkeys), as expected:
+the CWT-CNN concat architecture is optimized for transfer compatibility, not
+peak standalone performance.
+
+### Metrics
+
+| Species | Condition | Fold | Best val F1 | Run name | State |
+| --- | --- | --- | --- | --- | --- |
+| Minipigs | Scratch | 0 | 0.2742 | neurosoft_8b_intrasession_scratch_minipigs_fold0 | finished |
+| Minipigs | Scratch | 1 | 0.2664 | neurosoft_8b_intrasession_scratch_minipigs_fold1 | finished |
+| Minipigs | Scratch | 2 | 0.2680 | neurosoft_8b_intrasession_scratch_minipigs_fold2 | finished |
+| Monkeys | Scratch | 0 | 0.2635 | neurosoft_8b_intrasession_scratch_monkeys_fold0 | finished |
+| Monkeys | Scratch | 1 | 0.2564 | neurosoft_8b_intrasession_scratch_monkeys_fold1 | finished |
+| Monkeys | Scratch | 2 | 0.2716 | neurosoft_8b_intrasession_scratch_monkeys_fold2 | finished |
+
+### Analysis
+
+```bash
+uv run python analysis/041_neurosoft_intrasession_loso_results.py
+```
+
+### Figures
+
+![Intrasession comparison](../analysis/figures/041_neurosoft_intrasession_comparison.png)
+
+![Training curves](../analysis/figures/041_neurosoft_training_curves.png)
 
 ## Conclusions
 
-TBD
+Hypothesis confirmed: the CWT-CNN transfer-compatible scratch models provide
+stable three-fold references (low cross-fold variance: σ ≤ 0.008) and do not
+exceed the prior Resample-CNN peaks, as predicted. Minipigs reach 0.270 mean
+F1 and monkeys 0.264 — both well below the 0.394 and 0.538 ceiling set by
+architecture-optimized models. These baselines serve as the appropriate
+no-pretraining control for measuring transfer benefit.
 
 ## Notes for future experiments
 
-TBD — compare this architecture-matched scratch control with the Kochi-only
-and Kochi + B2 leak-fixed initializers.
+- Investigate whether the pretraining transfer delta holds at higher baseline
+  F1 when using Laura's optimized downstream recipe (higher capacity,
+  Resample-CNN), to determine whether the benefit is architecture-dependent.

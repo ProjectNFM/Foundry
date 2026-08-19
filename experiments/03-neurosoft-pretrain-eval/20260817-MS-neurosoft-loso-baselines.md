@@ -1,6 +1,6 @@
 # NeuroSoft Leave-One-Subject-Out From-Scratch Baselines
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-08-17
 **Parent experiment:** [Leak-Fixed iEEG Pretraining for Neurosoft Transfer](20260814-MS-ieeg-leak-fixed-pretraining.md)
 **Follow-up experiments:** TBD — compare LOSO baselines with Kochi-only and Kochi + B2 leak-fixed pretraining
@@ -107,13 +107,63 @@ The held-out recordings log aggregate validation metrics and per-recording
 
 ## Results
 
-TBD
+### Summary
+
+All 13 LOSO scratch baseline runs (7 minipigs + 6 monkeys) completed
+successfully.  Both species hover at or near eight-class chance level
+(0.125), with several held-out subjects falling below it.
+
+| Species | Subjects | Mean F1 | Std | Min | Max |
+| --- | --- | --- | --- | --- | --- |
+| Minipigs | 7 | 0.1241 | 0.0131 | 0.1018 | 0.1395 |
+| Monkeys | 6 | 0.1262 | 0.0228 | 0.1055 | 0.1700 |
+
+### Metrics
+
+| Species | Subject | Best val F1 | Run name | State |
+| --- | --- | --- | --- | --- |
+| Minipigs | sub-01 | 0.1159 | neurosoft_8b_loso_scratch_minipigs_sub-01 | finished |
+| Minipigs | sub-02 | 0.1330 | neurosoft_8b_loso_scratch_minipigs_sub-02 | finished |
+| Minipigs | sub-03 | 0.1356 | neurosoft_8b_loso_scratch_minipigs_sub-03 | finished |
+| Minipigs | sub-04 | 0.1018 | neurosoft_8b_loso_scratch_minipigs_sub-04 | finished |
+| Minipigs | sub-05 | 0.1224 | neurosoft_8b_loso_scratch_minipigs_sub-05 | finished |
+| Minipigs | sub-06 | 0.1206 | neurosoft_8b_loso_scratch_minipigs_sub-06 | finished |
+| Minipigs | sub-07 | 0.1395 | neurosoft_8b_loso_scratch_minipigs_sub-07 | finished |
+| Monkeys | sub-01 | 0.1292 | neurosoft_8b_loso_scratch_monkeys_sub-01 | finished |
+| Monkeys | sub-02 | 0.1213 | neurosoft_8b_loso_scratch_monkeys_sub-02 | finished |
+| Monkeys | sub-03 | 0.1163 | neurosoft_8b_loso_scratch_monkeys_sub-03 | finished |
+| Monkeys | sub-04 | 0.1150 | neurosoft_8b_loso_scratch_monkeys_sub-04 | finished |
+| Monkeys | sub-05 | 0.1700 | neurosoft_8b_loso_scratch_monkeys_sub-05 | finished |
+| Monkeys | sub-06 | 0.1055 | neurosoft_8b_loso_scratch_monkeys_sub-06 | finished |
+
+### Analysis
+
+```bash
+uv run python analysis/042_neurosoft_loso_scratch_baselines.py
+```
+
+### Figures
+
+![Per-subject LOSO F1](../analysis/figures/042_neurosoft_loso_scratch_subjects.png)
+
+![Training curves](../analysis/figures/042_neurosoft_loso_scratch_curves.png)
 
 ## Conclusions
 
-TBD
+Hypothesis partially confirmed.  As predicted, LOSO test F1 is substantially
+lower and more variable than the corresponding intrasession baselines (0.124
+vs 0.270 for minipigs; 0.126 vs 0.264 for monkeys).  However, the prediction
+that all held-out subjects would exceed chance-level performance (0.125) is
+**not met**: several subjects in both species fall below chance (minipig
+sub-04 at 0.102, monkey sub-06 at 0.105).  The scratch LOSO models are
+effectively at chance, indicating that training on other subjects' data
+provides negligible transfer to a completely unseen subject without
+pretrained initialization.  These baselines set a floor near chance for the
+pretrained LOSO transfer experiments.
 
 ## Notes for future experiments
 
-TBD — compare this architecture-matched scratch baseline with the two
-leak-fixed pretraining initializers.
+- Compare these at-chance scratch baselines with pretrained LOSO transfer
+  (Kochi-only and Kochi+B2 initializers) to determine whether pretraining
+  lifts held-out-subject performance meaningfully above chance — the primary
+  measure of genuine cross-subject generalization benefit.
