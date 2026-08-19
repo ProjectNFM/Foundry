@@ -1,6 +1,6 @@
 # Multi-Length Pretraining: Do Varied Temporal Scales Produce More Versatile Representations?
 
-**Status:** In Progress (pretraining completed; downstream evaluation launched 2026-08-18)
+**Status:** In Progress (pretraining completed; downstream evaluation resubmitted 2026-08-19 after staging fix)
 **Date started:** 2026-08-11
 **Parent experiment:** [Data Scaling Group](../02-data-scaling/README.md) (builds on B2 sweet spot)
 **Follow-up experiments:** TBD
@@ -137,19 +137,35 @@ uv run python main.py experiment=p300/brain_invaders_linear_probe_from_data_scal
 
 ### Downstream evaluation submissions
 
-All arrays use the completed checkpoint at
-`/network/scratch/s/sobralm/runs/MASKING_SEQLEN_LEAK_FIXED/pretrain_S1_multilength_leak_fixed/checkpoints/last.ckpt`,
-were submitted from Git commit `82591abe605679f368851a1364be01549ff7fc14`, and
-contain folds 0–2.
+#### Attempt 1 (cancelled — staging bug)
+
+First submission on 2026-08-18 from commit `82591abe` was cancelled due to a
+data staging bug. All arrays below were killed.
+
+| Task | Mode | Slurm array (cancelled) |
+|---|---|---|
+| Kemp Sleep | Finetune | `10408257_[0-2]` |
+| Kemp Sleep | Linear probe | `10408259_[0-2]` |
+| PhysioNet MI | Finetune | `10408263_[0-2]` |
+| PhysioNet MI | Linear probe | `10408266_[0-2]` |
+| Brain Invaders P300 | Finetune | `10408268_[0-2]` |
+| Brain Invaders P300 | Linear probe | `10408270_[0-2]` |
+
+#### Attempt 2 (current)
+
+Resubmitted on 2026-08-19 from Git commit `db327161` (staging fix applied).
+All arrays use the same pretrained checkpoint at
+`/network/scratch/s/sobralm/runs/MASKING_SEQLEN_LEAK_FIXED/pretrain_S1_multilength_leak_fixed/checkpoints/last.ckpt`
+and contain folds 0–2.
 
 | Task | Mode | Slurm array | Immutable snapshot bundle |
 |---|---|---|---|
-| Kemp Sleep | Finetune | `10408257_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260818T210404_KEMP_FT_DATA_SCALING_82591abe_41f8801d` |
-| Kemp Sleep | Linear probe | `10408259_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260818T210440_KEMP_LP_DATA_SCALING_82591abe_4d645d81` |
-| PhysioNet MI | Finetune | `10408263_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260818T210459_PHYSIONET_FT_DATA_SCALING_82591abe_91638d6d` |
-| PhysioNet MI | Linear probe | `10408266_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260818T210526_PHYSIONET_LP_DATA_SCALING_82591abe_0c64943f` |
-| Brain Invaders P300 | Finetune | `10408268_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260818T210551_BI_P300_FT_DATA_SCALING_82591abe_4de777a1` |
-| Brain Invaders P300 | Linear probe | `10408270_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260818T210609_BI_P300_LP_DATA_SCALING_82591abe_b8e7cd47` |
+| Kemp Sleep | Finetune | `10417388_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260819T181300_KEMP_FT_DATA_SCALING_db327161_0d64870a` |
+| Kemp Sleep | Linear probe | `10417390_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260819T181317_KEMP_LP_DATA_SCALING_db327161_2de427dc` |
+| PhysioNet MI | Finetune | `10417391_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260819T181335_PHYSIONET_FT_DATA_SCALING_db327161_f941e98b` |
+| PhysioNet MI | Linear probe | `10417392_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260819T181352_PHYSIONET_LP_DATA_SCALING_db327161_092cedb0` |
+| Brain Invaders P300 | Finetune | `10417393_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260819T181409_BI_P300_FT_DATA_SCALING_db327161_61a24828` |
+| Brain Invaders P300 | Linear probe | `10417394_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260819T181425_BI_P300_LP_DATA_SCALING_db327161_eebbec23` |
 
 ### Key config overrides
 
