@@ -26,10 +26,13 @@ are not protocol-matched to session EEGNet/GRU.
 
 ## Question
 
-How do session-averaged EEGNet and GRU max-val metrics compare to
-(1) opt-HP **single-session** POYO (mean across sessions), (2) opt-HP
-**single-subject** POYO (mean across subjects), and (3) the **best
-multi-subject** POYO (reduced-capacity fold-0 winners)?
+How do **fold-0** session-averaged EEGNet and GRU max-val metrics
+compare to (1) opt-HP **single-session** POYO, (2) opt-HP
+**single-subject** POYO (`val_session/` per recording), and (3) the
+**best multi-subject** POYO (reduced-capacity fold-0 winners;
+`val_session/` per recording)? Primary scoreboard is the unweighted
+mean±std **across sessions**. Pooled `val/` is supplementary, and only
+where a single model actually spans multiple sessions.
 
 ## Hypothesis
 
@@ -50,19 +53,23 @@ baselines on **both F1 and AUROC**.
   (report **max** summary / history values)
 - **Split:** `intrasession-block` (fixed)
 
-| Condition | Source | Aggregation |
-|-----------|--------|-------------|
-| EEGNet | group `NEUROSOFT_INTRASESSION_SINGLESESS`, tags `baselines`+`eegnet` | mean±std of per-session fold-means (excl. outliers) |
-| GRU | same group, tags `baselines`+`gru` | same |
-| POYO session | opt-HP sweeps `hiyb4224` / `h5gf9jn1` ([20260727](20260727-LS-intrasession-opt-baselines.md)) | same |
-| POYO subject | opt-HP sweeps `4k9zt970` / `aycfxm9b` | mean±std of per-subject fold-means |
-| POYO multi (best) | capacity fold-0 winners `ncx1been` / `zrvjtixp` ([20260805](20260805-LS-model-capacity.md)) | single pooled run |
+| Condition | Source | Primary aggregation (fold 0) |
+|-----------|--------|------------------------------|
+| EEGNet single-session | group `NEUROSOFT_INTRASESSION_SINGLESESS`, tags `baselines`+`eegnet` | mean±std of per-session `val/` max (excl. outliers) |
+| GRU single-session | same group, tags `baselines`+`gru` | same |
+| POYO single-session | opt-HP sweeps `hiyb4224` / `h5gf9jn1` ([20260727](20260727-LS-intrasession-opt-baselines.md)) | same |
+| POYO single-subject | opt-HP sweeps `4k9zt970` / `aycfxm9b` | mean±std of per-session `val_session/` history-max (excl. outliers) |
+| POYO multi-subject | capacity fold-0 winners `ncx1been` / `zrvjtixp` ([20260805](20260805-LS-model-capacity.md)) | same as single-subject |
 
-**Session outliers:** missing F1 or fold-mean F1 ≥ 0.99 (same rule as
+**Fold:** **0 only** for every condition (EEGNet / GRU / single-session POYO
+previously used a 3-fold mean; that is dropped so the comparison
+matches the capacity winners).
+
+**Session outliers:** missing F1 or fold-0 F1 ≥ 0.99 (same rule as
 [20260727](20260727-LS-intrasession-opt-baselines.md)). Two monkey
 sessions (`sub-02_ses-04/05` RH) are excluded; none for minipigs.
-Finished primary session runs: 41×3 folds × 3 models (minipigs) and
-27×3 × 3 (monkeys). POYO subject: 7 minipigs + 6 monkeys (3 folds).
+Finished primary session runs: 41×3 models (minipigs) and 27×3
+(monkeys) on fold 0. POYO single-subject: 7 minipigs + 6 monkeys (fold 0).
 
 **Session-level model configs:**
 
@@ -86,11 +93,11 @@ uv run python main.py experiment=auditory_decoding/eegnet_neurosoft_8band_intras
 uv run python main.py experiment=auditory_decoding/gru_neurosoft_8band_intrasession_singlesess -m
 
 # POYO references (already reported)
-wandb agent <entity>/auditory_decoding/hiyb4224   # session minipigs
-wandb agent <entity>/auditory_decoding/h5gf9jn1   # session monkeys
-wandb agent <entity>/auditory_decoding/4k9zt970   # subject minipigs
-wandb agent <entity>/auditory_decoding/aycfxm9b   # subject monkeys
-# best multi: ncx1been / zrvjtixp from capacity sweep ov9f1g0n / 104ze4mt
+wandb agent <entity>/auditory_decoding/hiyb4224   # single-session minipigs
+wandb agent <entity>/auditory_decoding/h5gf9jn1   # single-session monkeys
+wandb agent <entity>/auditory_decoding/4k9zt970   # single-subject minipigs
+wandb agent <entity>/auditory_decoding/aycfxm9b   # single-subject monkeys
+# best multi-subject: ncx1been / zrvjtixp from capacity sweep ov9f1g0n / 104ze4mt
 ```
 
 ### Key config overrides
@@ -104,54 +111,103 @@ in the session YAMLs).
 
 ### Summary
 
-On the **matched session protocol**, EEGNet and GRU beat opt-HP POYO on
-mean max-val F1 for both species (minipigs EEGNet 0.578 vs POYO 0.287;
-monkeys GRU 0.571 vs POYO 0.394). They also beat **single-subject** POYO
-on F1. Versus the **best multi-subject** POYO, session EEGNet (minipigs)
-and session GRU (monkeys) are still higher on F1, but best multi-subject
-POYO has the highest AUROC in both species — by a wide margin in monkeys
-(0.892 vs ~0.56–0.59). That F1/AUROC split is the main result: pooled
-POYO ranks well, but does not convert those scores into competitive
-hard-label F1.
+All numbers below are **fold 0**, unweighted mean±std **across
+sessions** (n=41 minipigs, n=25 monkeys after outlier exclusion).
+On the **matched session protocol**, EEGNet and GRU beat opt-HP
+single-session POYO on F1 for both species (minipigs EEGNet 0.578 vs POYO 0.281;
+monkeys GRU 0.565 vs POYO 0.406). They also beat **single-subject**
+POYO on the same session-mean (`val_session/`). Versus the **best
+multi-subject** POYO: minipig EEGNet still leads on both metrics (F1
+0.578 vs 0.432; AUROC 0.772 vs 0.683); monkey GRU is essentially tied
+with multi-subject POYO on F1 (0.565 vs 0.573) and AUROC (0.582 vs
+0.577).
+
+**Pooled** metrics (all validation trials mixed) are supplementary.
+Pooled **F1** is reconstructed for every condition by summing the
+validation confusion matrix at each run’s max-F1 epoch. Pooled
+**AUROC** is the true run `val/` only for multi-subject POYO (one
+model, scores mixed). For EEGNet / GRU / single-session POYO / single-subject POYO,
+scores are not stored; the bar is a trial-count-weighted mean of
+per-run AUROCs (hatched).
 
 Session-level F1 and AUROC can disagree, especially in monkeys: several
 high-F1 sessions have AUROC near 0.35. Minipig session AUROC is more
-consistent with the F1 ranking (EEGNet 0.771, GRU 0.737, POYO 0.606).
+consistent with the F1 ranking (EEGNet 0.772, GRU 0.744, POYO single-session
+0.607).
 
 ### Metrics
 
-#### Session EEGNet / GRU vs POYO session, subject, and best multi
+#### Session EEGNet / GRU vs POYO single-session, single-subject, and multi-subject
 
-Aggregation: EEGNet, GRU, and POYO session = mean±std **across sessions**
-of fold-mean max-val metrics (excl. outliers). POYO subject = mean±std
-**across subjects**. POYO multi (best) = capacity fold-0 winner (no unit
-std).
+Aggregation: **fold 0**, unweighted mean±std **across sessions** of
+max-val metrics (excl. outliers). EEGNet / GRU / POYO single-session use that
+recording’s `val/` max. POYO single-subject and POYO multi-subject use
+`val_session/` history-max on the same recordings.
 
 | Species | Condition | n | F1 | AUROC | Precision | Recall | Balanced acc |
 |---------|-----------|---|----|-------|-----------|--------|--------------|
-| minipigs | EEGNet (session) | 41 | 0.5775±0.1981 | 0.7711±0.1256 | 0.6480±0.1699 | 0.5894±0.1904 | 0.5894±0.1904 |
-| minipigs | GRU (session) | 41 | 0.5100±0.2552 | 0.7370±0.1487 | 0.5525±0.2618 | 0.5339±0.2297 | 0.5339±0.2297 |
-| minipigs | POYO session | 41 | 0.2866±0.2061 | 0.6061±0.1369 | 0.3280±0.2226 | 0.3292±0.1833 | 0.3292±0.1833 |
-| minipigs | POYO subject | 7 | 0.3203±0.1124 | 0.7054±0.0908 | 0.3752±0.1154 | 0.3274±0.1033 | 0.3274±0.1033 |
-| minipigs | POYO multi (best) | 1 | 0.3936 | 0.8009 | 0.4049 | 0.3954 | 0.3954 |
-| monkeys | EEGNet (session) | 25 | 0.5033±0.2116 | 0.5636±0.2427 | 0.6190±0.1854 | 0.5263±0.1970 | 0.5263±0.1970 |
-| monkeys | GRU (session) | 25 | 0.5706±0.2611 | 0.5851±0.2751 | 0.6200±0.2556 | 0.6016±0.2360 | 0.6016±0.2360 |
-| monkeys | POYO session | 25 | 0.3944±0.2630 | 0.5021±0.2597 | 0.4443±0.2700 | 0.4385±0.2362 | 0.4385±0.2362 |
-| monkeys | POYO subject | 6 | 0.3710±0.1364 | 0.5878±0.2215 | 0.4465±0.1396 | 0.4105±0.1189 | 0.4105±0.1189 |
-| monkeys | POYO multi (best) | 1 | 0.5382 | 0.8916 | 0.5356 | 0.5485 | 0.5485 |
+| minipigs | EEGNet single-session | 41 | 0.5785±0.2008 | 0.7725±0.1243 | 0.6485±0.1708 | 0.5885±0.1933 | 0.5885±0.1933 |
+| minipigs | GRU single-session | 41 | 0.5301±0.2673 | 0.7441±0.1486 | 0.5697±0.2722 | 0.5523±0.2416 | 0.5523±0.2416 |
+| minipigs | POYO single-session | 41 | 0.2808±0.2125 | 0.6066±0.1417 | 0.3199±0.2339 | 0.3241±0.1880 | 0.3241±0.1880 |
+| minipigs | POYO single-subject | 41 | 0.4131±0.1717 | 0.6710±0.1239 | 0.4560±0.1755 | 0.4301±0.1670 | 0.4301±0.1670 |
+| minipigs | POYO multi-subject | 41 | 0.4318±0.1641 | 0.6829±0.1251 | 0.5051±0.1460 | 0.4519±0.1507 | 0.4519±0.1507 |
+| monkeys | EEGNet single-session | 25 | 0.5048±0.2113 | 0.5622±0.2433 | 0.6105±0.1942 | 0.5260±0.1962 | 0.5260±0.1962 |
+| monkeys | GRU single-session | 25 | 0.5653±0.2817 | 0.5822±0.2772 | 0.6115±0.2796 | 0.5987±0.2534 | 0.5987±0.2534 |
+| monkeys | POYO single-session | 25 | 0.4065±0.2715 | 0.5054±0.2612 | 0.4501±0.2661 | 0.4484±0.2457 | 0.4484±0.2457 |
+| monkeys | POYO single-subject | 25 | 0.4838±0.2271 | 0.5363±0.2657 | 0.5228±0.2264 | 0.5125±0.2034 | 0.5125±0.2034 |
+| monkeys | POYO multi-subject | 25 | 0.5725±0.1726 | 0.5766±0.2569 | 0.6263±0.1492 | 0.5883±0.1646 | 0.5883±0.1646 |
 
-POYO session / subject numbers reproduce
-[20260727](20260727-LS-intrasession-opt-baselines.md); POYO multi (best)
-reproduces [20260805](20260805-LS-model-capacity.md).
+POYO multi-subject session means are `val_session/` history-max on `ncx1been` /
+`zrvjtixp`. Fold-0-only single-session POYO is close to the 3-fold means in
+[20260727](20260727-LS-intrasession-opt-baselines.md) but not identical.
 
 #### Δ F1 / AUROC: session EEGNet or GRU minus each POYO reference
 
-| Species | Baseline | − POYO session | − POYO subject | − POYO multi (best) |
-|---------|----------|----------------|----------------|---------------------|
-| minipigs | EEGNet | +0.291 / +0.165 | +0.257 / +0.066 | +0.184 / −0.030 |
-| minipigs | GRU | +0.223 / +0.131 | +0.190 / +0.032 | +0.116 / −0.064 |
-| monkeys | EEGNet | +0.109 / +0.062 | +0.132 / −0.024 | −0.035 / −0.328 |
-| monkeys | GRU | +0.176 / +0.083 | +0.200 / −0.003 | +0.032 / −0.307 |
+| Species | Baseline | − POYO single-session | − POYO single-subject | − POYO multi-subject |
+|---------|----------|-----------------------|-----------------------|----------------------|
+| minipigs | EEGNet | +0.298 / +0.166 | +0.165 / +0.102 | +0.147 / +0.090 |
+| minipigs | GRU | +0.249 / +0.138 | +0.117 / +0.073 | +0.098 / +0.061 |
+| monkeys | EEGNet | +0.098 / +0.057 | +0.021 / +0.026 | −0.068 / −0.014 |
+| monkeys | GRU | +0.159 / +0.077 | +0.082 / +0.046 | −0.007 / +0.006 |
+
+#### Supplementary: species-level pooled metrics (fold 0)
+
+Pooled F1 / precision / recall are computed from the **sum of
+validation confusion matrices** at each run’s max-F1 epoch, then
+macro-averaged over classes with support (this matches WandB’s
+session F1 on a single run). That concatenates hard predictions.
+It is protocol-matched in *aggregation* (all val trials) but not in
+*training*: EEGNet / GRU / single-session POYO contribute one model per
+recording; single-subject POYO one model per animal; multi-subject POYO one model
+for the species.
+
+Pooled AUROC cannot be recovered from a confusion matrix. Multi-subject
+POYO uses the true mixed-trial `val/` AUROC. Every other condition uses
+the trial-count-weighted mean of that run’s history-max AUROC (hatched
+in the figure).
+
+| Species | Condition | n models | n val trials | Pooled F1 | Pooled / est. AUROC | Precision | Recall |
+|---------|-----------|----------|--------------|-----------|---------------------|-----------|--------|
+| minipigs | EEGNet single-session | 41 | 7002 | 0.5738 | 0.7948† | 0.5845 | 0.5682 |
+| minipigs | GRU single-session | 41 | 7002 | 0.5450 | 0.7639† | 0.5644 | 0.5379 |
+| minipigs | POYO single-session | 41 | 7002 | 0.3696 | 0.6322† | 0.4050 | 0.3609 |
+| minipigs | POYO single-subject | 7 | 7002 | 0.3761 | 0.7443† | 0.3810 | 0.3750 |
+| minipigs | POYO multi-subject | 1 | — | 0.3936 | 0.8009 | 0.4049 | 0.3954 |
+| monkeys | EEGNet single-session | 25 | 5073 | 0.4954 | 0.6244† | 0.5080 | 0.4922 |
+| monkeys | GRU single-session | 25 | 5073 | 0.5922 | 0.6375† | 0.6269 | 0.5816 |
+| monkeys | POYO single-session | 25 | 5073 | 0.4560 | 0.5494† | 0.4901 | 0.4510 |
+| monkeys | POYO single-subject | 6 | 5170 | 0.4489 | 0.7728† | 0.4778 | 0.4766 |
+| monkeys | POYO multi-subject | 1 | — | 0.5382 | 0.8916 | 0.5356 | 0.5485 |
+
+† Trial-count-weighted mean of per-run max AUROC, not a single ROC on
+concatenated scores. Monkey single-subject POYO includes the two outlier
+sessions inside `sub-02`’s subject-level CM (5170 vs 5073 trials).
+
+On this pooled-F1 scoreboard, session EEGNet (minipigs) and GRU
+(monkeys) still beat multi-subject POYO. Multi-subject POYO keeps the
+highest **true** pooled AUROC (0.801 / 0.892). The hatched EEGNet
+minipig AUROC (0.795) is close to that ceiling but is not the same
+estimator.
 
 #### Excluded single-session outliers
 
@@ -171,9 +227,9 @@ uv run python analysis/20260818-LS-singlesess-eegnet-gru-baselines.py --cached
 
 ### Figures
 
-![F1: session EEGNet/GRU vs POYO session, subject, and best multi](../../analysis/figures/20260818-LS-singlesess-eegnet-gru-baselines_f1_by_model.png)
+![F1: session EEGNet/GRU vs POYO single-session, single-subject, and multi-subject](../../analysis/figures/20260818-LS-singlesess-eegnet-gru-baselines_f1_by_model.png)
 
-![AUROC: session EEGNet/GRU vs POYO session, subject, and best multi](../../analysis/figures/20260818-LS-singlesess-eegnet-gru-baselines_auroc_by_model.png)
+![AUROC: session EEGNet/GRU vs POYO single-session, single-subject, and multi-subject](../../analysis/figures/20260818-LS-singlesess-eegnet-gru-baselines_auroc_by_model.png)
 
 ![Per-session F1: EEGNet and GRU vs best multi-subject POYO](../../analysis/figures/20260818-LS-singlesess-eegnet-gru-baselines_f1_vs_poyo_multi.png)
 
@@ -182,13 +238,21 @@ uv run python analysis/20260818-LS-singlesess-eegnet-gru-baselines.py --cached
 Each point is one recording. X is that session’s **history-max**
 `val_session/` F1 or AUROC on the best multi-subject POYO run (fold 0:
 `ncx1been` / `zrvjtixp`). Points above the identity line beat
-multi-subject POYO on that same session.
+multi-subject POYO on that same session. Fold-0 counts above identity:
+F1 EEGNet 37/41 and 10/25, GRU 29/41 and 13/25; AUROC EEGNet 39/41 and
+11/25, GRU 30/41 and 16/25 (minipigs / monkeys).
 
-**Supplementary — per-session bars (excl. outliers):** EEGNet / GRU /
-session POYO, plus **single-subject POYO** and **best multi-subject
-POYO** `val_session/` scores for the same recording (solid purple /
-green; subject POYO is a fold-mean across the three subject-level
-runs).
+**Supplementary — species-level pooled metrics:** all five conditions.
+F1 is from summed confusion matrices. AUROC bars are hatched when they
+are n-weighted session AUROCs rather than a true mixed-trial ROC.
+
+![Pooled F1](../../analysis/figures/20260818-LS-singlesess-eegnet-gru-baselines_supp_pooled_f1.png)
+
+![Pooled AUROC](../../analysis/figures/20260818-LS-singlesess-eegnet-gru-baselines_supp_pooled_auroc.png)
+
+**Supplementary — per-session bars (excl. outliers, fold 0):** EEGNet /
+GRU / single-session POYO, plus **single-subject POYO** and **best
+multi-subject POYO** `val_session/` scores for the same recording.
 
 ![Per-session F1](../../analysis/figures/20260818-LS-singlesess-eegnet-gru-baselines_supp_f1_per_session.png)
 
@@ -197,28 +261,32 @@ runs).
 ## Conclusions
 
 The hypothesis that high-data POYO should **outperform** session
-EEGNet/GRU on **both** F1 and AUROC is **partial**: **refuted on F1**,
-**supported on AUROC** for multi-subject POYO. Session-level POYO is
-the expected unfair low-data loss.
+EEGNet/GRU on **both** F1 and AUROC is **not supported** on fold-0
+session-mean F1 or AUROC. Session-level POYO is the expected unfair
+low-data loss.
 
 - **Matched session protocol (low data):** EEGNet and GRU outperform
-  session POYO on mean F1 and AUROC for both species — the expected
+  single-session POYO on mean F1 and AUROC for both species — the expected
   unfair comparison for a transformer trained in a low-data regime.
-- **Vs single-subject POYO:** session EEGNet/GRU still win on F1; AUROC
-  is mixed (minipigs baselines slightly ahead; monkeys ≈ tied).
-  Single-subject pooling is not a high enough data regime for POYO to
-  outperform the traditional baselines.
-- **Vs best multi-subject POYO:** session EEGNet (minipigs, ΔF1 +0.184)
-  and session GRU (monkeys, ΔF1 +0.032) remain higher on **mean** F1, but
-  best multi-subject POYO wins **pooled** AUROC — slightly in minipigs
-  (0.801 vs EEGNet 0.771) and by a large margin in monkeys (0.892 vs
-  ~0.56–0.59). Matched per-session scatters (`val_session/` on the same
-  recordings) tell a session-wise story: on F1, most minipig sessions
-  still sit above identity (EEGNet 35/41, GRU 26/41) while monkeys
-  favor pooled POYO vs EEGNet (8/25 above) and are split vs GRU
-  (14/25); on AUROC, minipig baselines win most sessions (38/41, 28/41)
-  even though pooled POYO has the higher species AUROC, and monkeys
-  track the identity line more closely (10/25, 16/25 above).
+- **Vs single-subject POYO (session-mean `val_session/`):** session
+  EEGNet/GRU still win on F1 and AUROC for both species. Single-subject
+  pooling is not a high enough data regime for POYO to outperform the
+  traditional baselines.
+- **Vs best multi-subject POYO (session-mean `val_session/`):** minipig
+  EEGNet remains higher on F1 (Δ +0.147) and AUROC (Δ +0.090). Monkey
+  GRU is tied with multi-subject POYO on F1 (0.565 vs 0.573) and AUROC
+  (0.582 vs 0.577); EEGNet is slightly behind on both. Matched
+  per-session scatters: on F1, most minipig sessions sit above identity
+  (EEGNet 37/41, GRU 29/41) while monkeys favor multi-subject POYO vs
+  EEGNet (10/25 above) and are split vs GRU (13/25); on AUROC, minipig
+  baselines win most sessions (39/41, 30/41) and monkeys track the
+  identity line (11/25, 16/25 above).
+- **Pooled metrics (supplementary):** summing max-F1 confusion
+  matrices gives a species-level F1 for every condition. Minipig
+  EEGNet (0.574) and monkey GRU (0.592) still beat multi-subject POYO
+  F1 (0.394 / 0.538). True mixed-trial AUROC exists only for
+  multi-subject POYO (0.801 / 0.892) and remains the ranking ceiling;
+  hatched AUROCs are n-weighted session means, not concatenated ROCs.
 - **Caveats:** session vs pooled protocols differ; EEGNet/GRU HPs were
   tuned but patience is 20 vs POYO 50; monkey session F1 can look
   strong while AUROC is near chance (see supplementary per-session
@@ -232,8 +300,13 @@ after converting probabilities into class labels. In an 8-class
 problem that default cut is rarely optimal, so False Positives /
 False Negatives inflate even when ranking is strong.
 
-Pooling still improves POYO’s **ranking**. It has not yet produced a
-multi-subject F1 that beats these session-level CNN/RNN baselines.
+Pooling still improves POYO relative to session-level POYO. Averaged
+across sessions **or** pooled via summed confusion matrices, it has
+not produced an F1 that clearly beats these session-level CNN/RNN
+baselines (monkey GRU leads pooled F1; monkey multi is a session-mean
+tie). The capacity run’s **true pooled** AUROC remains the ranking
+ceiling; hatched AUROCs in the supplementary figure are a different
+estimator.
 
 ## Notes for future experiments
 

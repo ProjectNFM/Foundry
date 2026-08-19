@@ -1,16 +1,19 @@
 """Session-level EEGNet / GRU vs POYO on NeuroSoft 8-band decoding.
 
 Fetches finished runs from ``NEUROSOFT_INTRASESSION_SINGLESESS`` and
-compares EEGNet and GRU **session averages** against three POYO
-references from this thread:
+compares EEGNet and GRU against three POYO references, **fold 0 only**:
 
-1. Opt-HP **single-session** POYO (mean across sessions)
-2. Opt-HP **single-subject** POYO (mean across subjects)
-3. **Best multi-subject** POYO (reduced-capacity fold-0 winners)
+1. Opt-HP **single-session** POYO
+2. Opt-HP **single-subject** POYO (``val_session/`` per recording)
+3. **Best multi-subject** POYO (``val_session/`` per recording)
 
-Per-session scatterplots and supplementary bars use ``val_session/``
-history-max metrics from (2) and (3), matched to the same recordings
-as EEGNet/GRU — not the pooled run summary.
+Primary bars / tables: unweighted mean±std **across sessions**.
+Supplementary: species-level **pooled** metrics for every condition.
+Pooled F1 / precision / recall come from summing validation confusion
+matrices at each run's max-F1 epoch (hard-label pool). Pooled AUROC is
+the true run ``val/`` when one model spans the pool (multi-subject
+POYO); otherwise a trial-count-weighted mean of per-run AUROCs (ranking
+scores are not stored).
 
 Usage:
     uv run python analysis/20260818-LS-singlesess-eegnet-gru-baselines.py
@@ -19,6 +22,8 @@ Usage:
 
 from __future__ import annotations
 
+import json
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -55,6 +60,7 @@ MULTISUBJ_BEST_POYO: dict[str, str] = {
 }
 
 SINGLESESS_OUTLIER_F1_GE = 0.99
+FOLD_KEEP = 0
 
 TASK = "neurosoft_acoustic_stim_8band"
 METRIC_KEYS = {
@@ -67,18 +73,23 @@ METRIC_KEYS = {
 METRICS = list(METRIC_KEYS)
 
 MODEL_ORDER = ["eegnet", "gru", "poyo"]
-MODEL_LABELS = {"eegnet": "EEGNet", "gru": "GRU", "poyo": "POYO (session)"}
+MODEL_LABELS = {
+    "eegnet": "EEGNet",
+    "gru": "GRU",
+    "poyo": "POYO (single-session)",
+}
 MODEL_COLORS = {"eegnet": "#E8963E", "gru": "#C44E52", "poyo": "#4C72B0"}
 SPECIES_ORDER = ["minipigs", "monkeys"]
 
 CONDITION_ORDER = ["eegnet", "gru", "poyo_sess", "poyo_subj", "poyo_multi"]
 CONDITION_LABELS = {
-    "eegnet": "EEGNet\n(session)",
-    "gru": "GRU\n(session)",
-    "poyo_sess": "POYO\nsession",
-    "poyo_subj": "POYO\nsubject",
-    "poyo_multi": "POYO multi\n(best)",
+    "eegnet": "EEGNet\nsingle-session",
+    "gru": "GRU\nsingle-session",
+    "poyo_sess": "POYO\nsingle-session",
+    "poyo_subj": "POYO\nsingle-subject",
+    "poyo_multi": "POYO\nmulti-subject",
 }
+CONDITION_NAMES = {k: v.replace("\n", " ") for k, v in CONDITION_LABELS.items()}
 CONDITION_COLORS = {
     "eegnet": "#E8963E",
     "gru": "#C44E52",
@@ -89,11 +100,11 @@ CONDITION_COLORS = {
 
 PER_SESSION_MODELS = ["eegnet", "gru", "poyo", "poyo_subj", "poyo_multi"]
 PER_SESSION_LABELS = {
-    "eegnet": "EEGNet",
-    "gru": "GRU",
-    "poyo": "POYO (session)",
-    "poyo_subj": "POYO (subject)",
-    "poyo_multi": "POYO multi (best)",
+    "eegnet": "EEGNet (single-session)",
+    "gru": "GRU (single-session)",
+    "poyo": "POYO (single-session)",
+    "poyo_subj": "POYO (single-subject)",
+    "poyo_multi": "POYO (multi-subject)",
 }
 PER_SESSION_COLORS = {
     "eegnet": CONDITION_COLORS["eegnet"],
@@ -108,6 +119,9 @@ CSV_DIR = csv_dir(__file__)
 N_WORKERS = 8
 HISTORY_BATCH = 30
 VAL_SESSION_PREFIX = "val_session/"
+CM_KEY = f"val/{TASK}_confusion_counts"
+F1_KEY = METRIC_KEYS["f1"]
+AUROC_KEY = METRIC_KEYS["auroc"]
 
 
 def _run_path(run_id: str, project: str = PROJECT) -> str:
@@ -528,6 +542,13 @@ def fill_missing_metrics(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def keep_fold(df: pd.DataFrame, fold: int = FOLD_KEEP) -> pd.DataFrame:
+    if df.empty or "fold" not in df.columns:
+        return df.copy()
+    folds = pd.to_numeric(df["fold"], errors="coerce")
+    return df.loc[folds == fold].copy()
+
+
 def primary_runs(df: pd.DataFrame) -> pd.DataFrame:
     """Finished EEGNet, GRU, and opt-HP POYO."""
     finished = df[df["state"] == "finished"].copy()
@@ -744,11 +765,13 @@ def subject_summary(subject_df: pd.DataFrame) -> pd.DataFrame:
 
 def comparison_table(
     sess_summary: pd.DataFrame,
-    subj_summary_df: pd.DataFrame,
-    multi: pd.DataFrame,
+    subj_sess: pd.DataFrame,
+    multi_sess: pd.DataFrame,
+    session_df: pd.DataFrame,
 ) -> pd.DataFrame:
-    """EEGNet/GRU/POYO session means vs POYO subject mean vs best multi POYO."""
+    """Fold-0 session mean±std for EEGNet/GRU/POYO single-session, single-subject, and multi-subject."""
     filt = sess_summary[sess_summary["subset"] == "excl. outliers"]
+    drop_keys = _outlier_session_keys(session_df)
     rows: list[dict[str, Any]] = []
     sess_map = {"eegnet": "eegnet", "gru": "gru", "poyo": "poyo_sess"}
     for species in SPECIES_ORDER:
@@ -767,40 +790,62 @@ def comparison_table(
                 row[f"{m}_std"] = float(srow[f"{m}_std"].iloc[0])
             rows.append(row)
 
-        sub = subj_summary_df[subj_summary_df["species"] == species]
-        if not sub.empty:
-            row = {
-                "species": species,
-                "condition": "poyo_subj",
-                "n_units": int(sub["n_subjects"].iloc[0]),
-                "unit": "subject",
-            }
-            for m in METRICS:
-                row[f"{m}_mean"] = float(sub[f"{m}_mean"].iloc[0])
-                row[f"{m}_std"] = float(sub[f"{m}_std"].iloc[0])
-            rows.append(row)
-
-        mrow = multi[multi["species"] == species]
-        if not mrow.empty:
-            row = {
-                "species": species,
-                "condition": "poyo_multi",
-                "n_units": 1,
-                "unit": "pooled (fold 0)",
-            }
-            for m in METRICS:
-                row[f"{m}_mean"] = (
-                    float(mrow[m].iloc[0])
-                    if pd.notna(mrow[m].iloc[0])
-                    else np.nan
-                )
-                row[f"{m}_std"] = 0.0
-            rows.append(row)
+        for cond, source in (
+            ("poyo_subj", subj_sess),
+            ("poyo_multi", multi_sess),
+        ):
+            part = _filter_ref_sessions(source, species, drop_keys)
+            if part.empty:
+                continue
+            rows.append(_session_agg_row(part, species, cond))
     out = pd.DataFrame(rows)
     out["condition"] = pd.Categorical(
         out["condition"], categories=CONDITION_ORDER, ordered=True
     )
     return out.sort_values(["species", "condition"]).reset_index(drop=True)
+
+
+def _session_agg_row(
+    part: pd.DataFrame, species: str, cond: str
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "species": species,
+        "condition": cond,
+        "n_units": int(len(part)),
+        "unit": "session",
+    }
+    for m in METRICS:
+        vals = part[f"{m}_mean"].dropna()
+        row[f"{m}_mean"] = float(vals.mean()) if len(vals) else np.nan
+        row[f"{m}_std"] = float(vals.std(ddof=0)) if len(vals) else np.nan
+    return row
+
+
+def _outlier_session_keys(session_df: pd.DataFrame) -> set[tuple[str, str]]:
+    flagged = flag_outliers(session_df)
+    out = flagged[flagged["is_outlier"]]
+    return {
+        (str(sp), _shorten_session_id(sess))
+        for sp, sess in zip(out["species"], out["session"])
+    }
+
+
+def _filter_ref_sessions(
+    multi_sess: pd.DataFrame,
+    species: str,
+    drop_keys: set[tuple[str, str]],
+) -> pd.DataFrame:
+    if multi_sess.empty:
+        return multi_sess
+    work = multi_sess[multi_sess["species"] == species].copy()
+    work["session_key"] = work["session"].map(_shorten_session_id)
+    work = flag_outliers(work)
+    keep_mask = [
+        (str(sp), sk) not in drop_keys
+        for sp, sk in zip(work["species"], work["session_key"])
+    ]
+    work = work.loc[keep_mask]
+    return work[~work["is_outlier"]].reset_index(drop=True)
 
 
 def _fmt(mean: float, std: float) -> str:
@@ -809,6 +854,297 @@ def _fmt(mean: float, std: float) -> str:
     if pd.isna(std):
         return f"{mean:.4f}"
     return f"{mean:.4f}±{std:.4f}"
+
+
+def _as_cm(val: Any) -> np.ndarray | None:
+    if val is None:
+        return None
+    if isinstance(val, float) and np.isnan(val):
+        return None
+    try:
+        arr = np.asarray(val, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    if arr.ndim != 2 or arr.shape[0] != arr.shape[1] or arr.size == 0:
+        return None
+    return arr
+
+
+def _macro_from_cm(cm: np.ndarray) -> dict[str, float]:
+    """Macro P/R/F1 over classes with support, matching WandB session F1."""
+    cm = np.asarray(cm, dtype=float)
+    tp = np.diag(cm)
+    fp = cm.sum(axis=0) - tp
+    fn = cm.sum(axis=1) - tp
+    support = cm.sum(axis=1)
+    present = support > 0
+    prec = np.divide(tp, tp + fp, out=np.zeros_like(tp), where=(tp + fp) > 0)
+    rec = np.divide(tp, tp + fn, out=np.zeros_like(tp), where=(tp + fn) > 0)
+    f1 = np.divide(
+        2 * prec * rec,
+        prec + rec,
+        out=np.zeros_like(tp),
+        where=(prec + rec) > 0,
+    )
+    if not present.any():
+        return {
+            "f1": np.nan,
+            "precision": np.nan,
+            "recall": np.nan,
+            "balanced_acc": np.nan,
+            "n_trials": 0.0,
+        }
+    return {
+        "f1": float(f1[present].mean()),
+        "precision": float(prec[present].mean()),
+        "recall": float(rec[present].mean()),
+        "balanced_acc": float(rec[present].mean()),
+        "n_trials": float(cm.sum()),
+    }
+
+
+def _history_with_retry(run: Any, tries: int = 4) -> pd.DataFrame:
+    delay = 2.0
+    last_exc: Exception | None = None
+    for _ in range(tries):
+        try:
+            hist = run.history(samples=20_000, pandas=True)
+            if hist is None:
+                return pd.DataFrame()
+            return hist
+        except Exception as exc:
+            last_exc = exc
+            time.sleep(delay)
+            delay = min(delay * 2, 20.0)
+    if last_exc is not None:
+        print(f"  history failed for {run.id}: {last_exc}")
+    return pd.DataFrame()
+
+
+def _cm_at_max_f1_from_history(hist: pd.DataFrame) -> np.ndarray | None:
+    if hist.empty or F1_KEY not in hist.columns:
+        return None
+    last_cm = None
+    best_f1 = -np.inf
+    best_cm = None
+    has_cm = CM_KEY in hist.columns
+    for _, row in hist.iterrows():
+        if has_cm:
+            cm = _as_cm(row.get(CM_KEY))
+            if cm is not None:
+                last_cm = cm
+        f1 = row.get(F1_KEY)
+        if f1 is None or (isinstance(f1, float) and np.isnan(f1)):
+            continue
+        f1_v = float(f1)
+        if f1_v > best_f1:
+            best_f1 = f1_v
+            best_cm = last_cm
+    return None if best_cm is None else np.asarray(best_cm, dtype=float)
+
+
+def _fetch_one_confusion(run_id: str) -> dict[str, Any]:
+    api = wandb.Api()
+    run = api.run(_run_path(str(run_id)))
+    from_summary = False
+    hist = _history_with_retry(run)
+    cm = _cm_at_max_f1_from_history(hist)
+    if cm is None:
+        cm = _as_cm(run.summary.get(CM_KEY))
+        from_summary = cm is not None
+    if cm is None:
+        return {
+            "run_id": run_id,
+            "n_trials": np.nan,
+            "cm_json": None,
+            "from_summary": False,
+        }
+    return {
+        "run_id": run_id,
+        "n_trials": float(cm.sum()),
+        "cm_json": json.dumps(cm.astype(int).tolist()),
+        "from_summary": from_summary,
+    }
+
+
+def fetch_confusion_at_max_f1(run_ids: list[str]) -> pd.DataFrame:
+    ids = [str(r) for r in run_ids if r]
+    print(
+        f"Fetching max-F1 confusion matrices for {len(ids)} runs "
+        f"({N_WORKERS} workers)..."
+    )
+    rows: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=N_WORKERS) as pool:
+        futures = {pool.submit(_fetch_one_confusion, rid): rid for rid in ids}
+        done = 0
+        for fut in as_completed(futures):
+            rows.append(fut.result())
+            done += 1
+            if done % 20 == 0 or done == len(ids):
+                print(f"  {done}/{len(ids)}")
+    return pd.DataFrame(rows)
+
+
+def _cm_map(cm_df: pd.DataFrame) -> dict[str, np.ndarray]:
+    out: dict[str, np.ndarray] = {}
+    if cm_df.empty:
+        return out
+    for _, row in cm_df.iterrows():
+        raw = row.get("cm_json")
+        if raw is None or (isinstance(raw, float) and np.isnan(raw)):
+            continue
+        cm = _as_cm(json.loads(raw) if isinstance(raw, str) else raw)
+        if cm is not None:
+            out[str(row["run_id"])] = cm
+    return out
+
+
+def pooled_reference_table(
+    primary: pd.DataFrame,
+    session_df: pd.DataFrame,
+    subj_fold0: pd.DataFrame,
+    multi: pd.DataFrame,
+    cm_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Species-level pooled metrics for every condition.
+
+    F1 / precision / recall / balanced acc: sum confusion matrices at each
+    run's max-F1 epoch, then macro-average over classes with support.
+    AUROC: true ``val/`` for the single multi-subject model; otherwise the
+    trial-count-weighted mean of per-run history-max AUROC.
+    """
+    cms = _cm_map(cm_df)
+    drop_keys = _outlier_session_keys(session_df)
+    n_trials_map = (
+        {
+            str(r["run_id"]): r["n_trials"]
+            for _, r in cm_df.iterrows()
+            if pd.notna(r.get("n_trials"))
+        }
+        if not cm_df.empty
+        else {}
+    )
+
+    def _keep_session(row: pd.Series) -> bool:
+        sid = row.get("recording_id") or row.get("session") or ""
+        key = (str(row["species"]), _shorten_session_id(str(sid)))
+        return key not in drop_keys
+
+    rows: list[dict[str, Any]] = []
+    sess_map = {"eegnet": "eegnet", "gru": "gru", "poyo": "poyo_sess"}
+    for species in SPECIES_ORDER:
+        for model, cond in sess_map.items():
+            part = primary[
+                (primary["species"] == species) & (primary["model"] == model)
+            ]
+            part = part[part.apply(_keep_session, axis=1)]
+            rows.append(
+                _pooled_condition_row(
+                    species,
+                    cond,
+                    part,
+                    cms,
+                    n_trials_map,
+                    unit="single-session models (summed CM)",
+                    f1_source="summed_cm",
+                    auroc_source="n_weighted",
+                )
+            )
+
+        subj = subj_fold0[subj_fold0["species"] == species]
+        rows.append(
+            _pooled_condition_row(
+                species,
+                "poyo_subj",
+                subj,
+                cms,
+                n_trials_map,
+                unit="single-subject models (summed CM)",
+                f1_source="summed_cm",
+                auroc_source="n_weighted",
+            )
+        )
+
+        mrow = multi[multi["species"] == species]
+        row: dict[str, Any] = {
+            "species": species,
+            "condition": "poyo_multi",
+            "n_units": 1 if not mrow.empty else 0,
+            "n_trials": np.nan,
+            "unit": "multi-subject (pooled val/)",
+            "f1_source": "val",
+            "auroc_source": "val",
+            "auroc_estimated": False,
+        }
+        for m in METRICS:
+            if mrow.empty or m not in mrow.columns:
+                row[f"{m}_mean"] = np.nan
+            else:
+                val = mrow[m].iloc[0]
+                row[f"{m}_mean"] = float(val) if pd.notna(val) else np.nan
+            row[f"{m}_std"] = 0.0
+        rows.append(row)
+
+    out = pd.DataFrame(rows)
+    out["condition"] = pd.Categorical(
+        out["condition"], categories=CONDITION_ORDER, ordered=True
+    )
+    return out.sort_values(["species", "condition"]).reset_index(drop=True)
+
+
+def _pooled_condition_row(
+    species: str,
+    cond: str,
+    part: pd.DataFrame,
+    cms: dict[str, np.ndarray],
+    n_trials_map: dict[str, float],
+    *,
+    unit: str,
+    f1_source: str,
+    auroc_source: str,
+) -> dict[str, Any]:
+    stacked: list[np.ndarray] = []
+    aurocs: list[float] = []
+    weights: list[float] = []
+    for _, run in part.iterrows():
+        rid = str(run["run_id"])
+        cm = cms.get(rid)
+        if cm is None:
+            continue
+        stacked.append(cm)
+        n = float(n_trials_map.get(rid, cm.sum()))
+        auc = pd.to_numeric(run.get("auroc"), errors="coerce")
+        if pd.notna(auc) and n > 0:
+            aurocs.append(float(auc))
+            weights.append(n)
+    row: dict[str, Any] = {
+        "species": species,
+        "condition": cond,
+        "n_units": int(len(stacked)),
+        "n_trials": float(sum(s.sum() for s in stacked)) if stacked else np.nan,
+        "unit": unit,
+        "f1_source": f1_source,
+        "auroc_source": auroc_source,
+        "auroc_estimated": auroc_source == "n_weighted",
+    }
+    if stacked:
+        mets = _macro_from_cm(np.sum(stacked, axis=0))
+        row["f1_mean"] = mets["f1"]
+        row["precision_mean"] = mets["precision"]
+        row["recall_mean"] = mets["recall"]
+        row["balanced_acc_mean"] = mets["balanced_acc"]
+        if mets["n_trials"]:
+            row["n_trials"] = mets["n_trials"]
+    else:
+        for m in ("f1", "precision", "recall", "balanced_acc"):
+            row[f"{m}_mean"] = np.nan
+    if aurocs:
+        row["auroc_mean"] = float(np.average(aurocs, weights=weights))
+    else:
+        row["auroc_mean"] = np.nan
+    for m in METRICS:
+        row[f"{m}_std"] = 0.0
+    return row
 
 
 def print_inventory(raw: pd.DataFrame, primary: pd.DataFrame) -> None:
@@ -852,15 +1188,17 @@ def print_tables(
     outliers: pd.DataFrame,
     comparison: pd.DataFrame,
     subj_units: pd.DataFrame,
+    pooled: pd.DataFrame | None = None,
 ) -> None:
-    print("\n=== Comparison: session EEGNet/GRU vs POYO paradigms ===")
+    print("\n=== Comparison: fold-0 session mean ± std (excl. outliers) ===")
+    print("  EEGNet / GRU / POYO single-session: fold-0 val/ max per recording")
     print(
-        "  EEGNet/GRU/POYO session: mean±std across sessions of fold-means "
-        "(excl. outliers)"
+        "  POYO single-subject / multi-subject: fold-0 val_session/ history-max per recording"
     )
-    print("  POYO subject: mean±std across subjects of fold-means")
-    print("  POYO multi (best): capacity-ablation fold-0 winner")
     show_c = comparison.copy()
+    show_c["condition"] = show_c["condition"].map(
+        lambda c: CONDITION_NAMES.get(str(c), c)
+    )
     for m in METRICS:
         show_c[m] = [
             _fmt(a, b) for a, b in zip(show_c[f"{m}_mean"], show_c[f"{m}_std"])
@@ -960,9 +1298,41 @@ def print_tables(
                 d_f1 = b_f1 - float(sub.loc[ref, "f1_mean"])
                 d_auc = b_auc - float(sub.loc[ref, "auroc_mean"])
                 print(
-                    f"    {base:6s} − {ref:10s}  "
+                    f"    {base:6s} − {CONDITION_NAMES.get(ref, ref):20s}  "
                     f"ΔF1={d_f1:+.4f}  ΔAUROC={d_auc:+.4f}"
                 )
+
+    if pooled is not None and not pooled.empty:
+        print("\n=== Supplementary: species-level pooled metrics ===")
+        print(
+            "  F1 / P / R / bAcc: sum of val confusion matrices at each "
+            "run's max-F1 epoch, then macro over classes with support"
+        )
+        print(
+            "  AUROC: true pooled val/ for POYO multi-subject; otherwise "
+            "trial-count-weighted mean of per-run max AUROC (scores not stored)"
+        )
+        cols = [
+            "species",
+            "condition",
+            "n_units",
+            "n_trials",
+            "unit",
+            "f1_source",
+            "auroc_source",
+            *METRICS,
+        ]
+        show_p = pooled.copy()
+        show_p["condition"] = show_p["condition"].map(
+            lambda c: CONDITION_NAMES.get(str(c), c)
+        )
+        for m in METRICS:
+            show_p[m] = [
+                _fmt(a, b)
+                for a, b in zip(show_p[f"{m}_mean"], show_p[f"{m}_std"])
+            ]
+        keep = [c for c in cols if c in show_p.columns]
+        print(show_p[keep].to_string(index=False))
 
 
 def plot_comparison_bars(
@@ -1013,7 +1383,79 @@ def plot_comparison_bars(
             )
         ax.set_xticks(x)
         ax.set_xticklabels(
-            [CONDITION_LABELS[c] for c in CONDITION_ORDER], fontsize=8
+            [CONDITION_LABELS[c] for c in CONDITION_ORDER], fontsize=7.5
+        )
+        ax.set_title(species)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+    axes[0].set_ylabel(ylabel)
+    fig.suptitle(title, y=1.02)
+    fig.tight_layout()
+    out = FIGURES_DIR / f"{STEM}_{stem_suffix}.png"
+    fig.savefig(out, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved: {out}")
+    return out
+
+
+POOLED_PLOT_CONDS = list(CONDITION_ORDER)
+POOLED_PLOT_LABELS = CONDITION_LABELS
+
+
+def plot_pooled_bars(
+    pooled: pd.DataFrame,
+    metric: str,
+    ylabel: str,
+    title: str,
+    stem_suffix: str,
+) -> Path:
+    fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.8), sharey=True)
+    x = np.arange(len(POOLED_PLOT_CONDS))
+    width = 0.7
+    mean_col = f"{metric}_mean"
+    hatch_est = metric == "auroc"
+    for ax, species in zip(axes, SPECIES_ORDER):
+        sub = pooled[pooled["species"] == species].set_index("condition")
+        means = [
+            float(sub.loc[c, mean_col]) if c in sub.index else np.nan
+            for c in POOLED_PLOT_CONDS
+        ]
+        colors = [CONDITION_COLORS[c] for c in POOLED_PLOT_CONDS]
+        hatches = []
+        for c in POOLED_PLOT_CONDS:
+            estimated = False
+            if (
+                hatch_est
+                and c in sub.index
+                and "auroc_estimated" in sub.columns
+            ):
+                estimated = bool(sub.loc[c, "auroc_estimated"])
+            hatches.append("//" if estimated else None)
+        bars = ax.bar(
+            x,
+            means,
+            width,
+            color=colors,
+            edgecolor="white",
+        )
+        for bar, hatch in zip(bars, hatches):
+            if hatch:
+                bar.set_hatch(hatch)
+                bar.set_edgecolor("0.25")
+        for bar, mean in zip(bars, means):
+            if np.isnan(mean):
+                continue
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.015,
+                f"{mean:.3f}",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
+        ax.set_xticks(x)
+        ax.set_xticklabels(
+            [POOLED_PLOT_LABELS[c] for c in POOLED_PLOT_CONDS], fontsize=7.5
         )
         ax.set_title(species)
         ax.spines["top"].set_visible(False)
@@ -1053,7 +1495,7 @@ def attach_poyo_session_metrics(
     subj_sess: pd.DataFrame,
     multi_sess: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Add per-session POYO subject / multi bars for sessions already plotted."""
+    """Add per-session POYO single-subject / multi-subject bars for sessions already plotted."""
     keep = session_df.copy()
     keep["model"] = keep["model"].astype(str)
     keep["session_key"] = keep["session"].map(_shorten_session_id)
@@ -1098,12 +1540,12 @@ def plot_per_session_bars(
     width = 0.15
     offsets = (np.arange(n_models) - (n_models - 1) / 2) * width
     ylabels = {
-        "f1": "Fold-mean max val F1",
-        "auroc": "Fold-mean max val AUROC",
+        "f1": "Fold-0 max val F1",
+        "auroc": "Fold-0 max val AUROC",
     }
     titles = {
-        "f1": "Per-session F1 (excl. outliers)",
-        "auroc": "Per-session AUROC (excl. outliers)",
+        "f1": "Per-session F1, fold 0 (excl. outliers)",
+        "auroc": "Per-session AUROC, fold 0 (excl. outliers)",
     }
     col = f"{metric}_mean"
     for ax, species in zip(axes, SPECIES_ORDER):
@@ -1140,7 +1582,7 @@ def plot_per_session_bars(
         ax.set_ylabel(ylabels[metric])
         ax.legend(
             frameon=False,
-            fontsize=7.5,
+            fontsize=6.5,
             loc="upper right",
             ncol=2,
         )
@@ -1238,6 +1680,7 @@ def main() -> None:
     use_cached = "--cached" in sys.argv
     print(
         f"Resolved: project={PROJECT}, group={GROUP}, entity={ENTITY}\n"
+        f"  fold={FOLD_KEEP} only\n"
         f"  POYO opt singlesess sweeps: {sorted(POYO_OPT_SWEEPS)}\n"
         f"  POYO singlesub sweeps: {POYO_SINGLESUB_SWEEPS}\n"
         f"  Best multisubj POYO: {MULTISUBJ_BEST_POYO}"
@@ -1248,6 +1691,7 @@ def main() -> None:
     csv_subj = CSV_DIR / f"{STEM}_poyo_singlesubj_runs.csv"
     csv_multi_val = CSV_DIR / f"{STEM}_poyo_multisubj_val_sessions.csv"
     csv_subj_val = CSV_DIR / f"{STEM}_poyo_singlesubj_val_sessions.csv"
+    csv_cm = CSV_DIR / f"{STEM}_confusion_maxf1.csv"
     if (
         use_cached
         and csv_runs.exists()
@@ -1292,7 +1736,7 @@ def main() -> None:
         multi_val.to_csv(csv_multi_val, index=False)
         subj_val.to_csv(csv_subj_val, index=False)
 
-    primary = primary_runs(raw)
+    primary = keep_fold(primary_runs(raw))
     print_inventory(raw, primary)
     session_df = fold_means_by_session(primary)
     flagged = flag_outliers(session_df)
@@ -1301,14 +1745,52 @@ def main() -> None:
     best = best_session_per_model(session_df)
     outliers = flagged[flagged["is_outlier"]]
 
-    subj_units = fold_means_by_subject(subj_runs)
-    subj_sum = subject_summary(subj_units)
-    comparison = comparison_table(summary, subj_sum, multi)
+    subj_runs_f0 = keep_fold(subj_runs)
+    subj_val_f0 = keep_fold(subj_val)
+    subj_units = fold_means_by_subject(subj_runs_f0)
     multi_sess = fold_means_from_session_rows(multi_val)
-    subj_sess = fold_means_from_session_rows(subj_val)
+    subj_sess = fold_means_from_session_rows(subj_val_f0)
+    comparison = comparison_table(summary, subj_sess, multi_sess, session_df)
 
-    print_tables(summary, matched, best, outliers, comparison, subj_units)
-    print("\n=== val_session coverage (best multi / single-subject POYO) ===")
+    cm_ids = (
+        primary["run_id"].astype(str).tolist()
+        + subj_runs_f0["run_id"].astype(str).tolist()
+    )
+    if use_cached and csv_cm.exists():
+        print(f"Loading cached confusion matrices from {csv_cm}")
+        cm_df = pd.read_csv(csv_cm)
+        missing_ids = [
+            i for i in cm_ids if i not in set(cm_df["run_id"].astype(str))
+        ]
+        if missing_ids:
+            print(f"  fetching {len(missing_ids)} missing CMs...")
+            extra = fetch_confusion_at_max_f1(missing_ids)
+            cm_df = pd.concat([cm_df, extra], ignore_index=True)
+            cm_df.to_csv(csv_cm, index=False)
+    else:
+        cm_df = fetch_confusion_at_max_f1(cm_ids)
+        cm_df.to_csv(csv_cm, index=False)
+    n_sum = (
+        int(cm_df["from_summary"].fillna(False).astype(bool).sum())
+        if (not cm_df.empty and "from_summary" in cm_df.columns)
+        else 0
+    )
+    n_miss = (
+        int(cm_df["cm_json"].isna().sum()) if not cm_df.empty else len(cm_ids)
+    )
+    print(
+        f"  confusion matrices: {len(cm_df) - n_miss} ok, {n_miss} missing, {n_sum} last-epoch fallback"
+    )
+    pooled = pooled_reference_table(
+        primary, session_df, subj_runs_f0, multi, cm_df
+    )
+
+    print_tables(
+        summary, matched, best, outliers, comparison, subj_units, pooled
+    )
+    print(
+        "\n=== val_session coverage (POYO multi-subject / single-subject) ==="
+    )
     for label, df in (
         ("poyo_multi", multi_sess),
         ("poyo_subj", subj_sess),
@@ -1323,16 +1805,30 @@ def main() -> None:
     plot_comparison_bars(
         comparison,
         "f1",
-        "Max val F1 (mean ± std across units)",
-        "EEGNet / GRU session means vs POYO session, subject, and best multi",
+        "Fold-0 max val F1 (mean ± std across sessions)",
+        "Fold 0 session mean ± std (excl. outliers)",
         "f1_by_model",
     )
     plot_comparison_bars(
         comparison,
         "auroc",
-        "Max val AUROC (mean ± std across units)",
-        "EEGNet / GRU session means vs POYO session, subject, and best multi",
+        "Fold-0 max val AUROC (mean ± std across sessions)",
+        "Fold 0 session mean ± std (excl. outliers)",
         "auroc_by_model",
+    )
+    plot_pooled_bars(
+        pooled,
+        "f1",
+        "Pooled macro-F1 (summed val confusion matrices)",
+        "Supplementary: species-level pooled F1 (fold 0)",
+        "supp_pooled_f1",
+    )
+    plot_pooled_bars(
+        pooled,
+        "auroc",
+        "Pooled AUROC (true val/ or n-weighted session AUROC)",
+        "Supplementary: species-level pooled AUROC (fold 0; hatched = estimate)",
+        "supp_pooled_auroc",
     )
     plot_per_session_bars(
         session_df, subj_sess, multi_sess, "f1", "supp_f1_per_session"
@@ -1350,6 +1846,7 @@ def main() -> None:
     csv_subj_units = CSV_DIR / f"{STEM}_poyo_singlesubj_units.csv"
     csv_multi_sess = CSV_DIR / f"{STEM}_poyo_multisubj_session_means.csv"
     csv_subj_sess = CSV_DIR / f"{STEM}_poyo_singlesubj_session_means.csv"
+    csv_pooled = CSV_DIR / f"{STEM}_pooled.csv"
     flagged.to_csv(csv_sessions, index=False)
     summary.to_csv(csv_summary, index=False)
     matched.to_csv(csv_matched, index=False)
@@ -1357,6 +1854,7 @@ def main() -> None:
     subj_units.to_csv(csv_subj_units, index=False)
     multi_sess.to_csv(csv_multi_sess, index=False)
     subj_sess.to_csv(csv_subj_sess, index=False)
+    pooled.to_csv(csv_pooled, index=False)
     print(f"Saved: {csv_runs}")
     print(f"Saved: {csv_sessions}")
     print(f"Saved: {csv_summary}")
@@ -1369,6 +1867,8 @@ def main() -> None:
     print(f"Saved: {csv_subj_val}")
     print(f"Saved: {csv_multi_sess}")
     print(f"Saved: {csv_subj_sess}")
+    print(f"Saved: {csv_pooled}")
+    print(f"Saved: {csv_cm}")
 
 
 if __name__ == "__main__":

@@ -27,11 +27,16 @@ harder for minipigs but nearly neutral for monkeys (fold 0).
 **Pure-frequency** labels helped monkeys slightly and not minipigs. The
 biggest lever was **reducing capacity**: very small models for minipigs,
 mid-size for monkeys. Stacking focal on that small model did not yield a
-clean combined win. Session-level **EEGNet and GRU** still beat even
-the best pooled POYO on mean F1 (though not on AUROC: multi-subject
-POYO ranks best, especially in monkeys). EEGNet/GRU session HPs were
-already tuned; the remaining F1 gap is more likely a threshold /
-calibration issue than an untuned baseline.
+clean combined win. Session-level **EEGNet and GRU** still beat or
+match the best multi-subject POYO when that model is scored as a
+**fold-0 session mean** of `val_session/` max F1 / AUROC (minipig
+EEGNet leads; monkey GRU is tied). Summing session confusion matrices
+gives the same F1 ranking at species level (EEGNet 0.57 / GRU 0.59 vs
+multi-subject POYO 0.39 / 0.54). The capacity run’s **true pooled** AUROC
+(0.80 / 0.89) remains higher than n-weighted session AUROCs. EEGNet/GRU
+session HPs were already tuned; remaining F1 gaps are more likely a
+threshold / calibration issue (and pooled vs session-mean AUROC) than
+an untuned baseline.
 
 ## Key Takeaways
 
@@ -100,7 +105,7 @@ calibration issue than an untuned baseline.
 | 7 | [Model capacity](./20260805-LS-model-capacity.md) | Confirmed (best-config) | Best F1 0.394 / 0.538 |
 | 8 | [Focal loss](./20260807-LS-focal-loss.md) | Partial / small vs CW | ΔF1 vs CW ≈ +0.001 / +0.010 |
 | 9 | [Capacity + focal](./20260811-LS-capacity-focal.md) | Refuted (no combined win) | vs small-cap CE +0.001 / −0.022 |
-| 10 | [EEGNet / GRU session baselines](./20260818-LS-singlesess-eegnet-gru-baselines.md) | Partial (high-data POYO wins AUROC, not F1) | Session EEGNet/GRU F1 0.58 / 0.57 vs best POYO 0.39 / 0.54; multi-subj AUROC 0.80 / 0.89 |
+| 10 | [EEGNet / GRU session baselines](./20260818-LS-singlesess-eegnet-gru-baselines.md) | Not supported on fold-0 session-mean F1 or AUROC | Fold-0 session EEGNet/GRU F1 0.58 / 0.57 vs multi-subject POYO 0.43 / 0.57; AUROC 0.77 / 0.58 vs 0.68 / 0.58 |
 
 ## Open Questions
 
