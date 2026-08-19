@@ -27,8 +27,6 @@ data:
   split_type: intersubject
   task_type: sleep_stage
 
-stage:
-  skip: true
 
 run:
   pretrain_run_name: ???
@@ -91,4 +89,3 @@ hydra:
       - "source .env || true"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment sleep_staging/kemp_linear_probe_from_data_scaling --overrides run.pretrain_run_name=_dummy run.pretrain_group=_dummy"

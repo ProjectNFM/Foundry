@@ -57,7 +57,7 @@ trainer:
       filename: "best-epoch{epoch:03d}-val_f1_{val/neurosoft_acoustic_stim_8band_f1:.4f}"
 
 stage:
-  skip: true
+  mode: direct
 
 hydra:
   sweeper:

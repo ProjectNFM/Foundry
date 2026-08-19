@@ -31,7 +31,7 @@ data:
   task_type: acoustic_stim
 
 stage:
-  skip: true
+  mode: direct
 
 run:
   project: auditory_decoding

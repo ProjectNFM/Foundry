@@ -43,7 +43,6 @@ model:
     mask_ratio: 0.5
 
 data:
-  root: ${oc.env:SLURM_TMPDIR}/brainsets/processed
   split_type: intersubject
   task_type: null
 
@@ -89,8 +88,6 @@ trainer:
     embedding_visualization:
       every_n_epochs: 5
 
-stage:
-  skip: false
 
 hydra:
   launcher:

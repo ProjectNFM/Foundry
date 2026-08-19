@@ -8,6 +8,7 @@ import types
 from pathlib import Path
 
 import pytest
+from hydra.core.utils import JobReturn, JobStatus
 from omegaconf import OmegaConf
 
 from hydra_plugins.foundry_launcher.launch_snapshot import (
@@ -158,10 +159,12 @@ def test_packed_launcher_accepts_submitit_tuple_snapshot_descriptor(
 ) -> None:
     """Submitit map-array batches each argument as a tuple for one task."""
     captured = {}
+    job_result = JobReturn(status=JobStatus.COMPLETED)
+    job_result.return_value = "called"
 
     def fake_call(self, *args):
         captured["args"] = args
-        return "called"
+        return job_result
 
     monkeypatch.setattr(PackedSubmititLauncher, "__call__", fake_call)
     monkeypatch.setattr(
@@ -179,8 +182,35 @@ def test_packed_launcher_accepts_submitit_tuple_snapshot_descriptor(
         (None,),
     )
 
-    assert result == "called"
+    assert result is job_result
     assert captured["args"][0] == ["fold=0"]
+
+
+def test_packed_launcher_reraises_failed_hydra_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = RuntimeError("task failed")
+    job_result = JobReturn(status=JobStatus.FAILED)
+    job_result.return_value = failure
+
+    monkeypatch.setattr(
+        PackedSubmititLauncher, "__call__", lambda self, *args: job_result
+    )
+    monkeypatch.setattr(
+        "submitit.JobEnvironment",
+        lambda: type("Job", (), {"global_rank": 0})(),
+    )
+
+    launcher = object.__new__(PackedSubmititLauncher)
+    with pytest.raises(RuntimeError, match="task failed"):
+        launcher.launch_batch(
+            [["fold=0"]],
+            ["hydra.sweep.dir"],
+            [0],
+            ["job_id_for_0"],
+            [{}],
+            None,
+        )
 
 
 def test_import_verification_ignores_submitit_worker_entrypoint(

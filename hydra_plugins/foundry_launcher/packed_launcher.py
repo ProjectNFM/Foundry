@@ -86,13 +86,18 @@ class PackedSubmititLauncher(BaseSubmititLauncher):
 
         task_id = submitit.JobEnvironment().global_rank
 
-        return self(
+        result = self(
             sweep_overrides[task_id],
             job_dir_key[task_id],
             job_num[task_id],
             job_id[task_id],
             singleton_state[task_id],
         )
+        # Hydra records task exceptions inside JobReturn instead of raising
+        # them. Accessing return_value re-raises failures so Submitit and Slurm
+        # report the allocation as failed rather than successfully completed.
+        result.return_value
+        return result
 
     def _get_snapshot_config(self) -> dict[str, Any]:
         """Extract snapshot settings from launcher params."""

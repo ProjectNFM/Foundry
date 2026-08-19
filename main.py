@@ -18,16 +18,16 @@ from rich.logging import RichHandler
 from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
 from foundry.data.datamodules.base import normalize_data_config
 from foundry.seed import set_seed
-from foundry.tools.stage_data import stage_data
+from foundry.tools.stage_data import (
+    DEFAULT_COMPRESSED_ROOT,
+    DEFAULT_SOURCE_ROOT,
+    destination_lock,
+    stage_data,
+)
 from foundry.training.pretrained import TransferMode, load_pretrained_weights
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 logger = logging.getLogger(__name__)
-
-os.environ.setdefault("SLURM_TMPDIR", "/tmp")
-
-DEFAULT_SOURCE_ROOT = "../scratch/brainsets/processed"
-DEFAULT_COMPRESSED_ROOT = "../scratch/brainsets/compressed"
 
 
 def setup_logging(log_level: str):
@@ -160,25 +160,44 @@ def _finish_active_wandb_run(exit_code: int = 0) -> None:
 
 
 def _stage_data_if_needed(cfg: DictConfig) -> None:
-    slurm_tmpdir = Path(os.environ.get("SLURM_TMPDIR", "/tmp"))
-    if not slurm_tmpdir.exists():
+    mode = str(OmegaConf.select(cfg, "stage.mode", default="node_local"))
+    if mode == "direct":
+        logger.info(
+            "Data staging disabled (stage.mode=direct); using %s", cfg.data.root
+        )
+        return
+    if mode != "node_local":
+        raise ValueError(
+            f"Unsupported stage.mode={mode!r}; expected 'node_local' or 'direct'."
+        )
+
+    dest_root = OmegaConf.select(cfg, "stage.destination_root", default=None)
+    if dest_root is None:
+        dest_root = os.environ.get("SLURM_TMPDIR")
+    if not dest_root:
+        logger.info(
+            "No node-local staging destination is available; using configured "
+            "data.root=%s",
+            cfg.data.root,
+        )
         return
 
-    stage_cfg = OmegaConf.to_container(
-        cfg.get("stage", OmegaConf.create({})), resolve=True
+    source_root = OmegaConf.select(
+        cfg, "stage.source_root", default=DEFAULT_SOURCE_ROOT
     )
-    if stage_cfg.get("skip", False):
-        return
+    compressed_root = OmegaConf.select(
+        cfg, "stage.compressed_root", default=DEFAULT_COMPRESSED_ROOT
+    )
+    compress = bool(OmegaConf.select(cfg, "stage.compress", default=False))
 
-    new_root = stage_data(
-        data_cfg=cfg.data,
-        source_root=stage_cfg.get("source_root", DEFAULT_SOURCE_ROOT),
-        compressed_root=stage_cfg.get(
-            "compressed_root", DEFAULT_COMPRESSED_ROOT
-        ),
-        dest_root=slurm_tmpdir,
-        compress=stage_cfg.get("compress", False),
-    )
+    with destination_lock(dest_root):
+        new_root = stage_data(
+            data_cfg=cfg.data,
+            source_root=source_root,
+            compressed_root=compressed_root,
+            dest_root=dest_root,
+            compress=compress,
+        )
     OmegaConf.update(cfg, "data.root", new_root)
     logger.info("Data staged to %s", new_root)
 

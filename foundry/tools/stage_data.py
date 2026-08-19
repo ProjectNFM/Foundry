@@ -17,12 +17,15 @@ Usage from Python (called automatically by main.py when SLURM_TMPDIR is set):
 """
 
 import argparse
+import fcntl
 import hashlib
 import logging
 import os
 import subprocess
 import time
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
@@ -33,6 +36,32 @@ from foundry.data.datamodules.base import normalize_data_config
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_SOURCE_ROOT = "../scratch/brainsets/processed"
+DEFAULT_COMPRESSED_ROOT = "../scratch/brainsets/compressed"
+
+
+@contextmanager
+def destination_lock(dest_root: str | Path) -> Iterator[None]:
+    """Serialize staging processes that share one node-local destination.
+
+    Packed Hydra tasks execute concurrently on the same node.  An advisory
+    ``flock`` on the node-local filesystem lets every task use its own fully
+    resolved data config without racing while copying or extracting files.
+    The kernel releases the lock automatically if a process exits.
+    """
+    dest_root = Path(dest_root).resolve()
+    dest_root.mkdir(parents=True, exist_ok=True)
+    lock_path = dest_root / ".foundry-stage.lock"
+
+    with lock_path.open("a+") as lock_file:
+        logger.info("Waiting for node-local staging lock at %s", lock_path)
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            logger.info("Acquired node-local staging lock at %s", lock_path)
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def collect_filepaths(dataset) -> dict[str, dict[str, Path]]:
@@ -435,13 +464,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--source-root",
-        default="../scratch/brainsets/processed",
-        help="Root directory of processed brainset data.",
+        default=None,
+        help="Override stage.source_root from the composed config.",
     )
     parser.add_argument(
         "--compressed-root",
-        default="../scratch/brainsets/compressed",
-        help="Directory for cached tar archives.",
+        default=None,
+        help="Override stage.compressed_root from the composed config.",
     )
     parser.add_argument(
         "--dest-root",
@@ -450,12 +479,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--compress",
-        action="store_true",
-        default=False,
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help=(
-            "Use zstd compression. Smaller archives and faster copies "
-            "over slow links, at the cost of extra CPU during "
-            "archive creation and extraction."
+            "Override stage.compress. Zstd uses less I/O at the cost of CPU."
         ),
     )
     parser.add_argument(
@@ -491,13 +518,26 @@ def main():
     with initialize_config_dir(config_dir=config_dir, version_base=None):
         cfg = compose(config_name="config", overrides=overrides)
 
-    new_root = stage_data(
-        data_cfg=cfg.data,
-        source_root=args.source_root,
-        compressed_root=args.compressed_root,
-        dest_root=dest_root,
-        compress=args.compress,
+    source_root = args.source_root or OmegaConf.select(
+        cfg, "stage.source_root", default=DEFAULT_SOURCE_ROOT
     )
+    compressed_root = args.compressed_root or OmegaConf.select(
+        cfg, "stage.compressed_root", default=DEFAULT_COMPRESSED_ROOT
+    )
+    compress = (
+        args.compress
+        if args.compress is not None
+        else bool(OmegaConf.select(cfg, "stage.compress", default=False))
+    )
+
+    with destination_lock(dest_root):
+        new_root = stage_data(
+            data_cfg=cfg.data,
+            source_root=source_root,
+            compressed_root=compressed_root,
+            dest_root=dest_root,
+            compress=compress,
+        )
     print(new_root)
 
 

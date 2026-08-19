@@ -65,8 +65,6 @@ trainer:
       auto_insert_metric_name: false
       filename: "best-epoch{epoch:03d}-val_loss_{val/loss:.4f}"
 
-stage:
-  skip: false
 
 hydra:
   sweeper:
@@ -82,4 +80,3 @@ hydra:
       - "source .env"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment pretraining/poyo_pretrain_dynamic_session_emb"

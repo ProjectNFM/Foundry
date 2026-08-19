@@ -27,8 +27,6 @@ data:
   split_type: intersubject
   task_type: motor_imagery
 
-stage:
-  skip: true
 
 _pretrain_ckpt_suffix:
   disabled: ""
@@ -94,4 +92,3 @@ hydra:
       - "source .env || true"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment motor_imagery/physionet_linear_probe_from_2ds_pretrain"

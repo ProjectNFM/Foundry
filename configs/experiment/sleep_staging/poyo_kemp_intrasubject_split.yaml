@@ -103,4 +103,3 @@ hydra:
       - "source .env"
       - "set +a"
       - "export RANK=0"
-      - "uv run python -m foundry.tools.stage_data --experiment sleep_staging/poyo_kemp_intrasubject_split"

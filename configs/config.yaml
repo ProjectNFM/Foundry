@@ -33,7 +33,11 @@ extract:
   max_batches: null
 
 stage:
-  skip: false
+  # Stage from shared storage when a node-local destination is available.
+  # Local runs without SLURM_TMPDIR continue to use data.root directly.
+  mode: node_local
+  destination_root: null
+  compress: false
 
 class_weights:
   mode: none
