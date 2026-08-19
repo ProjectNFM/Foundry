@@ -155,3 +155,9 @@ field to include a link to the newly created file.
   propose splitting into separate experiment files that reference each other.
 - **Initials come from the user.** If unknown, ask once and remember for the
   session.
+- **Artifact naming.** When analysis scripts and figures are created later
+  (via `run-experiment` or `report-sweep`), they must reuse the exact filename
+  stem from this experiment report, minus the `.md` extension
+  (e.g. `YYYYMMDD-<initials>-<slug>_analysis.py` and
+  `YYYYMMDD-<initials>-<slug>_*.png`). This keeps related artifacts easy to
+  link and find.

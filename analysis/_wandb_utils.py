@@ -191,10 +191,19 @@ def default_entity() -> str | None:
     return os.environ.get("WANDB_ENTITY") or None
 
 
-def figures_dir(script_path: str | os.PathLike[str]) -> Any:
-    """Return ``analysis/figures/`` relative to *script_path*, creating it."""
+def _analysis_subdir(script_path: str | os.PathLike[str], name: str) -> Any:
     from pathlib import Path
 
-    d = Path(script_path).parent / "figures"
+    d = Path(script_path).parent / name
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def figures_dir(script_path: str | os.PathLike[str]) -> Any:
+    """Return ``analysis/figures/`` relative to *script_path*, creating it."""
+    return _analysis_subdir(script_path, "figures")
+
+
+def csv_dir(script_path: str | os.PathLike[str]) -> Any:
+    """Return ``analysis/csv/`` relative to *script_path*, creating it."""
+    return _analysis_subdir(script_path, "csv")
