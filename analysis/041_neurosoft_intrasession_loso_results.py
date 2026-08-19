@@ -177,8 +177,13 @@ def fetch_loso_runs(api: wandb.Api) -> pd.DataFrame:
         best_f1 = fetch_best_f1(run)
         if best_f1 is not None:
             records.append(
-                {**info, "best_f1": best_f1, "run_name": run.name,
-                 "run_id": run.id, "state": run.state}
+                {
+                    **info,
+                    "best_f1": best_f1,
+                    "run_name": run.name,
+                    "run_id": run.id,
+                    "state": run.state,
+                }
             )
 
     for species, group in LOSO_TRANSFER_GROUPS.items():
@@ -194,8 +199,13 @@ def fetch_loso_runs(api: wandb.Api) -> pd.DataFrame:
             best_f1 = fetch_best_f1(run)
             if best_f1 is not None:
                 records.append(
-                    {**info, "best_f1": best_f1, "run_name": run.name,
-                     "run_id": run.id, "state": run.state}
+                    {
+                        **info,
+                        "best_f1": best_f1,
+                        "run_name": run.name,
+                        "run_id": run.id,
+                        "state": run.state,
+                    }
                 )
 
     return pd.DataFrame(records)
@@ -205,7 +215,11 @@ def plot_intrasession_comparison(df: pd.DataFrame) -> Path:
     """Bar chart comparing intrasession conditions per species."""
     fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
     condition_order = ["Scratch", "Kochi-only", "Kochi + B2"]
-    colors = {"Scratch": "#7f8c8d", "Kochi-only": "#2980b9", "Kochi + B2": "#27ae60"}
+    colors = {
+        "Scratch": "#7f8c8d",
+        "Kochi-only": "#2980b9",
+        "Kochi + B2": "#27ae60",
+    }
 
     for ax, species in zip(axes, ["minipigs", "monkeys"]):
         subset = df[df["species"] == species]
@@ -224,30 +238,55 @@ def plot_intrasession_comparison(df: pd.DataFrame) -> Path:
 
         x = np.arange(len(labels))
         bars = ax.bar(
-            x, means, yerr=stds, capsize=5, color=[colors[c] for c in labels],
-            edgecolor="black", linewidth=0.5, alpha=0.85,
+            x,
+            means,
+            yerr=stds,
+            capsize=5,
+            color=[colors[c] for c in labels],
+            edgecolor="black",
+            linewidth=0.5,
+            alpha=0.85,
         )
 
-        for bar, fold_data in zip(bars, [subset[subset["condition"] == c]["best_f1"] for c in condition_order]):
+        for bar, fold_data in zip(
+            bars,
+            [
+                subset[subset["condition"] == c]["best_f1"]
+                for c in condition_order
+            ],
+        ):
             if not fold_data.empty:
-                jitter = np.random.default_rng(42).uniform(-0.15, 0.15, len(fold_data))
+                jitter = np.random.default_rng(42).uniform(
+                    -0.15, 0.15, len(fold_data)
+                )
                 ax.scatter(
                     bar.get_x() + bar.get_width() / 2 + jitter,
-                    fold_data.values, color="black", s=25, zorder=5, alpha=0.7,
+                    fold_data.values,
+                    color="black",
+                    s=25,
+                    zorder=5,
+                    alpha=0.7,
                 )
 
         ax.set_xticks(x)
         ax.set_xticklabels(labels, fontsize=10)
         ax.set_title(f"{species.capitalize()}", fontsize=12, fontweight="bold")
         ax.set_ylabel("Best Validation F1" if species == "minipigs" else "")
-        ax.set_ylim(0, min(1.0, max(means) * 1.4 + 0.05) if means and max(means) > 0 else 1.0)
+        ax.set_ylim(
+            0,
+            min(1.0, max(means) * 1.4 + 0.05)
+            if means and max(means) > 0
+            else 1.0,
+        )
         ax.grid(axis="y", alpha=0.3)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
 
     fig.suptitle(
         "NeuroSoft 8-Band Intrasession: Scratch vs Pretrained Transfer",
-        fontsize=13, fontweight="bold", y=0.98,
+        fontsize=13,
+        fontweight="bold",
+        y=0.98,
     )
     fig.tight_layout(rect=[0, 0, 1, 0.94])
     path = FIGURES_DIR / "041_neurosoft_intrasession_comparison.png"
@@ -263,7 +302,11 @@ def plot_loso_comparison(df: pd.DataFrame) -> dict[str, Path]:
         return saved
 
     condition_order = ["Scratch", "Kochi-only", "Kochi + B2"]
-    colors = {"Scratch": "#7f8c8d", "Kochi-only": "#2980b9", "Kochi + B2": "#27ae60"}
+    colors = {
+        "Scratch": "#7f8c8d",
+        "Kochi-only": "#2980b9",
+        "Kochi + B2": "#27ae60",
+    }
 
     for species in ["minipigs", "monkeys"]:
         sp_df = df[df["species"] == species]
@@ -271,7 +314,9 @@ def plot_loso_comparison(df: pd.DataFrame) -> dict[str, Path]:
             continue
 
         subjects = sorted(sp_df["subject"].dropna().unique())
-        conditions_present = [c for c in condition_order if c in sp_df["condition"].values]
+        conditions_present = [
+            c for c in condition_order if c in sp_df["condition"].values
+        ]
         n_cond = len(conditions_present)
         if n_cond == 0:
             continue
@@ -283,25 +328,40 @@ def plot_loso_comparison(df: pd.DataFrame) -> dict[str, Path]:
         for i, cond in enumerate(conditions_present):
             vals = []
             for subj in subjects:
-                row = sp_df[(sp_df["subject"] == subj) & (sp_df["condition"] == cond)]
+                row = sp_df[
+                    (sp_df["subject"] == subj) & (sp_df["condition"] == cond)
+                ]
                 vals.append(row["best_f1"].values[0] if not row.empty else 0)
             offset = (i - (n_cond - 1) / 2) * bar_width
             ax.bar(
-                x + offset, vals, bar_width * 0.9,
-                label=cond, color=colors[cond],
-                edgecolor="black", linewidth=0.5, alpha=0.85,
+                x + offset,
+                vals,
+                bar_width * 0.9,
+                label=cond,
+                color=colors[cond],
+                edgecolor="black",
+                linewidth=0.5,
+                alpha=0.85,
             )
 
         chance = 1.0 / 8
-        ax.axhline(chance, color="#95a5a6", linestyle=":", linewidth=1.2,
-                    label=f"Chance = {chance:.3f}")
+        ax.axhline(
+            chance,
+            color="#95a5a6",
+            linestyle=":",
+            linewidth=1.2,
+            label=f"Chance = {chance:.3f}",
+        )
 
         for cond in conditions_present:
             cond_vals = sp_df[sp_df["condition"] == cond]["best_f1"]
             if not cond_vals.empty:
                 ax.axhline(
-                    cond_vals.mean(), color=colors[cond], linestyle="--",
-                    linewidth=1.2, alpha=0.6,
+                    cond_vals.mean(),
+                    color=colors[cond],
+                    linestyle="--",
+                    linewidth=1.2,
+                    alpha=0.6,
                     label=f"{cond} mean = {cond_vals.mean():.3f}",
                 )
 
@@ -311,7 +371,8 @@ def plot_loso_comparison(df: pd.DataFrame) -> dict[str, Path]:
         ax.set_ylabel("Best Validation F1")
         ax.set_title(
             f"NeuroSoft 8-Band LOSO: Scratch vs Transfer — {species.capitalize()}",
-            fontsize=12, fontweight="bold",
+            fontsize=12,
+            fontweight="bold",
         )
         ax.legend(fontsize=9, loc="upper right")
         ymax = max(sp_df["best_f1"].max() * 1.3 + 0.05, 0.3)
@@ -329,14 +390,20 @@ def plot_loso_comparison(df: pd.DataFrame) -> dict[str, Path]:
     return saved
 
 
-def plot_training_curves(api: wandb.Api, intrasession_df: pd.DataFrame) -> Path | None:
+def plot_training_curves(
+    api: wandb.Api, intrasession_df: pd.DataFrame
+) -> Path | None:
     """Training curves (F1 over epochs) for intrasession runs."""
     if intrasession_df.empty:
         return None
 
     entity = api.default_entity
     fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharey=True)
-    colors = {"Scratch": "#7f8c8d", "Kochi-only": "#2980b9", "Kochi + B2": "#27ae60"}
+    colors = {
+        "Scratch": "#7f8c8d",
+        "Kochi-only": "#2980b9",
+        "Kochi + B2": "#27ae60",
+    }
     linestyles = {0: "-", 1: "--", 2: ":"}
 
     for ax, species in zip(axes, ["minipigs", "monkeys"]):
@@ -344,16 +411,22 @@ def plot_training_curves(api: wandb.Api, intrasession_df: pd.DataFrame) -> Path 
         for _, row in subset.iterrows():
             try:
                 run = api.run(f"{entity}/{PROJECT}/{row['run_id']}")
-                history = run.history(keys=[METRIC], samples=50_000, pandas=True)
+                history = run.history(
+                    keys=[METRIC], samples=50_000, pandas=True
+                )
                 scores = history[METRIC].dropna()
                 if scores.empty:
                     continue
-                fold_label = f" (fold {row['fold']})" if row["fold"] is not None else ""
+                fold_label = (
+                    f" (fold {row['fold']})" if row["fold"] is not None else ""
+                )
                 ax.plot(
-                    range(len(scores)), scores.values,
+                    range(len(scores)),
+                    scores.values,
                     color=colors.get(row["condition"], "#333"),
                     linestyle=linestyles.get(row["fold"], "-"),
-                    alpha=0.7, linewidth=1.2,
+                    alpha=0.7,
+                    linewidth=1.2,
                     label=f"{row['condition']}{fold_label}",
                 )
             except Exception:
@@ -369,11 +442,18 @@ def plot_training_curves(api: wandb.Api, intrasession_df: pd.DataFrame) -> Path 
         handles, labels = ax.get_legend_handles_labels()
         if handles:
             by_label = dict(zip(labels, handles))
-            ax.legend(by_label.values(), by_label.keys(), fontsize=8, loc="lower right")
+            ax.legend(
+                by_label.values(),
+                by_label.keys(),
+                fontsize=8,
+                loc="lower right",
+            )
 
     fig.suptitle(
         "NeuroSoft 8-Band: Validation F1 Training Curves",
-        fontsize=13, fontweight="bold", y=0.98,
+        fontsize=13,
+        fontweight="bold",
+        y=0.98,
     )
     fig.tight_layout(rect=[0, 0, 1, 0.94])
     path = FIGURES_DIR / "041_neurosoft_training_curves.png"
@@ -399,7 +479,9 @@ def main() -> None:
         print(f"\nFound {len(intra_df)} intrasession runs.\n")
         print("Individual runs:")
         print(
-            intra_df[["species", "condition", "fold", "best_f1", "run_name", "state"]]
+            intra_df[
+                ["species", "condition", "fold", "best_f1", "run_name", "state"]
+            ]
             .sort_values(["species", "condition", "fold"])
             .to_string(index=False)
         )
@@ -413,10 +495,18 @@ def main() -> None:
             .reset_index()
         )
         summary["mean±std"] = summary.apply(
-            lambda r: f"{r['mean']:.4f} ± {r['std']:.4f}" if pd.notna(r["std"]) else f"{r['mean']:.4f}",
+            lambda r: (
+                f"{r['mean']:.4f} ± {r['std']:.4f}"
+                if pd.notna(r["std"])
+                else f"{r['mean']:.4f}"
+            ),
             axis=1,
         )
-        print(summary[["species", "condition", "mean±std", "count"]].to_string(index=False))
+        print(
+            summary[["species", "condition", "mean±std", "count"]].to_string(
+                index=False
+            )
+        )
 
         fig_path = plot_intrasession_comparison(intra_df)
         print(f"\nSaved: {fig_path}")
@@ -436,7 +526,16 @@ def main() -> None:
         print(f"\nFound {len(loso_df)} LOSO runs.\n")
         print("All LOSO runs:")
         print(
-            loso_df[["species", "condition", "subject", "best_f1", "run_name", "state"]]
+            loso_df[
+                [
+                    "species",
+                    "condition",
+                    "subject",
+                    "best_f1",
+                    "run_name",
+                    "state",
+                ]
+            ]
             .sort_values(["species", "condition", "subject"])
             .to_string(index=False)
         )
@@ -450,33 +549,55 @@ def main() -> None:
             .reset_index()
         )
         loso_summary["mean±std"] = loso_summary.apply(
-            lambda r: f"{r['mean']:.4f} ± {r['std']:.4f}" if pd.notna(r["std"]) else f"{r['mean']:.4f}",
+            lambda r: (
+                f"{r['mean']:.4f} ± {r['std']:.4f}"
+                if pd.notna(r["std"])
+                else f"{r['mean']:.4f}"
+            ),
             axis=1,
         )
-        print(loso_summary[["species", "condition", "mean±std", "count"]].to_string(index=False))
+        print(
+            loso_summary[
+                ["species", "condition", "mean±std", "count"]
+            ].to_string(index=False)
+        )
 
         # Per-subject paired comparison where both scratch and transfer exist
         print("\n" + "-" * 70)
-        print("LOSO PER-SUBJECT COMPARISON (subjects with both scratch and transfer)")
+        print(
+            "LOSO PER-SUBJECT COMPARISON (subjects with both scratch and transfer)"
+        )
         print("-" * 70)
         for species in ["minipigs", "monkeys"]:
             sp_df = loso_df[loso_df["species"] == species]
-            scratch = sp_df[sp_df["condition"] == "Scratch"].set_index("subject")["best_f1"]
+            scratch = sp_df[sp_df["condition"] == "Scratch"].set_index(
+                "subject"
+            )["best_f1"]
             for cond in ["Kochi-only", "Kochi + B2"]:
-                transfer = sp_df[sp_df["condition"] == cond].set_index("subject")["best_f1"]
+                transfer = sp_df[sp_df["condition"] == cond].set_index(
+                    "subject"
+                )["best_f1"]
                 shared = sorted(set(scratch.index) & set(transfer.index))
                 if not shared:
                     continue
-                print(f"\n  {species.capitalize()} — Scratch vs {cond} ({len(shared)} subjects):")
-                print(f"  {'Subject':<10} {'Scratch':>10} {cond:>12} {'Delta':>10}")
+                print(
+                    f"\n  {species.capitalize()} — Scratch vs {cond} ({len(shared)} subjects):"
+                )
+                print(
+                    f"  {'Subject':<10} {'Scratch':>10} {cond:>12} {'Delta':>10}"
+                )
                 for subj in shared:
                     s_val = scratch[subj]
                     t_val = transfer[subj]
                     delta = t_val - s_val
-                    print(f"  {subj:<10} {s_val:>10.4f} {t_val:>12.4f} {delta:>+10.4f}")
+                    print(
+                        f"  {subj:<10} {s_val:>10.4f} {t_val:>12.4f} {delta:>+10.4f}"
+                    )
                 s_mean = scratch.loc[shared].mean()
                 t_mean = transfer.loc[shared].mean()
-                print(f"  {'Mean':<10} {s_mean:>10.4f} {t_mean:>12.4f} {t_mean - s_mean:>+10.4f}")
+                print(
+                    f"  {'Mean':<10} {s_mean:>10.4f} {t_mean:>12.4f} {t_mean - s_mean:>+10.4f}"
+                )
 
         fig_paths = plot_loso_comparison(loso_df)
         for species, path in fig_paths.items():
