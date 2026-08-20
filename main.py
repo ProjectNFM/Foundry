@@ -205,6 +205,12 @@ def _stage_data_if_needed(cfg: DictConfig) -> None:
 # -- Component construction ------------------------------------------------
 
 
+def _is_neuralbench_data(cfg: DictConfig) -> bool:
+    """Check if the data config targets a NeuralBenchDataModule."""
+    target = OmegaConf.select(cfg, "data._target_", default="")
+    return "NeuralBenchDataModule" in target
+
+
 def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
     """Auto-derive session_configs and num_channels from the dataset when missing."""
     session_configs = OmegaConf.select(
@@ -217,14 +223,20 @@ def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
     if session_configs is not None and num_channels is not None:
         return
 
-    normalize_data_config(cfg.data)
-    dm = instantiate(cfg.data, tokenizer=None)
+    if _is_neuralbench_data(cfg):
+        dm = instantiate(cfg.data, tokenizer=None)
+    else:
+        normalize_data_config(cfg.data)
+        dm = instantiate(cfg.data, tokenizer=None)
     dm.setup("fit")
 
     if session_configs is None:
-        from foundry.data.utils import get_session_configs
+        if hasattr(dm, "get_session_configs"):
+            session_configs = dm.get_session_configs()
+        else:
+            from foundry.data.utils import get_session_configs
 
-        session_configs = get_session_configs(dm.dataset)
+            session_configs = get_session_configs(dm.dataset)
         OmegaConf.update(
             cfg,
             "hyperparameters.session_configs",
@@ -238,9 +250,12 @@ def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
         )
 
     if num_channels is None:
-        from foundry.data.utils import get_max_channels
+        if hasattr(dm, "get_num_channels"):
+            num_channels = dm.get_num_channels()
+        else:
+            from foundry.data.utils import get_max_channels
 
-        num_channels = get_max_channels(dm.dataset)
+            num_channels = get_max_channels(dm.dataset)
         OmegaConf.update(
             cfg,
             "hyperparameters.num_channels",
@@ -400,7 +415,8 @@ def _build_model_and_data(cfg: DictConfig):
     _populate_data_driven_hyperparams(cfg)
 
     task_configs = _load_task_configs(cfg)
-    normalize_data_config(cfg.data)
+    if not _is_neuralbench_data(cfg):
+        normalize_data_config(cfg.data)
     datamodule = instantiate(cfg.data, tokenizer=None)
     datamodule._task_configs = task_configs
 

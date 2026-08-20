@@ -7,7 +7,7 @@ name = "foundry"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "hydra-core>=1.3.0",
     "hydra-submitit-launcher>=1.2.0",
@@ -25,6 +25,7 @@ dependencies = [
 dev = ["pre-commit>=4.5.1", "pytest>=8.0.0", "ruff==0.15.22"]
 notebook = ["ipykernel>=7.2.0", "seaborn>=0.13.2"]
 pipelines = ["mne~=1.11.0", "moabb~=1.4.3", "scikit-learn~=1.7.2"]
+neuralbench = ["neuralbench==0.2.3", "neuralfetch==0.2.3", "moabb>=1.5.0"]
 
 [tool.uv.sources]
 torch-brain = { git = "https://github.com/neuro-galaxy/torch_brain", branch = "main" }
@@ -36,6 +37,11 @@ allow-direct-references = true
 [tool.uv]
 override-dependencies = [
     "torch-brain @ git+https://github.com/neuro-galaxy/torch_brain.git@main",
+    "torch>=2.9.1",
+    "torchaudio>=2.9.1",
+    "torchvision>=0.22",
+    "mne-bids>=0.19",
+    "moabb>=1.5.0",
 ]
 
 [tool.pytest.ini_options]
