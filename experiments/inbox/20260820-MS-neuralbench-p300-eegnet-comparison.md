@@ -1,6 +1,6 @@
-# NeuralBench P300 EEGNet Validation Comparison
+# NeuralBench P300 EEGNet Comparison
 
-**Status:** Draft
+**Status:** In Progress
 **Date started:** 2026-08-20
 **Parent experiment:** None (POC Phase 2 — NeuralBench integration)
 **Follow-up experiments:** TBD
@@ -61,8 +61,8 @@ task-contract discrepancy requiring investigation.
 # 3-seed protocol (matches NeuralBench grid: seeds 33, 34, 35)
 uv run python main.py experiment=neuralbench/p300_eegnet_comparison -m
 
-# NeuralBench reference run (for comparison)
-uv run neuralbench eeg p3 --dataset korczowski2014a --model eegnet
+# NeuralBench reference grid (completed locally)
+uv run neuralbench --grid --force --model eegnet --dataset korczowski2014a eeg p3
 ```
 
 ### Key config overrides
@@ -78,11 +78,45 @@ uv run neuralbench eeg p3 --dataset korczowski2014a --model eegnet
 
 ## Results
 
-TBD
+### Summary
+
+The NeuralBench EEGNet reference grid completed locally for seeds 33, 34, and
+35. These are held as the reference side of the comparison; Foundry runs have
+not been launched and are intentionally outside this result update. NeuralBench
+reports test-set metrics from the best validation checkpoint. Each run used the
+same Korczowski2019BrainBi2014A split contract (35,270 train / 11,628
+validation / 14,124 test epochs), a 1,458-parameter EEGNet, and ran for
+5.9–6.6 minutes.
+
+### Metrics
+
+| Seed | Test balanced acc. | Test AUROC | Test AUPRC | Test macro F1 | Test acc. | Test loss | Train time (s) |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 33 | 0.6393 | 0.7231 | 0.6336 | 0.4787 | 0.5050 | 0.6970 | 372.0 |
+| 34 | 0.6445 | 0.7328 | 0.6460 | 0.4802 | 0.5057 | 0.6937 | 396.4 |
+| 35 | 0.6244 | 0.7119 | 0.6277 | 0.4531 | 0.4725 | 0.7013 | 352.0 |
+| **Mean ± sample SD** | **0.6361 ± 0.0104** | **0.7226 ± 0.0104** | **0.6358 ± 0.0093** | **0.4707 ± 0.0152** | **0.4944 ± 0.0190** | **0.6973 ± 0.0038** | **373.5 ± 22.2** |
+
+### Analysis
+
+The NeuralBench CLI does not create WandB runs; it records each completed local
+grid job as an `exca.task.LocalJob` artifact in
+`/network/scratch/s/sobralm/neuralbench-results`. The analysis script reads
+those primary result artifacts, verifies all three requested seeds completed,
+and writes a local CSV cache and figure:
+
+```bash
+uv run python analysis/20260820-MS-neuralbench-p300-eegnet-comparison_analysis.py
+```
+
+### Figures
+
+![NeuralBench P3 EEGNet reference test balanced accuracy](../../analysis/figures/20260820-MS-neuralbench-p300-eegnet-comparison_balanced_accuracy.png)
 
 ## Conclusions
 
-TBD
+TBD — the NeuralBench reference is established. Evaluate the Foundry side in a
+later update before making a parity or gap-attribution conclusion.
 
 ## Notes for future experiments
 
