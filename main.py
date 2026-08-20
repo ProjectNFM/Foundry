@@ -771,7 +771,8 @@ def main(cfg: DictConfig):
     _log_output_destinations(
         cfg, output_dir, checkpoint_dir, using_wandb_logger
     )
-    _stage_data_if_needed(cfg)
+    if not _is_neuralbench_data(cfg):
+        _stage_data_if_needed(cfg)
 
     # Eagerly resolve cfg.run so that ${data.subject} (and similar
     # interpolation-only keys) are baked in before normalize_data_config

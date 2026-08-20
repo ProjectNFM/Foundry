@@ -117,11 +117,15 @@ class FoundryModule(L.LightningModule):
         predictions: torch.Tensor,
         targets: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Convert raw logits to the format expected by torchmetrics."""
-        if cfg.kind == "multiclass":
+        """Convert raw logits to the format expected by torchmetrics.
+
+        All classification metrics now use ``task="multiclass"`` (even for
+        2-class problems) so that ``average="macro"`` is respected for
+        balanced accuracy.  This means the full softmax probability vector
+        is always passed.
+        """
+        if cfg.kind in ("multiclass", "binary"):
             return torch.softmax(predictions, dim=-1), targets
-        if cfg.kind == "binary":
-            return torch.softmax(predictions, dim=-1)[:, 1], targets
         return _squeeze_scalar_predictions(predictions, targets), targets
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):

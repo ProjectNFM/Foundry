@@ -8,8 +8,10 @@ pre-windowed epochs with index-based sampling (not window-based).
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from typing import Callable, Optional
 
+import numpy as np
 from lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from torch_brain.batching import collate
@@ -235,6 +237,55 @@ class NeuralBenchDataModule(LightningDataModule):
     def get_num_channels(self) -> int:
         """Return the number of EEG channels."""
         return self._num_channels
+
+    # ------------------------------------------------------------------
+    # Class weights
+    # ------------------------------------------------------------------
+
+    def compute_class_weights(
+        self, smoothing: float = 1.0
+    ) -> dict[str, list[float]]:
+        """Compute inverse-frequency class weights from the training labels.
+
+        Mirrors :meth:`NeuralDataModule.compute_class_weights` but counts
+        labels directly from the NeuralBench training adapter instead of
+        using the H5 dataset interface.
+        """
+        if self._train_adapter is None:
+            raise RuntimeError("Call setup() before compute_class_weights()")
+        if not self._task_configs:
+            raise ValueError(
+                "task_configs must be provided to compute class weights"
+            )
+
+        counts: Counter = Counter()
+        ds = self._train_adapter.nb_dataset
+        for i in range(len(ds)):
+            sample = ds[i]
+            target = sample["target"] if isinstance(sample, dict) else sample.data["target"]
+            target_np = target.numpy() if hasattr(target, "numpy") else np.asarray(target)
+            class_idx = int(np.argmax(target_np.flatten()))
+            counts[class_idx] += 1
+
+        weights: dict[str, list[float]] = {}
+        total = sum(counts.values())
+        for name, cfg in self._task_configs.items():
+            if cfg.kind not in ("binary", "multiclass"):
+                continue
+            num_classes = cfg.output_dim
+            task_weights = [
+                (total / (num_classes * max(counts.get(i, 0), 1))) ** smoothing
+                for i in range(num_classes)
+            ]
+            weights[name] = task_weights
+            logger.info(
+                "Class weights for %s (smoothing=%.2f): %s (counts: %s)",
+                name,
+                smoothing,
+                [f"{w:.3f}" for w in task_weights],
+                dict(sorted(counts.items())),
+            )
+        return weights
 
     # ------------------------------------------------------------------
     # Tokenizer

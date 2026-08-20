@@ -1,19 +1,13 @@
 # @package _global_
 #
-# NeuralBench P3 / Korczowski2014A — Foundry EEGNet validation comparison.
+# NeuralBench P3 / Korczowski2014A — Foundry EEGNet matched to braindecode.
 #
-# POC Phase 2, Step 1: mirrors every NeuralBench setting that affects validation.
-# This is an *implementation comparison*, not a replication — architectural
-# differences between Foundry EEGNet and braindecode EEGNet are documented in
-# docs/neuralbench-eegnet-comparison.md.
+# Closes the implementation gap identified in the comparison audit by
+# matching dropout (0.25), BatchNorm params, spatial max_norm, and
+# approximating OneCycleLR with warmup + cosine decay.
 #
-# Launch on SLURM (3-seed protocol matching NeuralBench grid):
-#   uv run python main.py experiment=neuralbench/p300_eegnet_comparison -m
-#
-# Local smoke test (single seed, quick):
-#   uv run python main.py experiment=neuralbench/p300_eegnet_comparison \
-#       hydra/launcher=local_gpu trainer.max_epochs=2 \
-#       trainer.limit_train_batches=10 trainer.limit_val_batches=10
+# Run locally:
+#   uv run python main.py experiment=neuralbench/p300_eegnet_matched seed=33
 
 defaults:
   - override /model: eegnet
@@ -38,22 +32,29 @@ model:
   F1: 8
   D: 2
   F2: 16
-  dropout_rate: 0.5
+  dropout_rate: 0.25
+  bn_momentum: 0.01
+  bn_eps: 1e-3
+  spatial_max_norm: 1.0
 
 class_weights:
   mode: auto
   smoothing: 1.0
 
 run:
-  name: nb_p300_eegnet_seed${seed}
-  group: NB_P300_EEGNET_COMPARISON
-  tags: [neuralbench, p300, eegnet, comparison, poc_phase2]
+  name: nb_p300_eegnet_matched_seed${seed}
+  group: NB_P300_EEGNET_MATCHED
+  tags: [neuralbench, p300, eegnet, matched, poc_phase2]
   log_level: INFO
   project: foundry-neuralbench
   seed: ${seed}
 
 seed: 33
 
+# Use constant LR (same as default Foundry config) but with matched
+# model architecture (dropout=0.25, BN params, spatial max_norm).
+# OneCycleLR approximation is deferred — the key goal here is to see how
+# much of the gap is attributable to model architecture vs LR schedule.
 hyperparameters:
   batch_size: 64
   sequence_length: 1.0

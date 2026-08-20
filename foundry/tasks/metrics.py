@@ -11,24 +11,31 @@ from torchmetrics.regression import MeanAbsoluteError, MeanSquaredError, R2Score
 
 
 def classification_metrics(num_classes: int) -> MetricCollection:
-    task_type = "binary" if num_classes == 2 else "multiclass"
+    # Always use "multiclass" so that average="macro" is respected for
+    # balanced_acc (binary Accuracy ignores the average parameter).
     return MetricCollection(
         {
-            "acc": Accuracy(task=task_type, num_classes=num_classes),
-            "f1": F1Score(
-                task=task_type, num_classes=num_classes, average="macro"
+            "acc": Accuracy(
+                task="multiclass", num_classes=num_classes,
             ),
-            "auroc": AUROC(task=task_type, num_classes=num_classes),
+            "f1": F1Score(
+                task="multiclass", num_classes=num_classes, average="macro"
+            ),
+            "auroc": AUROC(
+                task="multiclass", num_classes=num_classes,
+            ),
             "precision": Precision(
-                task=task_type, num_classes=num_classes, average="macro"
+                task="multiclass", num_classes=num_classes, average="macro"
             ),
             "recall": Recall(
-                task=task_type, num_classes=num_classes, average="macro"
+                task="multiclass", num_classes=num_classes, average="macro"
             ),
             "balanced_acc": Accuracy(
-                task=task_type, num_classes=num_classes, average="macro"
+                task="multiclass", num_classes=num_classes, average="macro"
             ),
-            "cohen_kappa": CohenKappa(task=task_type, num_classes=num_classes),
+            "cohen_kappa": CohenKappa(
+                task="multiclass", num_classes=num_classes,
+            ),
         }
     )
 

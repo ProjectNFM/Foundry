@@ -25,5 +25,5 @@ metric_summary_modes:
   acc: max
   f1: max
   auroc: max
-  bal_acc: max
+  balanced_acc: max
   loss: min
