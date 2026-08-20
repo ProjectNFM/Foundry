@@ -1,0 +1,32 @@
+name: neuralbench_sleep_stage
+
+class_mapping:
+  mapping:
+    N1: N1
+    N2: N2
+    N3: N3
+    R: REM
+    W: Wake
+  order: [Wake, N1, N2, N3, REM]
+
+head:
+  _target_: foundry.tasks.heads.ReadoutHead
+
+target_extractor:
+  _target_: foundry.tasks.targets.TargetExtractor
+  timestamp_key: sleep_stages.timestamps
+  value_key: sleep_stages.targets
+
+loss:
+  _target_: foundry.tasks.losses.CrossEntropyTaskLoss
+  label_smoothing: 0.1
+
+metrics:
+  _target_: foundry.tasks.metrics.classification_metrics
+
+metric_summary_modes:
+  acc: max
+  f1: max
+  auroc: max
+  balanced_acc: max
+  loss: min

@@ -1,17 +1,15 @@
 # @package _global_
 #
-# NeuralBench P3 / Korczowski2014A — Foundry EEGNet validation comparison.
+# NeuralBench Sleep Stage / Kemp2000Analysis — Foundry EEGNet comparison.
 #
-# POC Phase 2, Step 1: mirrors every NeuralBench setting that affects validation.
-# This is an *implementation comparison*, not a replication — architectural
-# differences between Foundry EEGNet and braindecode EEGNet are documented in
-# docs/neuralbench-eegnet-comparison.md.
+# Phase 1: single-seed EEGNet validation comparison for Sleep Staging.
+# 5-class (Wake, N1, N2, N3, REM), 30s epochs @ 120 Hz.
 #
-# Launch on SLURM (3-seed protocol matching NeuralBench grid):
-#   uv run python main.py experiment=neuralbench/p300_eegnet_comparison -m
+# Launch on SLURM:
+#   uv run python main.py experiment=neuralbench/sleep_stage_eegnet_comparison
 #
-# Local smoke test (single seed, quick):
-#   uv run python main.py experiment=neuralbench/p300_eegnet_comparison \
+# Local smoke test:
+#   uv run python main.py experiment=neuralbench/sleep_stage_eegnet_comparison \
 #       hydra/launcher=local_gpu trainer.max_epochs=2 \
 #       trainer.limit_train_batches=10 trainer.limit_val_batches=10
 
@@ -21,22 +19,22 @@ defaults:
   - override /hydra/launcher: slurm_default
 
 task_configs:
-  - neuralbench/p300
+  - neuralbench/sleep_stage
 
 data:
   _target_: foundry.data.neuralbench.datamodule.NeuralBenchDataModule
-  task: p3
-  dataset: korczowski2014a
+  task: sleep_stage
+  dataset: kemp2000analysis
   cache_dir: ${oc.env:NEURALSET_CACHE_DIR,/network/scratch/s/sobralm/neuralset-data}
   batch_size: 64
   num_workers: ${hyperparameters.num_workers}
   pin_memory: false
-  label_map:
-    0: NonTarget
-    1: Target
+  interval_name: sleep_stages
+  label_attr: targets
+  session_prefix: nb/sleep_stage
 
 model:
-  num_samples: 120
+  num_samples: 3600
   kernel_length: 64
   F1: 8
   D: 2
@@ -48,9 +46,9 @@ class_weights:
   smoothing: 1.0
 
 run:
-  name: nb_p300_eegnet_seed${seed}
-  group: NB_P300_EEGNET_COMPARISON
-  tags: [neuralbench, p300, eegnet, comparison, poc_phase2]
+  name: nb_sleep_eegnet_seed${seed}
+  group: NB_SLEEP_EEGNET_COMPARISON
+  tags: [neuralbench, sleep_stage, eegnet, comparison, phase1]
   log_level: INFO
   project: foundry-neuralbench
   seed: ${seed}
@@ -59,11 +57,11 @@ seed: 33
 
 hyperparameters:
   batch_size: 64
-  sequence_length: 1.0
+  sequence_length: 30.0
   patch_duration: 0.1
   sampling_rate: 120
   fold_number: 0
-  num_channels: 16
+  num_channels: 2
   num_workers: 4
   learning_rate: 1e-4
   weight_decay: 0.05
@@ -85,15 +83,15 @@ trainer:
   callbacks:
     early_stopping:
       _target_: lightning.pytorch.callbacks.EarlyStopping
-      monitor: val/neuralbench_p300_balanced_acc
+      monitor: val/neuralbench_sleep_stage_balanced_acc
       mode: max
-      patience: 10
+      patience: 5
     model_checkpoint:
       _target_: lightning.pytorch.callbacks.ModelCheckpoint
-      monitor: val/neuralbench_p300_balanced_acc
+      monitor: val/neuralbench_sleep_stage_balanced_acc
       mode: max
       auto_insert_metric_name: false
-      filename: "best-epoch{epoch:03d}-val_balanced_acc_{val/neuralbench_p300_balanced_acc:.4f}"
+      filename: "best-epoch{epoch:03d}-val_balanced_acc_{val/neuralbench_sleep_stage_balanced_acc:.4f}"
       save_last: true
 
 logger:
@@ -104,15 +102,12 @@ logger:
   save_dir: .
 
 hydra:
-  sweeper:
-    params:
-      seed: 33, 34, 35
   launcher:
     tasks_per_node: 1
     cpus_per_task: 6
-    mem_gb: 32
+    mem_gb: 64
     gres: gpu:1
-    timeout_min: 360
+    timeout_min: 720
     partition: long
     setup:
       - "set -a"

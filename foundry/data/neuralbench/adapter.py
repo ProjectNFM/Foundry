@@ -40,8 +40,8 @@ class NeuralSetAdapter(torch.utils.data.Dataset):
         label_attr: Name of the ``Interval`` attribute holding the label.
         interval_name: Name of the ``Interval`` on the ``Data`` object.
         session_prefix: Prefix for synthetic session IDs.
-        subject_key_fn: Callable to extract the subject key string from a
-            sample.  Defaults to extracting from segment trigger metadata.
+        identity_fn: Callable to extract ``(subject_key, session_key)`` from
+            a sample. Defaults to extracting NeuralSet segment metadata.
         transform: Optional callable applied after Data construction
             (typically ``model.tokenize``).
     """
@@ -53,22 +53,22 @@ class NeuralSetAdapter(torch.utils.data.Dataset):
         sampling_rate: float,
         split: str,
         *,
-        label_map: dict[int, str] | None = None,
+        label_map: dict[int, str],
         label_attr: str = "targets",
         interval_name: str = "p300_trials",
         session_prefix: str = "nb/p3",
-        subject_key_fn: Callable | None = None,
+        identity_fn: Callable | None = None,
         transform: Callable | None = None,
     ):
         self.nb_dataset = nb_dataset
         self.channel_names = list(channel_names)
         self.sampling_rate = float(sampling_rate)
         self.split = split
-        self.label_map = label_map if label_map is not None else P3_LABEL_MAP
+        self.label_map = label_map
         self.label_attr = label_attr
         self.interval_name = interval_name
         self.session_prefix = session_prefix
-        self._subject_key_fn = subject_key_fn or _extract_subject_key
+        self._identity_fn = identity_fn or _extract_identity
         self.transform = transform
 
         if not self.channel_names:
@@ -132,8 +132,9 @@ class NeuralSetAdapter(torch.utils.data.Dataset):
         label_name = self.label_map[class_idx]
 
         # --- Subject / session identity ---
-        subject_key = self._subject_key_fn(sample, sample_data)
-        session_id = f"{self.session_prefix}/{subject_key}"
+        subject_key, session_key = self._identity_fn(sample, sample_data)
+        subject_id = f"{self.session_prefix}/{subject_key}"
+        session_id = f"{self.session_prefix}/{session_key}"
 
         # --- Channel IDs (uniquified per session) ---
         channel_ids = np.array(
@@ -160,7 +161,7 @@ class NeuralSetAdapter(torch.utils.data.Dataset):
         )
         data.channels = Data(id=channel_ids, type=channel_types)
         data.session = Data(id=session_id)
-        data.subject = Data(id=session_id)
+        data.subject = Data(id=subject_id)
 
         return data
 
@@ -170,12 +171,14 @@ class NeuralSetAdapter(torch.utils.data.Dataset):
 # ------------------------------------------------------------------
 
 
-def _extract_subject_key(sample, sample_data: dict) -> str:
-    """Extract a stable subject identifier from a NeuralBench sample.
+def _extract_identity(sample, sample_data: dict) -> tuple[str, str]:
+    """Extract stable subject and recording/session identifiers.
 
-    Tries NeuralSet segment event metadata first (gives the canonical
-    study-scoped subject string).  Falls back to the integer
-    ``subject_id`` tensor.
+    A NeuralSet timeline identifies a recording (including run/session),
+    while ``subject`` identifies its participant.  Keeping those identities
+    separate is necessary for session embeddings and per-session channel
+    vocabularies.  The integer ``subject_id`` fallback has no recording
+    metadata, so it intentionally uses the subject as its session key.
     """
     # Path 1: segment trigger event metadata
     segments = getattr(sample, "segments", None)
@@ -185,8 +188,17 @@ def _extract_subject_key(sample, sample_data: dict) -> str:
         if ns_events:
             for ev in ns_events:
                 extra = getattr(ev, "extra", None)
-                if isinstance(extra, dict) and "subject" in extra:
-                    return str(extra["subject"])
+                if not isinstance(extra, dict) or "subject" not in extra:
+                    continue
+                subject = str(extra["subject"])
+                timeline = getattr(ev, "timeline", None)
+                if timeline:
+                    return subject, str(timeline)
+                parts = [subject]
+                for key in ("session", "run"):
+                    if extra.get(key) not in (None, ""):
+                        parts.append(f"{key}={extra[key]}")
+                return subject, "/".join(parts)
 
     # Path 2: integer subject_id tensor
     sid = sample_data.get("subject_id")
@@ -195,7 +207,8 @@ def _extract_subject_key(sample, sample_data: dict) -> str:
             sid = sid.item()
         elif isinstance(sid, np.ndarray):
             sid = int(sid.flat[0])
-        return f"sub-{int(sid)}"
+        subject = f"sub-{int(sid)}"
+        return subject, subject
 
     raise ValueError(
         "Cannot determine subject identity: no segment metadata and "

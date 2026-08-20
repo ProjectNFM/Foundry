@@ -9,7 +9,9 @@ from types import ModuleType
 import numpy as np
 import torch
 
+from foundry.data.neuralbench.adapter import NeuralSetAdapter
 from foundry.data.neuralbench.datamodule import NeuralBenchDataModule
+from foundry.tasks.config import TaskConfig
 
 
 class _Dataset:
@@ -35,6 +37,9 @@ class _NBData:
     def __init__(self, **_kwargs) -> None:
         self.neuro = type(
             "Neuro", (), {"_channels": {"Cz": None, "Pz": None}, "frequency": 4}
+        )()
+        self.target = type(
+            "Target", (), {"_label_to_ind": {"NonTarget": 0, "Target": 1}}
         )()
 
     def prepare(self) -> dict[str, _Loader]:
@@ -107,6 +112,7 @@ def test_setup_uses_mocked_splits_and_exposes_metadata(monkeypatch):
         "nb/p3/sub-3": 2,
     }
     assert dm.get_num_channels() == 2
+    assert dm.train_dataloader().drop_last is False
 
 
 def test_tokenizer_replacement_is_used_before_collation(monkeypatch):
@@ -128,3 +134,38 @@ def test_tokenizer_replacement_is_used_before_collation(monkeypatch):
     batch = next(iter(dm.train_dataloader()))
     assert "tokenizer_marker" in batch
     assert batch["tokenizer_marker"].shape == (2, 1)
+
+
+def test_class_weights_follow_foundry_output_class_order():
+    # NeuralBench LabelEncoder sorts source labels as N1, N2, N3, R, W.
+    # Foundry's task order is Wake, N1, N2, N3, REM, so source indices must
+    # be remapped before the loss-weight vector is assembled.
+    label_map = {0: "N1", 1: "N2", 2: "N3", 3: "R", 4: "W"}
+    samples = []
+    for source_idx, count in {0: 2, 1: 1, 2: 1, 3: 1, 4: 1}.items():
+        target = [0] * 5
+        target[source_idx] = 1
+        samples.extend(
+            {
+                "neuro": np.zeros((1, 2, 4), dtype=np.float32),
+                "target": np.array([target]),
+                "subject_id": np.array([[1]]),
+            }
+            for _ in range(count)
+        )
+    dm = NeuralBenchDataModule(task="sleep_stage", dataset="mock")
+    dm.label_map = label_map
+    dm._train_adapter = NeuralSetAdapter(
+        _Dataset(samples),
+        channel_names=["Cz", "Pz"],
+        sampling_rate=1.0,
+        split="train",
+        label_map=label_map,
+    )
+    task = TaskConfig.from_yaml("configs/tasks/neuralbench/sleep_stage.yaml")
+    dm._task_configs = {task.name: task}
+
+    weights = dm.compute_class_weights()[task.name]
+
+    # Output order: Wake (1), N1 (2), N2 (1), N3 (1), REM (1).
+    assert weights == [1.2, 0.6, 1.2, 1.2, 1.2]

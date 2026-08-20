@@ -16,7 +16,7 @@ from lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from torch_brain.batching import collate
 
-from foundry.data.neuralbench.adapter import NeuralSetAdapter, P3_LABEL_MAP
+from foundry.data.neuralbench.adapter import NeuralSetAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,21 @@ def _require_neuralbench() -> None:
             "neuralbench is required for NeuralBench integration.  "
             "Install with: uv sync --group neuralbench"
         ) from exc
+
+
+def _build_label_map_from_encoder(target_extractor) -> dict[int, str]:
+    """Invert the NeuralBench LabelEncoder's label-to-index mapping.
+
+    Returns a dict mapping one-hot argmax indices to the original label
+    strings. Works for both string and integer label encodings.
+    """
+    label_to_ind = getattr(target_extractor, "_label_to_ind", None)
+    if not label_to_ind:
+        raise RuntimeError(
+            "Cannot auto-discover label map: target extractor has no "
+            "_label_to_ind mapping. Provide an explicit label_map."
+        )
+    return {idx: str(label) for label, idx in label_to_ind.items()}
 
 
 class NeuralBenchDataModule(LightningDataModule):
@@ -83,7 +98,7 @@ class NeuralBenchDataModule(LightningDataModule):
         self.pin_memory = pin_memory
         self._tokenizer = tokenizer
         self._task_configs = task_configs
-        self.label_map = label_map if label_map is not None else P3_LABEL_MAP
+        self.label_map = label_map
         self.label_attr = label_attr
         self.interval_name = interval_name
         self.session_prefix = (
@@ -116,20 +131,43 @@ class NeuralBenchDataModule(LightningDataModule):
         default_config = load_yaml_config(DEFAULTS_DIR / "config.yaml")
         grid = ConfDict(load_yaml_config(DEFAULTS_DIR / "grid.yaml"))
 
-        configs = prepare_task_configs(
-            ConfDict(default_config),
-            grid,
-            device="eeg",
-            task_name=self.nb_task,
-            use_task_grid=False,
-            debug=False,
-            force=False,
-            prepare=False,
-            download=False,
-            models=[None],
-            datasets=[self.nb_dataset_name],
-            quiet=True,
-        )
+        # Try loading with explicit dataset; fall back to task defaults if
+        # the dataset-specific YAML doesn't exist (e.g. Kemp2000Analysis for
+        # sleep_stage where the task config already specifies the source).
+        try:
+            configs = prepare_task_configs(
+                ConfDict(default_config),
+                grid,
+                device="eeg",
+                task_name=self.nb_task,
+                use_task_grid=False,
+                debug=False,
+                force=False,
+                prepare=False,
+                download=False,
+                models=[None],
+                datasets=[self.nb_dataset_name],
+                quiet=True,
+            )
+        except FileNotFoundError:
+            logger.info(
+                "No dataset-specific config for '%s'; using task defaults.",
+                self.nb_dataset_name,
+            )
+            configs = prepare_task_configs(
+                ConfDict(default_config),
+                grid,
+                device="eeg",
+                task_name=self.nb_task,
+                use_task_grid=False,
+                debug=False,
+                force=False,
+                prepare=False,
+                download=False,
+                models=[None],
+                datasets=None,
+                quiet=True,
+            )
         cfg = configs[0]
 
         if self.cache_dir:
@@ -143,6 +181,13 @@ class NeuralBenchDataModule(LightningDataModule):
 
         self._channel_names = channel_names
         self._num_channels = len(channel_names)
+
+        # Auto-discover label map from the NeuralBench LabelEncoder
+        if self.label_map is None:
+            self.label_map = _build_label_map_from_encoder(nb_data.target)
+            logger.info(
+                "Auto-discovered label map: %s", self.label_map
+            )
 
         logger.info(
             "NeuralBench %s/%s: %d channels @ %.0f Hz, splits=%s",
@@ -178,32 +223,30 @@ class NeuralBenchDataModule(LightningDataModule):
         self._collect_metadata(loaders)
 
     def _collect_metadata(self, loaders: dict) -> None:
-        """Collect session and channel IDs from trigger metadata."""
+        """Collect complete recording and channel IDs for lazy vocabularies."""
         session_id_set: set[str] = set()
 
+        adapter_by_split = {
+            "train": self._train_adapter,
+            "val": self._val_adapter,
+            "test": self._test_adapter,
+        }
         for split_name, loader in loaders.items():
-            ds = loader.dataset
-            triggers = getattr(ds, "triggers", None)
-            if triggers is not None and "subject" in triggers.columns:
-                for subj in triggers["subject"].unique():
-                    session_id_set.add(f"{self.session_prefix}/{subj}")
-            else:
-                logger.warning(
-                    "Split '%s' has no trigger metadata; scanning samples "
-                    "for subject IDs (this may be slow).",
-                    split_name,
-                )
-                adapter = getattr(
-                    self,
-                    {
-                        "train": "_train_adapter",
-                        "val": "_val_adapter",
-                        "test": "_test_adapter",
-                    }.get(split_name, ""),
-                    None,
-                )
-                if adapter is not None:
-                    session_id_set.update(_scan_session_ids(adapter))
+            adapter = adapter_by_split.get(split_name)
+            if adapter is None:
+                continue
+            ids = _session_ids_from_triggers(
+                getattr(loader.dataset, "triggers", None), self.session_prefix
+            )
+            if ids:
+                session_id_set.update(ids)
+                continue
+            logger.warning(
+                "Split '%s' has no recording-level trigger identity; scanning "
+                "all samples to initialize complete session vocabularies.",
+                split_name,
+            )
+            session_id_set.update(_scan_session_ids(adapter))
 
         self._session_ids = sorted(session_id_set)
         self._channel_ids = sorted(
@@ -258,20 +301,45 @@ class NeuralBenchDataModule(LightningDataModule):
                 "task_configs must be provided to compute class weights"
             )
 
-        counts: Counter = Counter()
+        counts_by_task: dict[str, Counter] = {}
         ds = self._train_adapter.nb_dataset
         for i in range(len(ds)):
             sample = ds[i]
             target = sample["target"] if isinstance(sample, dict) else sample.data["target"]
             target_np = target.numpy() if hasattr(target, "numpy") else np.asarray(target)
-            class_idx = int(np.argmax(target_np.flatten()))
-            counts[class_idx] += 1
+            source_idx = int(np.argmax(target_np.flatten()))
+            try:
+                label = self.label_map[source_idx]
+            except KeyError as exc:
+                raise ValueError(
+                    f"Training sample {i} has unmapped NeuralBench class "
+                    f"index {source_idx}"
+                ) from exc
+
+            for name, cfg in self._task_configs.items():
+                if cfg.kind not in ("binary", "multiclass"):
+                    continue
+                if cfg.class_mapping is None:
+                    class_idx = source_idx
+                else:
+                    class_idx = int(
+                        cfg.class_mapping.map_to_class_ids(
+                            np.asarray([label])
+                        )[0]
+                    )
+                    if class_idx < 0:
+                        raise ValueError(
+                            f"NeuralBench label {label!r} is not present in "
+                            f"the class_mapping for task {name!r}"
+                        )
+                counts_by_task.setdefault(name, Counter())[class_idx] += 1
 
         weights: dict[str, list[float]] = {}
-        total = sum(counts.values())
         for name, cfg in self._task_configs.items():
             if cfg.kind not in ("binary", "multiclass"):
                 continue
+            counts = counts_by_task.get(name, Counter())
+            total = sum(counts.values())
             num_classes = cfg.output_dim
             task_weights = [
                 (total / (num_classes * max(counts.get(i, 0), 1))) ** smoothing
@@ -326,7 +394,9 @@ class NeuralBenchDataModule(LightningDataModule):
             collate_fn=collate,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
-            drop_last=shuffle,
+            # NeuralBench's Data config defaults to drop_last=False.  Keeping
+            # the final partial train batch is required for data/step parity.
+            drop_last=False,
             persistent_workers=self.num_workers > 0,
             prefetch_factor=2 if self.num_workers > 0 else None,
         )
@@ -346,21 +416,45 @@ class NeuralBenchDataModule(LightningDataModule):
 
 
 def _scan_session_ids(adapter: NeuralSetAdapter) -> set[str]:
-    """Scan adapter samples to collect unique session IDs (slow fallback)."""
+    """Scan every adapter sample to collect complete recording identities."""
     ids: set[str] = set()
-    seen_subjects: set[str] = set()
-    stale_count = 0
     for i in range(len(adapter)):
         _, sample_data = adapter._get_sample_data(i)
-        subject_key = adapter._subject_key_fn(
+        _, session_key = adapter._identity_fn(
             adapter.nb_dataset[i], sample_data
         )
-        if subject_key not in seen_subjects:
-            seen_subjects.add(subject_key)
-            ids.add(f"{adapter.session_prefix}/{subject_key}")
-            stale_count = 0
+        ids.add(f"{adapter.session_prefix}/{session_key}")
+    return ids
+
+
+def _session_ids_from_triggers(triggers, session_prefix: str) -> set[str]:
+    """Extract adapter-compatible recording IDs from a trigger dataframe.
+
+    NeuralSet trigger metadata normally carries ``timeline``; it is the same
+    recording identifier exposed on a segment event and avoids materializing
+    every preprocessed segment during startup.  Older datasets may instead
+    expose subject/run/session columns, in which case those form the fallback.
+    """
+    if triggers is None or not hasattr(triggers, "columns"):
+        return set()
+    columns = set(triggers.columns)
+    if "subject" not in columns:
+        return set()
+
+    ids: set[str] = set()
+    for _, row in triggers.iterrows():
+        subject = row.get("subject")
+        if subject is None or str(subject) == "nan":
+            return set()
+        timeline = row.get("timeline") if "timeline" in columns else None
+        if timeline is not None and str(timeline) != "nan":
+            session_key = str(timeline)
         else:
-            stale_count += 1
-        if stale_count > 500:
-            break
+            parts = [str(subject)]
+            for key in ("session", "run"):
+                value = row.get(key) if key in columns else None
+                if value is not None and str(value) != "nan":
+                    parts.append(f"{key}={value}")
+            session_key = "/".join(parts)
+        ids.add(f"{session_prefix}/{session_key}")
     return ids
