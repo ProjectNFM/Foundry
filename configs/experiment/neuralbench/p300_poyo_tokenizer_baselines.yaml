@@ -35,6 +35,7 @@ class_weights:
 run:
   name: nb_p300_poyo_${hydra:runtime.choices.model/tokenizer}_seed${seed}
   evaluate_test: true
+  compile: default
   float32_matmul_precision: highest
   group: NB_P300_POYO_TOKENIZER_BASELINES
   tags: [neuralbench, p300, poyo, tokenizer, baseline, from_scratch]
@@ -67,7 +68,7 @@ hyperparameters:
 
 trainer:
   max_epochs: 40
-  precision: 32-true
+  precision: 16-mixed
   gradient_clip_val: 1.0
   num_sanity_val_steps: 0
   callbacks:

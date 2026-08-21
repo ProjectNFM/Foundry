@@ -69,12 +69,50 @@ This is a ~25x speedup for the isolated pooling operation. The follow-up
 needed to quantify the net training-run speedup; profiler instrumentation and
 startup overhead obscure it at 20 batches.
 
-## Next steps
+## Epoch-level speedup from pooling optimization
 
-1. Run one uninstrumented P300 epoch with `ba70346` and compare it with the
-   ~3.2 minute CWT baseline.
-2. If the parity contract permits it, benchmark `run.compile=default` and
-   `precision=16-mixed` separately. Both can help an RTX 8000, but they change
-   the matched FP32 protocol and require a metric check.
-3. Profile MI and Sleep only after selecting the production precision and
+The full CWT-CNN epoch with `ba70346` measured 3:03 (3.19 it/s), compared to
+the pre-optimization ~3.2 min baseline. The 25x isolated improvement translates
+to roughly 5% wall-clock gain because other GPU work (attention, CWT forward,
+gradient accumulation) dominates the end-to-end step.
+
+## Compilation and precision benchmarks
+
+All four configurations below ran two uninstrumented epochs on the same RTX 8000
+with seed 33 and CWT-CNN. Validation balanced accuracy after two epochs is shown
+to confirm no early degradation.
+
+| Configuration | Steady-state epoch | it/s | Speedup | Val bal-acc (ep 0) |
+|---|---:|---:|---:|---:|
+| FP32 baseline | 3:03 | 3.19 | 1.0x | 0.603 |
+| FP32 + `compile=default` | 1:55 | 4.82 | 1.6x | 0.607 |
+| `16-mixed` | 1:27 | 6.73 | 2.1x | 0.609 |
+| `16-mixed` + `compile=default` | 0:46 | 12.04 | 4.0x | 0.608 |
+
+`torch.compile` triggers graph breaks from `Tensor.item()` in the CWT
+embedding's target-token computation but still achieves a substantial speedup.
+The combined configuration cuts the 40-epoch estimate from ~2h10m to
+approximately **35 minutes**.
+
+### Parity-contract considerations
+
+The matched EEGNet baseline (`p300_eegnet_matched`) uses `precision: 32-true`.
+`torch.compile(mode="default")` preserves bit-exact FP32 semantics so it is
+safe for the matched comparison without qualification. `precision=16-mixed`
+changes the numerical protocol (FP16 accumulations with grad scaling); if the
+POYO baselines adopt it the results are no longer precision-matched to EEGNet,
+though all early metrics look equivalent.
+
+## Recommendation
+
+Enable `run.compile=default` unconditionally in the POYO baseline config — it
+is numerically safe and gives 1.6x. If the parity contract tolerates
+mixed-precision results (or if EEGNet baselines are also switched to
+`16-mixed`), enable both for the full 4x speedup.
+
+## Remaining steps
+
+1. Apply the selected compile/precision policy to the production experiment
+   YAML and confirm a full 40-epoch seed-33 run produces competitive metrics.
+2. Profile MI and Sleep only after locking the production precision and
    compilation policy; their larger token counts make that choice material.

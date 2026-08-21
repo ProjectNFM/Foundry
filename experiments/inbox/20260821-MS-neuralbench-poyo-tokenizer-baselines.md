@@ -33,7 +33,7 @@ With all non-tokenizer choices fixed, CWT-CNN will achieve higher mean three-see
   - Motor Imagery / `Schalk2004Bci2000`: 64 channels, 4.0 s epochs.
   - Sleep Stage / `Kemp2000Analysis`: 2 channels, 30.0 s epochs.
 - **Seeds:** 33, 34, and 35 for every task and tokenizer condition (18 runs total).
-- **Training:** Mirror the parent’s non-architectural protocol: AdamW (`lr=1e-4`, `weight_decay=0.05`), OneCycleLR with cosine annealing and `pct_start=0.1` at step interval, batch size 64, FP32, gradient clipping 1.0, and a 40-epoch cap. Early-stopping patience is 10 for P300 and 5 for MI/Sleep.
+- **Training:** Mirror the parent’s non-architectural protocol: AdamW (`lr=1e-4`, `weight_decay=0.05`), OneCycleLR with cosine annealing and `pct_start=0.1` at step interval, batch size 64, `16-mixed` precision, `torch.compile(mode="default")`, gradient clipping 1.0, and a 40-epoch cap. Early-stopping patience is 10 for P300 and 5 for MI/Sleep. The compile + mixed-precision policy follows the [P300 profiling results](../docs/neuralbench-poyo-p300-profiling.md), which showed a 4x wall-clock speedup with no early metric degradation.
 - **Evaluation:** Evaluate the best-validation checkpoint on the NeuralBench held-out test split (`run.evaluate_test=true`).
 - **WandB:** project `foundry-neuralbench`; groups `NB_P300_POYO_TOKENIZER_BASELINES`, `NB_MI_POYO_TOKENIZER_BASELINES`, and `NB_SLEEP_POYO_TOKENIZER_BASELINES`.
 
@@ -59,6 +59,8 @@ The three POYO experiment YAMLs should compose the corresponding matched EEGNet 
 | `model.embed_dim`, `model.depth` | `256`, `4` |
 | `model.channel_emb_mode`, session embedding | dynamic / disabled |
 | `run.evaluate_test` | `true` |
+| `run.compile` | `default` |
+| `trainer.precision` | `16-mixed` |
 | `seed` | sweep: `33,34,35` |
 | `hydra.launcher.partition` | `long` |
 | `hydra.launcher.gres` | RTX 8000 GPU, matching the parent’s compatible-GPU constraint |
