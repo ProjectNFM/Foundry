@@ -3,7 +3,7 @@
 **Status:** In Progress
 **Date started:** 2026-08-21
 **Parent experiment:** [NeuralBench Phase 1 — Motor Imagery & Sleep Stage EEGNet Comparison](20260820-MS-neuralbench-phase1-mi-sleep-comparison.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [NeuralBench POYO-EEG Tokenizer Baselines](20260821-MS-neuralbench-poyo-tokenizer-baselines.md)
 **Tags:** neuralbench, eegnet, parity, test_evaluation, p300, motor_imagery, sleep_stage
 
 ## Background
