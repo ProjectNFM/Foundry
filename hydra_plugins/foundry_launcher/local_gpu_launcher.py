@@ -55,6 +55,7 @@ class LocalGpuLauncher(Launcher):
         stop_on_failure: bool = False,
         only_free_gpus: bool = True,
         snapshot: Optional[Any] = None,
+        **_inherited_launcher_fields: Any,
     ) -> None:
         self.gpus = gpus
         self.stop_on_failure = stop_on_failure
