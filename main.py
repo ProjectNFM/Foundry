@@ -704,7 +704,14 @@ def _write_snapshot_task_provenance(output_dir: str) -> None:
     snapshot = LaunchSnapshot.from_json(
         Path(manifest_path).with_name("snapshot-descriptor.json").read_text()
     )
-    task_index = int(HydraConfig.get().job.num)
+    # Hydra leaves ``job.num`` as a mandatory-but-unresolved value for a
+    # one-item local multirun.  That task still maps to the first snapshot
+    # config, so use index 0 when no explicit job number is available.
+    task_index = int(
+        OmegaConf.select(
+            HydraConfig.get(), "job.num", default=0, throw_on_missing=False
+        )
+    )
     task_config_path = (
         Path(snapshot.bundle_dir)
         / "task-configs"
