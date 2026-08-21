@@ -26,7 +26,7 @@ With all non-tokenizer choices fixed, CWT-CNN will achieve higher mean three-see
 
 ### Setup
 
-- **Model:** From-scratch POYO-EEG, fixed at `embed_dim=256`, depth 4, 8 cross-/self-attention heads, dynamic channel and session embeddings, and `channel_fusion=concat`.
+- **Model:** From-scratch POYO-EEG, fixed at `embed_dim=256`, depth 4, 8 cross-/self-attention heads, dynamic channel embeddings, disabled session embeddings, and `channel_fusion=concat`.
 - **Tokenizer conditions:** `per_channel_cwt_cnn` versus parameter-matched `per_channel_resample_cnn`; this is the sole independent variable.
 - **Data and task contract:** NeuralBench v0.2.3 / NeuralSet subject splits, identical to the parent:
   - P300 / `Korczowski2014A`: 16 channels, 1.0 s epochs.
@@ -57,7 +57,7 @@ The three POYO experiment YAMLs should compose the corresponding matched EEGNet 
 | `model` | `poyo_eeg` |
 | `model/tokenizer` | sweep: `per_channel_cwt_cnn`, `per_channel_resample_cnn` |
 | `model.embed_dim`, `model.depth` | `256`, `4` |
-| `model.channel_emb_mode`, session embedding | fixed dynamic configuration |
+| `model.channel_emb_mode`, session embedding | dynamic / disabled |
 | `run.evaluate_test` | `true` |
 | `seed` | sweep: `33,34,35` |
 | `hydra.launcher.partition` | `long` |

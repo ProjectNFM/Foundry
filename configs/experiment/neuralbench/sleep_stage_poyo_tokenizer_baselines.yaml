@@ -4,7 +4,7 @@
 defaults:
   - override /model: poyo_eeg
   - override /model/tokenizer: per_channel_cwt_cnn
-  - override /model/session_emb: dynamic
+  - override /model/session_emb: disabled
   - override /module: default
   - override /hydra/launcher: slurm_default
 
