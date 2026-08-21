@@ -2,6 +2,8 @@ name: neuralbench_p300
 
 class_mapping:
   mapping:
+    "1": NonTarget
+    "2": Target
     NonTarget: NonTarget
     Target: Target
   order: [NonTarget, Target]
