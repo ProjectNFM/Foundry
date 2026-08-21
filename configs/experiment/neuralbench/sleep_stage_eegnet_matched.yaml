@@ -1,17 +1,8 @@
 # @package _global_
 #
-# NeuralBench Sleep Stage / Kemp2000Analysis — Foundry EEGNet comparison.
-#
-# Phase 1: single-seed EEGNet validation comparison for Sleep Staging.
-# 5-class (Wake, N1, N2, N3, REM), 30s epochs @ 120 Hz.
-#
-# Launch on SLURM:
-#   uv run python main.py experiment=neuralbench/sleep_stage_eegnet_comparison
-#
-# Local smoke test:
-#   uv run python main.py experiment=neuralbench/sleep_stage_eegnet_comparison \
-#       hydra/launcher=local_gpu trainer.max_epochs=2 \
-#       trainer.limit_train_batches=10 trainer.limit_val_batches=10
+# NeuralBench Sleep Stage / Kemp2000Analysis — EEGNet parameter match.
+# Mirrors NeuralBench v0.2.3's EEGNet architecture, optimizer, scheduler,
+# early stopping, and DataLoader settings for a test-to-test comparison.
 
 defaults:
   - override /model: eegnet
@@ -28,7 +19,7 @@ data:
   cache_dir: ${oc.env:NEURALSET_CACHE_DIR,/network/scratch/s/sobralm/neuralset-data}
   batch_size: 64
   num_workers: ${hyperparameters.num_workers}
-  pin_memory: false
+  pin_memory: true
   interval_name: sleep_stages
   label_attr: targets
   session_prefix: nb/sleep_stage
@@ -39,17 +30,21 @@ model:
   F1: 8
   D: 2
   F2: 16
-  dropout_rate: 0.5
+  dropout_rate: 0.25
+  bn_momentum: 0.01
+  bn_eps: 1e-3
+  spatial_max_norm: 1.0
 
 class_weights:
   mode: auto
   smoothing: 1.0
 
 run:
-  name: nb_sleep_eegnet_seed${seed}
+  name: nb_sleep_eegnet_matched_seed${seed}
   evaluate_test: true
-  group: NB_SLEEP_EEGNET_COMPARISON
-  tags: [neuralbench, sleep_stage, eegnet, comparison, phase1]
+  float32_matmul_precision: highest
+  group: NB_SLEEP_EEGNET_MATCHED
+  tags: [neuralbench, sleep_stage, eegnet, matched]
   log_level: INFO
   project: foundry-neuralbench
   seed: ${seed}
@@ -63,16 +58,17 @@ hyperparameters:
   sampling_rate: 120
   fold_number: 0
   num_channels: 2
-  num_workers: 4
+  num_workers: 10
   learning_rate: 1e-4
   weight_decay: 0.05
+  scheduler_name: onecycle
   warmup: 0
   start_lr_factor: 1e-4
   hold: 0
-  hold_scheduler_type: "constant"
+  hold_scheduler_type: constant
   decay: 0
   end_lr_factor: 0.1
-  scheduler_interval: "step"
+  scheduler_interval: step
   cwt_lr_multiplier: 1.0
   backbone_learning_rate: null
 
@@ -103,9 +99,12 @@ logger:
   save_dir: .
 
 hydra:
+  sweeper:
+    params:
+      seed: 33,34,35
   launcher:
     tasks_per_node: 1
-    cpus_per_task: 6
+    cpus_per_task: 10
     mem_gb: 64
     gres: gpu:1
     timeout_min: 720

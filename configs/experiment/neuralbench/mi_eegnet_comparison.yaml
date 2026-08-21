@@ -47,6 +47,7 @@ class_weights:
 
 run:
   name: nb_mi_eegnet_seed${seed}
+  evaluate_test: true
   group: NB_MI_EEGNET_COMPARISON
   tags: [neuralbench, motor_imagery, eegnet, comparison, phase1]
   log_level: INFO

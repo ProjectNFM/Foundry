@@ -53,6 +53,7 @@ def test_foundry_module_instantiates_losses_from_task_config_yaml():
     assert set(module._task_losses.keys()) == set(task_configs.keys())
     assert module.train_metrics[clf_cfg.name] is not None
     assert module.val_metrics[reg_cfg.name] is not None
+    assert module.test_metrics[clf_cfg.name] is not None
 
 
 def test_sequence_weighted_multitask_loss_matches_spec_id_weighting():
@@ -255,14 +256,25 @@ def test_wandb_metric_summaries_use_task_config_modes():
 
     experiment.define_metric.assert_any_call("train/loss", summary="min")
     experiment.define_metric.assert_any_call("val/loss", summary="min")
+    experiment.define_metric.assert_any_call("test/loss", summary="min")
     experiment.define_metric.assert_any_call(
         f"train/{cfg.name}_loss", summary="min"
+    )
+    experiment.define_metric.assert_any_call(
+        f"test/{cfg.name}_loss", summary="min"
+    )
+    assert (
+        module._metric_summary_mode(cfg.name, f"test/{cfg.name}_f1", cfg)
+        == "max"
     )
     for metric_name, mode in cfg.metric_summary_modes.items():
         if metric_name == "loss":
             continue
         experiment.define_metric.assert_any_call(
             f"train/{cfg.name}_{metric_name}", summary=mode
+        )
+        experiment.define_metric.assert_any_call(
+            f"test/{cfg.name}_{metric_name}", summary=mode
         )
 
 
@@ -354,6 +366,32 @@ def test_scheduler_warmup_only():
     final_lr = optimizer.param_groups[0]["lr"]
     # After warmup, LR should be at or near base_lr
     assert final_lr > initial_lr
+
+
+def test_scheduler_onecycle_matches_neuralbench_recipe():
+    """OneCycleLR uses NeuralBench's explicit parameters and native defaults."""
+    from unittest.mock import MagicMock
+
+    from foundry.training import FoundryModule
+
+    module = FoundryModule(
+        model=_StubTaskModel({}),
+        learning_rate=1e-4,
+        weight_decay=0.05,
+        scheduler_name="onecycle",
+        scheduler_interval="step",
+    )
+    trainer = MagicMock()
+    trainer.estimated_stepping_batches = 400
+    module._trainer = trainer
+
+    config = module.configure_optimizers()
+    scheduler = config["lr_scheduler"]["scheduler"]
+
+    assert type(scheduler).__name__ == "OneCycleLR"
+    assert scheduler.total_steps == 400
+    assert scheduler._schedule_phases[0]["end_step"] == pytest.approx(39)
+    assert scheduler._anneal_func_type == "cos"
 
 
 def test_scheduler_hold_constant_only():

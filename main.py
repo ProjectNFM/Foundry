@@ -736,7 +736,8 @@ def main(cfg: DictConfig):
 
     Orchestrates logging setup, SLURM resume detection, WandB configuration,
     data staging, model/data construction, optional pretrained weight
-    transfer, ``torch.compile``, and ``trainer.fit()``.
+    transfer, ``torch.compile``, training, and optional best-checkpoint test
+    evaluation.
     """
     setup_logging(cfg.run.log_level)
     torch.set_float32_matmul_precision(
@@ -831,7 +832,7 @@ def main(cfg: DictConfig):
 
     _validate_checkpoint_policy(ckpt_path, pretrained_ckpt)
 
-    train_failed = False
+    run_failed = False
     try:
         trainer.fit(
             lightning_module,
@@ -839,13 +840,22 @@ def main(cfg: DictConfig):
             ckpt_path=ckpt_path,
             weights_only=False,
         )
+        if OmegaConf.select(cfg, "run.evaluate_test", default=False):
+            logger.info(
+                "Evaluating the best validation checkpoint on the test split."
+            )
+            trainer.test(
+                lightning_module,
+                datamodule=datamodule,
+                ckpt_path="best",
+            )
     except BaseException:
-        train_failed = True
+        run_failed = True
         traceback.print_exc(file=sys.stderr)
         raise
     finally:
         if using_wandb_logger:
-            _finish_active_wandb_run(exit_code=1 if train_failed else 0)
+            _finish_active_wandb_run(exit_code=1 if run_failed else 0)
 
 
 if __name__ == "__main__":

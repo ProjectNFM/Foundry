@@ -3,8 +3,7 @@
 # NeuralBench P3 / Korczowski2014A — Foundry EEGNet matched to braindecode.
 #
 # Closes the implementation gap identified in the comparison audit by
-# matching dropout (0.25), BatchNorm params, spatial max_norm, and
-# approximating OneCycleLR with warmup + cosine decay.
+# matching dropout (0.25), BatchNorm params, spatial max_norm, and OneCycleLR.
 #
 # Run locally:
 #   uv run python main.py experiment=neuralbench/p300_eegnet_matched seed=33
@@ -24,7 +23,7 @@ data:
   cache_dir: ${oc.env:NEURALSET_CACHE_DIR,/network/scratch/s/sobralm/neuralset-data}
   batch_size: 64
   num_workers: ${hyperparameters.num_workers}
-  pin_memory: false
+  pin_memory: true
 
 model:
   num_samples: 120
@@ -43,6 +42,8 @@ class_weights:
 
 run:
   name: nb_p300_eegnet_matched_seed${seed}
+  evaluate_test: true
+  float32_matmul_precision: highest
   group: NB_P300_EEGNET_MATCHED
   tags: [neuralbench, p300, eegnet, matched, poc_phase2]
   log_level: INFO
@@ -51,10 +52,9 @@ run:
 
 seed: 33
 
-# Use constant LR (same as default Foundry config) but with matched
-# model architecture (dropout=0.25, BN params, spatial max_norm).
-# OneCycleLR approximation is deferred — the key goal here is to see how
-# much of the gap is attributable to model architecture vs LR schedule.
+# Mirrors NeuralBench's AdamW + OneCycleLR recipe as well as its EEGNet
+# hyperparameters. The remaining difference is the Foundry ReadoutRouter
+# versus braindecode's single linear classifier implementation.
 hyperparameters:
   batch_size: 64
   sequence_length: 1.0
@@ -62,9 +62,10 @@ hyperparameters:
   sampling_rate: 120
   fold_number: 0
   num_channels: 16
-  num_workers: 4
+  num_workers: 10
   learning_rate: 1e-4
   weight_decay: 0.05
+  scheduler_name: onecycle
   warmup: 0
   start_lr_factor: 1e-4
   hold: 0
@@ -107,8 +108,8 @@ hydra:
       seed: 33, 34, 35
   launcher:
     tasks_per_node: 1
-    cpus_per_task: 6
-    mem_gb: 32
+    cpus_per_task: 10
+    mem_gb: 64
     gres: gpu:1
     timeout_min: 360
     partition: long

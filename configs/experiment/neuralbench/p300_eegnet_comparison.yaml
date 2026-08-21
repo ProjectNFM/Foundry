@@ -49,6 +49,7 @@ class_weights:
 
 run:
   name: nb_p300_eegnet_seed${seed}
+  evaluate_test: true
   group: NB_P300_EEGNET_COMPARISON
   tags: [neuralbench, p300, eegnet, comparison, poc_phase2]
   log_level: INFO

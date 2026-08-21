@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-08-20
 **Parent experiment:** [P300 EEGNet Comparison](./20260820-MS-neuralbench-p300-eegnet-comparison.md)
-**Follow-up experiments:** Phase 2 — Generic task onboarding
+**Follow-up experiments:** [NeuralBench Matched EEGNet — Three-Task Test Parity](20260821-MS-neuralbench-matched-test-parity.md); Phase 2 — Generic task onboarding
 **Tags:** neuralbench, motor_imagery, sleep_stage, eegnet, comparison, phase1
 
 ## Background
