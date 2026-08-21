@@ -16,6 +16,7 @@ from omegaconf import DictConfig, OmegaConf
 from rich.logging import RichHandler
 
 from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
+from foundry.core import VocabManager
 from foundry.data.datamodules.base import normalize_data_config
 from foundry.seed import set_seed
 from foundry.tools.stage_data import (
@@ -426,7 +427,7 @@ def _build_model_and_data(cfg: DictConfig):
     )
 
     # Apply auto class weights for CrossEntropy; reuse setup state from above
-    task_configs, _ = _apply_auto_class_weights(
+    task_configs, setup_done = _apply_auto_class_weights(
         cfg, datamodule, task_configs, setup_done=setup_done
     )
 
@@ -448,6 +449,21 @@ def _build_model_and_data(cfg: DictConfig):
         model_kwargs.update(session_emb_cfg)
 
     model = ModelClass(task_configs=task_configs, **model_kwargs)
+
+    # DataLoader workers apply ``model.tokenize`` in their own processes.  Lazy
+    # vocabularies must consequently be initialized here, before attaching the
+    # tokenizer, rather than waiting for Lightning's on_fit_start callback.
+    if isinstance(model, VocabManager) and model.has_lazy_vocabs():
+        if not setup_done:
+            datamodule.setup("fit")
+        vocab_info = {}
+        for method_name, key in [
+            ("get_recording_ids", "session_ids"),
+            ("get_channel_ids", "channel_ids"),
+        ]:
+            if hasattr(datamodule, method_name):
+                vocab_info[key] = getattr(datamodule, method_name)()
+        model.initialize_vocabs(vocab_info)
 
     if getattr(model, "session_emb_mode", None) == "dynamic":
         session_context_cfg = OmegaConf.select(
