@@ -31,6 +31,31 @@ STAGING_MARKER = ".snapshot_staging"
 REQUIRED_SOURCE_ENTRIES = ("main.py", "foundry", "hydra_plugins", "configs")
 
 
+def get_slurm_job_identifiers() -> dict[str, str]:
+    """Return stable, human-facing Slurm identifiers for the current task.
+
+    Slurm sets ``SLURM_JOB_ID`` to the internal, unique element ID for array
+    tasks.  That number cannot be used with the familiar ``<array>_<task>``
+    syntax.  Prefer that syntax for the public job ID and retain the internal
+    element ID separately for accounting and scheduler-log correlation.
+    """
+    raw_job_id = os.environ.get("SLURM_JOB_ID")
+    array_job_id = os.environ.get("SLURM_ARRAY_JOB_ID")
+    array_task_id = os.environ.get("SLURM_ARRAY_TASK_ID")
+
+    identifiers: dict[str, str] = {}
+    if array_job_id and array_task_id:
+        identifiers["slurm_job_id"] = f"{array_job_id}_{array_task_id}"
+        identifiers["slurm_array_job_id"] = array_job_id
+        identifiers["slurm_array_task_id"] = array_task_id
+    elif raw_job_id:
+        identifiers["slurm_job_id"] = raw_job_id
+
+    if raw_job_id:
+        identifiers["slurm_raw_job_id"] = raw_job_id
+    return identifiers
+
+
 @dataclass(frozen=True)
 class LaunchSnapshot:
     """Immutable descriptor for a sealed source bundle."""
@@ -401,10 +426,9 @@ def write_task_provenance(
         "environment_fingerprint": snapshot.environment_fingerprint,
         "task_index": task_index,
         "task_overrides": list(overrides),
-        "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
-        "slurm_array_task_id": os.environ.get("SLURM_ARRAY_TASK_ID"),
         "slurm_restart_count": os.environ.get("SLURM_RESTART_COUNT", "0"),
     }
+    provenance.update(get_slurm_job_identifiers())
 
     path = output_dir / "provenance.json"
     path.write_text(json.dumps(provenance, indent=2))
@@ -509,14 +533,16 @@ def get_snapshot_provenance_for_wandb(
         "provenance.source_dir": os.environ.get(
             "FOUNDRY_SNAPSHOT_SOURCE_DIR", ""
         ),
-        "provenance.slurm_job_id": os.environ.get("SLURM_JOB_ID", ""),
-        "provenance.slurm_array_task_id": os.environ.get(
-            "SLURM_ARRAY_TASK_ID", ""
-        ),
         "provenance.slurm_restart_count": os.environ.get(
             "SLURM_RESTART_COUNT", "0"
         ),
     }
+    provenance.update(
+        {
+            f"provenance.{key}": value
+            for key, value in get_slurm_job_identifiers().items()
+        }
+    )
     return {k: v for k, v in provenance.items() if v}
 
 

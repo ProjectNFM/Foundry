@@ -1,6 +1,6 @@
 # NeuralBench Matched EEGNet — Three-Task Test Parity
 
-**Status:** Draft
+**Status:** In Progress
 **Date started:** 2026-08-21
 **Parent experiment:** [NeuralBench Phase 1 — Motor Imagery & Sleep Stage EEGNet Comparison](20260820-MS-neuralbench-phase1-mi-sleep-comparison.md)
 **Follow-up experiments:** TBD
@@ -91,7 +91,20 @@ partition, for nine training-and-test jobs in total.
 
 ## Results
 
-TBD
+### Submission
+
+| Task | Slurm array | Snapshot bundle |
+|---|---|---|
+| P300 | `10438103_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260821T174353_NB_P300_EEGNET_MATCHED_3edfa24f_aeea2fbc` |
+| Motor Imagery | `10438105_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260821T174411_NB_MI_EEGNET_MATCHED_3edfa24f_283905a4` |
+| Sleep Stage | `10438107_[0-2]` | `/network/scratch/s/sobralm/foundry-launches/20260821T174428_NB_SLEEP_EEGNET_MATCHED_3edfa24f_a439c4c8` |
+
+Nine jobs were submitted on 2026-08-21. Results pending.
+
+Sleep Stage seed 34 (`10438107_1`; Slurm raw element ID `10438115`) failed
+before training on `cn-e002`: it was assigned a V100 and the installed PyTorch
+build has no compatible CUDA kernel. The matched configs now explicitly request
+L40S GPUs; this seed will be relaunched from the corrected snapshot.
 
 ## Conclusions
 

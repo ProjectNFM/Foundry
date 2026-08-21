@@ -584,17 +584,12 @@ def _log_config_to_wandb(trainer, cfg: DictConfig):
         for key in loggable_keys
         if key in cfg
     }
-    slurm_job_id = os.environ.get("SLURM_JOB_ID")
-    if slurm_job_id:
-        config_to_log["slurm_job_id"] = slurm_job_id
-        array_task_id = os.environ.get("SLURM_ARRAY_TASK_ID")
-        if array_task_id:
-            config_to_log["slurm_array_task_id"] = array_task_id
-
     from hydra_plugins.foundry_launcher.launch_snapshot import (
+        get_slurm_job_identifiers,
         get_snapshot_provenance_for_wandb,
     )
 
+    config_to_log.update(get_slurm_job_identifiers())
     provenance = get_snapshot_provenance_for_wandb()
     if provenance:
         config_to_log.update(provenance)
@@ -754,12 +749,16 @@ def main(cfg: DictConfig):
     logger.info("Starting training: %s", cfg.run.name)
 
     slurm_restart_count = _get_slurm_restart_count()
-    slurm_job_id = os.environ.get("SLURM_JOB_ID")
-    if slurm_job_id:
+    from hydra_plugins.foundry_launcher.launch_snapshot import (
+        get_slurm_job_identifiers,
+    )
+
+    slurm_ids = get_slurm_job_identifiers()
+    if slurm_ids:
         logger.info(
-            "SLURM job_id=%s array_task=%s restart_count=%s",
-            slurm_job_id,
-            os.environ.get("SLURM_ARRAY_TASK_ID"),
+            "SLURM job_id=%s raw_job_id=%s restart_count=%s",
+            slurm_ids["slurm_job_id"],
+            slurm_ids.get("slurm_raw_job_id"),
             slurm_restart_count,
         )
 
