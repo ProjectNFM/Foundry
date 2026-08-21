@@ -1,6 +1,6 @@
 # NeuralBench Phase 1 — Motor Imagery & Sleep Stage EEGNet Comparison
 
-**Status:** In progress (data downloading)
+**Status:** In progress (NeuralBench reference seed 33 complete; Foundry comparison pending)
 **Date started:** 2026-08-20
 **Parent experiment:** [P300 EEGNet Comparison](./20260820-MS-neuralbench-p300-eegnet-comparison.md)
 **Follow-up experiments:** Phase 2 — Generic task onboarding
@@ -48,8 +48,8 @@ reference EEGNet on these tasks?
 ### Setup — Motor Imagery
 
 - **NeuralBench task:** `motor_imagery` / `Schalk2004Bci2000`
-- **Classes:** 4 (imagery_left_fist, imagery_right_fist, imagery_both_fists,
-  imagery_both_feet — exact names TBD from LabelEncoder)
+- **Classes:** 4 (imagery_bilateral_feet, imagery_bilateral_fist,
+  imagery_left_fist, imagery_right_fist; verified from the LabelEncoder)
 - **Model:** Foundry EEGNetEncoder (F1=8, D=2, F2=16, kernel=64, dropout=0.5,
   num_samples=480)
 - **Training:** AdamW lr=1e-4, weight_decay=0.05, 40 epochs, patience=5
@@ -104,28 +104,49 @@ uv run neuralbench --grid --force --model eegnet eeg sleep_stage
 
 ## Results
 
-*To be filled after runs complete.*
+### Summary
+
+NeuralBench EEGNet seed 33 completed locally on one L40S for both task--dataset
+pairs. Both datasets passed the adapter/data verification before training:
+Schalk2004Bci2000 loaded all 1,526 timelines with the expected four labels,
+and Kemp2000Analysis loaded its 153 recordings with the expected five labels.
+The scores are NeuralBench **test** metrics; Foundry validation results have
+not yet been collected, so this is the baseline half of the comparison.
 
 ### Motor Imagery
 
 | Side | Balanced Acc. | AUROC | F1 (macro) | Train time (s) | Epochs |
 |------|-------------|-------|-----------|----------------|--------|
 | Foundry EEGNet (val) | — | — | — | — | — |
-| NeuralBench EEGNet (val) | — | — | — | — | — |
+| NeuralBench EEGNet (test, seed 33) | 0.5949 | 0.8134 | 0.5890 | 85.8 | best 29; stopped 34 |
 
 ### Sleep Stage
 
 | Side | Balanced Acc. | AUROC | F1 (macro) | Train time (s) | Epochs |
 |------|-------------|-------|-----------|----------------|--------|
 | Foundry EEGNet (val) | — | — | — | — | — |
-| NeuralBench EEGNet (val) | — | — | — | — | — |
+| NeuralBench EEGNet (test, seed 33) | 0.6849 | 0.9159 | 0.6179 | 869.1 | — |
 
 ### Timing Analysis
 
 | Task | Foundry time | NeuralBench time | Ratio | Notes |
 |------|-------------|-----------------|-------|-------|
-| MI | — | — | — | — |
-| Sleep | — | — | — | — |
+| MI | — | 85.8 s | — | 3,092 parameters; early stopping selected epoch 29 |
+| Sleep | — | 869.1 s | — | 10,101 parameters |
+
+### Analysis
+
+NeuralBench v0.2.3 local job artifacts (W&B logging was disabled) are stored
+under `/network/scratch/s/sobralm/neuralbench-results/`:
+
+- MI: `.../seed=33,task_name=motor_imagery,...-9e4eb200/job.pkl`
+- Sleep: `.../seed=33,task_name=sleep_stage,...-3925ff96/job.pkl`
+
+The direct comparison reference is the NeuralBench v0.2.3 three-seed
+(33--35) distribution on each exact task--dataset pair. The published
+NeuralBench headline MI protocol uses its default Stieger2021Continuous
+dataset rather than Schalk2004Bci2000, so it is not a strict numeric reference
+for the MI result above.
 
 ### Potential sources of major discrepancies
 
