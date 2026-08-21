@@ -36,7 +36,7 @@ class NeuralSetAdapter(torch.utils.data.Dataset):
         channel_names: Ordered list of EEG channel names for this task.
         sampling_rate: Signal sampling rate in Hz.
         split: Split name (``"train"``, ``"val"``, or ``"test"``).
-        label_map: Mapping from one-hot argmax index to string label name.
+        label_map: Mapping from one-hot argmax index to raw task label.
         label_attr: Name of the ``Interval`` attribute holding the label.
         interval_name: Name of the ``Interval`` on the ``Data`` object.
         session_prefix: Prefix for synthetic session IDs.
@@ -53,7 +53,7 @@ class NeuralSetAdapter(torch.utils.data.Dataset):
         sampling_rate: float,
         split: str,
         *,
-        label_map: dict[int, str],
+        label_map: dict[int, str | int],
         label_attr: str = "targets",
         interval_name: str = "p300_trials",
         session_prefix: str = "nb/p3",
@@ -114,8 +114,7 @@ class NeuralSetAdapter(torch.utils.data.Dataset):
         n_timepoints, n_channels = signal.shape
         if n_channels != len(self.channel_names):
             raise ValueError(
-                f"Expected {len(self.channel_names)} channels, "
-                f"got {n_channels}"
+                f"Expected {len(self.channel_names)} channels, got {n_channels}"
             )
         duration = n_timepoints / self.sampling_rate
 
@@ -126,8 +125,7 @@ class NeuralSetAdapter(torch.utils.data.Dataset):
         class_idx = int(np.argmax(target.flatten()))
         if class_idx not in self.label_map:
             raise ValueError(
-                f"One-hot argmax {class_idx} not in label_map "
-                f"{self.label_map}"
+                f"One-hot argmax {class_idx} not in label_map {self.label_map}"
             )
         label_name = self.label_map[class_idx]
 

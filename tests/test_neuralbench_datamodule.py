@@ -10,7 +10,10 @@ import numpy as np
 import torch
 
 from foundry.data.neuralbench.adapter import NeuralSetAdapter
-from foundry.data.neuralbench.datamodule import NeuralBenchDataModule
+from foundry.data.neuralbench.datamodule import (
+    NeuralBenchDataModule,
+    _build_label_map_from_encoder,
+)
 from foundry.tasks.config import TaskConfig
 
 
@@ -78,6 +81,12 @@ def _install_mock_neuralbench(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "neuralbench.registry", registry)
 
 
+def test_label_map_preserves_numeric_neuralbench_labels():
+    target = type("Target", (), {"_label_to_ind": {1: 0, 2: 1}})()
+
+    assert _build_label_map_from_encoder(target) == {0: 1, 1: 2}
+
+
 def test_setup_uses_mocked_splits_and_exposes_metadata(monkeypatch):
     _NBData.loaders = {
         "train": _Loader([_sample(1), _sample(1, (0, 1))]),
@@ -97,7 +106,11 @@ def test_setup_uses_mocked_splits_and_exposes_metadata(monkeypatch):
     assert len(dm._train_adapter) == 2
     assert len(dm._val_adapter) == 1
     assert len(dm._test_adapter) == 1
-    assert dm.get_recording_ids() == ["nb/p3/sub-1", "nb/p3/sub-2", "nb/p3/sub-3"]
+    assert dm.get_recording_ids() == [
+        "nb/p3/sub-1",
+        "nb/p3/sub-2",
+        "nb/p3/sub-3",
+    ]
     assert dm.get_channel_ids() == [
         "nb/p3/sub-1/Cz",
         "nb/p3/sub-1/Pz",

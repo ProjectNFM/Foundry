@@ -31,11 +31,12 @@ def _require_neuralbench() -> None:
         ) from exc
 
 
-def _build_label_map_from_encoder(target_extractor) -> dict[int, str]:
+def _build_label_map_from_encoder(target_extractor) -> dict[int, str | int]:
     """Invert the NeuralBench LabelEncoder's label-to-index mapping.
 
-    Returns a dict mapping one-hot argmax indices to the original label
-    strings. Works for both string and integer label encodings.
+    Returns a dict mapping one-hot argmax indices to the original label values.
+    Preserving integer labels is required for task mappings such as NeuralBench
+    P300, whose encoder emits stimulus codes 1 and 2 rather than descriptions.
     """
     label_to_ind = getattr(target_extractor, "_label_to_ind", None)
     if not label_to_ind:
@@ -43,7 +44,7 @@ def _build_label_map_from_encoder(target_extractor) -> dict[int, str]:
             "Cannot auto-discover label map: target extractor has no "
             "_label_to_ind mapping. Provide an explicit label_map."
         )
-    return {idx: str(label) for label, idx in label_to_ind.items()}
+    return {idx: label for label, idx in label_to_ind.items()}
 
 
 class NeuralBenchDataModule(LightningDataModule):
@@ -68,7 +69,7 @@ class NeuralBenchDataModule(LightningDataModule):
             :meth:`set_tokenizer`).
         task_configs: Per-task :class:`TaskConfig` dicts; set by
             ``main.py`` after instantiation.
-        label_map: Mapping from one-hot argmax index to string label.
+        label_map: Mapping from one-hot argmax index to raw task label.
         label_attr: Interval attribute name for labels.
         interval_name: Interval name on the Data object.
         session_prefix: Prefix for synthetic session IDs.
@@ -84,7 +85,7 @@ class NeuralBenchDataModule(LightningDataModule):
         pin_memory: bool = False,
         tokenizer: Optional[Callable] = None,
         task_configs: Optional[dict] = None,
-        label_map: Optional[dict[int, str]] = None,
+        label_map: Optional[dict[int, str | int]] = None,
         label_attr: str = "targets",
         interval_name: str = "p300_trials",
         session_prefix: Optional[str] = None,
@@ -185,9 +186,7 @@ class NeuralBenchDataModule(LightningDataModule):
         # Auto-discover label map from the NeuralBench LabelEncoder
         if self.label_map is None:
             self.label_map = _build_label_map_from_encoder(nb_data.target)
-            logger.info(
-                "Auto-discovered label map: %s", self.label_map
-            )
+            logger.info("Auto-discovered label map: %s", self.label_map)
 
         logger.info(
             "NeuralBench %s/%s: %d channels @ %.0f Hz, splits=%s",
@@ -305,8 +304,16 @@ class NeuralBenchDataModule(LightningDataModule):
         ds = self._train_adapter.nb_dataset
         for i in range(len(ds)):
             sample = ds[i]
-            target = sample["target"] if isinstance(sample, dict) else sample.data["target"]
-            target_np = target.numpy() if hasattr(target, "numpy") else np.asarray(target)
+            target = (
+                sample["target"]
+                if isinstance(sample, dict)
+                else sample.data["target"]
+            )
+            target_np = (
+                target.numpy()
+                if hasattr(target, "numpy")
+                else np.asarray(target)
+            )
             source_idx = int(np.argmax(target_np.flatten()))
             try:
                 label = self.label_map[source_idx]
@@ -323,9 +330,9 @@ class NeuralBenchDataModule(LightningDataModule):
                     class_idx = source_idx
                 else:
                     class_idx = int(
-                        cfg.class_mapping.map_to_class_ids(
-                            np.asarray([label])
-                        )[0]
+                        cfg.class_mapping.map_to_class_ids(np.asarray([label]))[
+                            0
+                        ]
                     )
                     if class_idx < 0:
                         raise ValueError(
