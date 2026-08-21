@@ -103,10 +103,11 @@ Nine jobs were submitted on 2026-08-21. Results pending.
 
 Sleep Stage seed 34 (`10438107_1`; Slurm raw element ID `10438115`) failed
 before training on `cn-e002`: it was assigned a V100 and the installed PyTorch
-build has no compatible CUDA kernel. The matched configs now explicitly request
-L40S GPUs. Seed 34 was relaunched as `10438514` from snapshot
-`/network/scratch/s/sobralm/foundry-launches/20260821T180554_NB_SLEEP_EEGNET_MATCHED_51eb1a12_b00b0fc9`;
-it is pending on the `long` partition with `gres/gpu:l40s:1`.
+build has no compatible CUDA kernel. The current matched configs explicitly
+request RTX 8000 GPUs. The interim L40S replacement (`10438514`) was cancelled
+while pending; seed 34 was relaunched as `10439024` from snapshot
+`/network/scratch/s/sobralm/foundry-launches/20260821T185904_NB_SLEEP_EEGNET_MATCHED_22c8c4a0_8379129b`.
+It is pending on the `long` partition with `gres/gpu:rtx8000:1`.
 
 ## Conclusions
 
