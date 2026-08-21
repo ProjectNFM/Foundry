@@ -1,6 +1,6 @@
 # NeuralBench Phase 1 — Motor Imagery & Sleep Stage EEGNet Comparison
 
-**Status:** In progress (NeuralBench reference seed 33 complete; Foundry comparison pending)
+**Status:** Completed
 **Date started:** 2026-08-20
 **Parent experiment:** [P300 EEGNet Comparison](./20260820-MS-neuralbench-p300-eegnet-comparison.md)
 **Follow-up experiments:** Phase 2 — Generic task onboarding
@@ -54,7 +54,7 @@ reference EEGNet on these tasks?
   num_samples=480)
 - **Training:** AdamW lr=1e-4, weight_decay=0.05, 40 epochs, patience=5
 - **WandB:** project=foundry-neuralbench, group=NB_MI_EEGNET_COMPARISON
-- **Seed:** 33 (single seed for initial comparison)
+- **Seeds:** 33, 34, 35
 
 ### Setup — Sleep Stage
 
@@ -64,7 +64,7 @@ reference EEGNet on these tasks?
   num_samples=3600)
 - **Training:** AdamW lr=1e-4, weight_decay=0.05, 40 epochs, patience=5
 - **WandB:** project=foundry-neuralbench, group=NB_SLEEP_EEGNET_COMPARISON
-- **Seed:** 33 (single seed for initial comparison)
+- **Seeds:** 33, 34, 35
 
 ### Launch commands
 
@@ -91,7 +91,7 @@ uv run neuralbench --grid --force --model eegnet eeg sleep_stage
 | `loss.label_smoothing` | 0.1 | Matches NeuralBench contract |
 | `class_weights.mode` | auto | Matches `compute_class_weights=true` |
 | `trainer.precision` | 32-true | Matches NeuralBench |
-| `seed` | 33 | Single seed for this comparison |
+| `seed` | 33, 34, 35 | Three-seed comparison protocol |
 
 ### Known implementation differences (same as P300)
 
@@ -106,74 +106,91 @@ uv run neuralbench --grid --force --model eegnet eeg sleep_stage
 
 ### Summary
 
-NeuralBench EEGNet seed 33 completed locally on one L40S for both task--dataset
-pairs. Both datasets passed the adapter/data verification before training:
-Schalk2004Bci2000 loaded all 1,526 timelines with the expected four labels,
-and Kemp2000Analysis loaded its 153 recordings with the expected five labels.
-The scores are NeuralBench **test** metrics; Foundry validation results have
-not yet been collected, so this is the baseline half of the comparison.
+All three seeds completed for each task and implementation. Both datasets passed
+adapter/data verification before training: Schalk2004Bci2000 loaded all 1,526
+timelines with the expected four labels, and Kemp2000Analysis loaded all 153
+recordings with the expected five labels.
+
+NeuralBench values are **test** metrics evaluated at its best-validation
+checkpoint. Foundry values are the best **validation** metrics logged to WandB;
+the comparison therefore remains val-vs-test rather than a fully apples-to-
+apples test-set evaluation. Sleep Staging reproduces the reference closely
+enough for this validation. Motor Imagery does not yet: its mean
+balanced-accuracy gap is 6.6 pp, above the pre-specified 5 pp target.
 
 ### Motor Imagery
 
-| Side | Balanced Acc. | AUROC | F1 (macro) | Train time (s) | Epochs |
-|------|-------------|-------|-----------|----------------|--------|
-| Foundry EEGNet (val) | — | — | — | — | — |
-| NeuralBench EEGNet (test, seed 33) | 0.5949 | 0.8134 | 0.5890 | 85.8 | best 29; stopped 34 |
+| Side | Balanced Acc. | AUROC | F1 (macro) | Accuracy | Runtime (s) |
+|------|-------------|-------|------------|----------|-------------|
+| Foundry EEGNet (best val, mean ± SD) | 0.5200 ± 0.0057 | 0.7648 ± 0.0050 | 0.5183 ± 0.0066 | 0.5200 ± 0.0059 | 161 ± 5 (W&B) |
+| NeuralBench EEGNet (test, mean ± SD) | 0.5858 ± 0.0124 | 0.8119 ± 0.0071 | 0.5799 ± 0.0126 | 0.5859 ± 0.0124 | 93 ± 6 |
+| Difference (Foundry − NeuralBench) | **−0.0659** | −0.0471 | −0.0617 | −0.0659 | — |
+
+Foundry runs: nb_mi_eegnet_seed33 (iwko4s5v),
+nb_mi_eegnet_seed34 (t1dljt8a), and
+nb_mi_eegnet_seed35 (4155ejdp). All ran through epoch 39 (40 epochs).
 
 ### Sleep Stage
 
-| Side | Balanced Acc. | AUROC | F1 (macro) | Train time (s) | Epochs |
-|------|-------------|-------|-----------|----------------|--------|
-| Foundry EEGNet (val) | — | — | — | — | — |
-| NeuralBench EEGNet (test, seed 33) | 0.6849 | 0.9159 | 0.6179 | 869.1 | — |
+| Side | Balanced Acc. | AUROC | F1 (macro) | Accuracy | Runtime (s) |
+|------|-------------|-------|------------|----------|-------------|
+| Foundry EEGNet (best val, mean ± SD) | 0.6614 ± 0.0060 | 0.9054 ± 0.0022 | 0.6032 ± 0.0129 | 0.6748 ± 0.0096 | 797 ± 337 (W&B) |
+| NeuralBench EEGNet (test, mean ± SD) | 0.6746 ± 0.0090 | 0.9129 ± 0.0027 | 0.5983 ± 0.0172 | 0.6749 ± 0.0141 | 601 ± 232 |
+| Difference (Foundry − NeuralBench) | **−0.0132** | −0.0074 | +0.0049 | −0.0001 | — |
+
+Foundry runs: nb_sleep_eegnet_seed33 (beljhv9g),
+nb_sleep_eegnet_seed34 (4fuehuj3), and
+nb_sleep_eegnet_seed35 (kowurvun). They completed through epochs 9, 22,
+and 14, respectively, with early stopping.
 
 ### Timing Analysis
 
-| Task | Foundry time | NeuralBench time | Ratio | Notes |
-|------|-------------|-----------------|-------|-------|
-| MI | — | 85.8 s | — | 3,092 parameters; early stopping selected epoch 29 |
-| Sleep | — | 869.1 s | — | 10,101 parameters |
+| Task | Foundry W&B runtime | NeuralBench trainer time | Notes |
+|------|---------------------|-------------------------|-------|
+| MI | 161 ± 5 s | 93 ± 6 s | Foundry completed 40 epochs; NeuralBench stopped early. |
+| Sleep | 797 ± 337 s | 601 ± 232 s | Both implementations stopped at seed-dependent epochs. |
+
+These timing fields are not strictly comparable: Foundry's W&B runtime
+includes process-level overhead, while NeuralBench records trainer time.
 
 ### Analysis
 
+The reproducible analysis script fetches Foundry metrics from WandB and reads
+the completed local NeuralBench artifacts:
+
+    uv run python analysis/20260820-MS-neuralbench-phase1-mi-sleep-comparison_analysis.py
+
 NeuralBench v0.2.3 local job artifacts (W&B logging was disabled) are stored
-under `/network/scratch/s/sobralm/neuralbench-results/`:
+under /network/scratch/s/sobralm/neuralbench-results/. The direct reference
+is its three-seed (33--35) distribution on each exact task--dataset pair.
+The published NeuralBench headline MI protocol uses its default
+Stieger2021Continuous dataset rather than Schalk2004Bci2000, so it is not a
+strict numeric reference for this MI result.
 
-- MI: `.../seed=33,task_name=motor_imagery,...-9e4eb200/job.pkl`
-- Sleep: `.../seed=33,task_name=sleep_stage,...-3925ff96/job.pkl`
+### Figures
 
-The direct comparison reference is the NeuralBench v0.2.3 three-seed
-(33--35) distribution on each exact task--dataset pair. The published
-NeuralBench headline MI protocol uses its default Stieger2021Continuous
-dataset rather than Schalk2004Bci2000, so it is not a strict numeric reference
-for the MI result above.
-
-### Potential sources of major discrepancies
-
-1. **Dropout rate (0.5 vs 0.25):** Foundry uses higher dropout which increases
-   regularization, potentially hurting performance on smaller datasets but helping
-   on larger ones.
-2. **LR schedule:** OneCycleLR (NeuralBench) reaches higher peak LR then decays,
-   often faster convergence. Foundry uses constant LR.
-3. **Class weighting implementation:** Both compute weights from training labels
-   but the exact formula and smoothing may differ.
-4. **Epoch length / model capacity:** Sleep Stage has 3600 samples (30s @ 120 Hz)
-   which is very large for EEGNet. The temporal conv kernel (64) spans only
-   ~0.5s; this may work differently in both implementations.
-5. **Data preprocessing:** Both use NeuralBench's preprocessing (0.1–75 Hz filter,
-   50/60 Hz notch, RobustScaler, clamp ±20). Any difference would indicate an
-   adapter bug, not an expected gap.
-6. **Split assignment:** Both use NeuralBench's subject-split (seed=33). A
-   difference here would be a critical bug.
+![Balanced-accuracy comparison](../../analysis/figures/20260820-MS-neuralbench-phase1-mi-sleep-comparison_analysis_balanced_accuracy.png)
 
 ## Conclusions
 
-*To be filled after analysis.*
+The adapter generalized operationally to both tasks, and **Sleep Staging is
+validated** for the present Foundry-vs-NeuralBench check: its 1.3 pp mean
+balanced-accuracy gap is comfortably within the 5 pp target, with near-identical
+accuracy and a slightly higher Foundry macro-F1.
+
+**Motor Imagery needs further investigation.** Its 6.6 pp balanced-accuracy
+gap, together with lower AUROC and macro-F1, exceeds the target despite matching
+the dataset, subject split, labels, class weighting, optimizer, and epoch cap.
+The documented dropout, scheduler, BatchNorm-momentum, and spatial-max-norm
+differences are leading candidates; the val-vs-test metric mismatch remains an
+important caveat.
 
 ## Notes for future experiments
 
-- Run 3-seed protocol (33, 34, 35) for statistical significance once
-  single-seed parity is confirmed.
-- Test with `dropout_rate=0.25` to quantify dropout contribution.
-- Expand to Stieger2021 (MI default dataset with more subjects).
-- Add POYO-EEG evaluation on both tasks.
+- For Motor Imagery, test dropout_rate=0.25 and OneCycleLR separately to
+  quantify their contributions.
+- Add a Foundry test-set evaluation using NeuralBench's exact split so the
+  comparison is test-vs-test.
+- Verify the EEGNet BatchNorm momentum and spatial max-norm effects on MI.
+- Expand the validated adapter to Stieger2021Continuous and add POYO-EEG
+  evaluations for both tasks.
