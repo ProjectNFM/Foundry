@@ -106,7 +106,7 @@ hydra:
     tasks_per_node: 1
     cpus_per_task: 10
     mem_gb: 64
-    gres: gpu:l40s:1
+    gres: gpu:rtx8000:1
     timeout_min: 360
     partition: long
     setup:
