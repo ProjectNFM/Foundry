@@ -9,7 +9,7 @@ defaults:
   - _self_
 
 run:
-  name: nb_p300_poyo_dynamic_channel_${hydra:runtime.choices.model/tokenizer}_gpu_profile
+  name: nb_p300_poyo_dynamic_channel_cwt_gpu_profile
   group: NB_P300_POYO_TOKENIZER_PROFILE
   evaluate_test: false
 
@@ -19,7 +19,7 @@ trainer:
   limit_val_batches: 0
   profiler:
     _target_: lightning.pytorch.profilers.PyTorchProfiler
-    dirpath: ${hydra:runtime.output_dir}/profiler
+    dirpath: /network/scratch/s/sobralm/runs/NB_P300_POYO_TOKENIZER_PROFILE/profiler
     filename: p300_poyo
     export_to_chrome: true
     row_limit: ${profiling.row_limit}
@@ -32,7 +32,7 @@ trainer:
       repeat: ${profiling.schedule.repeat}
     on_trace_ready:
       _target_: torch.profiler.tensorboard_trace_handler
-      dir_name: ${hydra:runtime.output_dir}/profiler
+      dir_name: /network/scratch/s/sobralm/runs/NB_P300_POYO_TOKENIZER_PROFILE/profiler
     record_shapes: ${profiling.record_shapes}
     profile_memory: ${profiling.profile_memory}
     with_stack: ${profiling.with_stack}
