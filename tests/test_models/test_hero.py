@@ -322,6 +322,31 @@ def test_temporal_slots_distinguish_equal_mean_local_patterns():
     assert not torch.allclose(first_reduced, second_reduced)
 
 
+def test_no_temporal_slots_uses_mask_aware_mean_reduction():
+    torch.manual_seed(13)
+    reduction = TemporalReduction(
+        embed_dim=8,
+        num_temporal_slots=2,
+        num_heads=2,
+        aggregation="mean",
+    ).eval()
+    x = torch.randn(1, 128, 8)
+    valid = torch.ones(1, 128, dtype=torch.bool)
+    valid[:, 64] = False
+
+    with torch.no_grad():
+        reduced, timestamps, reduced_valid, support = reduction(
+            x, torch.arange(128)[None] / 128, valid
+        )
+
+    assert reduction.aggregation == "mean"
+    assert not hasattr(reduction, "slot_queries")
+    assert not hasattr(reduction, "gate_proj")
+    assert reduced.shape == (1, 32, 8)
+    assert timestamps.shape == reduced_valid.shape == support.shape == (1, 32)
+    assert torch.isfinite(reduced).all()
+
+
 def test_spatial_slots_are_sensitive_to_an_unmasked_channel():
     torch.manual_seed(3)
     mixer = SpatialSlotMixer(embed_dim=8, num_slots=2, num_heads=2)
@@ -388,6 +413,26 @@ def test_top_down_zero_gate_preserves_nonzero_fine_residual():
 
     assert fine.abs().sum() > 0
     assert torch.equal(output, fine)
+
+
+def test_top_down_add_control_uses_ungated_aligned_residual():
+    align = AlignedGatedResidual(embed_dim=4, fusion="add").eval()
+    fine = torch.zeros(1, 1, 4)
+    coarse = torch.tensor([[[1.0, 2.0, 4.0, 8.0]]])
+    intervals = torch.tensor([[[0.0, 1.0]]])
+
+    output, output_intervals = align(
+        fine,
+        coarse,
+        fine_rf_intervals=intervals,
+        coarse_rf_intervals=intervals,
+    )
+
+    expected = align.proj(align.layer_norm(coarse))
+    assert align.fusion == "add"
+    assert not hasattr(align, "gate_proj")
+    assert torch.allclose(output, expected)
+    assert torch.equal(output_intervals, intervals)
 
 
 def test_top_down_alignment_does_not_materialize_dense_pairwise_weights():
@@ -514,6 +559,74 @@ def test_duration_growth_and_channel_growth_only_change_expected_dimensions(
         == 2 * short.coverage.mid_valid.shape[1]
     )
     assert many_channels.content.shape == short.content.shape
+
+
+def test_flat_control_reuses_prefusion_path_and_has_configurable_depth():
+    flat = HEROModel(
+        task_configs={},
+        num_channels=4,
+        embed_dim=8,
+        num_attn_heads=2,
+        num_spatial_slots=1,
+        num_local_attn_blocks=1,
+        temporal_mode="flat",
+        flat_num_local_attn_blocks=3,
+    ).eval()
+
+    representation = encode(flat, torch.randn(1, 4, 128))
+
+    assert flat.temporal_mode == "flat"
+    assert flat.spatial_mixer.num_slots == 1
+    assert len(flat.encoder.fine_attns) == 3
+    assert not hasattr(flat.encoder, "fine_to_mid")
+    assert representation.content.shape == (1, 128, 8)
+    assert representation.coverage.mid_valid.shape == (1, 0)
+    assert representation.coverage.coarse_valid.shape == (1, 0)
+    assert representation.coverage.mid_rf_intervals.shape == (1, 0, 2)
+    assert representation.coverage.coarse_rf_intervals.shape == (1, 0, 2)
+
+
+def test_hierarchical_ablation_options_compose():
+    ablation = HEROModel(
+        task_configs={},
+        num_channels=2,
+        embed_dim=8,
+        num_attn_heads=2,
+        num_spatial_slots=1,
+        num_temporal_slots=2,
+        num_local_attn_blocks=0,
+        temporal_reduction="mean",
+        top_down_fusion="add",
+    ).eval()
+
+    representation = encode(ablation, torch.randn(1, 2, 128))
+
+    assert ablation.encoder.fine_to_mid.aggregation == "mean"
+    assert ablation.encoder.mid_to_coarse.aggregation == "mean"
+    assert ablation.encoder.coarse_to_mid_align.fusion == "add"
+    assert ablation.encoder.mid_to_fine_align.fusion == "add"
+    assert representation.content.shape == (1, 128, 8)
+    assert torch.isfinite(representation.content).all()
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"temporal_mode": "global"}, "temporal_mode"),
+        ({"flat_num_local_attn_blocks": -1}, "flat_num_local_attn_blocks"),
+        ({"temporal_reduction": "max"}, "temporal_reduction"),
+        ({"top_down_fusion": "replace"}, "top_down_fusion"),
+    ],
+)
+def test_invalid_experiment_ladder_options_fail_early(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        HEROModel(
+            task_configs={},
+            num_channels=2,
+            embed_dim=8,
+            num_attn_heads=2,
+            **kwargs,
+        )
 
 
 def test_batch_order_does_not_change_each_example(model):

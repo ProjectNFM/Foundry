@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import torch
@@ -34,6 +34,11 @@ if TYPE_CHECKING:
     from foundry.tasks.config import TaskConfig
 
 __all__ = ["HEROModel", "Representation", "TaskQueryCrossAttention"]
+
+
+TemporalMode = Literal["hierarchical", "flat"]
+TemporalReductionMode = Literal["slots", "mean"]
+TopDownFusionMode = Literal["gated", "add"]
 
 
 # ---------------------------------------------------------------------------
@@ -448,14 +453,15 @@ class LocalWindowAttention(nn.Module):
 
 
 class TemporalReduction(nn.Module):
-    """Local anti-aliased 4x downsampling with temporal-slot cross-attention.
+    """Local anti-aliased 4x downsampling with selectable aggregation.
 
     Steps:
     1. Fixed 33-tap Kaiser-windowed-sinc depthwise low-pass.
     2. Compute coverage from validity mask convolved with absolute kernel.
     3. Group into 8-token neighborhoods with stride 4.
-    4. ``num_temporal_slots`` (4) learned queries cross-attend per group.
-    5. Concat + gated projection to D dims.
+    4. Aggregate each group with learned temporal slots (reference) or a
+       mask-aware mean (no-temporal-slots control).
+    5. Project and normalize to D dims.
 
     Drops partial tails: ``T_out = T_in // 4``.
     """
@@ -469,14 +475,21 @@ class TemporalReduction(nn.Module):
         num_heads: int = 8,
         stride: int = 4,
         neighborhood: int = 8,
+        aggregation: TemporalReductionMode = "slots",
     ):
         super().__init__()
+        if aggregation not in ("slots", "mean"):
+            raise ValueError(
+                "aggregation must be either 'slots' or 'mean', "
+                f"got {aggregation!r}."
+            )
         self.embed_dim = embed_dim
         self.num_temporal_slots = num_temporal_slots
         self.stride = stride
         self.neighborhood = neighborhood
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
+        self.aggregation = aggregation
 
         kernel = _build_kaiser_lowpass_kernel()
         self.register_buffer("lp_kernel", kernel.unsqueeze(0).unsqueeze(0))
@@ -484,15 +497,23 @@ class TemporalReduction(nn.Module):
         abs_kernel = abs_kernel / abs_kernel.sum()
         self.register_buffer("abs_kernel", abs_kernel.unsqueeze(0).unsqueeze(0))
 
-        self.slot_queries = nn.Parameter(
-            torch.randn(num_temporal_slots, embed_dim) * 0.02
-        )
-        self.slot_q_proj = nn.Linear(embed_dim, embed_dim, bias=False)
-        self.slot_k_proj = nn.Linear(embed_dim, embed_dim, bias=False)
-        self.slot_v_proj = nn.Linear(embed_dim, embed_dim, bias=False)
-
-        self.gate_proj = nn.Linear(num_temporal_slots * embed_dim, embed_dim)
-        self.out_proj = nn.Linear(num_temporal_slots * embed_dim, embed_dim)
+        if aggregation == "slots":
+            if num_temporal_slots <= 0:
+                raise ValueError(
+                    "num_temporal_slots must be positive when aggregation='slots'."
+                )
+            self.slot_queries = nn.Parameter(
+                torch.randn(num_temporal_slots, embed_dim) * 0.02
+            )
+            self.slot_q_proj = nn.Linear(embed_dim, embed_dim, bias=False)
+            self.slot_k_proj = nn.Linear(embed_dim, embed_dim, bias=False)
+            self.slot_v_proj = nn.Linear(embed_dim, embed_dim, bias=False)
+            self.gate_proj = nn.Linear(
+                num_temporal_slots * embed_dim, embed_dim
+            )
+            self.out_proj = nn.Linear(num_temporal_slots * embed_dim, embed_dim)
+        else:
+            self.out_proj = nn.Linear(embed_dim, embed_dim)
         self.layer_norm = nn.LayerNorm(embed_dim)
 
     def _compute_support(
@@ -559,44 +580,13 @@ class TemporalReduction(nn.Module):
             1, self.neighborhood, self.stride
         ).bool()
 
-        S = self.num_temporal_slots
-        H = self.num_heads
-        Dh = self.head_dim
-        N = self.neighborhood
-
-        BT = B * T_out
-        neigh_flat = neighborhoods.reshape(BT, N, D)
-        neigh_valid_flat = neigh_valid.reshape(BT, N)
-
-        q = self.slot_q_proj(self.slot_queries).unsqueeze(0).expand(BT, -1, -1)
-        k = self.slot_k_proj(neigh_flat)
-        v = self.slot_v_proj(neigh_flat)
-
-        q = q.view(BT, S, H, Dh).transpose(1, 2)
-        k = k.view(BT, N, H, Dh).transpose(1, 2)
-        v = v.view(BT, N, H, Dh).transpose(1, 2)
-
-        attn = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(Dh)
-
-        kv_mask = neigh_valid_flat.unsqueeze(1).unsqueeze(2)
-        attn = attn.masked_fill(~kv_mask, float("-inf"))
-
-        any_valid = neigh_valid_flat.any(dim=-1, keepdim=True)
-        any_valid_4d = any_valid.unsqueeze(1).unsqueeze(-1).expand_as(attn)
-        safe_attn = torch.where(any_valid_4d, attn, torch.zeros_like(attn))
-        attn_probs = torch.where(
-            any_valid_4d,
-            F.softmax(safe_attn, dim=-1),
-            torch.zeros_like(attn),
-        )
-
-        slot_out = torch.matmul(attn_probs, v)
-        slot_out = slot_out.transpose(1, 2).reshape(BT, S, D)
-        concat = slot_out.reshape(BT, S * D)
-
-        gate = torch.sigmoid(self.gate_proj(concat))
-        out = self.out_proj(concat) * gate
-        out = self.layer_norm(out).view(B, T_out, D)
+        if self.aggregation == "slots":
+            out = self._aggregate_with_slots(neighborhoods, neigh_valid)
+        else:
+            weights = neigh_valid.unsqueeze(-1).to(neighborhoods.dtype)
+            pooled = (neighborhoods * weights).sum(dim=2)
+            pooled = pooled / weights.sum(dim=2).clamp(min=1.0)
+            out = self.layer_norm(self.out_proj(pooled))
 
         out_timestamps = timestamps[
             :, self.stride // 2 : usable_T : self.stride
@@ -617,6 +607,48 @@ class TemporalReduction(nn.Module):
         out = out * out_valid.unsqueeze(-1).float()
 
         return out, out_timestamps, out_valid, out_support
+
+    def _aggregate_with_slots(
+        self,
+        neighborhoods: torch.Tensor,
+        neigh_valid: torch.Tensor,
+    ) -> torch.Tensor:
+        """Apply the reference learned-slot aggregation to local groups."""
+        B, T_out, N, D = neighborhoods.shape
+        S = self.num_temporal_slots
+        H = self.num_heads
+        Dh = self.head_dim
+        BT = B * T_out
+        neigh_flat = neighborhoods.reshape(BT, N, D)
+        neigh_valid_flat = neigh_valid.reshape(BT, N)
+
+        q = self.slot_q_proj(self.slot_queries).unsqueeze(0).expand(BT, -1, -1)
+        k = self.slot_k_proj(neigh_flat)
+        v = self.slot_v_proj(neigh_flat)
+
+        q = q.view(BT, S, H, Dh).transpose(1, 2)
+        k = k.view(BT, N, H, Dh).transpose(1, 2)
+        v = v.view(BT, N, H, Dh).transpose(1, 2)
+
+        attn = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(Dh)
+        kv_mask = neigh_valid_flat.unsqueeze(1).unsqueeze(2)
+        attn = attn.masked_fill(~kv_mask, float("-inf"))
+
+        any_valid = neigh_valid_flat.any(dim=-1, keepdim=True)
+        any_valid_4d = any_valid.unsqueeze(1).unsqueeze(-1).expand_as(attn)
+        safe_attn = torch.where(any_valid_4d, attn, torch.zeros_like(attn))
+        attn_probs = torch.where(
+            any_valid_4d,
+            F.softmax(safe_attn, dim=-1),
+            torch.zeros_like(attn),
+        )
+
+        slot_out = torch.matmul(attn_probs, v)
+        slot_out = slot_out.transpose(1, 2).reshape(BT, S, D)
+        concat = slot_out.reshape(BT, S * D)
+        gate = torch.sigmoid(self.gate_proj(concat))
+        out = self.out_proj(concat) * gate
+        return self.layer_norm(out).view(B, T_out, D)
 
     def _apply_lowpass(
         self, x: torch.Tensor, valid_mask: torch.Tensor
@@ -639,7 +671,7 @@ class TemporalReduction(nn.Module):
         input_valid: torch.Tensor,
         output_valid: torch.Tensor,
     ) -> torch.Tensor:
-        """Propagate dependency bounds through filtering and slot neighborhoods."""
+        """Propagate dependency bounds through filtering and local groups."""
         lowpass_radius = self.lp_kernel.shape[-1] // 2
         filtered = _expand_receptive_fields(
             intervals,
@@ -679,18 +711,28 @@ class TemporalReduction(nn.Module):
 
 
 class AlignedGatedResidual(nn.Module):
-    """Align coarser features to finer timestamps via receptive-field overlap.
+    """Align and fuse coarser features via receptive-field overlap.
 
     For each fine token, reads the bounded set of coarse tokens whose
     receptive-field intervals overlap that fine token's interval, uses
-    normalized overlap weights, projects, and applies a learned sigmoid gate.
-    The fine residual is always preserved.
+    normalized overlap weights, and projects before gated (reference) or
+    direct addition. The fine residual is always preserved.
     """
 
-    def __init__(self, embed_dim: int = 256):
+    def __init__(
+        self,
+        embed_dim: int = 256,
+        fusion: TopDownFusionMode = "gated",
+    ):
         super().__init__()
+        if fusion not in ("gated", "add"):
+            raise ValueError(
+                f"fusion must be either 'gated' or 'add', got {fusion!r}."
+            )
+        self.fusion = fusion
         self.proj = nn.Linear(embed_dim, embed_dim)
-        self.gate_proj = nn.Linear(embed_dim, embed_dim)
+        if fusion == "gated":
+            self.gate_proj = nn.Linear(embed_dim, embed_dim)
         self.layer_norm = nn.LayerNorm(embed_dim)
 
     def forward(
@@ -774,11 +816,14 @@ class AlignedGatedResidual(nn.Module):
             ).sum(dim=2)
         coarse_aligned = self.layer_norm(coarse_aligned)
 
-        gate = torch.sigmoid(self.gate_proj(coarse_aligned))
         projected = self.proj(coarse_aligned)
 
         has_overlap = (overlap_sum > 0).to(fine.dtype)
-        result = fine + gate * projected * has_overlap
+        if self.fusion == "gated":
+            projected = (
+                torch.sigmoid(self.gate_proj(coarse_aligned)) * projected
+            )
+        result = fine + projected * has_overlap
 
         if fine_valid is not None:
             result = result * fine_valid.unsqueeze(-1).float()
@@ -822,6 +867,8 @@ class HEROEncoder(nn.Module):
         num_local_attn_blocks: int = 2,
         local_window: int = 32,
         num_temporal_slots: int = 4,
+        temporal_reduction: TemporalReductionMode = "slots",
+        top_down_fusion: TopDownFusionMode = "gated",
     ):
         super().__init__()
         self.fine_attns = nn.ModuleList(
@@ -831,7 +878,10 @@ class HEROEncoder(nn.Module):
             ]
         )
         self.fine_to_mid = TemporalReduction(
-            embed_dim, num_temporal_slots, num_attn_heads
+            embed_dim,
+            num_temporal_slots,
+            num_attn_heads,
+            aggregation=temporal_reduction,
         )
         self.mid_attns = nn.ModuleList(
             [
@@ -840,7 +890,10 @@ class HEROEncoder(nn.Module):
             ]
         )
         self.mid_to_coarse = TemporalReduction(
-            embed_dim, num_temporal_slots, num_attn_heads
+            embed_dim,
+            num_temporal_slots,
+            num_attn_heads,
+            aggregation=temporal_reduction,
         )
         self.coarse_attns = nn.ModuleList(
             [
@@ -849,8 +902,12 @@ class HEROEncoder(nn.Module):
             ]
         )
 
-        self.coarse_to_mid_align = AlignedGatedResidual(embed_dim)
-        self.mid_to_fine_align = AlignedGatedResidual(embed_dim)
+        self.coarse_to_mid_align = AlignedGatedResidual(
+            embed_dim, fusion=top_down_fusion
+        )
+        self.mid_to_fine_align = AlignedGatedResidual(
+            embed_dim, fusion=top_down_fusion
+        )
 
     def forward(
         self,
@@ -935,6 +992,61 @@ class HEROEncoder(nn.Module):
             "coarse_valid": coarse_valid,
             "coarse_support": coarse_support,
             "coarse_rf_intervals": coarse_rf_intervals,
+        }
+        return x_fine, meta
+
+
+class FlatTemporalEncoder(nn.Module):
+    """Flat control over the fine stream with no temporal rate hierarchy.
+
+    This control deliberately starts after the same channel encoder and
+    spatial-slot mixer as the reference model. ``num_local_attn_blocks`` is
+    independent so an experiment can select a parameter- or compute-matched
+    flat depth without altering the shared pre-fusion path.
+    """
+
+    def __init__(
+        self,
+        embed_dim: int = 256,
+        num_attn_heads: int = 8,
+        num_local_attn_blocks: int = 2,
+        local_window: int = 32,
+    ):
+        super().__init__()
+        self.fine_attns = nn.ModuleList(
+            [
+                LocalWindowAttention(embed_dim, num_attn_heads, local_window)
+                for _ in range(num_local_attn_blocks)
+            ]
+        )
+
+    def forward(
+        self,
+        x_fine: torch.Tensor,
+        fine_timestamps: torch.Tensor,
+        fine_rf_intervals: torch.Tensor,
+        fine_valid: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        for attn in self.fine_attns:
+            x_fine = attn(x_fine, fine_timestamps, fine_valid)
+            fine_rf_intervals = attn.propagate_receptive_fields(
+                fine_rf_intervals, fine_valid
+            )
+
+        B = x_fine.shape[0]
+        empty = fine_timestamps.new_empty(B, 0)
+        empty_valid = torch.empty(B, 0, dtype=torch.bool, device=x_fine.device)
+        empty_intervals = fine_rf_intervals.new_empty(B, 0, 2)
+        meta = {
+            "mid_timestamps": empty,
+            "mid_valid": empty_valid,
+            "mid_support": empty,
+            "fine_rf_intervals": fine_rf_intervals,
+            "mid_rf_intervals": empty_intervals,
+            "coarse_timestamps": empty,
+            "coarse_valid": empty_valid.clone(),
+            "coarse_support": empty.clone(),
+            "coarse_rf_intervals": empty_intervals.clone(),
         }
         return x_fine, meta
 
@@ -1030,18 +1142,34 @@ class TaskQueryCrossAttention(nn.Module):
         if N_out == 0:
             return content.new_zeros(B, 0, D)
 
-        use_time = content_timestamps is not None or output_timestamps is not None
-        if use_time and (content_timestamps is None or output_timestamps is None):
+        use_time = (
+            content_timestamps is not None or output_timestamps is not None
+        )
+        if use_time and (
+            content_timestamps is None or output_timestamps is None
+        ):
             raise ValueError(
                 "content_timestamps and output_timestamps must be provided together."
             )
-        if content_timestamps is not None and content_timestamps.shape != (B, T):
-            raise ValueError("content_timestamps must have shape [batch, content].")
-        if output_timestamps is not None and output_timestamps.shape != (B, N_out):
-            raise ValueError("output_timestamps must have shape [batch, outputs].")
+        if content_timestamps is not None and content_timestamps.shape != (
+            B,
+            T,
+        ):
+            raise ValueError(
+                "content_timestamps must have shape [batch, content]."
+            )
+        if output_timestamps is not None and output_timestamps.shape != (
+            B,
+            N_out,
+        ):
+            raise ValueError(
+                "output_timestamps must have shape [batch, outputs]."
+            )
 
         if content_valid is None:
-            content_valid = torch.ones(B, T, dtype=torch.bool, device=content.device)
+            content_valid = torch.ones(
+                B, T, dtype=torch.bool, device=content.device
+            )
         elif content_valid.shape != (B, T):
             raise ValueError("content_valid must have shape [batch, content].")
 
@@ -1078,9 +1206,12 @@ class TaskQueryCrossAttention(nn.Module):
                 )
                 decay = F.softplus(self.log_time_decay[chunk_task_ids])
                 offset = self.time_offset[chunk_task_ids]
-                temporal_bias = -decay.permute(0, 2, 1).unsqueeze(-1) * (
-                    dt.unsqueeze(1) - offset.permute(0, 2, 1).unsqueeze(-1)
-                ).abs()
+                temporal_bias = (
+                    -decay.permute(0, 2, 1).unsqueeze(-1)
+                    * (
+                        dt.unsqueeze(1) - offset.permute(0, 2, 1).unsqueeze(-1)
+                    ).abs()
+                )
                 logits = logits + temporal_bias.to(logits.dtype)
 
             logits = logits.masked_fill(~key_mask, float("-inf"))
@@ -1166,6 +1297,10 @@ class HEROModel(nn.Module):
         channel_encoder_layers: int = 3,
         channel_encoder_kernel_size: int = 7,
         task_query_chunk_size: int = 256,
+        temporal_mode: TemporalMode = "hierarchical",
+        flat_num_local_attn_blocks: int | None = None,
+        temporal_reduction: TemporalReductionMode = "slots",
+        top_down_fusion: TopDownFusionMode = "gated",
     ):
         super().__init__()
 
@@ -1173,10 +1308,30 @@ class HEROModel(nn.Module):
 
         if canonical_rate != 128:
             raise ValueError("HERO v1 has a fixed 128 Hz canonical rate.")
+        if temporal_mode not in ("hierarchical", "flat"):
+            raise ValueError(
+                "temporal_mode must be either 'hierarchical' or 'flat', "
+                f"got {temporal_mode!r}."
+            )
+        if temporal_reduction not in ("slots", "mean"):
+            raise ValueError(
+                "temporal_reduction must be either 'slots' or 'mean', "
+                f"got {temporal_reduction!r}."
+            )
+        if top_down_fusion not in ("gated", "add"):
+            raise ValueError(
+                "top_down_fusion must be either 'gated' or 'add', "
+                f"got {top_down_fusion!r}."
+            )
+        if flat_num_local_attn_blocks is not None and (
+            flat_num_local_attn_blocks < 0
+        ):
+            raise ValueError("flat_num_local_attn_blocks must be non-negative.")
 
         self.embed_dim = embed_dim
         self.canonical_rate = canonical_rate
         self.num_channels = num_channels
+        self.temporal_mode = temporal_mode
         self._task_configs = TC.normalize_task_configs(task_configs or {})
 
         self.channel_encoder = SharedLocalChannelEncoder(
@@ -1189,13 +1344,28 @@ class HEROModel(nn.Module):
             num_slots=num_spatial_slots,
             num_heads=num_attn_heads,
         )
-        self.encoder = HEROEncoder(
-            embed_dim=embed_dim,
-            num_attn_heads=num_attn_heads,
-            num_local_attn_blocks=num_local_attn_blocks,
-            local_window=local_window,
-            num_temporal_slots=num_temporal_slots,
-        )
+        if temporal_mode == "hierarchical":
+            self.encoder = HEROEncoder(
+                embed_dim=embed_dim,
+                num_attn_heads=num_attn_heads,
+                num_local_attn_blocks=num_local_attn_blocks,
+                local_window=local_window,
+                num_temporal_slots=num_temporal_slots,
+                temporal_reduction=temporal_reduction,
+                top_down_fusion=top_down_fusion,
+            )
+        else:
+            flat_depth = (
+                num_local_attn_blocks
+                if flat_num_local_attn_blocks is None
+                else flat_num_local_attn_blocks
+            )
+            self.encoder = FlatTemporalEncoder(
+                embed_dim=embed_dim,
+                num_attn_heads=num_attn_heads,
+                num_local_attn_blocks=flat_depth,
+                local_window=local_window,
+            )
         self.task_decoder = TaskQueryCrossAttention(
             embed_dim=embed_dim,
             num_tasks=len(self._task_configs),
@@ -1548,7 +1718,9 @@ class HEROModel(nn.Module):
             rep.content,
             task_index,
             content_timestamps=(
-                rep.content_timestamps if output_timestamps is not None else None
+                rep.content_timestamps
+                if output_timestamps is not None
+                else None
             ),
             output_timestamps=output_timestamps,
             content_valid=rep.coverage.fine_valid,

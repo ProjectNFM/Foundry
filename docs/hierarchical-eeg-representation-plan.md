@@ -393,6 +393,16 @@ After the validation phase passes, test from scratch under the common NeuralBenc
 
 The indispensable causal baseline is a **flat control that reuses the new normalized local encoder and spatial-slot mixer**. It changes only the temporal organization. Existing POYO is a practical historical comparator but cannot by itself establish why a new model wins; EEGNet is the absolute task-specific reference.
 
+The model exposes the ladder controls directly through Hydra. The reference
+defaults are `temporal_mode=hierarchical`, `temporal_reduction=slots`, and
+`top_down_fusion=gated`. Set `temporal_mode=flat` for the causal flat control;
+`flat_num_local_attn_blocks` can set its depth independently for explicit
+parameter/compute matching. The no-temporal-slots condition uses
+`temporal_reduction=mean`, while simple aligned top-down addition uses
+`top_down_fusion=add`. Spatial-factor count, width, and local-window sweeps use
+the existing `num_spatial_slots`, `embed_dim`, and `local_window` options; the
+one-factor condition is `num_spatial_slots=1`.
+
 For every trained condition report held-out metrics, parameter count, FLOPs, peak memory, wall-clock time, level token counts, and duration scaling. Do not start pretraining until the winning scratch architecture is both competitive and demonstrably efficient. Pretraining and later label-efficiency/nuisance probes are follow-on experiments.
 
 ## Literature motivation and limits
