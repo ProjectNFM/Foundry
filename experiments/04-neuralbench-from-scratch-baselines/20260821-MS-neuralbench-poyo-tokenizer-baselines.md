@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-08-21
 **Parent experiment:** [NeuralBench Matched EEGNet — Three-Task Test Parity](20260821-MS-neuralbench-matched-test-parity.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [HERO spatial-slot ablation](../inbox/20260824-MS-hero-spatial-slots.md)
 **Tags:** neuralbench, poyo_eeg, tokenizer, from_scratch, baseline, p300, motor_imagery, sleep_stage
 
 ## Background
