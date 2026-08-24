@@ -57,6 +57,7 @@ from foundry.models.baselines import (
     ShallowConvNet,
     EEGNetEncoder,
 )
+from foundry.models.hero import HEROModel
 
 __all__ = [
     "POYOEEGModel",
@@ -99,4 +100,5 @@ __all__ = [
     "SessionEmbeddingCache",
     "ResampleCNNEmbedding",
     "CWTCNNEmbedding",
+    "HEROModel",
 ]

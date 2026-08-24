@@ -1,0 +1,12 @@
+_target_: foundry.models.HEROModel
+
+embed_dim: 256
+canonical_rate: 128
+num_spatial_slots: 8
+num_temporal_slots: 4
+local_window: 32
+num_local_attn_blocks: 2
+num_channels: ${hyperparameters.num_channels}
+num_attn_heads: 8
+channel_encoder_layers: 3
+channel_encoder_kernel_size: 7
