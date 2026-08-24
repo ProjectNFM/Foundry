@@ -1,6 +1,6 @@
 # Multi-Length Pretraining: Do Varied Temporal Scales Produce More Versatile Representations?
 
-**Status:** In Progress (pretraining completed; downstream evaluation resubmitted 2026-08-19 after staging fix)
+**Status:** Completed
 **Date started:** 2026-08-11
 **Parent experiment:** [Data Scaling Group](../02-data-scaling/README.md) (builds on B2 sweet spot)
 **Follow-up experiments:** TBD
@@ -191,14 +191,72 @@ and contain folds 0–2.
 
 ## Results
 
-Pretraining completed for `pretrain_S1_multilength_leak_fixed`. Downstream
-evaluation is in progress; see the submission table above. Results will be
-analyzed after all 18 fold runs have finished.
+### Summary
+
+The multi-length pretraining run (S1) converged much faster than the fixed-2s
+baseline (M0): early stopping triggered at ~63k steps versus M0's ~458k,
+reaching a best validation loss of 0.437 versus 0.246. The higher absolute
+loss is expected given the harder mixed-length reconstruction task, but the
+rapid early-stopping may indicate the mixed-length validation landscape was
+noisier or that the model plateaued quickly.
+
+Downstream evaluation had **severe coverage gaps**: all Brain Invaders P300
+runs crashed instantly (~49s each, likely a config/compatibility issue with
+the multi-length checkpoint), and all Kemp Sleep finetuning runs failed for
+both S1 and M0 (same DataLoader/timeout failures seen in the masking sweep).
+Only PhysioNet MI has complete 3-fold coverage for both conditions; Kemp Sleep
+linear probe has 3 M0 folds and 2 S1 folds.
+
+### Metrics
+
+Best validation F1 across finished folds (mean ± SD):
+
+| Task | Mode | M0: fixed 2s | S1: multi-length | Δ (S1 − M0) |
+|---|---|---:|---:|---:|
+| PhysioNet MI | Finetune | 0.8842 ± 0.0422 (n=3) | 0.8794 ± 0.0454 (n=3) | −0.0048 |
+| PhysioNet MI | Linear probe | 0.6527 ± 0.0381 (n=3) | 0.6571 ± 0.0091 (n=3) | +0.0044 |
+| Kemp Sleep | Linear probe | 0.6362 ± 0.0108 (n=3) | 0.6274 ± 0.0035 (n=2) | −0.0088 |
+| Kemp Sleep | Finetune | no finished folds | no finished folds | — |
+| Brain Invaders P300 | Finetune | 0.3337 ± 0.0210 (n=3) | all crashed | — |
+| Brain Invaders P300 | Linear probe | 0.3001 ± 0.0169 (n=3) | all crashed | — |
+
+Pretraining reconstruction loss: M0 best val = 0.246 (458k steps),
+S1 best val = 0.437 (63k steps).
+
+**Run-state inventory:** 30 downstream runs found (15 M0 + 8 S1 finished;
+3 M0 + 4 S1 failed). The 6 Brain Invaders P300 S1 runs were not found in
+WandB at all (Slurm shows all 6 crashed in ~49s before logging any metrics).
+
+### Analysis
+
+```bash
+uv run python analysis/20260811-MS-multi-length-pretraining_analysis.py
+```
+
+### Figures
+
+![M0 vs S1 pretraining reconstruction loss](../../analysis/figures/20260811-MS-multi-length-pretraining_analysis_pretraining_curves.png)
 
 ## Conclusions
 
-TBD
+**Inconclusive.** The only task with complete 3-fold coverage (PhysioNet MI)
+shows S1 is effectively neutral versus M0: −0.005 on finetuning, +0.004 on
+linear probing, both well within noise given the standard deviations. Kemp
+Sleep linear probe (the primary target of the hypothesis) shows a small
+negative delta (−0.009), but with only 2 S1 folds this is not reliable. The
+hypothesis predicted S1 would improve Kemp Sleep by at least +0.03 F1; the
+available evidence does not support this, but the missing data (P300
+completely, Sleep FT completely, one Sleep LP fold) prevents a firm verdict.
+
+The dramatically shorter S1 pretraining (63k vs 458k steps) is itself
+noteworthy — the mixed-length regime may have caused noisier validation
+signals that triggered early stopping prematurely, meaning S1 may not have
+had sufficient training to develop multi-scale representations.
 
 ## Notes for future experiments
 
-TBD
+- This dimension of exploration (varied temporal scales during pretraining)
+  is **paused** until other aspects of the pipeline are better understood
+  and stabilized — particularly the downstream evaluation failures (Kemp
+  Sleep finetuning, P300 compatibility with non-standard checkpoints) that
+  prevented a clean comparison here.

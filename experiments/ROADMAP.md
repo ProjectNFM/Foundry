@@ -109,10 +109,10 @@ in strategy, attention, latency, physiology, and pathology.
 
 ### Reconstruction loss is a poor representation metric
 
-The [information-leak experiment](./inbox/20260812-MS-channel-encoder-leak-fix-impact.md)
+The [information-leak experiment](./05-pretraining-parameter-exploration/20260812-MS-channel-encoder-leak-fix-impact.md)
 increased pretraining validation loss from 0.0576 to 0.2838 after fixing both
 shortcuts, while downstream transfer changed only slightly. Likewise, the
-[masking sweep](./inbox/20260811-MS-masking-parameter-sweep.md) made
+[masking sweep](./05-pretraining-parameter-exploration/20260811-MS-masking-parameter-sweep.md) made
 reconstruction monotonically harder from mask ratio 0.5 to 0.9 without improving
 motor-imagery or P300 transfer.
 
@@ -176,7 +176,7 @@ tokenizer, and objective are stable.
 
 ### Multi-length pretraining remains exploratory
 
-The [multi-length experiment](./inbox/20260811-MS-multi-length-pretraining.md)
+The [multi-length experiment](./05-pretraining-parameter-exploration/20260811-MS-multi-length-pretraining.md)
 is already running and should be completed and analyzed. Its interpretation is
 limited by two implementation-level confounds:
 
