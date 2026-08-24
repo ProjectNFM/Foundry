@@ -10,3 +10,4 @@ num_channels: ${hyperparameters.num_channels}
 num_attn_heads: 8
 channel_encoder_layers: 3
 channel_encoder_kernel_size: 7
+task_query_chunk_size: 256

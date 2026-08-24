@@ -12,6 +12,7 @@ from foundry.models.hero import (
     AlignedGatedResidual,
     HEROModel,
     SpatialSlotMixer,
+    TaskQueryCrossAttention,
     TemporalReduction,
 )
 from foundry.tasks.config import TaskConfig
@@ -538,6 +539,89 @@ def test_fixed_lowpass_suppresses_energy_above_the_canonical_band():
     assert high_rms < low_rms * 0.25
 
 
+def test_task_query_attention_learns_task_specific_temporal_spans():
+    decoder = TaskQueryCrossAttention(
+        embed_dim=2,
+        num_tasks=2,
+        num_heads=1,
+        query_chunk_size=1,
+    ).eval()
+    with torch.no_grad():
+        decoder.task_queries.weight.zero_()
+        decoder.q_proj.weight.zero_()
+        decoder.k_proj.weight.zero_()
+        decoder.v_proj.weight.copy_(torch.eye(2))
+        decoder.out_proj.weight.copy_(torch.eye(2))
+        decoder.out_proj.bias.zero_()
+        for parameter in decoder.ffn.parameters():
+            parameter.zero_()
+        decoder.log_time_decay[0].fill_(5.0)
+        decoder.log_time_decay[1].fill_(-20.0)
+
+    content = torch.tensor([[[1.0, -1.0], [-1.0, 1.0]]])
+    decoded = decoder(
+        content,
+        torch.tensor([[1, 1, 2]]),
+        content_timestamps=torch.tensor([[0.0, 10.0]]),
+        output_timestamps=torch.tensor([[0.0, 10.0, 0.0]]),
+    )
+
+    # Task 1 is configured as a short-range read and follows the requested
+    # timestamp. Task 2 has nearly global attention and averages the opposing
+    # content even when queried at t=0.
+    assert decoded[0, 0, 0] > 0.9
+    assert decoded[0, 1, 0] < -0.9
+    assert decoded[0, 2].abs().max() < 1e-3
+
+
+def test_task_query_attention_respects_masks_and_chunking():
+    torch.manual_seed(12)
+    decoder = TaskQueryCrossAttention(
+        embed_dim=8,
+        num_tasks=2,
+        num_heads=2,
+        query_chunk_size=1,
+    ).eval()
+    content = torch.randn(2, 5, 8)
+    timestamps = torch.arange(5, dtype=torch.float32).expand(2, -1)
+    task_index = torch.tensor([[1, 2, 1], [2, 1, 2]])
+    output_timestamps = torch.tensor([[0.0, 2.0, 4.0], [1.0, 2.0, 3.0]])
+    valid = torch.tensor(
+        [[True, True, True, False, False], [True, True, True, True, True]]
+    )
+
+    chunked = decoder(
+        content,
+        task_index,
+        content_timestamps=timestamps,
+        output_timestamps=output_timestamps,
+        content_valid=valid,
+    )
+    decoder.query_chunk_size = 32
+    unchunked = decoder(
+        content,
+        task_index,
+        content_timestamps=timestamps,
+        output_timestamps=output_timestamps,
+        content_valid=valid,
+    )
+    changed_padding = content.clone()
+    changed_padding[0, 3:] = 1e6
+    masked = decoder(
+        changed_padding,
+        task_index,
+        content_timestamps=timestamps,
+        output_timestamps=output_timestamps,
+        content_valid=valid,
+    )
+    global_read = decoder(content, task_index, content_valid=valid)
+
+    assert torch.allclose(chunked, unchunked, atol=1e-6)
+    assert torch.allclose(unchunked, masked, atol=1e-6)
+    assert global_read.shape == (2, 3, 8)
+    assert torch.isfinite(global_read).all()
+
+
 def test_two_level_lowpass_prevents_high_frequency_coarse_alias():
     reduction = TemporalReduction(
         embed_dim=1, num_temporal_slots=1, num_heads=1
@@ -612,10 +696,12 @@ def test_tokenize_collate_and_forward_integration():
     )()
 
     batch = collate([integration_model.tokenize(data)])
+    assert batch["output_timestamps"].shape == batch["task_index"].shape
     with torch.no_grad():
         output = integration_model(
             input_values=batch["input_values"],
             input_timestamps=batch["input_timestamps"],
+            output_timestamps=batch["output_timestamps"],
             channel_mask=batch["channel_mask"],
             sample_mask=batch["sample_mask"],
             task_index=batch["task_index"],

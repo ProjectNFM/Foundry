@@ -2,8 +2,9 @@
 
 Implements a three-level temporal hierarchy (fine 128 Hz, mid 32 Hz,
 coarse 8 Hz) with shared local channel encoding, spatial-slot fusion,
-local window attention, temporal reduction, and aligned gated top-down
-residuals.  Exposes a public ``encode()`` API returning
+local window attention, temporal reduction, aligned gated top-down residuals,
+and task-specific cross-attention readout. Exposes a public ``encode()`` API
+returning
 :class:`Representation` and a ``forward()`` adapter returning
 :class:`~foundry.models.ssl_meta.ModelOutput` for the standard Foundry
 training loop.
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
     from torch_brain.data import Data
     from foundry.tasks.config import TaskConfig
 
-__all__ = ["HEROModel", "Representation"]
+__all__ = ["HEROModel", "Representation", "TaskQueryCrossAttention"]
 
 
 # ---------------------------------------------------------------------------
@@ -938,6 +939,171 @@ class HEROEncoder(nn.Module):
         return x_fine, meta
 
 
+class TaskQueryCrossAttention(nn.Module):
+    """Read encoded content with learned task- and time-specific queries.
+
+    Every requested output starts from an embedding for its task and attends
+    over the complete fine-resolution representation. When output timestamps
+    are available, each task/head also learns a temporal offset and span. A
+    head can therefore specialize in anything from the immediate neighborhood
+    of an output to long-range context elsewhere in the recording.
+
+    Query chunks bound the temporary ``N_out x T_content`` attention matrix
+    without changing the result.
+    """
+
+    def __init__(
+        self,
+        embed_dim: int,
+        num_tasks: int,
+        num_heads: int = 8,
+        query_chunk_size: int = 256,
+    ):
+        super().__init__()
+        if embed_dim % num_heads != 0:
+            raise ValueError("embed_dim must be divisible by num_heads.")
+        if query_chunk_size <= 0:
+            raise ValueError("query_chunk_size must be positive.")
+
+        self.embed_dim = embed_dim
+        self.num_tasks = num_tasks
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.query_chunk_size = query_chunk_size
+
+        # Keep an unused row when there are no downstream tasks so encoder-only
+        # HERO instances remain constructible.
+        self.task_queries = nn.Embedding(max(1, num_tasks), embed_dim)
+        nn.init.normal_(self.task_queries.weight, std=0.02)
+
+        self.query_norm = nn.LayerNorm(embed_dim)
+        self.content_norm = nn.LayerNorm(embed_dim)
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.out_proj = nn.Linear(embed_dim, embed_dim)
+        self.ffn_norm = nn.LayerNorm(embed_dim)
+        self.ffn = nn.Sequential(
+            nn.Linear(embed_dim, 4 * embed_dim),
+            nn.GELU(),
+            nn.Linear(4 * embed_dim, embed_dim),
+        )
+
+        # softplus(-4) gives a weak, broad initial preference around the output
+        # time. Tasks can increase it for short-range reads or drive it toward
+        # zero for effectively global attention. Offsets allow heads to seek
+        # task-relevant information before or after the requested timestamp.
+        temporal_shape = (max(1, num_tasks), num_heads)
+        self.log_time_decay = nn.Parameter(torch.full(temporal_shape, -4.0))
+        self.time_offset = nn.Parameter(torch.zeros(temporal_shape))
+
+    def forward(
+        self,
+        content: torch.Tensor,
+        task_index: torch.Tensor,
+        *,
+        content_timestamps: torch.Tensor | None = None,
+        output_timestamps: torch.Tensor | None = None,
+        content_valid: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return one decoded embedding for every padded output query.
+
+        Args:
+            content: ``(B, T, D)`` encoder content.
+            task_index: ``(B, N_out)`` padded 1-based task indices.
+            content_timestamps: Optional ``(B, T)`` physical timestamps.
+            output_timestamps: Optional ``(B, N_out)`` physical timestamps.
+                Temporal bias is used only when both timestamp tensors are
+                supplied.
+            content_valid: Optional ``(B, T)`` validity mask.
+
+        Returns:
+            Decoded task embeddings with shape ``(B, N_out, D)``.
+        """
+        B, T, D = content.shape
+        if D != self.embed_dim:
+            raise ValueError(f"Expected content dim {self.embed_dim}, got {D}.")
+        if task_index.ndim != 2 or task_index.shape[0] != B:
+            raise ValueError("task_index must have shape [batch, outputs].")
+
+        N_out = task_index.shape[1]
+        if N_out == 0:
+            return content.new_zeros(B, 0, D)
+
+        use_time = content_timestamps is not None or output_timestamps is not None
+        if use_time and (content_timestamps is None or output_timestamps is None):
+            raise ValueError(
+                "content_timestamps and output_timestamps must be provided together."
+            )
+        if content_timestamps is not None and content_timestamps.shape != (B, T):
+            raise ValueError("content_timestamps must have shape [batch, content].")
+        if output_timestamps is not None and output_timestamps.shape != (B, N_out):
+            raise ValueError("output_timestamps must have shape [batch, outputs].")
+
+        if content_valid is None:
+            content_valid = torch.ones(B, T, dtype=torch.bool, device=content.device)
+        elif content_valid.shape != (B, T):
+            raise ValueError("content_valid must have shape [batch, content].")
+
+        task_ids = (task_index - 1).clamp(min=0)
+        queries = self.task_queries(task_ids)
+
+        H = self.num_heads
+        Dh = self.head_dim
+        normalized_content = self.content_norm(content)
+        keys = self.k_proj(normalized_content)
+        values = self.v_proj(normalized_content)
+        keys = keys.view(B, T, H, Dh).transpose(1, 2)
+        values = values.view(B, T, H, Dh).transpose(1, 2)
+
+        any_content = content_valid.any(dim=1)
+        key_mask = content_valid[:, None, None, :]
+        decoded_chunks = []
+        for start in range(0, N_out, self.query_chunk_size):
+            stop = min(start + self.query_chunk_size, N_out)
+            query_chunk = queries[:, start:stop]
+            chunk_task_ids = task_ids[:, start:stop]
+
+            q = self.q_proj(self.query_norm(query_chunk))
+            q = q.view(B, stop - start, H, Dh).transpose(1, 2)
+            logits = torch.matmul(q, keys.transpose(-2, -1)) / math.sqrt(Dh)
+
+            if content_timestamps is not None and output_timestamps is not None:
+                query_timestamps = output_timestamps[:, start:stop].to(
+                    content_timestamps
+                )
+                dt = (
+                    content_timestamps[:, None, :]
+                    - query_timestamps[:, :, None]
+                )
+                decay = F.softplus(self.log_time_decay[chunk_task_ids])
+                offset = self.time_offset[chunk_task_ids]
+                temporal_bias = -decay.permute(0, 2, 1).unsqueeze(-1) * (
+                    dt.unsqueeze(1) - offset.permute(0, 2, 1).unsqueeze(-1)
+                ).abs()
+                logits = logits + temporal_bias.to(logits.dtype)
+
+            logits = logits.masked_fill(~key_mask, float("-inf"))
+            safe_rows = any_content[:, None, None, None]
+            safe_logits = torch.where(
+                safe_rows.expand_as(logits), logits, torch.zeros_like(logits)
+            )
+            probabilities = torch.where(
+                safe_rows.expand_as(logits),
+                F.softmax(safe_logits, dim=-1),
+                torch.zeros_like(logits),
+            )
+
+            attended = torch.matmul(probabilities, values)
+            attended = attended.transpose(1, 2).reshape(B, stop - start, D)
+            decoded = query_chunk + self.out_proj(attended)
+            decoded = decoded + self.ffn(self.ffn_norm(decoded))
+            decoded = decoded * any_content[:, None, None].to(decoded.dtype)
+            decoded_chunks.append(decoded)
+
+        return torch.cat(decoded_chunks, dim=1)
+
+
 class MaskAwareTemporalPool(nn.Module):
     """Pool fine content over time, respecting validity masks."""
 
@@ -999,6 +1165,7 @@ class HEROModel(nn.Module):
         num_attn_heads: int = 8,
         channel_encoder_layers: int = 3,
         channel_encoder_kernel_size: int = 7,
+        task_query_chunk_size: int = 256,
     ):
         super().__init__()
 
@@ -1029,6 +1196,14 @@ class HEROModel(nn.Module):
             local_window=local_window,
             num_temporal_slots=num_temporal_slots,
         )
+        self.task_decoder = TaskQueryCrossAttention(
+            embed_dim=embed_dim,
+            num_tasks=len(self._task_configs),
+            num_heads=num_attn_heads,
+            query_chunk_size=task_query_chunk_size,
+        )
+        # Retained as part of the public module structure for downstream-code
+        # compatibility. Forward now uses ``task_decoder``.
         self.temporal_pool = MaskAwareTemporalPool(embed_dim)
         self.router = build_readout_router(self._task_configs, embed_dim)
 
@@ -1049,9 +1224,9 @@ class HEROModel(nn.Module):
 
         Returns:
             Dict ready for collation with ``input_values``,
-            ``input_timestamps``, ``channel_mask``, ``sample_mask``,
-            ``task_index``, ``target_values``, ``target_weights``,
-            and provenance fields.
+            ``input_timestamps``, ``output_timestamps``, ``channel_mask``,
+            ``sample_mask``, ``task_index``, ``target_values``,
+            ``target_weights``, and provenance fields.
         """
         signal, default_type, sampling_rate = self._resolve_signal_source(data)
 
@@ -1129,6 +1304,7 @@ class HEROModel(nn.Module):
         return {
             "input_values": torch.from_numpy(sig_ct),
             "input_timestamps": torch.from_numpy(timestamps_1d),
+            "output_timestamps": pad8(output_timestamps),
             "channel_mask": torch.from_numpy(channel_mask_1d),
             "sample_mask": torch.from_numpy(sample_mask_1d),
             "task_index": pad8(output_task_index),
@@ -1339,16 +1515,19 @@ class HEROModel(nn.Module):
         input_values: torch.Tensor,
         input_timestamps: torch.Tensor,
         task_index: torch.Tensor,
+        output_timestamps: torch.Tensor | None = None,
         channel_mask: torch.Tensor | None = None,
         sample_mask: torch.Tensor | None = None,
         unpack_output: bool = True,
     ) -> ModelOutput:
-        """Training adapter: encode + pool + route to task heads.
+        """Training adapter: encode + task-query decode + route to heads.
 
         Args:
             input_values: ``(B, C, T)`` signal from ``tokenize()``.
             input_timestamps: ``(B, T)`` physical timestamps.
             task_index: ``(B, N_out)`` padded task indices (0 = padding).
+            output_timestamps: Optional ``(B, N_out)`` target timestamps. When
+                omitted, task queries attend globally without temporal bias.
             channel_mask: ``(B, C)`` boolean.
             sample_mask: ``(B, T)`` boolean.
             unpack_output: Ignored (kept for interface compat).
@@ -1365,13 +1544,18 @@ class HEROModel(nn.Module):
             sample_mask=sample_mask,
         )
 
-        pooled = self.temporal_pool(rep.content, rep.coverage.fine_valid)
+        output_embs = self.task_decoder(
+            rep.content,
+            task_index,
+            content_timestamps=(
+                rep.content_timestamps if output_timestamps is not None else None
+            ),
+            output_timestamps=output_timestamps,
+            content_valid=rep.coverage.fine_valid,
+        )
 
-        B = pooled.shape[0]
-        N_out = task_index.shape[1]
-        pooled_expanded = pooled.unsqueeze(1).expand(B, N_out, -1)
-
-        flat_embs = pooled_expanded.reshape(B * N_out, -1)
+        B, N_out = task_index.shape
+        flat_embs = output_embs.reshape(B * N_out, -1)
         flat_task = task_index.reshape(B * N_out)
         valid = flat_task > 0
 
