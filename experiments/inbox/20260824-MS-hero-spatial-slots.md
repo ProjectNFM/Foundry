@@ -28,14 +28,14 @@ Eight spatial slots will outperform one-slot pooling by at least 2 pp test balan
 
 ### Setup
 
-- **Model:** HERO with `temporal_mode=flat`, `num_local_attn_blocks=2`, `embed_dim=256`, `canonical_rate=128`, `num_attn_heads=8`, `channel_encoder_layers=3`, `channel_encoder_kernel_size=7`.
+- **Model:** HERO with `temporal_mode=flat`, `num_local_attn_blocks=2`, `embed_dim=64`, `canonical_rate=128`, `num_attn_heads=8`, `channel_encoder_layers=3`, `channel_encoder_kernel_size=7`.
 - **Independent variable:** `num_spatial_slots`: 1 (one-factor pooling) vs 8 (reference spatial-slot mixer).
 - **Data and task contract:** NeuralBench v0.2.3 / NeuralSet subject splits, identical to the matched EEGNet and POYO tokenizer baselines:
   - P300 / `Korczowski2014A`: 16 channels, 1.0 s epochs.
   - Motor Imagery / `Schalk2004Bci2000`: 64 channels, 4.0 s epochs.
   - Sleep Stage / `Kemp2000Analysis`: 2 channels, 30.0 s epochs.
 - **Seeds:** 33, 34, and 35 for every task and slot condition (18 runs total).
-- **Training:** AdamW (`lr=1e-4`, `weight_decay=0.05`), OneCycleLR with cosine annealing and `pct_start=0.1` at step interval, batch size 64, FP32 precision, gradient clipping 1.0, 40-epoch cap. Early-stopping patience is 10 for P300 and 5 for MI/Sleep.
+- **Training:** AdamW (`lr=1e-4`, `weight_decay=0.05`), OneCycleLR with cosine annealing and `pct_start=0.1` at step interval, batch size 64, 16-mixed precision, `torch.compile` enabled, gradient clipping 1.0, 40-epoch cap. Early-stopping patience is 10 for all tasks.
 - **Evaluation:** Best-validation checkpoint on the NeuralBench held-out test split (`run.evaluate_test=true`).
 - **WandB:** project `foundry-neuralbench`; groups `NB_P300_HERO_SPATIAL_SLOTS`, `NB_MI_HERO_SPATIAL_SLOTS`, and `NB_SLEEP_HERO_SPATIAL_SLOTS`.
 - **EEGNet comparator groups:** `NB_P300_EEGNET_MATCHED`, `NB_MI_EEGNET_MATCHED`, and `NB_SLEEP_EEGNET_MATCHED`.
@@ -58,8 +58,9 @@ uv run python main.py experiment=neuralbench/sleep_stage_hero_spatial_slots -m
 | `model.temporal_mode` | `flat` |
 | `model.num_spatial_slots` | sweep: `1, 8` |
 | `model.num_local_attn_blocks` | `2` |
-| `model.embed_dim` | `256` |
-| `trainer.precision` | `32-true` |
+| `model.embed_dim` | `64` |
+| `trainer.precision` | `16-mixed` |
+| `run.compile` | `default` |
 | `run.evaluate_test` | `true` |
 | `seed` | sweep: `33, 34, 35` |
 

@@ -36,6 +36,7 @@ run:
   name: nb_p300_hero_${model.num_spatial_slots}slots_seed${seed}
   evaluate_test: true
   float32_matmul_precision: highest
+  compile: default
   group: NB_P300_HERO_SPATIAL_SLOTS
   tags: [neuralbench, p300, hero, spatial_slots, from_scratch]
   log_level: INFO
@@ -67,7 +68,7 @@ hyperparameters:
 
 trainer:
   max_epochs: 40
-  precision: 32-true
+  precision: 16-mixed
   gradient_clip_val: 1.0
   num_sanity_val_steps: 0
   callbacks:
@@ -101,7 +102,7 @@ hydra:
     cpus_per_task: 10
     mem_gb: 64
     gres: gpu:rtx8000:1
-    timeout_min: 360
+    timeout_min: 420
     partition: long
     setup:
       - "set -a"
