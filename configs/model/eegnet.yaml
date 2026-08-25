@@ -9,3 +9,4 @@ D: 2
 F2: 16
 kernel_length: 64
 dropout_rate: 0.5
+channel_mode: fixed

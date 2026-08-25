@@ -220,6 +220,7 @@ class TestBaselineTokenize:
 
         expected_keys = {
             "input_values",
+            "input_mask",
             "task_index",
             "target_values",
             "target_weights",
@@ -229,7 +230,7 @@ class TestBaselineTokenize:
         assert set(tokens.keys()) == expected_keys
 
     def test_tokenize_input_values_shape(self, simple_model):
-        """Test that tokenized input_values has expected shape (time, channels)."""
+        """Test that tokenized input_values has expected shape (time, channels) with padding."""
         num_channels = 4
         num_samples = 200
         data = create_baseline_data_sample(
@@ -237,8 +238,12 @@ class TestBaselineTokenize:
         )
         tokens = simple_model.tokenize(data)
 
+        # Model expects num_channels=4, so shape should match
         assert tokens["input_values"].obj.shape == (num_samples, num_channels)
         assert tokens["input_values"].obj.dtype == torch.float32
+        assert tokens["input_mask"].obj.shape == (num_channels,)
+        assert tokens["input_mask"].obj.dtype == torch.bool
+        assert tokens["input_mask"].obj.all()  # All channels are real, none padded
 
     def test_tokenize_raises_without_eeg_or_ecog_or_seeg_channels(
         self, simple_model
@@ -262,7 +267,7 @@ class TestBaselineTokenize:
         assert "test_baseline_task" in tokens["target_values"].obj
 
     def test_tokenize_filters_eeg_channels(self, simple_model):
-        """Test that tokenize filters for EEG channels only."""
+        """Test that tokenize filters for EEG channels only, then pads to num_channels."""
         num_channels = 4
         signal = np.random.randn(200, num_channels).astype(np.float32)
 
@@ -288,7 +293,10 @@ class TestBaselineTokenize:
 
         tokens = simple_model.tokenize(data)
 
-        assert tokens["input_values"].obj.shape == (200, 3)
+        # After filtering EEG only: 3 channels. After padding to num_channels=4: 4 channels
+        assert tokens["input_values"].obj.shape == (200, 4)
+        assert tokens["input_mask"].obj.shape == (4,)
+        assert tokens["input_mask"].obj.sum() == 3  # Only 3 real channels after EEG filter
 
 
 # ============================================================================
@@ -982,3 +990,216 @@ class TestBaselineIntegration:
         assert "input_values" in tokens
         assert "task_index" in tokens
         assert tokens["input_values"].obj.shape == (200, 4)
+
+
+# ============================================================================
+# Variable-Channel Tests
+# ============================================================================
+
+
+class TestVariableChannels:
+    """Tests for mixed-channel and per-channel mode support."""
+
+    def test_gru_mixed_channels_fixed_mode(self, task_configs):
+        """Test GRU fixed mode with mixed channel counts in a batch."""
+        model = GRU(
+            task_configs=task_configs,
+            num_channels=4,
+            num_samples=200,
+            channel_mode="fixed",
+        )
+
+        # Create two samples with different channel counts: 2 and 4
+        data1 = create_baseline_data_sample(num_channels=2, num_samples=200)
+        data2 = create_baseline_data_sample(num_channels=4, num_samples=200)
+
+        tokens1 = model.tokenize(data1)
+        tokens2 = model.tokenize(data2)
+        batch = collate([tokens1, tokens2])
+
+        assert batch["input_values"].shape == (2, 4, 200)
+        assert batch["input_mask"].shape == (2, 4)
+        assert batch["input_mask"][0].sum() == 2  # First sample has 2 real channels
+        assert batch["input_mask"][1].sum() == 4  # Second sample has 4 real channels
+
+        x = batch["input_values"]
+        task_index = batch["task_index"]
+        target_values = batch["target_values"]
+        target_weights = batch["target_weights"]
+        input_mask = batch.get("input_mask")
+
+        outputs = model(
+            input_values=x,
+            task_index=task_index,
+            input_mask=input_mask,
+        )
+
+        assert isinstance(outputs, dict)
+        assert "test_baseline_task" in outputs
+
+        loss = compute_multitask_loss(
+            model,
+            outputs,
+            target_values,
+            target_weights,
+            task_index,
+        )
+        assert loss.requires_grad
+
+    def test_gru_mixed_channels_per_channel_mode(self, task_configs):
+        """Test GRU per_channel mode with mixed channel counts in a batch."""
+        model = GRU(
+            task_configs=task_configs,
+            num_channels=4,
+            num_samples=200,
+            channel_mode="per_channel",
+        )
+
+        data1 = create_baseline_data_sample(num_channels=2, num_samples=200)
+        data2 = create_baseline_data_sample(num_channels=4, num_samples=200)
+
+        tokens1 = model.tokenize(data1)
+        tokens2 = model.tokenize(data2)
+        batch = collate([tokens1, tokens2])
+
+        x = batch["input_values"]
+        task_index = batch["task_index"]
+        target_values = batch["target_values"]
+        target_weights = batch["target_weights"]
+        input_mask = batch.get("input_mask")
+
+        outputs = model(
+            input_values=x,
+            task_index=task_index,
+            input_mask=input_mask,
+        )
+
+        assert isinstance(outputs, dict)
+        assert "test_baseline_task" in outputs
+
+        loss = compute_multitask_loss(
+            model,
+            outputs,
+            target_values,
+            target_weights,
+            task_index,
+        )
+        assert loss.requires_grad
+
+    def test_gru_channel_mode_validation(self, task_configs):
+        """Test that invalid channel_mode raises ValueError."""
+        with pytest.raises(
+            ValueError, match="channel_mode must be 'fixed' or 'per_channel'"
+        ):
+            GRU(
+                task_configs=task_configs,
+                num_channels=4,
+                channel_mode="invalid",
+            )
+
+    def test_eegnet_mixed_channels_fixed_mode(self, task_configs):
+        """Test EEGNet fixed mode with mixed channel counts in a batch."""
+        model = EEGNetEncoder(
+            task_configs=task_configs,
+            num_channels=4,
+            num_samples=512,
+            channel_mode="fixed",
+        )
+
+        data1 = create_baseline_data_sample(num_channels=2, num_samples=512)
+        data2 = create_baseline_data_sample(num_channels=4, num_samples=512)
+
+        tokens1 = model.tokenize(data1)
+        tokens2 = model.tokenize(data2)
+        batch = collate([tokens1, tokens2])
+
+        x = batch["input_values"]
+        task_index = batch["task_index"]
+        target_values = batch["target_values"]
+        target_weights = batch["target_weights"]
+        input_mask = batch.get("input_mask")
+
+        outputs = model(
+            input_values=x,
+            task_index=task_index,
+            input_mask=input_mask,
+        )
+
+        assert isinstance(outputs, dict)
+        assert "test_baseline_task" in outputs
+
+        loss = compute_multitask_loss(
+            model,
+            outputs,
+            target_values,
+            target_weights,
+            task_index,
+        )
+        assert loss.requires_grad
+        loss.backward()
+
+        has_gradients = False
+        for param in model.parameters():
+            if param.grad is not None:
+                has_gradients = True
+                break
+        assert has_gradients
+
+    def test_eegnet_mixed_channels_per_channel_mode(self, task_configs):
+        """Test EEGNet per_channel mode with mixed channel counts in a batch."""
+        model = EEGNetEncoder(
+            task_configs=task_configs,
+            num_channels=4,
+            num_samples=512,
+            channel_mode="per_channel",
+        )
+
+        data1 = create_baseline_data_sample(num_channels=2, num_samples=512)
+        data2 = create_baseline_data_sample(num_channels=4, num_samples=512)
+
+        tokens1 = model.tokenize(data1)
+        tokens2 = model.tokenize(data2)
+        batch = collate([tokens1, tokens2])
+
+        x = batch["input_values"]
+        task_index = batch["task_index"]
+        target_values = batch["target_values"]
+        target_weights = batch["target_weights"]
+        input_mask = batch.get("input_mask")
+
+        outputs = model(
+            input_values=x,
+            task_index=task_index,
+            input_mask=input_mask,
+        )
+
+        assert isinstance(outputs, dict)
+        assert "test_baseline_task" in outputs
+
+        loss = compute_multitask_loss(
+            model,
+            outputs,
+            target_values,
+            target_weights,
+            task_index,
+        )
+        assert loss.requires_grad
+        loss.backward()
+
+        has_gradients = False
+        for param in model.parameters():
+            if param.grad is not None:
+                has_gradients = True
+                break
+        assert has_gradients
+
+    def test_eegnet_channel_mode_validation(self, task_configs):
+        """Test that invalid channel_mode raises ValueError."""
+        with pytest.raises(
+            ValueError, match="channel_mode must be 'fixed' or 'per_channel'"
+        ):
+            EEGNetEncoder(
+                task_configs=task_configs,
+                num_channels=4,
+                channel_mode="invalid",
+            )

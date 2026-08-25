@@ -120,13 +120,17 @@ class BaselineEEGModel(nn.Module):
         """
         Converts a TemporalData EEG/ECoG sample to model-ready tensors and multitask readout targets.
 
+        Pads or truncates to `self.num_channels` and emits an `input_mask` to indicate which channels
+        are real (non-padded).
+
         Args:
             data (torch_brain.data.Data): Input data structure containing an "eeg" or "ecog" field
                 along with "channels" and task-specific label fields.
 
         Returns:
             dict: {
-                "input_values" (torch.Tensor): Model input of shape (T, C),
+                "input_values" (torch.Tensor): Model input of shape (T, C) padded to num_channels,
+                "input_mask" (torch.Tensor): Boolean mask (C,) indicating real channels,
                 "task_index" (torch.Tensor): Target output decoder indices,
                 "target_values" (dict[str, torch.Tensor] or similar): Multitask target values,
                 "target_weights" (dict[str, torch.Tensor] or similar): Multitask target weights,
@@ -173,12 +177,28 @@ class BaselineEEGModel(nn.Module):
         signal = np.asarray(signal, dtype=np.float32)
         x = torch.from_numpy(signal[:, modality_mask])
 
+        # Pad/truncate to self.num_channels
+        T, C_actual = x.shape
+        C_target = self.num_channels
+        
+        if C_actual > C_target:
+            x = x[:, :C_target]
+            C_actual = C_target
+        elif C_actual < C_target:
+            padding = torch.zeros(T, C_target - C_actual, dtype=x.dtype)
+            x = torch.cat([x, padding], dim=1)
+        
+        # Create mask: True for real channels, False for padded
+        input_mask = torch.zeros(C_target, dtype=torch.bool)
+        input_mask[:C_actual] = True
+
         output_values, output_task_index, output_weights = (
             self._extract_targets(data)
         )
 
         return {
             "input_values": pad2d(x),
+            "input_mask": pad8(input_mask),
             "task_index": pad8(output_task_index),
             "target_values": chain(output_values, allow_missing_keys=True),
             "target_weights": chain(output_weights, allow_missing_keys=True),
@@ -206,6 +226,8 @@ class BaselineEEGModel(nn.Module):
             "input_values": batch["input_values"],
             "task_index": task_index,
         }
+        if "input_mask" in batch:
+            model_inputs["input_mask"] = batch.pop("input_mask")
         return model_inputs, target_values, target_weights, task_index
 
 
@@ -362,6 +384,12 @@ class GRU(BaselineEEGModel):
     This model projects per-timestep channel values into a latent feature space,
     processes the sequence with a (bi)directional GRU, and applies global temporal
     averaging before a multitask readout.
+
+    Supports two channel modes:
+    - 'fixed': Original architecture with LayerNorm(C) + Linear(C → D). Works with
+      padded multi-channel inputs via input_mask.
+    - 'per_channel': Channel-independent encoding with shared per-electrode Linear(1 → D),
+      then masked mean over valid channels. Weights are independent of channel count.
     """
 
     def __init__(
@@ -374,6 +402,7 @@ class GRU(BaselineEEGModel):
         num_layers: int = 2,
         bidirectional: bool = True,
         dropout_rate: float = 0.3,
+        channel_mode: str = "fixed",
     ):
         """
         Args:
@@ -385,6 +414,8 @@ class GRU(BaselineEEGModel):
             num_layers (int, optional): Number of stacked GRU layers. Default: 2.
             bidirectional (bool, optional): Whether to use bidirectional GRU. Default: True.
             dropout_rate (float, optional): Dropout rate between stacked GRU layers. Default: 0.3.
+            channel_mode (str, optional): 'fixed' (default, original architecture with LayerNorm(C))
+                or 'per_channel' (shared per-electrode encoding, independent of C).
         """
         super().__init__(
             num_channels=num_channels,
@@ -392,8 +423,19 @@ class GRU(BaselineEEGModel):
             task_configs=task_configs,
         )
 
-        self.input_norm = nn.LayerNorm(num_channels)
-        self.input_proj = nn.Linear(num_channels, input_proj_dim)
+        if channel_mode not in ("fixed", "per_channel"):
+            raise ValueError(
+                f"channel_mode must be 'fixed' or 'per_channel', got '{channel_mode}'"
+            )
+        self.channel_mode = channel_mode
+
+        if channel_mode == "fixed":
+            self.input_norm = nn.LayerNorm(num_channels)
+            self.input_proj = nn.Linear(num_channels, input_proj_dim)
+        else:  # per_channel
+            self.input_norm = nn.LayerNorm(1)
+            self.input_proj = nn.Linear(1, input_proj_dim)
+
         self.gru = nn.GRU(
             input_size=input_proj_dim,
             hidden_size=hidden_size,
@@ -411,6 +453,7 @@ class GRU(BaselineEEGModel):
         *,
         input_values: torch.Tensor,
         task_index: torch.Tensor,
+        input_mask: torch.Tensor | None = None,
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
         """
@@ -419,6 +462,7 @@ class GRU(BaselineEEGModel):
         Args:
             input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
             task_index (torch.Tensor): Task index tensor of shape (B, n_out).
+            input_mask (torch.Tensor, optional): Boolean mask (B, C) or (C,) indicating valid channels.
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
@@ -430,13 +474,41 @@ class GRU(BaselineEEGModel):
             )
 
         # Convert from (B, C, T) to (B, T, C) for sequence modeling over time.
-        x = x.transpose(1, 2)
-        x = self.input_norm(x)
-        x = self.input_proj(x)
-        x, _ = self.gru(x)
+        x = x.transpose(1, 2)  # (B, T, C)
 
-        # Global average pooling across the temporal dimension.
-        x = x.mean(dim=1)
+        if self.channel_mode == "fixed":
+            # Original architecture: LayerNorm over all channels
+            x = self.input_norm(x)  # (B, T, C)
+            x = self.input_proj(x)  # (B, T, proj_dim)
+            x, _ = self.gru(x)  # (B, T, hidden_size * num_directions)
+            x = x.mean(dim=1)  # (B, hidden_size * num_directions)
+        else:  # per_channel
+            # Per-channel encoding: reshape and process each electrode independently
+            B, T, C = x.shape
+            x_reshape = x.reshape(B * T, C, 1)  # (B*T, C, 1)
+            x_norm = self.input_norm(x_reshape)  # (B*T, C, 1)
+            x_proj = self.input_proj(x_norm)  # (B*T, C, proj_dim)
+            x_proj = x_proj.reshape(B, T, C, -1)  # (B, T, C, proj_dim)
+
+            # Reshape to (B*C, T, proj_dim) for GRU
+            x_per_ch = x_proj.permute(0, 2, 1, 3).reshape(B * C, T, -1)
+            x_gru, _ = self.gru(x_per_ch)  # (B*C, T, hidden)
+            x_temporal = x_gru.mean(dim=1)  # (B*C, hidden)
+
+            # Reshape back to (B, C, hidden)
+            out_dim = x_temporal.shape[-1]
+            x_out = x_temporal.reshape(B, C, out_dim)
+
+            # Masked mean over channels
+            if input_mask is not None:
+                if input_mask.dim() == 1:
+                    input_mask = input_mask.unsqueeze(0)  # (1, C) -> broadcast
+                mask_expanded = input_mask.to(x_out.device).unsqueeze(-1)  # (B, C, 1)
+                valid_count = mask_expanded.sum(dim=1)  # (B, 1)
+                valid_count = torch.clamp(valid_count, min=1.0)
+                x = (x_out * mask_expanded).sum(dim=1) / valid_count  # (B, hidden)
+            else:
+                x = x_out.mean(dim=1)  # (B, hidden)
 
         batch_size = x.shape[0]
         n_out = task_index.shape[1]
@@ -668,6 +740,12 @@ class EEGNetEncoder(BaselineEEGModel):
     Designed to generalize across BCI tasks (ERD/ERS, MRCP) while maintaining
     efficiency and strong performance.
 
+    Supports two channel modes:
+    - 'fixed': Original architecture with depthwise spatial Conv2d(kernel=(C, 1)).
+      Works with padded multi-channel inputs via input_mask.
+    - 'per_channel': Channel-independent with 1x1 spatial conv followed by masked
+      mean over channels. Weights are independent of channel count.
+
     Args:
         task_configs: Mapping from task name to TaskConfig.
         num_channels (int, optional): Number of EEG electrodes/channels. Default: 64.
@@ -677,6 +755,8 @@ class EEGNetEncoder(BaselineEEGModel):
         F2 (int, optional): Pointwise filter count. Typically F1*D. Default: 16.
         kernel_length (int, optional): Temporal filter kernel length. Default: 64.
         dropout_rate (float, optional): Dropout probability. Default: 0.5.
+        channel_mode (str, optional): 'fixed' (default, depthwise spatial conv) or 'per_channel'
+            (1x1 spatial conv + masked mean). Default: 'fixed'.
     """
 
     def __init__(
@@ -689,6 +769,7 @@ class EEGNetEncoder(BaselineEEGModel):
         F2: int = 16,
         kernel_length: int = 64,
         dropout_rate: float = 0.5,
+        channel_mode: str = "fixed",
         **kwargs,
     ):
         super().__init__(
@@ -697,71 +778,79 @@ class EEGNetEncoder(BaselineEEGModel):
             task_configs=task_configs,
         )
 
-        # ----------------------------------------------------------------------
-        # Block 1: Bandpass & Spatial Filtering
-        # ----------------------------------------------------------------------
-        self.block1 = nn.Sequential(
-            # 1. Temporal Convolution
-            # Intuition: Learns frequency-specific bandpass filters (e.g., Alpha, Beta bands)
+        if channel_mode not in ("fixed", "per_channel"):
+            raise ValueError(
+                f"channel_mode must be 'fixed' or 'per_channel', got '{channel_mode}'"
+            )
+        self.channel_mode = channel_mode
+        self.F1 = F1
+        self.D = D
+        self.F2 = F2
+
+        # Temporal convolution (shared across both modes)
+        self.temporal_conv = nn.Sequential(
             nn.Conv2d(
                 1,
                 F1,
                 kernel_size=(1, kernel_length),
-                padding="same",  # CHECK: padding=(0, kernel_length // 2)
+                padding="same",
                 bias=False,
             ),
-            nn.BatchNorm2d(F1),  # CHECK: momentum=0.01, eps=1e-3
-            # 2. Depthwise Spatial Convolution
-            # Intuition: Acts as a data-driven spatial filter (similar to CSP).
-            # Using groups=F1 ensures each temporal bandpass filter gets 'D' dedicated spatial filters.
-            nn.Conv2d(
+            nn.BatchNorm2d(F1),
+        )
+
+        # Spatial filtering (mode-dependent)
+        if channel_mode == "fixed":
+            # Original EEGNet: depthwise spatial conv with kernel (C, 1)
+            self.spatial_conv = nn.Conv2d(
                 F1,
                 F1 * D,
                 kernel_size=(num_channels, 1),
                 groups=F1,
                 bias=False,
-                # CHECK: max_norm=0.25
-            ),
-            nn.BatchNorm2d(F1 * D),  # CHECK: momentum=0.01, eps=1e-3
-            nn.ELU(),  # ELU performs better than ReLU for EEG signals
-            # Downsample to reduce dimensionality and aggregate temporal information
-            nn.AvgPool2d(kernel_size=(1, 4)),  # CHECK: kernel_size
+            )
+        else:  # per_channel
+            # Per-channel mode: 1x1 spatial conv (independent of C)
+            self.spatial_conv = nn.Conv2d(
+                F1,
+                F1 * D,
+                kernel_size=(1, 1),
+                groups=F1,
+                bias=False,
+            )
+
+        self.spatial_post = nn.Sequential(
+            nn.BatchNorm2d(F1 * D),
+            nn.ELU(),
+            nn.AvgPool2d(kernel_size=(1, 4)),
             nn.Dropout(dropout_rate),
         )
 
-        # ----------------------------------------------------------------------
-        # Block 2: Feature Mixing & Downsampling
-        # ----------------------------------------------------------------------
+        # Block 2 (shared across both modes)
         self.block2 = nn.Sequential(
-            # Separable Convolution
-            # Intuition: Efficiently summarizes temporal patterns within each feature map
-            # before mixing them to form final high-level representations.
             SeparableConv2d(
                 F1 * D,
                 F2,
                 kernel_size=(1, 16),
                 bias=False,
             ),
-            nn.BatchNorm2d(F2),  # CHECK: momentum=0.01, eps=1e-3
-            nn.ELU(),  # CHECK: Is there ELU?
+            nn.BatchNorm2d(F2),
+            nn.ELU(),
             nn.AvgPool2d(kernel_size=(1, 8)),
             nn.Dropout(dropout_rate),
         )
 
-        # ----------------------------------------------------------------------
-        # Classifier Head
-        # ----------------------------------------------------------------------
         out_dim = self._calculate_out_dim(
             num_channels, num_samples
-        )  # CHECK: out_dim == F2
+        )
 
         self.router = self._build_router(out_dim)
 
     def _calculate_out_dim(self, channels, samples):
         """Dynamically calculate the flattened output dimension.
 
-        Computes the output dimension after passing through block1 and block2 by
-        using a dummy input tensor.
+        Computes the output dimension after passing through temporal conv, spatial filtering,
+        and block2 by using a dummy input tensor.
 
         Args:
             channels (int): Number of EEG channels (C).
@@ -772,13 +861,30 @@ class EEGNetEncoder(BaselineEEGModel):
         """
         with torch.no_grad():
             dummy_input = torch.zeros(1, 1, channels, samples)
-            x = self.block1(dummy_input)
+            x = self.temporal_conv(dummy_input)  # (1, F1, 1, T)
+            
+            if self.channel_mode == "fixed":
+                x = self.spatial_conv(x)  # (1, F1*D, 1, T)
+                x = self.spatial_post(x)  # (1, F1*D, 1, T_down)
+            else:  # per_channel
+                # For per_channel, reshape to apply per-electrode
+                B, F1, _, T = x.shape
+                x_with_C = x.view(B, F1, channels, T)
+                x_per_ch = x_with_C.permute(0, 2, 1, 3).reshape(B * channels, F1, 1, T)
+                x_per_ch = self.spatial_conv(x_per_ch)
+                x_per_ch = self.spatial_post(x_per_ch)
+                T_down = x_per_ch.shape[-1]
+                x = x_per_ch.reshape(B, channels, self.F1 * self.D, 1, T_down)
+                x = x.permute(0, 2, 3, 1, 4)  # (B, F1*D, 1, C, T_down)
+                x = x.mean(dim=3)  # (B, F1*D, 1, T_down) - mean over channels for dimension calculation
+            
             x = self.block2(x)
             return x.numel()
 
     def extract_features(
         self,
         input_values: torch.Tensor,
+        input_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Extracts deep feature representation (before readout head).
@@ -787,13 +893,46 @@ class EEGNetEncoder(BaselineEEGModel):
         Accepts flexible input shapes and corrects them as needed.
 
         Args:
-            x (torch.Tensor): EEG batch; (B, C, T), (B, T, C), or (B, 1, C, T).
+            input_values (torch.Tensor): EEG batch; (B, C, T), (B, T, C), or (B, 1, C, T).
+            input_mask (torch.Tensor, optional): Boolean mask (B, C) or (C,) indicating valid channels.
 
         Returns:
             torch.Tensor: 4D feature tensor (B, F, H, W) prior to flattening.
         """
         x = self._check_input_shape_conv2d(input_values)
-        x = self.block1(x)
+        B = x.shape[0]
+
+        # Temporal convolution (shared)
+        x = self.temporal_conv(x)  # (B, F1, 1, T)
+
+        # Spatial filtering (mode-dependent)
+        if self.channel_mode == "fixed":
+            # Original: depthwise spatial conv
+            x = self.spatial_conv(x)  # (B, F1*D, 1, T)
+            x = self.spatial_post(x)  # (B, F1*D, 1, T_down)
+        else:  # per_channel
+            # Per-channel mode: apply spatial conv per-channel, then masked mean
+            T = x.shape[-1]
+            x_with_C = x.view(B, self.F1, self.num_channels, T)  # (B, F1, C, T)
+            x_per_ch = x_with_C.permute(0, 2, 1, 3).reshape(B * self.num_channels, self.F1, 1, T)
+            x_per_ch = self.spatial_conv(x_per_ch)  # (B*C, F1*D, 1, T)
+            x_per_ch = self.spatial_post(x_per_ch)  # (B*C, F1*D, 1, T_down)
+            T_down = x_per_ch.shape[-1]
+            x = x_per_ch.reshape(B, self.num_channels, self.F1 * self.D, 1, T_down)
+            x = x.permute(0, 2, 3, 1, 4)  # (B, F1*D, 1, C, T_down)
+
+            # Masked mean over channels
+            if input_mask is not None:
+                if input_mask.dim() == 1:
+                    input_mask = input_mask.unsqueeze(0)
+                mask_device = input_mask.to(x.device).float()
+                valid_count = mask_device.sum(dim=1, keepdim=True)
+                valid_count = torch.clamp(valid_count, min=1.0)
+                mask_for_mult = mask_device.view(B, 1, 1, self.num_channels, 1)
+                x = (x * mask_for_mult).sum(dim=3) / valid_count.view(B, 1, 1, 1)
+            else:
+                x = x.mean(dim=3)  # (B, F1*D, 1, T_down)
+
         x = self.block2(x)
         return x
 
@@ -802,6 +941,7 @@ class EEGNetEncoder(BaselineEEGModel):
         *,
         input_values: torch.Tensor,
         task_index: torch.Tensor,
+        input_mask: torch.Tensor | None = None,
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
         """
@@ -810,11 +950,46 @@ class EEGNetEncoder(BaselineEEGModel):
         Args:
             input_values (torch.Tensor): EEG batch, (B, C, T), (B, T, C), or (B, 1, C, T).
             task_index (torch.Tensor): Task index tensor (B, n_out).
+            input_mask (torch.Tensor, optional): Boolean mask (B, C) or (C,) indicating valid channels.
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
         """
-        x = self.extract_features(input_values)
+        x = self._check_input_shape_conv2d(input_values)
+        B = x.shape[0]
+
+        # Temporal convolution (shared)
+        x = self.temporal_conv(x)  # (B, F1, 1, T)
+
+        # Spatial filtering (mode-dependent)
+        if self.channel_mode == "fixed":
+            # Original: depthwise spatial conv with kernel (C, 1)
+            x = self.spatial_conv(x)  # (B, F1*D, 1, T)
+            x = self.spatial_post(x)  # (B, F1*D, 1, T_down)
+        else:  # per_channel
+            # Per-channel mode: apply spatial conv per-channel, then masked mean
+            x_with_C = x.view(B, self.F1, self.num_channels, -1)  # (B, F1, C, T)
+            T = x_with_C.shape[-1]
+            x_per_ch = x_with_C.permute(0, 2, 1, 3).reshape(B * self.num_channels, self.F1, 1, T)
+            x_per_ch = self.spatial_conv(x_per_ch)  # (B*C, F1*D, 1, T)
+            x_per_ch = self.spatial_post(x_per_ch)  # (B*C, F1*D, 1, T_down)
+            T_down = x_per_ch.shape[-1]
+            x = x_per_ch.reshape(B, self.num_channels, self.F1 * self.D, 1, T_down)
+            x = x.permute(0, 2, 3, 1, 4)  # (B, F1*D, 1, C, T_down)
+
+            # Masked mean over channels
+            if input_mask is not None:
+                if input_mask.dim() == 1:
+                    input_mask = input_mask.unsqueeze(0)
+                mask_device = input_mask.to(x.device).float()
+                valid_count = mask_device.sum(dim=1, keepdim=True)
+                valid_count = torch.clamp(valid_count, min=1.0)
+                mask_for_mult = mask_device.view(B, 1, 1, self.num_channels, 1)
+                x = (x * mask_for_mult).sum(dim=3) / valid_count.view(B, 1, 1, 1)
+            else:
+                x = x.mean(dim=3)  # (B, F1*D, 1, T_down)
+
+        x = self.block2(x)
 
         batch_size = x.shape[0]
         n_out = task_index.shape[1]
