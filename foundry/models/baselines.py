@@ -180,14 +180,14 @@ class BaselineEEGModel(nn.Module):
         # Pad/truncate to self.num_channels
         T, C_actual = x.shape
         C_target = self.num_channels
-        
+
         if C_actual > C_target:
             x = x[:, :C_target]
             C_actual = C_target
         elif C_actual < C_target:
             padding = torch.zeros(T, C_target - C_actual, dtype=x.dtype)
             x = torch.cat([x, padding], dim=1)
-        
+
         # Create mask: True for real channels, False for padded
         input_mask = torch.zeros(C_target, dtype=torch.bool)
         input_mask[:C_actual] = True
@@ -503,10 +503,14 @@ class GRU(BaselineEEGModel):
             if input_mask is not None:
                 if input_mask.dim() == 1:
                     input_mask = input_mask.unsqueeze(0)  # (1, C) -> broadcast
-                mask_expanded = input_mask.to(x_out.device).unsqueeze(-1)  # (B, C, 1)
+                mask_expanded = input_mask.to(x_out.device).unsqueeze(
+                    -1
+                )  # (B, C, 1)
                 valid_count = mask_expanded.sum(dim=1)  # (B, 1)
                 valid_count = torch.clamp(valid_count, min=1.0)
-                x = (x_out * mask_expanded).sum(dim=1) / valid_count  # (B, hidden)
+                x = (x_out * mask_expanded).sum(
+                    dim=1
+                ) / valid_count  # (B, hidden)
             else:
                 x = x_out.mean(dim=1)  # (B, hidden)
 
@@ -840,9 +844,7 @@ class EEGNetEncoder(BaselineEEGModel):
             nn.Dropout(dropout_rate),
         )
 
-        out_dim = self._calculate_out_dim(
-            num_channels, num_samples
-        )
+        out_dim = self._calculate_out_dim(num_channels, num_samples)
 
         self.router = self._build_router(out_dim)
 
@@ -862,7 +864,7 @@ class EEGNetEncoder(BaselineEEGModel):
         with torch.no_grad():
             dummy_input = torch.zeros(1, 1, channels, samples)
             x = self.temporal_conv(dummy_input)  # (1, F1, 1, T)
-            
+
             if self.channel_mode == "fixed":
                 x = self.spatial_conv(x)  # (1, F1*D, 1, T)
                 x = self.spatial_post(x)  # (1, F1*D, 1, T_down)
@@ -870,14 +872,18 @@ class EEGNetEncoder(BaselineEEGModel):
                 # For per_channel, reshape to apply per-electrode
                 B, F1, _, T = x.shape
                 x_with_C = x.view(B, F1, channels, T)
-                x_per_ch = x_with_C.permute(0, 2, 1, 3).reshape(B * channels, F1, 1, T)
+                x_per_ch = x_with_C.permute(0, 2, 1, 3).reshape(
+                    B * channels, F1, 1, T
+                )
                 x_per_ch = self.spatial_conv(x_per_ch)
                 x_per_ch = self.spatial_post(x_per_ch)
                 T_down = x_per_ch.shape[-1]
                 x = x_per_ch.reshape(B, channels, self.F1 * self.D, 1, T_down)
                 x = x.permute(0, 2, 3, 1, 4)  # (B, F1*D, 1, C, T_down)
-                x = x.mean(dim=3)  # (B, F1*D, 1, T_down) - mean over channels for dimension calculation
-            
+                x = x.mean(
+                    dim=3
+                )  # (B, F1*D, 1, T_down) - mean over channels for dimension calculation
+
             x = self.block2(x)
             return x.numel()
 
@@ -914,11 +920,15 @@ class EEGNetEncoder(BaselineEEGModel):
             # Per-channel mode: apply spatial conv per-channel, then masked mean
             T = x.shape[-1]
             x_with_C = x.view(B, self.F1, self.num_channels, T)  # (B, F1, C, T)
-            x_per_ch = x_with_C.permute(0, 2, 1, 3).reshape(B * self.num_channels, self.F1, 1, T)
+            x_per_ch = x_with_C.permute(0, 2, 1, 3).reshape(
+                B * self.num_channels, self.F1, 1, T
+            )
             x_per_ch = self.spatial_conv(x_per_ch)  # (B*C, F1*D, 1, T)
             x_per_ch = self.spatial_post(x_per_ch)  # (B*C, F1*D, 1, T_down)
             T_down = x_per_ch.shape[-1]
-            x = x_per_ch.reshape(B, self.num_channels, self.F1 * self.D, 1, T_down)
+            x = x_per_ch.reshape(
+                B, self.num_channels, self.F1 * self.D, 1, T_down
+            )
             x = x.permute(0, 2, 3, 1, 4)  # (B, F1*D, 1, C, T_down)
 
             # Masked mean over channels
@@ -929,7 +939,9 @@ class EEGNetEncoder(BaselineEEGModel):
                 valid_count = mask_device.sum(dim=1, keepdim=True)
                 valid_count = torch.clamp(valid_count, min=1.0)
                 mask_for_mult = mask_device.view(B, 1, 1, self.num_channels, 1)
-                x = (x * mask_for_mult).sum(dim=3) / valid_count.view(B, 1, 1, 1)
+                x = (x * mask_for_mult).sum(dim=3) / valid_count.view(
+                    B, 1, 1, 1
+                )
             else:
                 x = x.mean(dim=3)  # (B, F1*D, 1, T_down)
 
@@ -968,13 +980,19 @@ class EEGNetEncoder(BaselineEEGModel):
             x = self.spatial_post(x)  # (B, F1*D, 1, T_down)
         else:  # per_channel
             # Per-channel mode: apply spatial conv per-channel, then masked mean
-            x_with_C = x.view(B, self.F1, self.num_channels, -1)  # (B, F1, C, T)
+            x_with_C = x.view(
+                B, self.F1, self.num_channels, -1
+            )  # (B, F1, C, T)
             T = x_with_C.shape[-1]
-            x_per_ch = x_with_C.permute(0, 2, 1, 3).reshape(B * self.num_channels, self.F1, 1, T)
+            x_per_ch = x_with_C.permute(0, 2, 1, 3).reshape(
+                B * self.num_channels, self.F1, 1, T
+            )
             x_per_ch = self.spatial_conv(x_per_ch)  # (B*C, F1*D, 1, T)
             x_per_ch = self.spatial_post(x_per_ch)  # (B*C, F1*D, 1, T_down)
             T_down = x_per_ch.shape[-1]
-            x = x_per_ch.reshape(B, self.num_channels, self.F1 * self.D, 1, T_down)
+            x = x_per_ch.reshape(
+                B, self.num_channels, self.F1 * self.D, 1, T_down
+            )
             x = x.permute(0, 2, 3, 1, 4)  # (B, F1*D, 1, C, T_down)
 
             # Masked mean over channels
@@ -985,7 +1003,9 @@ class EEGNetEncoder(BaselineEEGModel):
                 valid_count = mask_device.sum(dim=1, keepdim=True)
                 valid_count = torch.clamp(valid_count, min=1.0)
                 mask_for_mult = mask_device.view(B, 1, 1, self.num_channels, 1)
-                x = (x * mask_for_mult).sum(dim=3) / valid_count.view(B, 1, 1, 1)
+                x = (x * mask_for_mult).sum(dim=3) / valid_count.view(
+                    B, 1, 1, 1
+                )
             else:
                 x = x.mean(dim=3)  # (B, F1*D, 1, T_down)
 

@@ -243,7 +243,9 @@ class TestBaselineTokenize:
         assert tokens["input_values"].obj.dtype == torch.float32
         assert tokens["input_mask"].obj.shape == (num_channels,)
         assert tokens["input_mask"].obj.dtype == torch.bool
-        assert tokens["input_mask"].obj.all()  # All channels are real, none padded
+        assert tokens[
+            "input_mask"
+        ].obj.all()  # All channels are real, none padded
 
     def test_tokenize_raises_without_eeg_or_ecog_or_seeg_channels(
         self, simple_model
@@ -296,7 +298,9 @@ class TestBaselineTokenize:
         # After filtering EEG only: 3 channels. After padding to num_channels=4: 4 channels
         assert tokens["input_values"].obj.shape == (200, 4)
         assert tokens["input_mask"].obj.shape == (4,)
-        assert tokens["input_mask"].obj.sum() == 3  # Only 3 real channels after EEG filter
+        assert (
+            tokens["input_mask"].obj.sum() == 3
+        )  # Only 3 real channels after EEG filter
 
 
 # ============================================================================
@@ -1019,8 +1023,12 @@ class TestVariableChannels:
 
         assert batch["input_values"].shape == (2, 4, 200)
         assert batch["input_mask"].shape == (2, 4)
-        assert batch["input_mask"][0].sum() == 2  # First sample has 2 real channels
-        assert batch["input_mask"][1].sum() == 4  # Second sample has 4 real channels
+        assert (
+            batch["input_mask"][0].sum() == 2
+        )  # First sample has 2 real channels
+        assert (
+            batch["input_mask"][1].sum() == 4
+        )  # Second sample has 4 real channels
 
         x = batch["input_values"]
         task_index = batch["task_index"]
