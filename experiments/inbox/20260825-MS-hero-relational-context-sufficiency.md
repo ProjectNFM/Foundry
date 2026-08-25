@@ -1,6 +1,6 @@
 # HERO relational-context sufficiency for Motor Imagery
 
-**Status:** Draft
+**Status:** In Progress
 **Date started:** 2026-08-25
 **Parent experiment:** [HERO spatial-slot ablation: 1-factor vs 8-slot fusion in a flat temporal control](20260824-MS-hero-spatial-slots.md)
 **Follow-up experiments:** TBD
@@ -119,8 +119,11 @@ Production launch requirements from `AGENTS.md`: the repository must be clean
 and committed, `FOUNDRY_SNAPSHOT_ROOT` must be
 `/network/scratch/s/sobralm/foundry-launches`, the Hydra launcher must use the
 `long` partition, and the normal `python main.py ... -m` snapshot workflow must
-be retained. Record the Slurm job ID and immutable snapshot bundle path after
-submission.
+be retained.
+
+**Slurm job array:** `10499135_[0-20]` (21 jobs)
+**Snapshot bundle:** `/network/scratch/s/sobralm/foundry-launches/20260825T211631_NB_MI_HERO_RELATIONAL_CONTEXT_f0e61ea2_8032ba63`
+**Git SHA:** `f0e61ea268d6b3f3173a88222c164a270ad4e7c9`
 
 ### Key config overrides
 

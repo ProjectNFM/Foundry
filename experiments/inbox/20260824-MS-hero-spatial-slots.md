@@ -1,6 +1,6 @@
 # HERO spatial-slot ablation: 1-factor vs 8-slot fusion in a flat temporal control
 
-**Status:** Draft
+**Status:** Complete
 **Date started:** 2026-08-24
 **Parent experiment:** [NeuralBench POYO-EEG Tokenizer Baselines](../04-neuralbench-from-scratch-baselines/20260821-MS-neuralbench-poyo-tokenizer-baselines.md)
 **Follow-up experiments:** [HERO relational-context sufficiency for Motor Imagery](20260825-MS-hero-relational-context-sufficiency.md)
@@ -66,12 +66,63 @@ uv run python main.py experiment=neuralbench/sleep_stage_hero_spatial_slots -m
 
 ## Results
 
-TBD
+### Test balanced accuracy (mean ± SD, 3 seeds)
+
+| Task | 1-slot | 8-slot | Delta (8−1) | Meets 2pp | EEGNet ref |
+|---|---|---|---|---|---|
+| P300 (16ch) | 0.579 ± 0.004 | 0.584 ± 0.011 | +0.005 | NO | 0.625 ± 0.013 |
+| Motor Imagery (64ch) | 0.308 ± 0.008 | 0.302 ± 0.008 | −0.006 | NO | 0.571 ± 0.002 |
+| Sleep Stage (2ch) | 0.714 ± 0.002 | 0.707 ± 0.010 | −0.007 | NO | 0.680 ± 0.009 |
+
+### Per-seed detail
+
+**P300:**
+
+| Slots | Seed 33 | Seed 34 | Seed 35 |
+|---|---|---|---|
+| 1 | 0.581 | 0.581 | 0.575 |
+| 8 | 0.588 | 0.592 | 0.571 |
+
+**Motor Imagery:**
+
+| Slots | Seed 33 | Seed 34 | Seed 35 |
+|---|---|---|---|
+| 1 | 0.298 | 0.313 | 0.313 |
+| 8 | 0.300 | 0.295 | 0.310 |
+
+**Sleep Stage:**
+
+| Slots | Seed 33 | Seed 34 | Seed 35 |
+|---|---|---|---|
+| 1 | 0.717 | 0.714 | 0.712 |
+| 8 | 0.696 | 0.714 | 0.711 |
+
+### Hypothesis verdict
+
+**NOT SUPPORTED.** The 8-slot spatial mixer does not outperform 1-slot pooling by ≥ 2 pp on any task, including Motor Imagery (64ch) where the advantage was most expected. The delta is negative on MI (−0.006) and Sleep (−0.007), and negligibly positive on P300 (+0.005). Per-seed slopes are inconsistent with no systematic direction across tasks.
+
+### Comparison with EEGNet baselines
+
+- **P300:** HERO (both conditions) lags matched EEGNet by ~4 pp.
+- **Motor Imagery:** HERO is catastrophically below EEGNet (~0.30 vs 0.571). Both HERO conditions are near 4-class chance level (0.25), indicating a fundamental architectural bottleneck unrelated to spatial slots.
+- **Sleep Stage:** HERO outperforms EEGNet by +3.4 pp (1-slot) / +2.7 pp (8-slot) — the only task where HERO flat-temporal exceeds the baseline.
+
+### Figures
+
+- Grouped bar chart: `analysis/figures/20260824-MS-hero-spatial-slots_analysis_slot_comparison.png`
+- Per-seed paired comparison: `analysis/figures/20260824-MS-hero-spatial-slots_analysis_per_seed.png`
+- CSVs: `analysis/csv/20260824-MS-hero-spatial-slots_analysis_runs.csv`, `analysis/csv/20260824-MS-hero-spatial-slots_analysis_summary.csv`
 
 ## Conclusions
 
-TBD
+1. **The spatial-slot mechanism can be simplified.** 1-slot and 8-slot are functionally indistinguishable on all three tasks. The added complexity of multiple spatial slots provides no benefit, even on the 64-channel MI task where the spatial mixer receives the richest input set per time bin. Defaulting to `num_spatial_slots=1` eliminates unnecessary parameters and attention computation.
+
+2. **The flat temporal path is the dominant bottleneck on MI.** The near-chance MI performance (~0.30 for both slot conditions vs 0.571 EEGNet) confirms that the spatial-slot count is not the limiting factor. The flat Perceiver temporal path cannot represent the long 4-second, 64-channel MI recordings effectively — this is the same bottleneck identified in the POYO tokenizer baselines and motivates the hierarchical temporal structure (HERO Ladder Question 2).
+
+3. **Sleep Stage validates the channel encoder + spatial pooling path.** HERO outperforming EEGNet on Sleep (+3 pp) despite using only 2 channels and a flat temporal mode shows that the per-channel encoder and spatial aggregation are sound when the temporal sequence is manageable (30s at 2ch = modest token count).
 
 ## Notes for future experiments
 
-TBD
+- Proceed directly to **Ladder Question 2** (hierarchical temporal structure) with `num_spatial_slots=1` as the default. The spatial-slot mechanism is a resolved non-factor.
+- The MI task is the critical test for the temporal hierarchy: if multi-level temporal aggregation cannot close the 27-pp gap with EEGNet, the HERO architecture needs deeper rethinking.
+- Consider whether the P300 4-pp gap is also a temporal-path issue or reflects a different limitation (e.g., the channel encoder's receptive field on 1-second epochs).
