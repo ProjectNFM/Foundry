@@ -1,0 +1,8 @@
+# @package _global_
+condition_name: shuffled_relational
+
+model:
+  channel_context_mode: relational
+  channel_type_enabled: true
+  absolute_position_enabled: false
+  shuffle_relational_context: true

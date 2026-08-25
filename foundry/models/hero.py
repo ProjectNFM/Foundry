@@ -1941,6 +1941,7 @@ class HEROModel(nn.Module):
         channel_type_enabled: bool = False,
         absolute_position_enabled: bool | None = None,
         position_num_fourier_bands: int = 6,
+        shuffle_relational_context: bool = False,
     ):
         super().__init__()
 
@@ -2089,6 +2090,22 @@ class HEROModel(nn.Module):
         # compatibility. Forward now uses ``task_decoder``.
         self.temporal_pool = MaskAwareTemporalPool(embed_dim)
         self.router = build_readout_router(self._task_configs, embed_dim)
+
+        self.shuffle_relational_context = shuffle_relational_context
+        if shuffle_relational_context:
+            if not self.use_relational_context:
+                raise ValueError(
+                    "shuffle_relational_context requires a relational "
+                    "channel_context_mode."
+                )
+            perm = torch.randperm(num_channels)
+            while torch.equal(perm, torch.arange(num_channels)):
+                perm = torch.randperm(num_channels)
+            self.register_buffer(
+                "_relational_shuffle_perm", perm, persistent=True
+            )
+        else:
+            self._relational_shuffle_perm: torch.Tensor | None = None
 
     @property
     def task_configs(self) -> dict[str, TaskConfig]:
@@ -2421,9 +2438,12 @@ class HEROModel(nn.Module):
                 relational = channel_context.relational
                 if relational is None:
                     raise RuntimeError("Relational context was not produced.")
-                if relational_context_permutation is not None:
+                perm = relational_context_permutation
+                if perm is None and self._relational_shuffle_perm is not None:
+                    perm = self._relational_shuffle_perm
+                if perm is not None:
                     relational = self._permute_relational_context(
-                        relational, relational_context_permutation
+                        relational, perm
                     )
                 routing_context["relational"] = relational
 
@@ -2879,7 +2899,7 @@ class HEROModel(nn.Module):
         count = len(selected_indices)
         positions = np.zeros((count, 3), dtype=np.float32)
         valid = np.zeros(count, dtype=bool)
-        source_count = len(data.channels)
+        source_count = len(np.asarray(data.channels.id))
 
         explicit = getattr(data.channels, "position", None)
         frame = getattr(data.channels, "position_frame", None)

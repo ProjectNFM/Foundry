@@ -111,8 +111,8 @@ The seven conditions are:
 ### Launch command
 
 ```bash
-# TBD -- create and smoke-test
-# configs/experiment/neuralbench/mi_hero_relational_context.yaml before running.
+FOUNDRY_SNAPSHOT_ROOT=/network/scratch/s/sobralm/foundry-launches \
+  uv run python main.py experiment=neuralbench/mi_hero_relational_context -m
 ```
 
 Production launch requirements from `AGENTS.md`: the repository must be clean

@@ -1,0 +1,8 @@
+# @package _global_
+condition_name: position_only
+
+model:
+  channel_context_mode: position
+  channel_type_enabled: true
+  absolute_position_enabled: true
+  shuffle_relational_context: false
