@@ -157,7 +157,27 @@ class NeuralSetAdapter(torch.utils.data.Dataset):
             ),
             **{self.interval_name: trial_interval},
         )
-        data.channels = Data(id=channel_ids, type=channel_types)
+        channel_metadata = {"id": channel_ids, "type": channel_types}
+        raw_positions = sample_data.get("channel_positions")
+        if raw_positions is not None:
+            if isinstance(raw_positions, torch.Tensor):
+                raw_positions = raw_positions.numpy()
+            positions = np.asarray(raw_positions, dtype=np.float32).squeeze(0)
+            if positions.shape != (n_channels, 3):
+                raise ValueError(
+                    "channel_positions must have shape [1, channels, 3]."
+                )
+            # NeuralSet ChannelPositions emits normalized head-frame values;
+            # its documented -0.1 vector marks unresolved channels.
+            position_valid = np.isfinite(positions).all(axis=-1)
+            position_valid &= ~(positions == -0.1).all(axis=-1)
+            channel_metadata.update(
+                position=positions,
+                position_valid=position_valid,
+                position_frame=np.array(["head"] * n_channels),
+                position_units=np.array(["normalized"] * n_channels),
+            )
+        data.channels = Data(**channel_metadata)
         data.session = Data(id=session_id)
         data.subject = Data(id=subject_id)
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
@@ -33,12 +34,58 @@ if TYPE_CHECKING:
     from torch_brain.data import Data
     from foundry.tasks.config import TaskConfig
 
-__all__ = ["HEROModel", "Representation", "TaskQueryCrossAttention"]
+__all__ = [
+    "CanonicalSignalViews",
+    "ChannelContext",
+    "ChannelTypeEncoder",
+    "HEROModel",
+    "AbsolutePositionEncoder",
+    "RelationalContextEncoder",
+    "Representation",
+    "SharedLocalContextEncoder",
+    "SpatialRoutingDiagnostics",
+    "TaskQueryCrossAttention",
+]
 
 
 TemporalMode = Literal["hierarchical", "flat"]
 TemporalReductionMode = Literal["slots", "mean"]
 TopDownFusionMode = Literal["gated", "add"]
+ChannelContextMode = Literal[
+    "disabled",
+    "local",
+    "relational",
+    "position",
+    "relational_position",
+]
+
+CHANNEL_TYPE_TO_INDEX = {
+    "unknown": 0,
+    "eeg": 1,
+    "ecog": 2,
+    "seeg": 3,
+    "lfp": 4,
+    "microelectrode": 5,
+    "micro": 5,
+}
+SUPPORTED_POSITION_FRAMES = {
+    "head",
+    "mri",
+    "mni",
+    "mni_tal",
+    "native",
+    "ras",
+    "scanner_ras",
+}
+POSITION_UNIT_TO_HEAD_RADIUS = {
+    "normalized": 1.0,
+    "m": 10.0,
+    "meter": 10.0,
+    "meters": 10.0,
+    "cm": 0.1,
+    "mm": 0.01,
+    "um": 1e-5,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +124,61 @@ class Representation:
     content: torch.Tensor
     content_timestamps: torch.Tensor
     coverage: CoverageInfo
+    channel_context: ChannelContext | None = None
+    spatial_routing: SpatialRoutingDiagnostics | None = None
+
+
+@dataclass
+class CanonicalSignalViews:
+    """Aligned raw and normalized views of one canonical-rate sample.
+
+    ``source_mean`` and the population standard deviation underlying
+    ``source_std`` are calculated before resampling from valid source samples.
+    ``source_std`` uses one when that deviation is effectively zero. All
+    invalid samples and padded channels are zero in both signal views.
+    """
+
+    raw: torch.Tensor
+    content: torch.Tensor
+    timestamps: torch.Tensor
+    sample_mask: torch.Tensor
+    source_mean: torch.Tensor
+    source_std: torch.Tensor
+
+
+@dataclass
+class ChannelContext:
+    """Phase-1 sample-derived context and its attention diagnostics.
+
+    ``local`` and ``relational`` contain one time-constant vector per channel.
+    ``local_attention`` records the temporal pooling distribution on the
+    downsampled context grid. ``relational_attention`` has shape
+    ``[B, blocks, heads, C, C]`` and is ``None`` for a local-only encoder.
+    """
+
+    local: torch.Tensor
+    relational: torch.Tensor | None
+    local_attention: torch.Tensor
+    relational_attention: torch.Tensor | None
+
+    @property
+    def context_width(self) -> int:
+        """Width of every local and relational channel vector."""
+        return self.local.shape[-1]
+
+
+@dataclass
+class SpatialRoutingDiagnostics:
+    """Compact routing diagnostics suitable for experiment logging.
+
+    ``gate_values`` and ``logit_rms`` map source names to per-head values.
+    ``attention_mean`` is the spatial probability averaged over valid time,
+    with shape ``[B, heads, slots, C]``.
+    """
+
+    gate_values: dict[str, torch.Tensor]
+    logit_rms: dict[str, torch.Tensor]
+    attention_mean: torch.Tensor
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +251,53 @@ def _expand_receptive_fields(
     return expanded
 
 
+def _channel_type_index(channel_type: object) -> int:
+    """Map a coarse data-layer channel type to the fixed model ontology."""
+    return CHANNEL_TYPE_TO_INDEX.get(str(channel_type).strip().lower(), 0)
+
+
+@lru_cache(maxsize=1)
+def _standard_montage_positions() -> dict[str, np.ndarray]:
+    """Return normalized 3-D EEG positions from standard MNE montages.
+
+    Names are lookup keys only. The returned numeric vectors are normalized by
+    a fixed 10 cm head radius before they can cross the model boundary.
+    """
+    try:
+        import mne
+    except ImportError:
+        return {}
+
+    mne.set_log_level("ERROR")
+    positions: dict[str, np.ndarray] = {}
+    for montage_name in ("standard_1020", "standard_1005"):
+        try:
+            montage = mne.channels.make_standard_montage(montage_name)
+        except Exception:
+            continue
+        for name, xyz in montage.get_positions()["ch_pos"].items():
+            key = name.strip().lower()
+            if key not in positions:
+                positions[key] = np.asarray(xyz, dtype=np.float32) * 10.0
+    return positions
+
+
+def _metadata_values(
+    value: object,
+    count: int,
+) -> np.ndarray:
+    """Broadcast scalar metadata or validate one value per source channel."""
+    values = np.asarray(value)
+    if values.ndim == 0:
+        return np.repeat(values.reshape(1), count)
+    values = values.reshape(-1)
+    if len(values) != count:
+        raise ValueError(
+            f"Expected scalar metadata or {count} channel values, got {len(values)}."
+        )
+    return values
+
+
 # ---------------------------------------------------------------------------
 # Submodules
 # ---------------------------------------------------------------------------
@@ -218,6 +367,372 @@ class SharedLocalChannelEncoder(nn.Module):
         return x
 
 
+class SharedLocalContextEncoder(nn.Module):
+    """Compress each raw channel independently with shared temporal weights.
+
+    Every convolution block is followed by mask-aware bounded downsampling.
+    A learned query then pools the remaining temporal grid to one vector. No
+    operation in this module mixes channels.
+    """
+
+    def __init__(
+        self,
+        context_dim: int = 32,
+        num_layers: int = 3,
+        kernel_size: int = 7,
+        pool_factor: int = 2,
+    ):
+        super().__init__()
+        if context_dim <= 0:
+            raise ValueError("context_dim must be positive.")
+        if num_layers <= 0:
+            raise ValueError("context encoder num_layers must be positive.")
+        if kernel_size <= 0 or kernel_size % 2 == 0:
+            raise ValueError(
+                "context kernel_size must be a positive odd integer."
+            )
+        if pool_factor <= 0:
+            raise ValueError("context pool_factor must be positive.")
+
+        self.context_dim = context_dim
+        self.pool_factor = pool_factor
+        self.convs = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        in_channels = 1
+        for _ in range(num_layers):
+            self.convs.append(
+                nn.Conv1d(
+                    in_channels,
+                    context_dim,
+                    kernel_size,
+                    padding=kernel_size // 2,
+                    bias=False,
+                )
+            )
+            self.norms.append(nn.LayerNorm(context_dim))
+            in_channels = context_dim
+
+        self.pool_norm = nn.LayerNorm(context_dim)
+        self.pool_query = nn.Parameter(torch.randn(context_dim) * 0.02)
+
+    def _downsample(
+        self,
+        x: torch.Tensor,
+        valid: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Mask-aware average pooling that cannot ingest invalid values."""
+        if self.pool_factor == 1:
+            return x, valid
+
+        weights = valid.unsqueeze(1).to(x.dtype)
+        numerator = F.avg_pool1d(
+            x * weights,
+            self.pool_factor,
+            stride=self.pool_factor,
+            ceil_mode=True,
+            count_include_pad=False,
+        )
+        denominator = F.avg_pool1d(
+            weights,
+            self.pool_factor,
+            stride=self.pool_factor,
+            ceil_mode=True,
+            count_include_pad=False,
+        )
+        pooled_valid = denominator.squeeze(1) > 0
+        x = numerator / denominator.clamp_min(1e-8)
+        x = x * pooled_valid.unsqueeze(1).to(x.dtype)
+        return x, pooled_valid
+
+    def forward(
+        self,
+        raw_signal: torch.Tensor,
+        channel_mask: torch.Tensor,
+        sample_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return local vectors and temporal-pooling attention weights.
+
+        Args:
+            raw_signal: Unnormalized canonical signal ``[B, C, T]``.
+            channel_mask: Valid channels ``[B, C]``.
+            sample_mask: Valid canonical samples ``[B, T]``.
+        """
+        if raw_signal.ndim != 3:
+            raise ValueError("raw_signal must have shape [B, C, T].")
+        B, C, T = raw_signal.shape
+        channel_mask = channel_mask.to(raw_signal.device, dtype=torch.bool)
+        sample_mask = sample_mask.to(raw_signal.device, dtype=torch.bool)
+        if channel_mask.shape != (B, C):
+            raise ValueError("channel_mask must have shape [B, C].")
+        if sample_mask.shape != (B, T):
+            raise ValueError("sample_mask must have shape [B, T].")
+
+        finite = torch.isfinite(raw_signal)
+        valid = sample_mask.unsqueeze(1) & channel_mask.unsqueeze(-1) & finite
+        x = torch.where(valid, raw_signal, torch.zeros_like(raw_signal))
+        x = x.reshape(B * C, 1, T)
+        valid_flat = valid.reshape(B * C, T)
+
+        for conv, norm in zip(self.convs, self.norms, strict=True):
+            x = x * valid_flat.unsqueeze(1).to(x.dtype)
+            x = conv(x)
+            x = F.gelu(norm(x.transpose(1, 2))).transpose(1, 2)
+            x = x * valid_flat.unsqueeze(1).to(x.dtype)
+            x, valid_flat = self._downsample(x, valid_flat)
+
+        features = self.pool_norm(x.transpose(1, 2))
+        scores = torch.einsum("btd,d->bt", features, self.pool_query)
+        scores = scores / math.sqrt(self.context_dim)
+        scores = scores.masked_fill(~valid_flat, float("-inf"))
+        any_valid = valid_flat.any(dim=-1)
+        safe_scores = torch.where(
+            any_valid.unsqueeze(-1), scores, torch.zeros_like(scores)
+        )
+        attention = torch.where(
+            any_valid.unsqueeze(-1),
+            F.softmax(safe_scores, dim=-1),
+            torch.zeros_like(safe_scores),
+        )
+        local = torch.einsum("bt,btd->bd", attention, features)
+        local = local * any_valid.unsqueeze(-1).to(local.dtype)
+
+        return (
+            local.view(B, C, self.context_dim),
+            attention.view(B, C, -1),
+        )
+
+
+class RelationalContextBlock(nn.Module):
+    """One mask-safe, permutation-equivariant channel transformer block."""
+
+    def __init__(self, context_dim: int = 32, num_heads: int = 4):
+        super().__init__()
+        if num_heads <= 0:
+            raise ValueError("context heads must be positive.")
+        if context_dim % num_heads != 0:
+            raise ValueError("context_dim must be divisible by context heads.")
+        self.context_dim = context_dim
+        self.num_heads = num_heads
+        self.head_dim = context_dim // num_heads
+        self.attn_norm = nn.LayerNorm(context_dim)
+        self.qkv = nn.Linear(context_dim, 3 * context_dim, bias=False)
+        self.out_proj = nn.Linear(context_dim, context_dim, bias=False)
+        self.ffn_norm = nn.LayerNorm(context_dim)
+        self.ffn = nn.Sequential(
+            nn.Linear(context_dim, 4 * context_dim),
+            nn.GELU(),
+            nn.Linear(4 * context_dim, context_dim),
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        channel_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        B, C, D = x.shape
+        mask = channel_mask.to(x.device, dtype=torch.bool)
+        if mask.shape != (B, C):
+            raise ValueError("channel_mask must have shape [B, C].")
+
+        qkv = self.qkv(self.attn_norm(x))
+        qkv = qkv.view(B, C, 3, self.num_heads, self.head_dim)
+        q, k, v = qkv.unbind(dim=2)
+        q = q.transpose(1, 2)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
+        logits = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
+        logits = logits.masked_fill(~mask[:, None, None, :], float("-inf"))
+        any_channel = mask.any(dim=-1)
+        safe_logits = torch.where(
+            any_channel[:, None, None, None], logits, torch.zeros_like(logits)
+        )
+        attention = torch.where(
+            any_channel[:, None, None, None],
+            F.softmax(safe_logits, dim=-1),
+            torch.zeros_like(safe_logits),
+        )
+        attention = attention * mask[:, None, :, None].to(attention.dtype)
+
+        attended = torch.matmul(attention, v)
+        attended = attended.transpose(1, 2).reshape(B, C, D)
+        mask_f = mask.unsqueeze(-1).to(x.dtype)
+        x = (x + self.out_proj(attended)) * mask_f
+        x = (x + self.ffn(self.ffn_norm(x))) * mask_f
+        return x, attention
+
+
+class RelationalContextEncoder(nn.Module):
+    """Apply cross-channel attention without any channel-order embedding."""
+
+    def __init__(
+        self,
+        context_dim: int = 32,
+        num_blocks: int = 2,
+        num_heads: int = 4,
+    ):
+        super().__init__()
+        if num_blocks <= 0:
+            raise ValueError("relational context num_blocks must be positive.")
+        self.blocks = nn.ModuleList(
+            [
+                RelationalContextBlock(context_dim, num_heads)
+                for _ in range(num_blocks)
+            ]
+        )
+        self.output_norm = nn.LayerNorm(context_dim)
+
+    def forward(
+        self,
+        local: torch.Tensor,
+        channel_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        attentions = []
+        x = local
+        for block in self.blocks:
+            x, attention = block(x, channel_mask)
+            attentions.append(attention)
+        x = self.output_norm(x)
+        x = x * channel_mask.unsqueeze(-1).to(x.dtype)
+        return x, torch.stack(attentions, dim=1)
+
+
+class SampleDerivedContextEncoder(nn.Module):
+    """Compose independent raw-signal summaries and optional relationships."""
+
+    def __init__(
+        self,
+        *,
+        context_dim: int = 32,
+        local_layers: int = 3,
+        local_kernel_size: int = 7,
+        local_pool_factor: int = 2,
+        relational_blocks: int = 2,
+        relational_heads: int = 4,
+    ):
+        super().__init__()
+        if relational_blocks < 0:
+            raise ValueError("relational_blocks must be non-negative.")
+        self.local_encoder = SharedLocalContextEncoder(
+            context_dim=context_dim,
+            num_layers=local_layers,
+            kernel_size=local_kernel_size,
+            pool_factor=local_pool_factor,
+        )
+        self.relational_encoder = (
+            RelationalContextEncoder(
+                context_dim=context_dim,
+                num_blocks=relational_blocks,
+                num_heads=relational_heads,
+            )
+            if relational_blocks > 0
+            else None
+        )
+
+    def forward(
+        self,
+        raw_signal: torch.Tensor,
+        channel_mask: torch.Tensor,
+        sample_mask: torch.Tensor,
+    ) -> ChannelContext:
+        local, local_attention = self.local_encoder(
+            raw_signal, channel_mask, sample_mask
+        )
+        if self.relational_encoder is None:
+            relational = None
+            relational_attention = None
+        else:
+            relational, relational_attention = self.relational_encoder(
+                local, channel_mask
+            )
+        return ChannelContext(
+            local=local,
+            relational=relational,
+            local_attention=local_attention,
+            relational_attention=relational_attention,
+        )
+
+
+class ChannelTypeEncoder(nn.Module):
+    """Embed the fixed six-entry channel-type ontology."""
+
+    num_types = 6
+
+    def __init__(self, context_dim: int = 32):
+        super().__init__()
+        self.embedding = nn.Embedding(self.num_types, context_dim)
+
+    def forward(
+        self,
+        channel_type: torch.Tensor,
+        channel_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        if channel_type.shape != channel_mask.shape:
+            raise ValueError("channel_type must have shape [B, C].")
+        if channel_type.is_floating_point():
+            raise ValueError(
+                "channel_type must contain integer ontology indices."
+            )
+        channel_type = channel_type.to(channel_mask.device, dtype=torch.long)
+        if torch.any((channel_type < 0) | (channel_type >= self.num_types)):
+            raise ValueError("channel_type contains an unknown ontology index.")
+        context = self.embedding(channel_type)
+        return context * channel_mask.unsqueeze(-1).to(context.dtype)
+
+
+class AbsolutePositionEncoder(nn.Module):
+    """Encode normalized 3-D coordinates with Fourier features and an MLP."""
+
+    def __init__(self, context_dim: int = 32, num_fourier_bands: int = 6):
+        super().__init__()
+        if num_fourier_bands <= 0:
+            raise ValueError("num_fourier_bands must be positive.")
+        frequencies = torch.pi * 2 ** torch.arange(num_fourier_bands).float()
+        self.register_buffer("frequencies", frequencies, persistent=False)
+        feature_dim = 3 * (1 + 2 * num_fourier_bands)
+        self.mlp = nn.Sequential(
+            nn.Linear(feature_dim, 2 * context_dim),
+            nn.GELU(),
+            nn.Linear(2 * context_dim, context_dim),
+        )
+        self.missing_position = nn.Parameter(torch.randn(context_dim) * 0.02)
+
+    def forward(
+        self,
+        position: torch.Tensor,
+        position_valid: torch.Tensor,
+        channel_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        if position.ndim != 3 or position.shape[-1] != 3:
+            raise ValueError("channel_position must have shape [B, C, 3].")
+        if position_valid.shape != position.shape[:2]:
+            raise ValueError("channel_position_valid must have shape [B, C].")
+        if channel_mask.shape != position.shape[:2]:
+            raise ValueError("channel_mask must have shape [B, C].")
+
+        finite = torch.isfinite(position).all(dim=-1)
+        valid = (
+            position_valid.to(position.device, dtype=torch.bool)
+            & channel_mask.to(position.device, dtype=torch.bool)
+            & finite
+        )
+        safe_position = torch.where(
+            valid.unsqueeze(-1), position, torch.zeros_like(position)
+        )
+        phase = safe_position.unsqueeze(-1) * self.frequencies.to(position)
+        features = torch.cat(
+            [
+                safe_position,
+                phase.sin().flatten(start_dim=-2),
+                phase.cos().flatten(start_dim=-2),
+            ],
+            dim=-1,
+        )
+        encoded = self.mlp(features)
+        missing = self.missing_position.view(1, 1, -1).expand_as(encoded)
+        encoded = torch.where(valid.unsqueeze(-1), encoded, missing)
+        return encoded * channel_mask.unsqueeze(-1).to(encoded.dtype)
+
+
 class SpatialSlotMixer(nn.Module):
     """Fuse an unordered set of channel-local features at each time bin.
 
@@ -229,13 +744,33 @@ class SpatialSlotMixer(nn.Module):
     """
 
     def __init__(
-        self, embed_dim: int = 256, num_slots: int = 8, num_heads: int = 8
+        self,
+        embed_dim: int = 256,
+        num_slots: int = 8,
+        num_heads: int = 8,
+        *,
+        context_dim: int = 32,
+        context_sources: tuple[str, ...] = (),
     ):
         super().__init__()
+        if embed_dim % num_heads != 0:
+            raise ValueError("embed_dim must be divisible by spatial heads.")
+        if context_sources and context_dim % num_heads != 0:
+            raise ValueError("context_dim must be divisible by spatial heads.")
+        supported_sources = {"local", "relational", "type", "position"}
+        if len(set(context_sources)) != len(context_sources) or not set(
+            context_sources
+        ).issubset(supported_sources):
+            raise ValueError(
+                "context_sources contains duplicates or unknown sources."
+            )
         self.embed_dim = embed_dim
         self.num_slots = num_slots
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
+        self.context_dim = context_dim
+        self.context_head_dim = context_dim // num_heads
+        self.context_sources = tuple(context_sources)
 
         self.queries = nn.Parameter(torch.randn(num_slots, embed_dim) * 0.02)
         self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False)
@@ -246,11 +781,33 @@ class SpatialSlotMixer(nn.Module):
         self.out_proj = nn.Linear(num_slots * embed_dim, embed_dim)
         self.layer_norm = nn.LayerNorm(embed_dim)
 
+        self.context_queries = nn.ParameterDict()
+        self.context_k_proj = nn.ModuleDict()
+        self.context_gates = nn.ParameterDict()
+        for source in self.context_sources:
+            key = f"source_{source}"
+            self.context_queries[key] = nn.Parameter(
+                torch.randn(num_slots, num_heads, self.context_head_dim) * 0.02
+            )
+            self.context_k_proj[key] = nn.Linear(
+                context_dim, context_dim, bias=False
+            )
+            # Exact zero is both the initialization and the ablation value.
+            self.context_gates[key] = nn.Parameter(torch.zeros(num_heads))
+
     def forward(
         self,
         x: torch.Tensor,
         channel_mask: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        *,
+        routing_context: dict[str, torch.Tensor] | None = None,
+        routing_masks: dict[str, torch.Tensor] | None = None,
+        temporal_mask: torch.Tensor | None = None,
+        return_diagnostics: bool = False,
+    ) -> (
+        tuple[torch.Tensor, torch.Tensor]
+        | tuple[torch.Tensor, torch.Tensor, SpatialRoutingDiagnostics]
+    ):
         """
         Args:
             x: ``(B, C, T, D)`` channel-local features.
@@ -275,6 +832,54 @@ class SpatialSlotMixer(nn.Module):
         v = v.view(B * T, C, H, Dh).transpose(1, 2)
 
         attn_weights = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(Dh)
+        logit_rms = {
+            "content": attn_weights.square().mean(dim=(0, 2, 3)).sqrt()
+        }
+
+        routing_context = routing_context or {}
+        routing_masks = routing_masks or {}
+        unexpected = set(routing_context) - set(self.context_sources)
+        if unexpected:
+            raise ValueError(
+                f"Unexpected routing context sources: {unexpected}."
+            )
+        for source in self.context_sources:
+            key = f"source_{source}"
+            context = routing_context.get(source)
+            if context is None:
+                continue
+            if context.shape != (B, C, self.context_dim):
+                raise ValueError(
+                    f"{source} context must have shape [B, C, context_dim]."
+                )
+            source_mask = routing_masks.get(source, channel_mask)
+            if source_mask is None:
+                source_mask = torch.ones(
+                    B, C, dtype=torch.bool, device=x.device
+                )
+            source_mask = source_mask.to(x.device, dtype=torch.bool)
+            if source_mask.shape != (B, C):
+                raise ValueError(
+                    f"{source} routing mask must have shape [B, C]."
+                )
+
+            source_keys = self.context_k_proj[key](context)
+            source_keys = source_keys.view(B, C, H, self.context_head_dim)
+            source_logits = torch.einsum(
+                "bchd,shd->bhsc",
+                source_keys,
+                self.context_queries[key],
+            ) / math.sqrt(self.context_head_dim)
+            source_logits = source_logits * source_mask[:, None, None, :].to(
+                source_logits.dtype
+            )
+            logit_rms[source] = (
+                source_logits.square().mean(dim=(0, 2, 3)).sqrt()
+            )
+            gate = self.context_gates[key].view(1, 1, H, 1, 1)
+            attn_weights = attn_weights.view(B, T, H, S, C)
+            attn_weights = attn_weights + gate * source_logits[:, None]
+            attn_weights = attn_weights.reshape(B * T, H, S, C)
 
         if channel_mask is not None:
             mask_bt = channel_mask.unsqueeze(2).expand(B, C, T)
@@ -314,7 +919,32 @@ class SpatialSlotMixer(nn.Module):
         out = out.where(any_valid.unsqueeze(1), torch.zeros_like(out))
         out = out.view(B, T, D)
         token_valid = any_valid.view(B, T)
-        return out, token_valid
+        if not return_diagnostics:
+            return out, token_valid
+
+        attention_by_time = attn_probs.view(B, T, H, S, C)
+        if temporal_mask is None:
+            attention_mean = attention_by_time.mean(dim=1)
+        else:
+            temporal_mask = temporal_mask.to(x.device, dtype=torch.bool)
+            if temporal_mask.shape != (B, T):
+                raise ValueError("temporal_mask must have shape [B, T].")
+            weights = temporal_mask[:, :, None, None, None].to(x.dtype)
+            denominator = weights.sum(dim=1).clamp_min(1.0)
+            attention_mean = (attention_by_time * weights).sum(
+                dim=1
+            ) / denominator
+        diagnostics = SpatialRoutingDiagnostics(
+            gate_values={
+                source: self.context_gates[f"source_{source}"].detach().clone()
+                for source in self.context_sources
+            },
+            logit_rms={
+                source: value.detach() for source, value in logit_rms.items()
+            },
+            attention_mean=attention_mean.detach(),
+        )
+        return out, token_valid, diagnostics
 
 
 class LocalWindowAttention(nn.Module):
@@ -1301,6 +1931,16 @@ class HEROModel(nn.Module):
         flat_num_local_attn_blocks: int | None = None,
         temporal_reduction: TemporalReductionMode = "slots",
         top_down_fusion: TopDownFusionMode = "gated",
+        channel_context_mode: ChannelContextMode = "disabled",
+        context_dim: int = 32,
+        context_encoder_layers: int = 3,
+        context_encoder_kernel_size: int = 7,
+        context_pool_factor: int = 2,
+        relational_context_blocks: int = 2,
+        relational_context_heads: int = 4,
+        channel_type_enabled: bool = False,
+        absolute_position_enabled: bool | None = None,
+        position_num_fourier_bands: int = 6,
     ):
         super().__init__()
 
@@ -1323,6 +1963,24 @@ class HEROModel(nn.Module):
                 "top_down_fusion must be either 'gated' or 'add', "
                 f"got {top_down_fusion!r}."
             )
+        if channel_context_mode not in (
+            "disabled",
+            "local",
+            "relational",
+            "position",
+            "relational_position",
+        ):
+            raise ValueError(
+                "channel_context_mode must be disabled, local, relational, "
+                f"position, or relational_position; got {channel_context_mode!r}."
+            )
+        if (
+            channel_context_mode in ("relational", "relational_position")
+            and relational_context_blocks <= 0
+        ):
+            raise ValueError(
+                "relational_context_blocks must be positive in relational mode."
+            )
         if flat_num_local_attn_blocks is not None and (
             flat_num_local_attn_blocks < 0
         ):
@@ -1332,6 +1990,26 @@ class HEROModel(nn.Module):
         self.canonical_rate = canonical_rate
         self.num_channels = num_channels
         self.temporal_mode = temporal_mode
+        self.channel_context_mode = channel_context_mode
+        self.use_local_context = channel_context_mode in (
+            "local",
+            "relational",
+            "relational_position",
+        )
+        self.use_relational_context = channel_context_mode in (
+            "relational",
+            "relational_position",
+        )
+        position_from_mode = channel_context_mode in (
+            "position",
+            "relational_position",
+        )
+        self.use_absolute_position = (
+            position_from_mode
+            if absolute_position_enabled is None
+            else absolute_position_enabled
+        )
+        self.use_channel_type = channel_type_enabled
         self._task_configs = TC.normalize_task_configs(task_configs or {})
 
         self.channel_encoder = SharedLocalChannelEncoder(
@@ -1339,10 +2017,45 @@ class HEROModel(nn.Module):
             num_layers=channel_encoder_layers,
             kernel_size=channel_encoder_kernel_size,
         )
+        self.channel_context_encoder = (
+            SampleDerivedContextEncoder(
+                context_dim=context_dim,
+                local_layers=context_encoder_layers,
+                local_kernel_size=context_encoder_kernel_size,
+                local_pool_factor=context_pool_factor,
+                relational_blocks=(
+                    relational_context_blocks
+                    if self.use_relational_context
+                    else 0
+                ),
+                relational_heads=relational_context_heads,
+            )
+            if self.use_local_context
+            else None
+        )
+        self.channel_type_encoder = (
+            ChannelTypeEncoder(context_dim) if self.use_channel_type else None
+        )
+        self.position_encoder = (
+            AbsolutePositionEncoder(context_dim, position_num_fourier_bands)
+            if self.use_absolute_position
+            else None
+        )
+        routing_sources = []
+        if self.use_local_context:
+            routing_sources.append("local")
+        if self.use_relational_context:
+            routing_sources.append("relational")
+        if self.use_channel_type:
+            routing_sources.append("type")
+        if self.use_absolute_position:
+            routing_sources.append("position")
         self.spatial_mixer = SpatialSlotMixer(
             embed_dim=embed_dim,
             num_slots=num_spatial_slots,
             num_heads=num_attn_heads,
+            context_dim=context_dim,
+            context_sources=tuple(routing_sources),
         )
         if temporal_mode == "hierarchical":
             self.encoder = HEROEncoder(
@@ -1381,6 +2094,36 @@ class HEROModel(nn.Module):
     def task_configs(self) -> dict[str, TaskConfig]:
         return self._task_configs
 
+    def estimate_relational_context_cost(
+        self,
+        channel_count: int,
+        batch_size: int = 1,
+    ) -> dict[str, int]:
+        """Report the duration-independent cross-channel attention cost.
+
+        The multiply-add estimate covers only relational QK and attention-value
+        products. Local temporal convolution and post-fusion temporal work are
+        intentionally excluded so channel-count scaling stays explicit.
+        """
+        if channel_count < 0 or batch_size <= 0:
+            raise ValueError(
+                "channel_count must be non-negative and batch_size positive."
+            )
+        if (
+            self.channel_context_encoder is None
+            or self.channel_context_encoder.relational_encoder is None
+        ):
+            return {"attention_elements": 0, "multiply_adds": 0}
+        relational = self.channel_context_encoder.relational_encoder
+        blocks = len(relational.blocks)
+        heads = relational.blocks[0].num_heads
+        context_dim = relational.blocks[0].context_dim
+        pairs = batch_size * blocks * channel_count * channel_count
+        return {
+            "attention_elements": pairs * heads,
+            "multiply_adds": 2 * pairs * context_dim,
+        }
+
     # ------------------------------------------------------------------
     # tokenize  (CPU / DataLoader workers)
     # ------------------------------------------------------------------
@@ -1388,15 +2131,17 @@ class HEROModel(nn.Module):
     def tokenize(self, data: Data) -> dict:
         """CPU-side data preparation.
 
-        Resolves modality, filters channels, sanitizes non-finites,
-        z-scores each valid channel, resamples to ``canonical_rate``,
-        pads, and extracts multitask targets.
+        Resolves modality, filters and pads channels, then creates aligned raw
+        and normalized views of one canonical-rate sample. The raw signal is
+        sanitized and resampled exactly once. Normalization uses statistics
+        from valid source-rate samples and is applied after resampling.
 
         Returns:
-            Dict ready for collation with ``input_values``,
-            ``input_timestamps``, ``output_timestamps``, ``channel_mask``,
-            ``sample_mask``, ``task_index``, ``target_values``,
-            ``target_weights``, and provenance fields.
+            Dict ready for collation. ``input_values`` is the unnormalized
+            canonical signal and ``input_content_values`` is its normalized,
+            timestamp-aligned content view. Source normalization statistics
+            are retained as ``input_normalization_mean`` and
+            ``input_normalization_std``.
         """
         signal, default_type, sampling_rate = self._resolve_signal_source(data)
 
@@ -1408,75 +2153,70 @@ class HEROModel(nn.Module):
         modality_mask = np.isin(
             np.char.lower(modality_field), list(self.SUPPORTED_MODALITIES)
         )
-        sig = np.asarray(signal.signal[:, modality_mask], dtype=np.float32)
+        selected_indices = np.flatnonzero(modality_mask)[: self.num_channels]
+        sig = np.asarray(signal.signal[:, selected_indices], dtype=np.float32)
 
         C_real = sig.shape[1]
-
-        non_finite = ~np.isfinite(sig)
-        sample_valid = np.ones(sig.shape, dtype=bool)
-        if non_finite.any():
-            sample_valid[non_finite] = False
-            sig = np.where(non_finite, 0.0, sig)
-
-        for c in range(C_real):
-            ch_valid = sample_valid[:, c]
-            if ch_valid.sum() < 2:
-                continue
-            vals = sig[ch_valid, c]
-            mu = vals.mean()
-            std = vals.std()
-            if std > 1e-8:
-                sig[:, c] = (sig[:, c] - mu) / std
-            sig[~ch_valid, c] = 0.0
-
         sig_ct = sig.T
-
-        was_resampled = abs(sampling_rate - self.canonical_rate) > 0.5
-        if was_resampled:
-            resampled, resampled_mask = self._resample_signal(
-                torch.from_numpy(sig_ct).unsqueeze(0),
-                torch.from_numpy(sample_valid.all(axis=1)).unsqueeze(0),
-                sampling_rate,
-                self.canonical_rate,
-            )
-            sig_ct = resampled.squeeze(0).numpy()
-            T_out = sig_ct.shape[1]
-            sample_mask_1d = resampled_mask.squeeze(0).numpy()
-        else:
-            T_out = sig_ct.shape[1]
-            sample_mask_1d = sample_valid.all(axis=1)[:T_out]
-
-        domain_start = float(getattr(signal, "domain_start", 0.0))
-        output_rate = self.canonical_rate if was_resampled else sampling_rate
-        timestamps_1d = (
-            domain_start
-            + (np.arange(T_out, dtype=np.float32) + 0.5) / output_rate
+        channel_type_1d = np.array(
+            [
+                _channel_type_index(value)
+                for value in modality_field[selected_indices]
+            ],
+            dtype=np.int64,
         )
-
-        channel_mask_1d = np.ones(C_real, dtype=bool)
-
-        C_pad = self.num_channels
-        if C_real < C_pad:
-            pad_c = C_pad - C_real
-            sig_ct = np.pad(sig_ct, ((0, pad_c), (0, 0)), constant_values=0.0)
-            channel_mask_1d = np.concatenate(
-                [channel_mask_1d, np.zeros(pad_c, dtype=bool)]
+        channel_position, channel_position_valid = (
+            self._resolve_channel_positions(
+                data,
+                selected_indices,
+                modality_field[selected_indices],
             )
-        elif C_real > C_pad:
-            sig_ct = sig_ct[:C_pad]
-            channel_mask_1d = channel_mask_1d[:C_pad]
-            C_real = C_pad
+        )
+        channel_mask_1d = np.ones(C_real, dtype=bool)
+        if C_real < self.num_channels:
+            pad_c = self.num_channels - C_real
+            sig_ct = np.pad(sig_ct, ((0, pad_c), (0, 0)), constant_values=0.0)
+            channel_mask_1d = np.pad(
+                channel_mask_1d, (0, pad_c), constant_values=False
+            )
+            channel_type_1d = np.pad(
+                channel_type_1d, (0, pad_c), constant_values=0
+            )
+            channel_position = np.pad(
+                channel_position, ((0, pad_c), (0, 0)), constant_values=0.0
+            )
+            channel_position_valid = np.pad(
+                channel_position_valid, (0, pad_c), constant_values=False
+            )
+
+        source = torch.from_numpy(sig_ct).unsqueeze(0)
+        source_channel_mask = torch.from_numpy(channel_mask_1d).unsqueeze(0)
+        source_sample_mask = torch.ones(1, source.shape[-1], dtype=torch.bool)
+        domain_start = float(getattr(signal, "domain_start", 0.0))
+        views = self._prepare_signal_views(
+            source,
+            source_channel_mask,
+            source_sample_mask,
+            sampling_rate,
+            domain_start=torch.tensor([[domain_start]], dtype=source.dtype),
+        )
 
         output_timestamps, output_values, output_task_index, output_weights = (
             extract_multitask_targets(self._task_configs, data)
         )
 
         return {
-            "input_values": torch.from_numpy(sig_ct),
-            "input_timestamps": torch.from_numpy(timestamps_1d),
+            "input_values": views.raw.squeeze(0),
+            "input_content_values": views.content.squeeze(0),
+            "input_normalization_mean": views.source_mean.squeeze(0),
+            "input_normalization_std": views.source_std.squeeze(0),
+            "input_timestamps": views.timestamps.squeeze(0),
             "output_timestamps": pad8(output_timestamps),
             "channel_mask": torch.from_numpy(channel_mask_1d),
-            "sample_mask": torch.from_numpy(sample_mask_1d),
+            "channel_type": torch.from_numpy(channel_type_1d),
+            "channel_position": torch.from_numpy(channel_position),
+            "channel_position_valid": torch.from_numpy(channel_position_valid),
+            "sample_mask": views.sample_mask.squeeze(0),
             "task_index": pad8(output_task_index),
             "target_values": chain(output_values, allow_missing_keys=True),
             "target_weights": chain(output_weights, allow_missing_keys=True),
@@ -1496,22 +2236,92 @@ class HEROModel(nn.Module):
         timestamps: torch.Tensor | None = None,
         channel_mask: torch.Tensor | None = None,
         sample_mask: torch.Tensor | None = None,
+        channel_type: torch.Tensor | None = None,
+        channel_position: torch.Tensor | None = None,
+        channel_position_valid: torch.Tensor | None = None,
+        relational_context_permutation: torch.Tensor | None = None,
     ) -> Representation:
         """Public representation entry point.
 
         Args:
-            signal: ``(B, C, T)`` raw or pre-resampled EEG.
+            signal: ``(B, C, T)`` unnormalized EEG.
             sampling_rate: Source sampling rate if ``signal`` is not at
                 ``canonical_rate``. Mutually exclusive with ``timestamps``.
             timestamps: ``(B, T)`` explicit physical timestamps. Mutually
                 exclusive with ``sampling_rate``.
             channel_mask: ``(B, C)`` boolean (True = valid channel).
             sample_mask: ``(B, T)`` boolean (True = valid sample).
+            channel_type: Optional integer ontology indices ``(B, C)``.
+            channel_position: Optional normalized coordinates ``(B, C, 3)``.
+            channel_position_valid: Optional coordinate validity ``(B, C)``.
+            relational_context_permutation: Experimental-only reassignment of
+                relational vectors, shaped ``(C,)`` or ``(B, C)``.
 
         Returns:
             :class:`Representation` with fused fine content, timestamps,
             and coverage metadata.
         """
+        views, channel_mask = self._prepare_encode_views(
+            signal,
+            sampling_rate=sampling_rate,
+            timestamps=timestamps,
+            channel_mask=channel_mask,
+            sample_mask=sample_mask,
+        )
+        return self._encode_prepared_views(
+            views,
+            channel_mask,
+            channel_type=channel_type,
+            channel_position=channel_position,
+            channel_position_valid=channel_position_valid,
+            relational_context_permutation=relational_context_permutation,
+        )
+
+    def encode_channel_context(
+        self,
+        *,
+        signal: torch.Tensor,
+        sampling_rate: float | None = None,
+        timestamps: torch.Tensor | None = None,
+        channel_mask: torch.Tensor | None = None,
+        sample_mask: torch.Tensor | None = None,
+    ) -> ChannelContext:
+        """Inspect sample-derived context from the canonical raw sample view.
+
+        The main encoder routes with this branch when its configured source
+        gates are active. This method exposes the pre-routing vectors and
+        attention diagnostics independently for analysis and probing.
+        """
+        if self.channel_context_encoder is None:
+            raise RuntimeError(
+                "Channel context is disabled; set channel_context_mode to "
+                "'local' or 'relational'."
+            )
+        views, channel_mask = self._prepare_encode_views(
+            signal,
+            sampling_rate=sampling_rate,
+            timestamps=timestamps,
+            channel_mask=channel_mask,
+            sample_mask=sample_mask,
+        )
+        return self.channel_context_encoder(
+            views.raw, channel_mask, views.sample_mask
+        )
+
+    def _prepare_encode_views(
+        self,
+        signal: torch.Tensor,
+        *,
+        sampling_rate: float | None,
+        timestamps: torch.Tensor | None,
+        channel_mask: torch.Tensor | None,
+        sample_mask: torch.Tensor | None,
+    ) -> tuple[CanonicalSignalViews, torch.Tensor]:
+        """Validate the signal-first API and create its shared sample views."""
+        if signal.ndim != 3:
+            raise ValueError(
+                "signal must have shape [batch, channels, samples]."
+            )
         B, C, T = signal.shape
         device = signal.device
 
@@ -1547,42 +2357,111 @@ class HEROModel(nn.Module):
         if sample_mask is None:
             sample_mask = torch.ones(B, T, dtype=torch.bool, device=device)
 
-        was_resampled = not math.isclose(
-            rate, self.canonical_rate, rel_tol=0, abs_tol=0.5
+        views = self._prepare_signal_views(
+            signal,
+            channel_mask,
+            sample_mask,
+            rate,
+            domain_start=domain_start,
+            explicit_timestamps=explicit_timestamps,
         )
-        if was_resampled:
-            signal, sample_mask = self._resample_signal(
-                signal, sample_mask, rate, self.canonical_rate
-            )
-            T = signal.shape[-1]
-            ts = (
-                domain_start
-                + (
-                    torch.arange(
-                        T, device=device, dtype=signal.dtype
-                    ).unsqueeze(0)
-                    + 0.5
-                )
-                / self.canonical_rate
-            )
-        elif explicit_timestamps is not None:
-            ts = explicit_timestamps
-        else:
-            ts = (
-                domain_start
-                + (
-                    torch.arange(
-                        T, device=device, dtype=signal.dtype
-                    ).unsqueeze(0)
-                    + 0.5
-                )
-                / rate
-            )
+        return views, channel_mask
 
-        input_rf_intervals = _timestamp_intervals(ts, fallback_step=1.0 / rate)
+    def _encode_prepared_views(
+        self,
+        views: CanonicalSignalViews,
+        channel_mask: torch.Tensor,
+        *,
+        channel_type: torch.Tensor | None = None,
+        channel_position: torch.Tensor | None = None,
+        channel_position_valid: torch.Tensor | None = None,
+        relational_context_permutation: torch.Tensor | None = None,
+    ) -> Representation:
+        """Encode canonical views without repeating data preparation."""
+        if views.raw.shape != views.content.shape or views.raw.ndim != 3:
+            raise ValueError(
+                "raw and content views must share shape [B, C, T]."
+            )
+        B, C, T = views.content.shape
+        channel_mask = channel_mask.to(
+            device=views.content.device, dtype=torch.bool
+        )
+        sample_mask = views.sample_mask.to(
+            device=views.content.device, dtype=torch.bool
+        )
+        if channel_mask.shape != (B, C):
+            raise ValueError("channel_mask must have shape [batch, channels].")
+        if sample_mask.shape != (B, T):
+            raise ValueError("sample_mask must have shape [batch, samples].")
+
+        joint_finite = torch.isfinite(views.raw) & torch.isfinite(views.content)
+        finite_or_padded = joint_finite | ~channel_mask.unsqueeze(-1)
+        sample_mask = sample_mask & finite_or_padded.all(dim=1)
+        valid = sample_mask.unsqueeze(1) & channel_mask.unsqueeze(-1)
+        signal = torch.where(
+            valid, views.content, torch.zeros_like(views.content)
+        )
+        ts = views.timestamps
+
+        input_rf_intervals = _timestamp_intervals(
+            ts, fallback_step=1.0 / self.canonical_rate
+        )
 
         x = self._channel_encode(signal, channel_mask, sample_mask)
-        fused, token_valid = self.spatial_mixer(x, channel_mask)
+        routing_context: dict[str, torch.Tensor] = {}
+        routing_masks: dict[str, torch.Tensor] = {}
+        channel_context = None
+
+        if self.channel_context_encoder is not None:
+            channel_context = self.channel_context_encoder(
+                views.raw, channel_mask, sample_mask
+            )
+            routing_context["local"] = channel_context.local
+            if self.use_relational_context:
+                relational = channel_context.relational
+                if relational is None:
+                    raise RuntimeError("Relational context was not produced.")
+                if relational_context_permutation is not None:
+                    relational = self._permute_relational_context(
+                        relational, relational_context_permutation
+                    )
+                routing_context["relational"] = relational
+
+        if self.channel_type_encoder is not None:
+            if channel_type is None:
+                channel_type = torch.zeros(
+                    B, C, dtype=torch.long, device=views.content.device
+                )
+            routing_context["type"] = self.channel_type_encoder(
+                channel_type.to(views.content.device), channel_mask
+            )
+
+        if self.position_encoder is not None:
+            if channel_position is None:
+                channel_position = views.content.new_zeros(B, C, 3)
+            else:
+                channel_position = channel_position.to(views.content)
+            if channel_position_valid is None:
+                channel_position_valid = torch.zeros(
+                    B, C, dtype=torch.bool, device=views.content.device
+                )
+            else:
+                channel_position_valid = channel_position_valid.to(
+                    views.content.device, dtype=torch.bool
+                )
+            routing_context["position"] = self.position_encoder(
+                channel_position, channel_position_valid, channel_mask
+            )
+            routing_masks["position"] = channel_position_valid & channel_mask
+
+        fused, token_valid, spatial_routing = self.spatial_mixer(
+            x,
+            channel_mask,
+            routing_context=routing_context,
+            routing_masks=routing_masks,
+            temporal_mask=sample_mask,
+            return_diagnostics=True,
+        )
 
         combined_valid = token_valid & sample_mask
         fine_rf_intervals = input_rf_intervals
@@ -1627,6 +2506,134 @@ class HEROModel(nn.Module):
             content=fused_fine,
             content_timestamps=ts,
             coverage=coverage,
+            channel_context=channel_context,
+            spatial_routing=spatial_routing,
+        )
+
+    @staticmethod
+    def _permute_relational_context(
+        relational: torch.Tensor,
+        permutation: torch.Tensor,
+    ) -> torch.Tensor:
+        """Apply an explicit experimental channel reassignment."""
+        B, C, D = relational.shape
+        permutation = permutation.to(relational.device, dtype=torch.long)
+        if permutation.ndim == 1:
+            permutation = permutation.unsqueeze(0).expand(B, -1)
+        if permutation.shape != (B, C):
+            raise ValueError(
+                "relational_context_permutation must have shape [C] or [B, C]."
+            )
+        expected = torch.arange(C, device=relational.device).expand(B, -1)
+        if not torch.equal(permutation.sort(dim=-1).values, expected):
+            raise ValueError(
+                "relational_context_permutation must permute every channel once."
+            )
+        return relational.gather(1, permutation.unsqueeze(-1).expand(B, C, D))
+
+    def _prepare_signal_views(
+        self,
+        signal: torch.Tensor,
+        channel_mask: torch.Tensor,
+        sample_mask: torch.Tensor,
+        source_rate: float,
+        *,
+        domain_start: torch.Tensor,
+        explicit_timestamps: torch.Tensor | None = None,
+    ) -> CanonicalSignalViews:
+        """Sanitize, resample once, then construct the normalized view."""
+        if signal.ndim != 3:
+            raise ValueError(
+                "signal must have shape [batch, channels, samples]."
+            )
+        B, C, T = signal.shape
+        device = signal.device
+        channel_mask = channel_mask.to(device=device, dtype=torch.bool)
+        sample_mask = sample_mask.to(device=device, dtype=torch.bool)
+        if channel_mask.shape != (B, C):
+            raise ValueError("channel_mask must have shape [batch, channels].")
+        if sample_mask.shape != (B, T):
+            raise ValueError("sample_mask must have shape [batch, samples].")
+
+        # Both views share one temporal mask. A non-finite in any valid channel
+        # invalidates that time; values in padded channels are irrelevant.
+        finite = torch.isfinite(signal)
+        finite_or_padded = finite | ~channel_mask.unsqueeze(-1)
+        source_valid = sample_mask & finite_or_padded.all(dim=1)
+        valid_3d = source_valid.unsqueeze(1) & channel_mask.unsqueeze(-1)
+        sanitized = torch.where(finite, signal, torch.zeros_like(signal))
+        sanitized = sanitized * valid_3d.to(signal.dtype)
+
+        weights = valid_3d.to(signal.dtype)
+        count = weights.sum(dim=-1).clamp(min=1.0)
+        source_mean = (sanitized * weights).sum(dim=-1) / count
+        centered = (sanitized - source_mean.unsqueeze(-1)) * weights
+        variance = centered.square().sum(dim=-1) / count
+        measured_std = variance.sqrt()
+        source_std = torch.where(
+            measured_std > 1e-8,
+            measured_std,
+            torch.ones_like(measured_std),
+        )
+        source_mean = torch.where(
+            channel_mask, source_mean, torch.zeros_like(source_mean)
+        )
+        source_std = torch.where(
+            channel_mask, source_std, torch.ones_like(source_std)
+        )
+
+        was_resampled = not math.isclose(
+            source_rate, self.canonical_rate, rel_tol=0, abs_tol=0.5
+        )
+        if was_resampled:
+            raw, canonical_mask = self._resample_signal(
+                sanitized,
+                source_valid,
+                source_rate,
+                self.canonical_rate,
+            )
+            T_out = raw.shape[-1]
+            timestamps = (
+                domain_start
+                + (
+                    torch.arange(
+                        T_out, device=device, dtype=signal.dtype
+                    ).unsqueeze(0)
+                    + 0.5
+                )
+                / self.canonical_rate
+            )
+        else:
+            raw = sanitized
+            canonical_mask = source_valid
+            if explicit_timestamps is not None:
+                timestamps = explicit_timestamps
+            else:
+                timestamps = (
+                    domain_start
+                    + (
+                        torch.arange(
+                            T, device=device, dtype=signal.dtype
+                        ).unsqueeze(0)
+                        + 0.5
+                    )
+                    / source_rate
+                )
+
+        canonical_valid = canonical_mask.unsqueeze(1) & channel_mask.unsqueeze(
+            -1
+        )
+        raw = raw * canonical_valid.to(raw.dtype)
+        content = (raw - source_mean.unsqueeze(-1)) / source_std.unsqueeze(-1)
+        content = content * canonical_valid.to(content.dtype)
+
+        return CanonicalSignalViews(
+            raw=raw,
+            content=content,
+            timestamps=timestamps,
+            sample_mask=canonical_mask,
+            source_mean=source_mean,
+            source_std=source_std,
         )
 
     @staticmethod
@@ -1683,23 +2690,40 @@ class HEROModel(nn.Module):
         self,
         *,
         input_values: torch.Tensor,
+        input_content_values: torch.Tensor | None = None,
+        input_normalization_mean: torch.Tensor | None = None,
+        input_normalization_std: torch.Tensor | None = None,
         input_timestamps: torch.Tensor,
         task_index: torch.Tensor,
         output_timestamps: torch.Tensor | None = None,
         channel_mask: torch.Tensor | None = None,
         sample_mask: torch.Tensor | None = None,
+        channel_type: torch.Tensor | None = None,
+        channel_position: torch.Tensor | None = None,
+        channel_position_valid: torch.Tensor | None = None,
+        relational_context_permutation: torch.Tensor | None = None,
         unpack_output: bool = True,
     ) -> ModelOutput:
         """Training adapter: encode + task-query decode + route to heads.
 
         Args:
-            input_values: ``(B, C, T)`` signal from ``tokenize()``.
+            input_values: ``(B, C, T)`` raw canonical signal from
+                ``tokenize()``.
+            input_content_values: Optional aligned normalized content view. If
+                omitted, it is derived from ``input_values``.
+            input_normalization_mean: Preserved source per-channel means.
+            input_normalization_std: Preserved source per-channel scales.
             input_timestamps: ``(B, T)`` physical timestamps.
             task_index: ``(B, N_out)`` padded task indices (0 = padding).
             output_timestamps: Optional ``(B, N_out)`` target timestamps. When
                 omitted, task queries attend globally without temporal bias.
             channel_mask: ``(B, C)`` boolean.
             sample_mask: ``(B, T)`` boolean.
+            channel_type: Optional integer ontology indices ``(B, C)``.
+            channel_position: Optional normalized coordinates ``(B, C, 3)``.
+            channel_position_valid: Optional coordinate validity ``(B, C)``.
+            relational_context_permutation: Experimental relational-context
+                reassignment hook; never produced by normal tokenization.
             unpack_output: Ignored (kept for interface compat).
 
         Returns:
@@ -1707,12 +2731,59 @@ class HEROModel(nn.Module):
         """
         del unpack_output
 
-        rep = self.encode(
-            signal=input_values,
-            timestamps=input_timestamps,
-            channel_mask=channel_mask,
-            sample_mask=sample_mask,
-        )
+        if input_content_values is None:
+            rep = self.encode(
+                signal=input_values,
+                timestamps=input_timestamps,
+                channel_mask=channel_mask,
+                sample_mask=sample_mask,
+                channel_type=channel_type,
+                channel_position=channel_position,
+                channel_position_valid=channel_position_valid,
+                relational_context_permutation=relational_context_permutation,
+            )
+        else:
+            B, C, T = input_values.shape
+            if input_content_values.shape != (B, C, T):
+                raise ValueError(
+                    "input_content_values must match input_values shape."
+                )
+            if channel_mask is None:
+                channel_mask = torch.ones(
+                    B, C, dtype=torch.bool, device=input_values.device
+                )
+            if sample_mask is None:
+                sample_mask = torch.ones(
+                    B, T, dtype=torch.bool, device=input_values.device
+                )
+            if input_normalization_mean is None:
+                input_normalization_mean = input_values.new_zeros(B, C)
+            if input_normalization_std is None:
+                input_normalization_std = input_values.new_ones(B, C)
+            if input_normalization_mean.shape != (B, C):
+                raise ValueError(
+                    "input_normalization_mean must have shape [B, C]."
+                )
+            if input_normalization_std.shape != (B, C):
+                raise ValueError(
+                    "input_normalization_std must have shape [B, C]."
+                )
+            views = CanonicalSignalViews(
+                raw=input_values,
+                content=input_content_values,
+                timestamps=input_timestamps,
+                sample_mask=sample_mask,
+                source_mean=input_normalization_mean,
+                source_std=input_normalization_std,
+            )
+            rep = self._encode_prepared_views(
+                views,
+                channel_mask,
+                channel_type=channel_type,
+                channel_position=channel_position,
+                channel_position_valid=channel_position_valid,
+                relational_context_permutation=relational_context_permutation,
+            )
 
         output_embs = self.task_decoder(
             rep.content,
@@ -1791,3 +2862,73 @@ class HEROModel(nn.Module):
         raise ValueError(
             "Data must have an 'eeg', 'ecog', 'seeg', or 'ieeg' field"
         )
+
+    def _resolve_channel_positions(
+        self,
+        data: Data,
+        selected_indices: np.ndarray,
+        selected_types: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Resolve explicit numeric or standard-montage channel positions.
+
+        Explicit coordinates cross the boundary only when their frame and
+        units are uniform and recognized. Missing or ambiguous coordinates do
+        not invalidate a signal channel. EEG channels can independently fall
+        back to a standard montage lookup using their bare channel name.
+        """
+        count = len(selected_indices)
+        positions = np.zeros((count, 3), dtype=np.float32)
+        valid = np.zeros(count, dtype=bool)
+        source_count = len(data.channels)
+
+        explicit = getattr(data.channels, "position", None)
+        frame = getattr(data.channels, "position_frame", None)
+        units = getattr(data.channels, "position_units", None)
+        if explicit is not None and frame is not None and units is not None:
+            explicit = np.asarray(explicit, dtype=np.float32)
+            if explicit.shape != (source_count, 3):
+                raise ValueError(
+                    "channels.position must have shape [channels, 3]."
+                )
+            frames = _metadata_values(frame, source_count).astype(str)
+            unit_values = _metadata_values(units, source_count).astype(str)
+            selected_frames = np.char.lower(frames[selected_indices])
+            selected_units = np.char.lower(unit_values[selected_indices])
+            uniform_frame = len(set(selected_frames.tolist())) == 1
+            uniform_units = len(set(selected_units.tolist())) == 1
+            recognized_frame = (
+                uniform_frame
+                and selected_frames[0] in SUPPORTED_POSITION_FRAMES
+            )
+            recognized_units = (
+                uniform_units
+                and selected_units[0] in POSITION_UNIT_TO_HEAD_RADIUS
+            )
+            if recognized_frame and recognized_units:
+                positions = explicit[selected_indices].copy()
+                positions *= POSITION_UNIT_TO_HEAD_RADIUS[selected_units[0]]
+                explicit_valid = getattr(data.channels, "position_valid", None)
+                if explicit_valid is None:
+                    valid = np.isfinite(positions).all(axis=-1)
+                else:
+                    explicit_valid = _metadata_values(
+                        explicit_valid, source_count
+                    ).astype(bool)
+                    valid = explicit_valid[selected_indices]
+                    valid &= np.isfinite(positions).all(axis=-1)
+
+        channel_ids = np.asarray(data.channels.id).astype(str)[selected_indices]
+        standard_positions = _standard_montage_positions()
+        for index, (channel_id, channel_type) in enumerate(
+            zip(channel_ids, selected_types, strict=True)
+        ):
+            if valid[index] or str(channel_type).strip().lower() != "eeg":
+                continue
+            bare_name = channel_id.rsplit("/", 1)[-1].strip().lower()
+            resolved = standard_positions.get(bare_name)
+            if resolved is not None:
+                positions[index] = resolved
+                valid[index] = True
+
+        positions[~valid] = 0.0
+        return positions, valid

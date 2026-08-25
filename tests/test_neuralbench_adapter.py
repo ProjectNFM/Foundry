@@ -74,15 +74,40 @@ def test_applies_tokenizer_after_constructing_data():
     assert adapter[0].tokenized
 
 
+def test_preserves_normalized_head_positions_and_marks_missing_channels():
+    sample = _sample()
+    sample["channel_positions"] = np.array(
+        [[[0.2, 0.4, 0.8], [-0.1, -0.1, -0.1]]], dtype=np.float32
+    )
+    adapter = NeuralSetAdapter(
+        _Dataset([sample]),
+        channel_names=["Cz", "unknown"],
+        sampling_rate=2.0,
+        split="train",
+        label_map=LABEL_MAP,
+    )
+
+    data = adapter[0]
+
+    np.testing.assert_array_equal(
+        data.channels.position, sample["channel_positions"][0]
+    )
+    np.testing.assert_array_equal(
+        data.channels.position_valid, np.array([True, False])
+    )
+    assert set(data.channels.position_frame) == {"head"}
+    assert set(data.channels.position_units) == {"normalized"}
+
+
 @pytest.mark.parametrize("channel_names", [[], ["Cz", "Cz"]])
 def test_rejects_empty_or_duplicate_channel_names(channel_names):
     with pytest.raises(ValueError, match="channel_names|Duplicate channel"):
         NeuralSetAdapter(
             _Dataset([_sample()]),
             channel_names=channel_names,
-                sampling_rate=2.0,
-                split="train",
-                label_map=LABEL_MAP,
+            sampling_rate=2.0,
+            split="train",
+            label_map=LABEL_MAP,
         )
 
 
@@ -152,10 +177,14 @@ def test_four_second_mi_signal_is_identical_at_eegnet_input():
 
     task = TaskConfig.from_yaml("configs/tasks/neuralbench/motor_imagery.yaml")
     model = EEGNetEncoder(
-        task_configs={task.name: task}, num_channels=channels, num_samples=samples
+        task_configs={task.name: task},
+        num_channels=channels,
+        num_samples=samples,
     )
     tokenized = model.tokenize(data)
-    np.testing.assert_array_equal(tokenized["input_values"].obj.numpy(), raw_signal[0].T)
+    np.testing.assert_array_equal(
+        tokenized["input_values"].obj.numpy(), raw_signal[0].T
+    )
     normalized = model._check_input_shape_conv2d(
         tokenized["input_values"].obj.unsqueeze(0)
     )

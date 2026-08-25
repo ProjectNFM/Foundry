@@ -17,3 +17,16 @@ temporal_mode: hierarchical       # hierarchical | flat
 flat_num_local_attn_blocks: null  # null reuses num_local_attn_blocks
 temporal_reduction: slots         # slots | mean (no temporal slots)
 top_down_fusion: gated            # gated | add
+
+# Sample-derived and optional absolute-position routing. Disabled remains the
+# exact HERO control; every active source has an independently zeroable gate.
+channel_context_mode: disabled    # disabled | local | relational | position | relational_position
+context_dim: 32
+context_encoder_layers: 3
+context_encoder_kernel_size: 7
+context_pool_factor: 2
+relational_context_blocks: 2
+relational_context_heads: 4
+channel_type_enabled: false
+absolute_position_enabled: null   # null derives from channel_context_mode
+position_num_fourier_bands: 6

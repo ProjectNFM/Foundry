@@ -3,7 +3,7 @@
 **Status:** Draft
 **Date started:** 2026-08-24
 **Parent experiment:** [NeuralBench POYO-EEG Tokenizer Baselines](../04-neuralbench-from-scratch-baselines/20260821-MS-neuralbench-poyo-tokenizer-baselines.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [HERO relational-context sufficiency for Motor Imagery](20260825-MS-hero-relational-context-sufficiency.md)
 **Tags:** neuralbench, hero, spatial_slots, ablation, from_scratch, p300, motor_imagery, sleep_stage
 
 ## Background

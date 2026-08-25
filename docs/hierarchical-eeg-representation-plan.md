@@ -48,6 +48,12 @@ These concepts must not be conflated.
 
 There is intentionally no public `context` output in version one. A later measurement-context stream needs its own controlled routing, bandwidth limits, and nuisance-information probes.
 
+A proposed phased follow-on is documented in
+[HERO measurement-context integration plan](hero-measurement-context-plan.md).
+It preserves this signal-only model as the reference and tests a narrow
+sample-derived relational stream from the same unnormalized input, with coarse
+channel type and absolute position as optional routing sources.
+
 ## Agreed reference architecture
 
 ### Input contract

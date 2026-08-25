@@ -9,8 +9,13 @@ from torch_brain.batching import collate
 from torch_brain.data import Data, Interval, RegularTimeSeries
 
 from foundry.models.hero import (
+    AbsolutePositionEncoder,
     AlignedGatedResidual,
+    CanonicalSignalViews,
+    ChannelTypeEncoder,
     HEROModel,
+    RelationalContextEncoder,
+    SharedLocalContextEncoder,
     SpatialSlotMixer,
     TaskQueryCrossAttention,
     TemporalReduction,
@@ -41,6 +46,619 @@ def encode(model, signal, *, rate=128, channel_mask=None, sample_mask=None):
             channel_mask=channel_mask,
             sample_mask=sample_mask,
         )
+
+
+@pytest.fixture
+def relational_context_model():
+    """Small Phase-1 model with both local and relational context enabled."""
+    torch.manual_seed(19)
+    return HEROModel(
+        task_configs={},
+        num_channels=4,
+        embed_dim=8,
+        num_attn_heads=2,
+        num_spatial_slots=2,
+        num_temporal_slots=2,
+        num_local_attn_blocks=0,
+        channel_context_mode="relational",
+        context_dim=8,
+        context_encoder_layers=2,
+        context_encoder_kernel_size=5,
+        context_pool_factor=2,
+        relational_context_blocks=2,
+        relational_context_heads=2,
+    ).eval()
+
+
+def test_local_context_is_channel_independent_before_relational_attention(
+    relational_context_model,
+):
+    signal = torch.randn(1, 3, 128)
+    baseline = relational_context_model.encode_channel_context(
+        signal=signal, sampling_rate=128
+    )
+    changed_signal = signal.clone()
+    changed_signal[:, 1] = torch.randn_like(changed_signal[:, 1]) * 17 + 5
+    changed = relational_context_model.encode_channel_context(
+        signal=changed_signal, sampling_rate=128
+    )
+
+    assert baseline.local.shape == (1, 3, 8)
+    assert baseline.context_width == 8
+    assert torch.equal(baseline.local[:, 0], changed.local[:, 0])
+    assert not torch.allclose(baseline.local[:, 1], changed.local[:, 1])
+    assert baseline.relational is not None
+    assert changed.relational is not None
+    assert not torch.allclose(
+        baseline.relational[:, 0], changed.relational[:, 0]
+    )
+
+
+def test_context_masks_block_padded_channels_and_all_masked_rows_are_finite(
+    relational_context_model,
+):
+    signal = torch.randn(2, 4, 128)
+    channel_mask = torch.tensor(
+        [[True, True, True, False], [False, False, False, False]]
+    )
+    sample_mask = torch.ones(2, 128, dtype=torch.bool)
+    sample_mask[0, 40:56] = False
+    baseline = relational_context_model.encode_channel_context(
+        signal=signal,
+        sampling_rate=128,
+        channel_mask=channel_mask,
+        sample_mask=sample_mask,
+    )
+
+    corrupted = signal.clone()
+    corrupted[0, 3] = float("nan")
+    corrupted[0, :3, 40:56] = float("inf")
+    corrupted[1] = 1e20
+    changed = relational_context_model.encode_channel_context(
+        signal=corrupted,
+        sampling_rate=128,
+        channel_mask=channel_mask,
+        sample_mask=sample_mask,
+    )
+
+    assert torch.equal(baseline.local, changed.local)
+    assert torch.equal(baseline.relational, changed.relational)
+    assert torch.equal(baseline.local_attention, changed.local_attention)
+    assert torch.equal(
+        baseline.relational_attention, changed.relational_attention
+    )
+    assert torch.equal(baseline.local[:, 3], torch.zeros(2, 8))
+    assert torch.equal(baseline.relational[:, 3], torch.zeros(2, 8))
+    assert torch.equal(baseline.local[1], torch.zeros(4, 8))
+    assert torch.equal(baseline.relational[1], torch.zeros(4, 8))
+    assert torch.isfinite(baseline.local).all()
+    assert torch.isfinite(baseline.relational).all()
+
+
+def test_relational_context_and_diagnostics_are_permutation_equivariant(
+    relational_context_model,
+):
+    signal = torch.randn(1, 4, 128)
+    channel_mask = torch.tensor([[True, True, False, True]])
+    baseline = relational_context_model.encode_channel_context(
+        signal=signal,
+        sampling_rate=128,
+        channel_mask=channel_mask,
+    )
+    permutation = torch.tensor([3, 1, 0, 2])
+    permuted = relational_context_model.encode_channel_context(
+        signal=signal[:, permutation],
+        sampling_rate=128,
+        channel_mask=channel_mask[:, permutation],
+    )
+
+    assert baseline.local.ndim == 3
+    assert baseline.relational.ndim == 3
+    assert torch.allclose(permuted.local, baseline.local[:, permutation])
+    assert torch.allclose(
+        permuted.relational, baseline.relational[:, permutation], atol=2e-6
+    )
+    assert torch.allclose(
+        permuted.local_attention,
+        baseline.local_attention[:, permutation],
+    )
+    assert torch.allclose(
+        baseline.local_attention[0, channel_mask[0]].sum(dim=-1),
+        torch.ones(channel_mask[0].sum()),
+    )
+    assert torch.equal(
+        baseline.local_attention[0, ~channel_mask[0]],
+        torch.zeros_like(baseline.local_attention[0, ~channel_mask[0]]),
+    )
+    expected_attention = baseline.relational_attention.index_select(
+        -2, permutation
+    ).index_select(-1, permutation)
+    assert torch.allclose(
+        permuted.relational_attention, expected_attention, atol=2e-6
+    )
+
+    valid_attention = baseline.relational_attention[0, :, :, channel_mask[0]]
+    assert torch.allclose(
+        valid_attention.sum(dim=-1),
+        torch.ones_like(valid_attention.sum(dim=-1)),
+    )
+    assert torch.equal(
+        baseline.relational_attention[..., ~channel_mask[0], :],
+        torch.zeros_like(
+            baseline.relational_attention[..., ~channel_mask[0], :]
+        ),
+    )
+
+
+def test_context_gradients_and_full_model_are_finite_across_raw_scales():
+    torch.manual_seed(23)
+    context_model = HEROModel(
+        task_configs={},
+        num_channels=3,
+        embed_dim=8,
+        num_attn_heads=2,
+        num_spatial_slots=1,
+        num_temporal_slots=2,
+        num_local_attn_blocks=0,
+        channel_context_mode="relational",
+        context_dim=8,
+        context_encoder_layers=2,
+        relational_context_blocks=2,
+        relational_context_heads=2,
+    )
+    scales = torch.tensor([1e-4, 1.0, 1e4]).view(1, 3, 1)
+    signal = (torch.randn(1, 3, 128) * scales).requires_grad_()
+
+    context = context_model.encode_channel_context(
+        signal=signal, sampling_rate=128
+    )
+    representation = context_model.encode(signal=signal, sampling_rate=128)
+    feature_weights = torch.arange(1, 9, dtype=signal.dtype)
+    loss = (
+        (context.local * feature_weights).mean()
+        + (context.relational * feature_weights.flip(0)).mean()
+        + representation.content.square().mean()
+    )
+    loss.backward()
+
+    local_grad = context_model.channel_context_encoder.local_encoder.convs[
+        0
+    ].weight.grad
+    relation_grad = (
+        context_model.channel_context_encoder.relational_encoder.blocks[
+            0
+        ].qkv.weight.grad
+    )
+    assert torch.isfinite(loss)
+    assert signal.grad is not None and torch.isfinite(signal.grad).all()
+    assert local_grad is not None and torch.isfinite(local_grad).all()
+    assert relation_grad is not None and torch.isfinite(relation_grad).all()
+    assert local_grad.abs().sum() > 0
+    assert relation_grad.abs().sum() > 0
+    assert all(
+        parameter.grad is None or torch.isfinite(parameter.grad).all()
+        for parameter in context_model.parameters()
+    )
+
+
+def test_context_modes_are_explicit_and_validate_dimensions():
+    disabled = HEROModel(
+        task_configs={}, num_channels=2, embed_dim=8, num_attn_heads=2
+    )
+    assert disabled.channel_context_encoder is None
+    with pytest.raises(RuntimeError, match="Channel context is disabled"):
+        disabled.encode_channel_context(
+            signal=torch.randn(1, 2, 128), sampling_rate=128
+        )
+
+    local = HEROModel(
+        task_configs={},
+        num_channels=2,
+        embed_dim=8,
+        num_attn_heads=2,
+        channel_context_mode="local",
+        context_dim=8,
+    )
+    local_context = local.encode_channel_context(
+        signal=torch.randn(1, 2, 128), sampling_rate=128
+    )
+    assert local_context.relational is None
+    assert local_context.relational_attention is None
+
+    with pytest.raises(ValueError, match="context_dim"):
+        RelationalContextEncoder(context_dim=7, num_heads=2)
+    with pytest.raises(ValueError, match="kernel_size"):
+        SharedLocalContextEncoder(kernel_size=4)
+
+
+def _small_routing_model(
+    *,
+    mode="relational_position",
+    channel_type_enabled=True,
+):
+    torch.manual_seed(31)
+    return HEROModel(
+        task_configs={},
+        num_channels=4,
+        embed_dim=8,
+        num_attn_heads=2,
+        num_spatial_slots=2,
+        num_temporal_slots=2,
+        num_local_attn_blocks=0,
+        temporal_mode="flat",
+        channel_context_mode=mode,
+        context_dim=8,
+        context_encoder_layers=2,
+        context_pool_factor=2,
+        relational_context_blocks=2,
+        relational_context_heads=2,
+        channel_type_enabled=channel_type_enabled,
+        position_num_fourier_bands=3,
+    ).eval()
+
+
+def _set_routing_gates(model, **values):
+    with torch.no_grad():
+        for source, value in values.items():
+            model.spatial_mixer.context_gates[f"source_{source}"].fill_(value)
+
+
+def test_static_metadata_encoders_are_masked_and_permutation_equivariant():
+    torch.manual_seed(29)
+    type_encoder = ChannelTypeEncoder(context_dim=8)
+    position_encoder = AbsolutePositionEncoder(
+        context_dim=8, num_fourier_bands=3
+    )
+    channel_type = torch.tensor([[1, 2, 3, 0]])
+    position = torch.randn(1, 4, 3)
+    position_valid = torch.tensor([[True, False, True, False]])
+    channel_mask = torch.tensor([[True, True, True, False]])
+    permutation = torch.tensor([2, 0, 3, 1])
+
+    type_context = type_encoder(channel_type, channel_mask)
+    position_context = position_encoder(position, position_valid, channel_mask)
+    permuted_type = type_encoder(
+        channel_type[:, permutation], channel_mask[:, permutation]
+    )
+    permuted_position = position_encoder(
+        position[:, permutation],
+        position_valid[:, permutation],
+        channel_mask[:, permutation],
+    )
+
+    assert torch.equal(permuted_type, type_context[:, permutation])
+    assert torch.equal(permuted_position, position_context[:, permutation])
+    assert torch.equal(type_context[:, 3], torch.zeros(1, 8))
+    assert torch.equal(position_context[:, 3], torch.zeros(1, 8))
+
+    arbitrary_missing = position.clone()
+    arbitrary_missing[:, 1] = 1e6
+    changed_missing = position_encoder(
+        arbitrary_missing, position_valid, channel_mask
+    )
+    assert torch.equal(position_context[:, 1], changed_missing[:, 1])
+    real_zero = position.clone()
+    real_zero[:, 1] = 0
+    real_zero_context = position_encoder(
+        real_zero,
+        torch.tensor([[True, True, True, False]]),
+        channel_mask,
+    )
+    assert not torch.equal(position_context[:, 1], real_zero_context[:, 1])
+
+
+def test_tokenize_maps_types_resolves_montage_and_ignores_ambiguous_positions():
+    tokenizer_model = HEROModel(
+        task_configs={},
+        num_channels=5,
+        embed_dim=8,
+        num_attn_heads=2,
+        num_local_attn_blocks=0,
+    )
+    eeg = RegularTimeSeries(
+        signal=np.random.default_rng(4)
+        .normal(size=(128, 4))
+        .astype(np.float32),
+        sampling_rate=128.0,
+    )
+    data = Data(eeg=eeg, domain=Interval(0.0, 1.0))
+    data.channels = type(
+        "Channels",
+        (),
+        {
+            "id": np.array(["s/C3", "s/not-a-site", "s/G1", "s/D1"]),
+            "type": np.array(["EEG", "EEG", "ECoG", "SEEG"]),
+            "position": np.ones((4, 3), dtype=np.float32),
+            "position_valid": np.ones(4, dtype=bool),
+            "position_frame": np.array(["head", "mri", "head", "head"]),
+            "position_units": np.array(["m"] * 4),
+            "__len__": lambda self: 4,
+        },
+    )()
+    data.session = type("Session", (), {"id": "session"})()
+    data._absolute_start = 0.0
+
+    tokenized = tokenizer_model.tokenize(data)
+
+    assert torch.equal(tokenized["channel_type"], torch.tensor([1, 1, 2, 3, 0]))
+    assert torch.equal(
+        tokenized["channel_mask"],
+        torch.tensor([True, True, True, True, False]),
+    )
+    # Mixed coordinate frames invalidate explicit positions. C3 is then
+    # resolved numerically from the standard montage; unresolved EEG and iEEG
+    # channels remain valid signals with missing positions.
+    assert torch.equal(
+        tokenized["channel_position_valid"],
+        torch.tensor([True, False, False, False, False]),
+    )
+    assert torch.isfinite(tokenized["channel_position"]).all()
+    assert tokenized["channel_position"][0].abs().sum() > 0
+    assert torch.equal(tokenized["channel_position"][1:], torch.zeros(4, 3))
+    assert "channel_name" not in tokenized
+
+
+def test_zero_context_gates_exactly_reproduce_signal_only_model():
+    signal_only = _small_routing_model(
+        mode="disabled", channel_type_enabled=False
+    )
+    context_model = _small_routing_model()
+    context_state = context_model.state_dict()
+    for name, value in signal_only.state_dict().items():
+        if name in context_state and context_state[name].shape == value.shape:
+            context_state[name] = value
+    context_model.load_state_dict(context_state)
+
+    signal = torch.randn(1, 4, 128)
+    channel_type = torch.tensor([[1, 1, 2, 3]])
+    position = torch.randn(1, 4, 3)
+    position_valid = torch.tensor([[True, False, True, True]])
+    with torch.no_grad():
+        baseline = signal_only.encode(signal=signal, sampling_rate=128)
+        contextual = context_model.encode(
+            signal=signal,
+            sampling_rate=128,
+            channel_type=channel_type,
+            channel_position=position,
+            channel_position_valid=position_valid,
+        )
+
+    assert torch.equal(baseline.content, contextual.content)
+    assert all(
+        torch.equal(value, torch.zeros_like(value))
+        for value in contextual.spatial_routing.gate_values.values()
+    )
+
+
+def test_all_context_sources_preserve_joint_channel_permutation_invariance():
+    routing_model = _small_routing_model()
+    _set_routing_gates(
+        routing_model, local=0.4, relational=-0.7, type=0.3, position=0.9
+    )
+    signal = torch.randn(1, 4, 128)
+    channel_mask = torch.tensor([[True, True, False, True]])
+    channel_type = torch.tensor([[1, 2, 0, 3]])
+    position = torch.randn(1, 4, 3)
+    position_valid = torch.tensor([[True, False, False, True]])
+    permutation = torch.tensor([3, 1, 0, 2])
+
+    with torch.no_grad():
+        baseline = routing_model.encode(
+            signal=signal,
+            sampling_rate=128,
+            channel_mask=channel_mask,
+            channel_type=channel_type,
+            channel_position=position,
+            channel_position_valid=position_valid,
+        )
+        permuted = routing_model.encode(
+            signal=signal[:, permutation],
+            sampling_rate=128,
+            channel_mask=channel_mask[:, permutation],
+            channel_type=channel_type[:, permutation],
+            channel_position=position[:, permutation],
+            channel_position_valid=position_valid[:, permutation],
+        )
+
+    assert torch.allclose(baseline.content, permuted.content, atol=2e-5)
+    expected_attention = baseline.spatial_routing.attention_mean.index_select(
+        -1, permutation
+    )
+    assert torch.allclose(
+        permuted.spatial_routing.attention_mean,
+        expected_attention,
+        atol=2e-6,
+    )
+
+
+def test_relational_shuffling_changes_routing_and_validates_hook():
+    routing_model = _small_routing_model(
+        mode="relational", channel_type_enabled=False
+    )
+    _set_routing_gates(routing_model, local=0.0, relational=4.0)
+    signal = torch.randn(1, 4, 128)
+    permutation = torch.tensor([2, 3, 0, 1])
+
+    with torch.no_grad():
+        bound = routing_model.encode(signal=signal, sampling_rate=128)
+        shuffled = routing_model.encode(
+            signal=signal,
+            sampling_rate=128,
+            relational_context_permutation=permutation,
+        )
+
+    assert not torch.allclose(bound.content, shuffled.content)
+    assert not torch.allclose(
+        bound.spatial_routing.attention_mean,
+        shuffled.spatial_routing.attention_mean,
+    )
+    with pytest.raises(ValueError, match="permute every channel"):
+        routing_model.encode(
+            signal=signal,
+            sampling_rate=128,
+            relational_context_permutation=torch.tensor([0, 0, 1, 2]),
+        )
+
+
+def test_context_is_routing_only_and_diagnostics_are_separate_by_source():
+    torch.manual_seed(37)
+    mixer = SpatialSlotMixer(
+        embed_dim=8,
+        num_slots=2,
+        num_heads=2,
+        context_dim=8,
+        context_sources=("local", "relational", "type", "position"),
+    ).eval()
+    with torch.no_grad():
+        for gate in mixer.context_gates.values():
+            gate.fill_(2.0)
+    # Every channel has the same normalized content value. Routing weights can
+    # change, but no context can become a slot value.
+    one_channel = torch.randn(1, 1, 16, 8)
+    content = one_channel.expand(1, 3, 16, 8).clone()
+    zeros = {source: torch.zeros(1, 3, 8) for source in mixer.context_sources}
+    varied = {source: torch.randn(1, 3, 8) for source in mixer.context_sources}
+    channel_mask = torch.ones(1, 3, dtype=torch.bool)
+    with torch.no_grad():
+        baseline, _, baseline_diag = mixer(
+            content,
+            channel_mask,
+            routing_context=zeros,
+            return_diagnostics=True,
+        )
+        routed, _, routed_diag = mixer(
+            content,
+            channel_mask,
+            routing_context=varied,
+            return_diagnostics=True,
+        )
+
+    assert torch.allclose(baseline, routed, atol=2e-6)
+    assert not torch.allclose(
+        baseline_diag.attention_mean, routed_diag.attention_mean
+    )
+    assert set(routed_diag.gate_values) == {
+        "local",
+        "relational",
+        "type",
+        "position",
+    }
+    assert set(routed_diag.logit_rms) == {
+        "content",
+        "local",
+        "relational",
+        "type",
+        "position",
+    }
+    assert routed_diag.attention_mean.shape == (1, 2, 2, 3)
+
+
+def test_missing_positions_are_absent_from_routing_not_shared_coordinates():
+    position_model = _small_routing_model(
+        mode="position", channel_type_enabled=False
+    )
+    _set_routing_gates(position_model, position=3.0)
+    signal = torch.randn(1, 4, 128)
+    arbitrary = torch.randn(1, 4, 3) * 1e6
+    missing = torch.zeros(1, 4, dtype=torch.bool)
+    one_real = torch.tensor([[True, False, False, False]])
+
+    with torch.no_grad():
+        absent_a = position_model.encode(
+            signal=signal,
+            sampling_rate=128,
+            channel_position=arbitrary,
+            channel_position_valid=missing,
+        )
+        absent_b = position_model.encode(
+            signal=signal,
+            sampling_rate=128,
+            channel_position=torch.zeros_like(arbitrary),
+            channel_position_valid=missing,
+        )
+        anchored = position_model.encode(
+            signal=signal,
+            sampling_rate=128,
+            channel_position=torch.zeros_like(arbitrary),
+            channel_position_valid=one_real,
+        )
+
+    assert torch.equal(absent_a.content, absent_b.content)
+    assert not torch.allclose(absent_a.content, anchored.content)
+
+
+def test_relational_cost_is_quadratic_and_duration_independent():
+    relational = _small_routing_model(
+        mode="relational", channel_type_enabled=False
+    )
+    cost_16 = relational.estimate_relational_context_cost(16, batch_size=2)
+    cost_64 = relational.estimate_relational_context_cost(64, batch_size=2)
+    assert cost_64["attention_elements"] == 16 * cost_16["attention_elements"]
+    assert cost_64["multiply_adds"] == 16 * cost_16["multiply_adds"]
+    assert "duration" not in cost_64
+
+    disabled = _small_routing_model(mode="disabled", channel_type_enabled=False)
+    assert disabled.estimate_relational_context_cost(64) == {
+        "attention_elements": 0,
+        "multiply_adds": 0,
+    }
+
+
+def test_routing_gradients_reach_every_active_source_and_gate():
+    routing_model = _small_routing_model().train()
+    _set_routing_gates(
+        routing_model, local=0.5, relational=0.5, type=0.5, position=0.5
+    )
+    signal = torch.randn(1, 4, 128, requires_grad=True)
+    channel_type = torch.tensor([[1, 2, 3, 4]])
+    position = torch.randn(1, 4, 3)
+    position_valid = torch.ones(1, 4, dtype=torch.bool)
+
+    representation = routing_model.encode(
+        signal=signal,
+        sampling_rate=128,
+        channel_type=channel_type,
+        channel_position=position,
+        channel_position_valid=position_valid,
+    )
+    weights = torch.arange(1, 9, dtype=signal.dtype)
+    (representation.content * weights).mean().backward()
+
+    parameters = [
+        routing_model.channel_context_encoder.local_encoder.convs[0].weight,
+        routing_model.channel_context_encoder.relational_encoder.blocks[
+            0
+        ].qkv.weight,
+        routing_model.channel_type_encoder.embedding.weight,
+        routing_model.position_encoder.mlp[0].weight,
+        routing_model.spatial_mixer.context_k_proj["source_relational"].weight,
+        routing_model.spatial_mixer.context_gates["source_position"],
+    ]
+    assert signal.grad is not None and torch.isfinite(signal.grad).all()
+    for parameter in parameters:
+        assert parameter.grad is not None
+        assert torch.isfinite(parameter.grad).all()
+        assert parameter.grad.abs().sum() > 0
+
+
+def test_context_does_not_change_post_fusion_temporal_scaling():
+    routing_model = _small_routing_model(
+        mode="relational", channel_type_enabled=False
+    )
+    _set_routing_gates(routing_model, local=0.5, relational=0.5)
+    relational_cost = routing_model.estimate_relational_context_cost(4)
+    with torch.no_grad():
+        short = routing_model.encode(
+            signal=torch.randn(1, 4, 128), sampling_rate=128
+        )
+        long = routing_model.encode(
+            signal=torch.randn(1, 4, 512), sampling_rate=128
+        )
+
+    assert short.content.shape == (1, 128, 8)
+    assert long.content.shape == (1, 512, 8)
+    assert len(routing_model.encoder.fine_attns) == 0
+    assert routing_model.estimate_relational_context_cost(4) == relational_cost
 
 
 @pytest.mark.parametrize(("duration", "channels"), [(1, 2), (4, 16), (30, 64)])
@@ -287,6 +905,174 @@ def test_resampling_does_not_lose_isolated_invalid_source_samples(model):
     assert not resampled_mask.all()
 
 
+def test_single_resample_views_share_grid_masks_and_source_statistics(model):
+    time = torch.arange(512, dtype=torch.float32)
+    signal = torch.stack(
+        [10 + torch.sin(time / 9), -3 + 2 * torch.cos(time / 13), time],
+        dim=0,
+    ).unsqueeze(0)
+    channel_mask = torch.tensor([[True, True, False]])
+    sample_mask = torch.ones(1, 512, dtype=torch.bool)
+    sample_mask[:, 300] = False
+    signal[:, 0, 200] = float("nan")
+    signal[:, 2] = float("inf")
+
+    with patch.object(
+        model, "_resample_signal", wraps=model._resample_signal
+    ) as resample:
+        views = model._prepare_signal_views(
+            signal,
+            channel_mask,
+            sample_mask,
+            256,
+            domain_start=torch.tensor([[2.0]]),
+        )
+
+    assert resample.call_count == 1
+    assert views.raw.shape == views.content.shape == (1, 3, 256)
+    assert views.timestamps.shape == views.sample_mask.shape == (1, 256)
+    assert torch.allclose(
+        views.timestamps,
+        2 + (torch.arange(256, dtype=torch.float32) + 0.5) / 128,
+    )
+    valid = views.sample_mask[:, None] & channel_mask[:, :, None]
+    assert torch.equal(
+        views.raw.masked_select(~valid),
+        torch.zeros_like(views.raw.masked_select(~valid)),
+    )
+    assert torch.equal(
+        views.content.masked_select(~valid),
+        torch.zeros_like(views.content.masked_select(~valid)),
+    )
+    expected_content = (
+        views.raw - views.source_mean.unsqueeze(-1)
+    ) / views.source_std.unsqueeze(-1)
+    assert torch.allclose(
+        views.content.masked_select(valid),
+        expected_content.masked_select(valid),
+    )
+    source_valid = sample_mask[0] & torch.isfinite(signal[0, :2]).all(dim=0)
+    expected_source = signal[0, :2, source_valid]
+    assert torch.allclose(views.source_mean[0, :2], expected_source.mean(dim=1))
+    assert torch.allclose(
+        views.source_std[0, :2],
+        expected_source.std(dim=1, correction=0),
+    )
+    assert torch.equal(views.source_mean[:, 2], torch.zeros(1))
+    assert torch.equal(views.source_std[:, 2], torch.ones(1))
+    assert torch.isfinite(views.raw).all()
+    assert torch.isfinite(views.content).all()
+
+    changed_invalid = signal.clone()
+    changed_invalid[:, 0, 200] = float("-inf")
+    changed_invalid[:, :, 300] = 1e20
+    changed_invalid[:, 2] = -1e20
+    changed = model._prepare_signal_views(
+        changed_invalid,
+        channel_mask,
+        sample_mask,
+        256,
+        domain_start=torch.tensor([[2.0]]),
+    )
+    assert torch.equal(views.sample_mask, changed.sample_mask)
+    assert torch.allclose(views.raw, changed.raw)
+    assert torch.allclose(views.content, changed.content)
+
+    corrupted_raw = views.raw.clone()
+    corrupted_content = views.content.clone()
+    corrupted_raw[:, 2] = float("nan")
+    corrupted_content[:, 2] = float("nan")
+    invalid_time = (~views.sample_mask[0]).nonzero()[0, 0]
+    corrupted_raw[:, :2, invalid_time] = float("inf")
+    corrupted_content[:, :2, invalid_time] = float("-inf")
+    corrupted_views = CanonicalSignalViews(
+        raw=corrupted_raw,
+        content=corrupted_content,
+        timestamps=views.timestamps,
+        sample_mask=views.sample_mask,
+        source_mean=views.source_mean,
+        source_std=views.source_std,
+    )
+    with torch.no_grad():
+        baseline_rep = model._encode_prepared_views(views, channel_mask)
+        corrupted_rep = model._encode_prepared_views(
+            corrupted_views, channel_mask
+        )
+    assert torch.allclose(baseline_rep.content, corrupted_rep.content)
+
+
+def test_refactored_normalization_matches_v1_interior_and_trains(model):
+    time = torch.arange(512, dtype=torch.float32) / 256
+    raw = (
+        7
+        + 0.4 * torch.sin(2 * torch.pi * 5 * time)
+        + 0.2 * torch.cos(2 * torch.pi * 17 * time)
+    )[None, None]
+    channel_mask = torch.ones(1, 1, dtype=torch.bool)
+    sample_mask = torch.ones(1, 512, dtype=torch.bool)
+    views = model._prepare_signal_views(
+        raw,
+        channel_mask,
+        sample_mask,
+        256,
+        domain_start=torch.zeros(1, 1),
+    )
+
+    source_mean = raw.mean(dim=-1, keepdim=True)
+    source_std = raw.std(dim=-1, correction=0, keepdim=True)
+    legacy_source = (raw - source_mean) / source_std
+    legacy_content, legacy_mask = model._resample_signal(
+        legacy_source, sample_mask, 256, 128
+    )
+
+    assert torch.equal(views.sample_mask, legacy_mask)
+    assert not torch.equal(views.content, legacy_content)
+    interior_error = (
+        views.content[:, :, 24:-24] - legacy_content[:, :, 24:-24]
+    ).abs()
+    assert interior_error.mean() < 0.02
+    assert interior_error.max() < 0.02
+
+    legacy_views = CanonicalSignalViews(
+        raw=views.raw,
+        content=legacy_content,
+        timestamps=views.timestamps,
+        sample_mask=legacy_mask,
+        source_mean=views.source_mean,
+        source_std=views.source_std,
+    )
+    with torch.no_grad():
+        refactored_rep = model._encode_prepared_views(
+            views, channel_mask
+        ).content
+        legacy_rep = model._encode_prepared_views(
+            legacy_views, channel_mask
+        ).content
+    representation_error = (refactored_rep - legacy_rep).abs()
+    assert 0 < representation_error.mean() < 0.1
+    assert torch.isfinite(representation_error).all()
+
+    model.train()
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-4)
+    for prepared in (legacy_views, views):
+        optimizer.zero_grad()
+        loss = (
+            model._encode_prepared_views(prepared, channel_mask)
+            .content.square()
+            .mean()
+        )
+        loss.backward()
+        assert torch.isfinite(loss)
+        assert all(
+            parameter.grad is None or torch.isfinite(parameter.grad).all()
+            for parameter in model.parameters()
+        )
+        optimizer.step()
+    assert all(
+        torch.isfinite(parameter).all() for parameter in model.parameters()
+    )
+
+
 def test_temporal_slots_are_not_mean_pooling_and_keep_partial_tail_policy():
     torch.manual_seed(2)
     reduction = TemporalReduction(
@@ -499,7 +1285,20 @@ def test_reported_receptive_fields_contain_every_impulse_affected_token_at_all_l
             )
         )
         try:
-            representation = encode(impulse_model, signal)
+            B, C, T = signal.shape
+            representation = impulse_model._encode_prepared_views(
+                CanonicalSignalViews(
+                    raw=signal,
+                    content=signal,
+                    timestamps=(
+                        (torch.arange(T, dtype=signal.dtype) + 0.5) / 128
+                    ).expand(B, -1),
+                    sample_mask=torch.ones(B, T, dtype=torch.bool),
+                    source_mean=torch.zeros(B, C),
+                    source_std=torch.ones(B, C),
+                ),
+                torch.ones(B, C, dtype=torch.bool),
+            )
         finally:
             coarse_hook.remove()
             mid_hook.remove()
@@ -616,6 +1415,14 @@ def test_hierarchical_ablation_options_compose():
         ({"flat_num_local_attn_blocks": -1}, "flat_num_local_attn_blocks"),
         ({"temporal_reduction": "max"}, "temporal_reduction"),
         ({"top_down_fusion": "replace"}, "top_down_fusion"),
+        ({"channel_context_mode": "global"}, "channel_context_mode"),
+        (
+            {
+                "channel_context_mode": "relational",
+                "relational_context_blocks": 0,
+            },
+            "relational_context_blocks",
+        ),
     ],
 )
 def test_invalid_experiment_ladder_options_fail_early(kwargs, message):
@@ -808,17 +1615,51 @@ def test_tokenize_collate_and_forward_integration():
         {"timestamps": np.array([3.0]), "values": np.array([1])},
     )()
 
-    batch = collate([integration_model.tokenize(data)])
+    with patch.object(
+        integration_model,
+        "_resolve_signal_source",
+        wraps=integration_model._resolve_signal_source,
+    ) as resolve_signal:
+        batch = collate([integration_model.tokenize(data)])
+    assert resolve_signal.call_count == 1
     assert batch["output_timestamps"].shape == batch["task_index"].shape
     with torch.no_grad():
         output = integration_model(
             input_values=batch["input_values"],
+            input_content_values=batch["input_content_values"],
+            input_normalization_mean=batch["input_normalization_mean"],
+            input_normalization_std=batch["input_normalization_std"],
             input_timestamps=batch["input_timestamps"],
             output_timestamps=batch["output_timestamps"],
             channel_mask=batch["channel_mask"],
+            channel_type=batch["channel_type"],
+            channel_position=batch["channel_position"],
+            channel_position_valid=batch["channel_position_valid"],
             sample_mask=batch["sample_mask"],
             task_index=batch["task_index"],
         )
 
     assert batch["input_values"].shape == (1, 4, 256)
+    assert batch["input_content_values"].shape == (1, 4, 256)
+    assert batch["input_normalization_mean"].shape == (1, 4)
+    assert batch["input_normalization_std"].shape == (1, 4)
+    assert batch["channel_type"].shape == (1, 4)
+    assert batch["channel_position"].shape == (1, 4, 3)
+    assert batch["channel_position_valid"].shape == (1, 4)
+    valid = batch["sample_mask"][:, None] & batch["channel_mask"][:, :, None]
+    expected_content = (
+        batch["input_values"] - batch["input_normalization_mean"].unsqueeze(-1)
+    ) / batch["input_normalization_std"].unsqueeze(-1)
+    assert torch.allclose(
+        batch["input_content_values"].masked_select(valid),
+        expected_content.masked_select(valid),
+    )
+    assert torch.equal(
+        batch["input_values"].masked_select(~valid),
+        torch.zeros_like(batch["input_values"].masked_select(~valid)),
+    )
+    assert torch.equal(
+        batch["input_content_values"].masked_select(~valid),
+        torch.zeros_like(batch["input_content_values"].masked_select(~valid)),
+    )
     assert output.task_outputs["hero_test"].shape == (1, 2)
