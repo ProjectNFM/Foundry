@@ -1973,6 +1973,7 @@ class HEROModel(nn.Module):
         relational_context_heads: int = 4,
         channel_type_enabled: bool = False,
         absolute_position_enabled: bool | None = None,
+        position_value_enabled: bool = False,
         position_num_fourier_bands: int = 6,
         shuffle_relational_context: bool = False,
         context_gate_init: float = 0.0,
@@ -2044,6 +2045,7 @@ class HEROModel(nn.Module):
             if absolute_position_enabled is None
             else absolute_position_enabled
         )
+        self.position_value_enabled = position_value_enabled
         self.use_channel_type = channel_type_enabled
         self._task_configs = TC.normalize_task_configs(task_configs or {})
 
@@ -2074,7 +2076,12 @@ class HEROModel(nn.Module):
         )
         self.position_encoder = (
             AbsolutePositionEncoder(context_dim, position_num_fourier_bands)
-            if self.use_absolute_position
+            if self.use_absolute_position or self.position_value_enabled
+            else None
+        )
+        self.position_value_proj = (
+            nn.Linear(context_dim, embed_dim, bias=False)
+            if self.position_value_enabled
             else None
         )
         routing_sources = []
@@ -2505,10 +2512,20 @@ class HEROModel(nn.Module):
                 channel_position_valid = channel_position_valid.to(
                     views.content.device, dtype=torch.bool
                 )
-            routing_context["position"] = self.position_encoder(
+            position_context = self.position_encoder(
                 channel_position, channel_position_valid, channel_mask
             )
-            routing_masks["position"] = channel_position_valid & channel_mask
+            if self.position_value_proj is not None:
+                # This deliberately makes electrode identity part of each
+                # channel value before the permutation-invariant mixer.  It is
+                # distinct from position-only routing, which can alter only
+                # attention weights over otherwise anonymous channel values.
+                x = x + self.position_value_proj(position_context).unsqueeze(2)
+            if self.use_absolute_position:
+                routing_context["position"] = position_context
+                routing_masks["position"] = (
+                    channel_position_valid & channel_mask
+                )
 
         fused, token_valid, spatial_routing = self.spatial_mixer(
             x,
@@ -2866,7 +2883,9 @@ class HEROModel(nn.Module):
             routing = rep.spatial_routing
             for source, values in routing.gate_values.items():
                 for head, value in enumerate(values):
-                    diagnostics[f"hero/routing/{source}_gate_head{head}"] = value
+                    diagnostics[f"hero/routing/{source}_gate_head{head}"] = (
+                        value
+                    )
             for source, values in routing.logit_rms.items():
                 for head, value in enumerate(values):
                     diagnostics[
@@ -2897,9 +2916,9 @@ class HEROModel(nn.Module):
                 diagnostics[f"hero/grad/{source}_gate_norm"] = gate_grad.norm()
             projection_grad = self.spatial_mixer.context_k_proj[key].weight.grad
             if projection_grad is not None:
-                diagnostics[
-                    f"hero/grad/{source}_projection_norm"
-                ] = projection_grad.norm()
+                diagnostics[f"hero/grad/{source}_projection_norm"] = (
+                    projection_grad.norm()
+                )
         return diagnostics
 
     # ------------------------------------------------------------------

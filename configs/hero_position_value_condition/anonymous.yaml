@@ -1,0 +1,11 @@
+# @package _global_
+#
+# Signal-only control: channel values remain anonymous before spatial fusion.
+condition_name: anonymous
+
+model:
+  channel_context_mode: disabled
+  channel_type_enabled: false
+  absolute_position_enabled: false
+  position_value_enabled: false
+  context_gate_init: 0.0

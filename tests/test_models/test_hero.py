@@ -517,6 +517,50 @@ def test_all_context_sources_preserve_joint_channel_permutation_invariance():
     )
 
 
+def test_position_value_stream_uses_correct_channel_position_binding():
+    torch.manual_seed(43)
+    model = HEROModel(
+        task_configs={},
+        num_channels=4,
+        embed_dim=8,
+        num_attn_heads=2,
+        num_spatial_slots=2,
+        num_local_attn_blocks=0,
+        temporal_mode="flat",
+        context_dim=8,
+        position_num_fourier_bands=3,
+        position_value_enabled=True,
+    ).eval()
+    signal = torch.randn(1, 4, 128)
+    position = torch.randn(1, 4, 3)
+    valid = torch.ones(1, 4, dtype=torch.bool)
+    permutation = torch.tensor([2, 0, 3, 1])
+
+    with torch.no_grad():
+        bound = model.encode(
+            signal=signal,
+            sampling_rate=128,
+            channel_position=position,
+            channel_position_valid=valid,
+        )
+        rebound = model.encode(
+            signal=signal,
+            sampling_rate=128,
+            channel_position=position[:, permutation],
+            channel_position_valid=valid[:, permutation],
+        )
+        jointly_permuted = model.encode(
+            signal=signal[:, permutation],
+            sampling_rate=128,
+            channel_position=position[:, permutation],
+            channel_position_valid=valid[:, permutation],
+        )
+
+    assert model.spatial_mixer.context_sources == ()
+    assert not torch.allclose(bound.content, rebound.content)
+    assert torch.allclose(bound.content, jointly_permuted.content, atol=2e-5)
+
+
 def test_relational_shuffling_changes_routing_and_validates_hook():
     routing_model = _small_routing_model(
         mode="relational", channel_type_enabled=False

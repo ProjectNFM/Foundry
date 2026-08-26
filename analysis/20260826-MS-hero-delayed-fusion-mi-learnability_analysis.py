@@ -99,7 +99,9 @@ def fetch_group(api: wandb.Api, group: str, phase: str) -> pd.DataFrame:
             run.summary, f"val/{TASK_KEY}_balanced_acc", "max"
         )
         if val_balanced_acc is None:
-            print(f"[skip] {run.name} ({run.id}): no validation balanced accuracy")
+            print(
+                f"[skip] {run.name} ({run.id}): no validation balanced accuracy"
+            )
             continue
         rows.append(
             {
@@ -168,18 +170,23 @@ def pilot_checks(pilot: pd.DataFrame) -> dict[str, bool]:
 
 
 def full_checks(full: pd.DataFrame) -> dict[str, bool]:
+    if full.empty:
+        print(
+            "\nFull experiment not launched; pre-registered full-run criteria not evaluated."
+        )
+        return {}
     required = {(condition, seed) for condition in CONDITIONS for seed in SEEDS}
     observed = set(zip(full["condition"], full["seed"], strict=False))
     if missing := sorted(required - observed):
         print(f"\nFull experiment incomplete; missing cells: {missing}")
         return {}
 
-    paired = full.pivot(index="seed", columns="condition", values="val_balanced_acc")
+    paired = full.pivot(
+        index="seed", columns="condition", values="val_balanced_acc"
+    )
     means = full.groupby("condition")["val_balanced_acc"].mean()
     delayed_delta = means["delayed_fusion"] - means["early_fusion"]
-    position_delta = (
-        means["delayed_fusion_position"] - means["delayed_fusion"]
-    )
+    position_delta = means["delayed_fusion_position"] - means["delayed_fusion"]
     delayed_rows = full.loc[full["condition"] == "delayed_fusion"]
     return {
         "delayed-fusion mean validation balanced accuracy >= 0.40": bool(
@@ -194,17 +201,13 @@ def full_checks(full: pd.DataFrame) -> dict[str, bool]:
         ),
         "position mean improvement >= 0.02": bool(position_delta >= 0.02),
         "position wins at least two matched seeds": bool(
-            (
-                paired["delayed_fusion_position"]
-                > paired["delayed_fusion"]
-            ).sum()
+            (paired["delayed_fusion_position"] > paired["delayed_fusion"]).sum()
             >= 2
         ),
         "position has no matched-seed regression > 0.02": bool(
-            (
-                paired["delayed_fusion_position"]
-                - paired["delayed_fusion"]
-            ).ge(-0.02).all()
+            (paired["delayed_fusion_position"] - paired["delayed_fusion"])
+            .ge(-0.02)
+            .all()
         ),
     }
 
@@ -212,8 +215,12 @@ def full_checks(full: pd.DataFrame) -> dict[str, bool]:
 def plot_validation(summary: pd.DataFrame) -> Path | None:
     if summary.empty:
         return None
-    phases = [phase for phase in ("pilot", "full") if phase in set(summary["phase"])]
-    fig, axes = plt.subplots(1, len(phases), figsize=(6 * len(phases), 5), squeeze=False)
+    phases = [
+        phase for phase in ("pilot", "full") if phase in set(summary["phase"])
+    ]
+    fig, axes = plt.subplots(
+        1, len(phases), figsize=(6 * len(phases), 5), squeeze=False
+    )
     for axis, phase in zip(axes[0], phases, strict=True):
         data = summary.loc[summary["phase"] == phase].set_index("condition")
         data = data.reindex(CONDITIONS).dropna(how="all")
@@ -224,8 +231,12 @@ def plot_validation(summary: pd.DataFrame) -> Path | None:
             capsize=4,
             color=["#9ecae1", "#3182bd", "#31a354"][: len(data)],
         )
-        axis.axhline(0.25, color="black", linestyle="--", linewidth=1, label="Chance")
-        axis.axhline(0.40, color="#e6550d", linestyle=":", linewidth=1, label="Gate")
+        axis.axhline(
+            0.25, color="black", linestyle="--", linewidth=1, label="Chance"
+        )
+        axis.axhline(
+            0.40, color="#e6550d", linestyle=":", linewidth=1, label="Gate"
+        )
         axis.set_title(f"{phase.title()} validation")
         axis.set_ylabel("Best validation balanced accuracy")
         axis.tick_params(axis="x", rotation=20)
@@ -252,7 +263,9 @@ def main() -> None:
     full = fetch_group(api, FULL_GROUP, "full")
     frames = [frame for frame in (pilot, full) if not frame.empty]
     if not frames:
-        raise RuntimeError("No finished delayed-fusion pilot or full runs found.")
+        raise RuntimeError(
+            "No finished delayed-fusion pilot or full runs found."
+        )
 
     runs = pd.concat(frames, ignore_index=True)
     runs_path = CSV_DIR / f"{STEM}_runs.csv"
@@ -262,7 +275,11 @@ def main() -> None:
     summary.to_csv(summary_path, index=False)
 
     print("\nValidation-only summary")
-    print(summary.to_string(index=False, float_format=lambda value: f"{value:.4f}"))
+    print(
+        summary.to_string(
+            index=False, float_format=lambda value: f"{value:.4f}"
+        )
+    )
     _print_checks("Pilot learnability gate", pilot_checks(pilot))
     _print_checks("Full pre-registered criteria", full_checks(full))
 
