@@ -16,13 +16,15 @@ def classification_metrics(num_classes: int) -> MetricCollection:
     return MetricCollection(
         {
             "acc": Accuracy(
-                task="multiclass", num_classes=num_classes,
+                task="multiclass",
+                num_classes=num_classes,
             ),
             "f1": F1Score(
                 task="multiclass", num_classes=num_classes, average="macro"
             ),
             "auroc": AUROC(
-                task="multiclass", num_classes=num_classes,
+                task="multiclass",
+                num_classes=num_classes,
             ),
             "precision": Precision(
                 task="multiclass", num_classes=num_classes, average="macro"
@@ -34,7 +36,8 @@ def classification_metrics(num_classes: int) -> MetricCollection:
                 task="multiclass", num_classes=num_classes, average="macro"
             ),
             "cohen_kappa": CohenKappa(
-                task="multiclass", num_classes=num_classes,
+                task="multiclass",
+                num_classes=num_classes,
             ),
         }
     )

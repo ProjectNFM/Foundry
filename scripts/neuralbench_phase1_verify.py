@@ -20,9 +20,9 @@ def verify_task(task_name, dataset_name, interval_name, cache_dir):
     """Verify a NeuralBench task through the adapter."""
     from foundry.data.neuralbench.datamodule import NeuralBenchDataModule
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  Task: {task_name} / {dataset_name}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     t0 = time.time()
     dm = NeuralBenchDataModule(
@@ -96,7 +96,9 @@ def verify_task(task_name, dataset_name, interval_name, cache_dir):
     _, raw_data = adapter._get_sample_data(0)
     sample = adapter[0]
     print(f"    Data type: {type(sample).__name__}")
-    print(f"    Has interval '{interval_name}': {hasattr(sample, interval_name)}")
+    print(
+        f"    Has interval '{interval_name}': {hasattr(sample, interval_name)}"
+    )
     if hasattr(sample, interval_name):
         interval = getattr(sample, interval_name)
         print(f"    Interval targets: {interval.targets}")
@@ -158,8 +160,10 @@ def main():
     # Motor Imagery
     try:
         mi_labels = verify_task(
-            "motor_imagery", "schalk2004bci2000",
-            "motor_imagery_trials", cache_dir
+            "motor_imagery",
+            "schalk2004bci2000",
+            "motor_imagery_trials",
+            cache_dir,
         )
         results["motor_imagery"] = {"status": "OK", "labels": mi_labels}
     except Exception as e:
@@ -169,17 +173,16 @@ def main():
     # Sleep Stage
     try:
         sleep_labels = verify_task(
-            "sleep_stage", "kemp2000analysis",
-            "sleep_stages", cache_dir
+            "sleep_stage", "kemp2000analysis", "sleep_stages", cache_dir
         )
         results["sleep_stage"] = {"status": "OK", "labels": sleep_labels}
     except Exception as e:
         print(f"\n  ERROR: {e}")
         results["sleep_stage"] = {"status": "FAILED", "error": str(e)}
 
-    print(f"\n\n{'='*60}")
+    print(f"\n\n{'=' * 60}")
     print("  Summary")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     for task, info in results.items():
         print(f"  {task}: {info['status']}")
         if info["status"] == "OK":

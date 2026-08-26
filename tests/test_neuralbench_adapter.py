@@ -80,9 +80,9 @@ def test_rejects_empty_or_duplicate_channel_names(channel_names):
         NeuralSetAdapter(
             _Dataset([_sample()]),
             channel_names=channel_names,
-                sampling_rate=2.0,
-                split="train",
-                label_map=LABEL_MAP,
+            sampling_rate=2.0,
+            split="train",
+            label_map=LABEL_MAP,
         )
 
 
@@ -152,10 +152,14 @@ def test_four_second_mi_signal_is_identical_at_eegnet_input():
 
     task = TaskConfig.from_yaml("configs/tasks/neuralbench/motor_imagery.yaml")
     model = EEGNetEncoder(
-        task_configs={task.name: task}, num_channels=channels, num_samples=samples
+        task_configs={task.name: task},
+        num_channels=channels,
+        num_samples=samples,
     )
     tokenized = model.tokenize(data)
-    np.testing.assert_array_equal(tokenized["input_values"].obj.numpy(), raw_signal[0].T)
+    np.testing.assert_array_equal(
+        tokenized["input_values"].obj.numpy(), raw_signal[0].T
+    )
     normalized = model._check_input_shape_conv2d(
         tokenized["input_values"].obj.unsqueeze(0)
     )

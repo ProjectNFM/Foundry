@@ -88,9 +88,7 @@ def load_neuralbench_results() -> pd.DataFrame:
         status, result = job.__dict__.get("_result", (None, None))
         if status != "success" or not isinstance(result, dict):
             raise RuntimeError(f"NeuralBench job did not succeed: {job_path}")
-        rows.append(
-            {"seed": seed, **{m: result[m] for m in NB_TEST_METRICS}}
-        )
+        rows.append({"seed": seed, **{m: result[m] for m in NB_TEST_METRICS}})
     frame = pd.DataFrame(rows).sort_values("seed").reset_index(drop=True)
     missing = (
         sorted(set(SEEDS) - set(frame["seed"]))
@@ -185,9 +183,7 @@ def print_comparison(nb: pd.DataFrame, foundry: pd.DataFrame) -> str:
     lines.append("=" * 72)
     lines.append("NeuralBench P300 EEGNet — reference test metrics (3 seeds)")
     lines.append("=" * 72)
-    lines.append(
-        nb.to_string(index=False, float_format=lambda v: f"{v:.4f}")
-    )
+    lines.append(nb.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
     nb_mean = nb[list(NB_TEST_METRICS)].mean()
     nb_std = nb[list(NB_TEST_METRICS)].std()
     lines.append("\nMean ± SD:")
@@ -254,12 +250,20 @@ def plot_comparison_bars(nb: pd.DataFrame, foundry: pd.DataFrame) -> Path:
     ]
 
     bars_nb = ax.bar(
-        x - width / 2, nb_vals, width,
-        label="NeuralBench (test)", color=COLORS["neuralbench"], edgecolor="white",
+        x - width / 2,
+        nb_vals,
+        width,
+        label="NeuralBench (test)",
+        color=COLORS["neuralbench"],
+        edgecolor="white",
     )
     bars_f = ax.bar(
-        x + width / 2, f_vals, width,
-        label="Foundry (val)", color=COLORS["foundry"], edgecolor="white",
+        x + width / 2,
+        f_vals,
+        width,
+        label="Foundry (val)",
+        color=COLORS["foundry"],
+        edgecolor="white",
     )
 
     for bars in (bars_nb, bars_f):
@@ -268,7 +272,9 @@ def plot_comparison_bars(nb: pd.DataFrame, foundry: pd.DataFrame) -> Path:
                 bar.get_x() + bar.get_width() / 2,
                 bar.get_height() + 0.008,
                 f"{bar.get_height():.3f}",
-                ha="center", va="bottom", fontsize=8,
+                ha="center",
+                va="bottom",
+                fontsize=8,
             )
 
     nb_mean = np.mean(nb_vals)
@@ -281,7 +287,9 @@ def plot_comparison_bars(nb: pd.DataFrame, foundry: pd.DataFrame) -> Path:
     ax.set_xlabel("Seed")
     ax.set_ylabel("Balanced accuracy")
     ax.set_ylim(0, 1.0)
-    ax.set_title("Foundry EEGNet (val) vs NeuralBench EEGNet (test)\nP300 balanced accuracy")
+    ax.set_title(
+        "Foundry EEGNet (val) vs NeuralBench EEGNet (test)\nP300 balanced accuracy"
+    )
     ax.legend(loc="upper right", frameon=False)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -294,7 +302,9 @@ def plot_comparison_bars(nb: pd.DataFrame, foundry: pd.DataFrame) -> Path:
     return out
 
 
-def plot_all_metrics_comparison(nb: pd.DataFrame, foundry: pd.DataFrame) -> Path:
+def plot_all_metrics_comparison(
+    nb: pd.DataFrame, foundry: pd.DataFrame
+) -> Path:
     """Bar chart comparing mean±std across all comparable metrics."""
     metric_pairs = [
         ("Balanced\nacc.", "val_balanced_acc", "test/bal_acc"),
@@ -313,29 +323,51 @@ def plot_all_metrics_comparison(nb: pd.DataFrame, foundry: pd.DataFrame) -> Path
     width = 0.35
 
     ax.bar(
-        x - width / 2, nb_means, width, yerr=nb_stds, capsize=4,
-        label="NeuralBench (test)", color=COLORS["neuralbench"], edgecolor="white",
+        x - width / 2,
+        nb_means,
+        width,
+        yerr=nb_stds,
+        capsize=4,
+        label="NeuralBench (test)",
+        color=COLORS["neuralbench"],
+        edgecolor="white",
     )
     ax.bar(
-        x + width / 2, f_means, width, yerr=f_stds, capsize=4,
-        label="Foundry (val)", color=COLORS["foundry"], edgecolor="white",
+        x + width / 2,
+        f_means,
+        width,
+        yerr=f_stds,
+        capsize=4,
+        label="Foundry (val)",
+        color=COLORS["foundry"],
+        edgecolor="white",
     )
 
     for i in range(len(labels)):
         ax.text(
-            x[i] - width / 2, nb_means[i] + nb_stds[i] + 0.012,
-            f"{nb_means[i]:.3f}", ha="center", va="bottom", fontsize=7.5,
+            x[i] - width / 2,
+            nb_means[i] + nb_stds[i] + 0.012,
+            f"{nb_means[i]:.3f}",
+            ha="center",
+            va="bottom",
+            fontsize=7.5,
         )
         ax.text(
-            x[i] + width / 2, f_means[i] + f_stds[i] + 0.012,
-            f"{f_means[i]:.3f}", ha="center", va="bottom", fontsize=7.5,
+            x[i] + width / 2,
+            f_means[i] + f_stds[i] + 0.012,
+            f"{f_means[i]:.3f}",
+            ha="center",
+            va="bottom",
+            fontsize=7.5,
         )
 
     ax.set_xticks(x)
     ax.set_xticklabels(labels)
     ax.set_ylabel("Metric value (mean ± SD over 3 seeds)")
     ax.set_ylim(0, 1.0)
-    ax.set_title("Foundry EEGNet (val) vs NeuralBench EEGNet (test) — all metrics")
+    ax.set_title(
+        "Foundry EEGNet (val) vs NeuralBench EEGNet (test) — all metrics"
+    )
     ax.legend(loc="upper right", frameon=False)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -363,11 +395,23 @@ def plot_training_curves(curves: pd.DataFrame) -> Path:
         if val_bacc_key in sub.columns:
             vals = sub.dropna(subset=[val_bacc_key])
             if not vals.empty:
-                axes[0].plot(vals["epoch"], vals[val_bacc_key], marker="o", markersize=3, label=label)
+                axes[0].plot(
+                    vals["epoch"],
+                    vals[val_bacc_key],
+                    marker="o",
+                    markersize=3,
+                    label=label,
+                )
         if val_loss_key in sub.columns:
             vals = sub.dropna(subset=[val_loss_key])
             if not vals.empty:
-                axes[1].plot(vals["epoch"], vals[val_loss_key], marker="o", markersize=3, label=label)
+                axes[1].plot(
+                    vals["epoch"],
+                    vals[val_loss_key],
+                    marker="o",
+                    markersize=3,
+                    label=label,
+                )
 
     axes[0].set_xlabel("Epoch")
     axes[0].set_ylabel("Val balanced accuracy")

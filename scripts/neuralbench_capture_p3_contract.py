@@ -62,16 +62,12 @@ def _inspect_task_config(cfg) -> dict:
     """Extract all task-level settings from the effective config."""
     data_cfg = cfg.get("data", {})
     return {
-        "study_name": data_cfg.get("study", {})
-        .get("source", {})
-        .get("name"),
+        "study_name": data_cfg.get("study", {}).get("source", {}).get("name"),
         "study_path": str(
             data_cfg.get("study", {}).get("source", {}).get("path", "")
         ),
         "split": {
-            "method": data_cfg.get("study", {})
-            .get("split", {})
-            .get("name"),
+            "method": data_cfg.get("study", {}).get("split", {}).get("name"),
             "split_by": data_cfg.get("study", {})
             .get("split", {})
             .get("split_by"),

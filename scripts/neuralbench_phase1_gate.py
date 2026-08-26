@@ -41,7 +41,7 @@ def check(name: str, passed: bool, detail: str = "") -> None:
 def print_summary() -> bool:
     n_pass = sum(1 for _, p, _ in CHECKS if p)
     n_fail = sum(1 for _, p, _ in CHECKS if not p)
-    print(f"\n{'='*72}")
+    print(f"\n{'=' * 72}")
     print(f"Phase 1 Gate: {n_pass} passed, {n_fail} failed")
     if n_fail > 0:
         print("GATE: BLOCKED — fix failures above before proceeding to Phase 2")
@@ -50,13 +50,14 @@ def print_summary() -> bool:
                 print(f"  - {name}: {detail}")
     else:
         print("GATE: PASSED")
-    print(f"{'='*72}")
+    print(f"{'=' * 72}")
     return n_fail == 0
 
 
 # ---------------------------------------------------------------------------
 # Phase 1 Gate
 # ---------------------------------------------------------------------------
+
 
 def main() -> bool:
     print("=" * 72)
@@ -104,7 +105,7 @@ def main() -> bool:
     check(
         "Channel IDs populated",
         len(dm.get_channel_ids()) == 64 * 16,
-        f"got {len(dm.get_channel_ids())} channel IDs (expected {64*16})",
+        f"got {len(dm.get_channel_ids())} channel IDs (expected {64 * 16})",
     )
 
     # ------------------------------------------------------------------
@@ -172,7 +173,9 @@ def main() -> bool:
     raw_target = raw_data["target"]
     if isinstance(raw_target, torch.Tensor):
         raw_target = raw_target.numpy()
-    expected_label = "NonTarget" if np.argmax(raw_target.flatten()) == 0 else "Target"
+    expected_label = (
+        "NonTarget" if np.argmax(raw_target.flatten()) == 0 else "Target"
+    )
     check(
         "Label matches NeuralSet",
         label == expected_label,
@@ -187,8 +190,22 @@ def main() -> bool:
         f"got {len(channel_ids)}",
     )
     expected_order = [
-        "Fp1", "Fp2", "F3", "AFz", "F4", "T7", "Cz", "T8",
-        "P7", "P3", "Pz", "P4", "P8", "O1", "Oz", "O2",
+        "Fp1",
+        "Fp2",
+        "F3",
+        "AFz",
+        "F4",
+        "T7",
+        "Cz",
+        "T8",
+        "P7",
+        "P3",
+        "Pz",
+        "P4",
+        "P8",
+        "O1",
+        "Oz",
+        "O2",
     ]
     bare_names = [cid.rsplit("/", 1)[-1] for cid in channel_ids]
     check(
@@ -213,7 +230,15 @@ def main() -> bool:
     labels_seen = set()
     sessions_seen = set()
     n_train = len(dm._train_adapter)
-    probe_indices = [0, 1, 2, n_train // 4, n_train // 2, 3 * n_train // 4, n_train - 1]
+    probe_indices = [
+        0,
+        1,
+        2,
+        n_train // 4,
+        n_train // 2,
+        3 * n_train // 4,
+        n_train - 1,
+    ]
     for i in probe_indices:
         d = dm._train_adapter._to_torch_brain_data(i)
         labels_seen.add(np.asarray(d.p300_trials.targets)[0])
@@ -339,10 +364,12 @@ def main() -> bool:
     # Initialize vocabs
     session_ids = dm_poyo.get_recording_ids()
     channel_ids = dm_poyo.get_channel_ids()
-    poyo.initialize_vocabs({
-        "session_ids": session_ids,
-        "channel_ids": channel_ids,
-    })
+    poyo.initialize_vocabs(
+        {
+            "session_ids": session_ids,
+            "channel_ids": channel_ids,
+        }
+    )
 
     dm_poyo.set_tokenizer(poyo.tokenize)
 
@@ -350,7 +377,10 @@ def main() -> bool:
     poyo_batch = next(iter(poyo_loader))
 
     non_forward_keys = {
-        "target_values", "target_weights", "session_id", "absolute_start",
+        "target_values",
+        "target_weights",
+        "session_id",
+        "absolute_start",
     }
     poyo_inputs = {
         k: v for k, v in poyo_batch.items() if k not in non_forward_keys

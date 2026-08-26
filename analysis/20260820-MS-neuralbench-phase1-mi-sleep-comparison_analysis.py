@@ -51,11 +51,15 @@ NB_KEYS = {
 
 
 def _seed_from_run(run: wandb.apis.public.Run) -> int:
-    seed = (run.config or {}).get("seed") or (run.config or {}).get("run", {}).get("seed")
+    seed = (run.config or {}).get("seed") or (run.config or {}).get(
+        "run", {}
+    ).get("seed")
     if seed is None:
         match = re.search(r"seed(\d+)", run.name or "")
         if match is None:
-            raise RuntimeError(f"Could not determine seed for WandB run {run.id}")
+            raise RuntimeError(
+                f"Could not determine seed for WandB run {run.id}"
+            )
         seed = match.group(1)
     return int(seed)
 
@@ -64,7 +68,10 @@ def load_neuralbench(task_name: str) -> pd.DataFrame:
     """Load successful NeuralBench LocalJob artifacts for all experiment seeds."""
     rows: list[dict[str, float | int]] = []
     pattern = str(
-        RESULTS_ROOT / EXPERIMENT_PREFIX / f"seed=*,task_name={task_name},*" / "job.pkl"
+        RESULTS_ROOT
+        / EXPERIMENT_PREFIX
+        / f"seed=*,task_name={task_name},*"
+        / "job.pkl"
     )
     for path_text in glob.glob(pattern):
         path = Path(path_text)
@@ -83,7 +90,11 @@ def load_neuralbench(task_name: str) -> pd.DataFrame:
             }
         )
     frame = pd.DataFrame(rows).sort_values("seed").drop_duplicates("seed")
-    missing = sorted(set(SEEDS) - set(frame["seed"])) if not frame.empty else list(SEEDS)
+    missing = (
+        sorted(set(SEEDS) - set(frame["seed"]))
+        if not frame.empty
+        else list(SEEDS)
+    )
     if missing:
         raise RuntimeError(f"Missing NeuralBench {task_name} seeds: {missing}")
     return frame.reset_index(drop=True)
@@ -102,7 +113,9 @@ def fetch_foundry(api: wandb.Api, group: str, task_name: str) -> pd.DataFrame:
                 "seed": _seed_from_run(run),
                 "run_name": run.name,
                 "run_id": run.id,
-                "balanced_acc": float(summary[f"val/{task_name}_balanced_acc.max"]),
+                "balanced_acc": float(
+                    summary[f"val/{task_name}_balanced_acc.max"]
+                ),
                 "auroc": float(summary[f"val/{task_name}_auroc.max"]),
                 "f1_macro": float(summary[f"val/{task_name}_f1.max"]),
                 "accuracy": float(summary[f"val/{task_name}_acc.max"]),
@@ -111,13 +124,19 @@ def fetch_foundry(api: wandb.Api, group: str, task_name: str) -> pd.DataFrame:
             }
         )
     frame = pd.DataFrame(rows).sort_values("seed").drop_duplicates("seed")
-    missing = sorted(set(SEEDS) - set(frame["seed"])) if not frame.empty else list(SEEDS)
+    missing = (
+        sorted(set(SEEDS) - set(frame["seed"]))
+        if not frame.empty
+        else list(SEEDS)
+    )
     if missing:
         raise RuntimeError(f"Missing finished Foundry {group} seeds: {missing}")
     return frame.reset_index(drop=True)
 
 
-def summarize(task: str, nb: pd.DataFrame, foundry: pd.DataFrame) -> pd.DataFrame:
+def summarize(
+    task: str, nb: pd.DataFrame, foundry: pd.DataFrame
+) -> pd.DataFrame:
     metrics = ("balanced_acc", "auroc", "f1_macro", "accuracy")
     rows = []
     for metric in metrics:
@@ -137,12 +156,24 @@ def summarize(task: str, nb: pd.DataFrame, foundry: pd.DataFrame) -> pd.DataFram
     return pd.DataFrame(rows)
 
 
-def plot_balanced_accuracy(results: dict[str, tuple[pd.DataFrame, pd.DataFrame]]) -> Path:
+def plot_balanced_accuracy(
+    results: dict[str, tuple[pd.DataFrame, pd.DataFrame]],
+) -> Path:
     fig, axes = plt.subplots(1, 2, figsize=(10, 4), sharey=True)
     for ax, (task, (nb, foundry)) in zip(axes, results.items(), strict=True):
         x = range(len(SEEDS))
-        ax.bar([v - 0.2 for v in x], nb["balanced_acc"], 0.4, label="NeuralBench test")
-        ax.bar([v + 0.2 for v in x], foundry["balanced_acc"], 0.4, label="Foundry val")
+        ax.bar(
+            [v - 0.2 for v in x],
+            nb["balanced_acc"],
+            0.4,
+            label="NeuralBench test",
+        )
+        ax.bar(
+            [v + 0.2 for v in x],
+            foundry["balanced_acc"],
+            0.4,
+            label="Foundry val",
+        )
         ax.set_title(task)
         ax.set_xticks(list(x), [str(seed) for seed in SEEDS])
         ax.set_xlabel("Seed")
@@ -165,21 +196,35 @@ def main() -> None:
     for label, spec in TASKS.items():
         nb = load_neuralbench(spec["nb_task"])
         foundry = fetch_foundry(api, spec["group"], spec["foundry_task"])
-        nb.to_csv(CSV_DIR / f"{STEM}_{spec['nb_task']}_neuralbench.csv", index=False)
-        foundry.to_csv(CSV_DIR / f"{STEM}_{spec['nb_task']}_foundry.csv", index=False)
+        nb.to_csv(
+            CSV_DIR / f"{STEM}_{spec['nb_task']}_neuralbench.csv", index=False
+        )
+        foundry.to_csv(
+            CSV_DIR / f"{STEM}_{spec['nb_task']}_foundry.csv", index=False
+        )
         results[label] = (nb, foundry)
         summaries.append(summarize(label, nb, foundry))
 
         print(f"\\n{label} — per-seed results")
         print("NeuralBench (test):")
-        print(nb.to_string(index=False, float_format=lambda value: f"{value:.4f}"))
+        print(
+            nb.to_string(index=False, float_format=lambda value: f"{value:.4f}")
+        )
         print("Foundry (best validation):")
-        print(foundry.to_string(index=False, float_format=lambda value: f"{value:.4f}"))
+        print(
+            foundry.to_string(
+                index=False, float_format=lambda value: f"{value:.4f}"
+            )
+        )
 
     summary = pd.concat(summaries, ignore_index=True)
     summary.to_csv(CSV_DIR / f"{STEM}_summary.csv", index=False)
     print("\\nMean ± SD comparison")
-    print(summary.to_string(index=False, float_format=lambda value: f"{value:.4f}"))
+    print(
+        summary.to_string(
+            index=False, float_format=lambda value: f"{value:.4f}"
+        )
+    )
     print(f"\\nSaved figure: {plot_balanced_accuracy(results)}")
 
 

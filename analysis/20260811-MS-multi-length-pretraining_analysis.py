@@ -145,7 +145,9 @@ def fetch_downstream(api: wandb.Api) -> pd.DataFrame:
         print(f"  {task} / {mode}: {len(relevant)} runs found")
 
         for run in relevant:
-            history = run.history(keys=[metric_key], samples=50_000, pandas=True)
+            history = run.history(
+                keys=[metric_key], samples=50_000, pandas=True
+            )
             values = history.get(metric_key, pd.Series(dtype=float)).dropna()
             records.append(
                 {
@@ -184,7 +186,9 @@ def summarize(downstream: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
     return coverage.merge(
-        agg.drop(columns="n_finished"), on=["task", "mode", "run_tag"], how="left"
+        agg.drop(columns="n_finished"),
+        on=["task", "mode", "run_tag"],
+        how="left",
     )
 
 
@@ -205,9 +209,12 @@ def plot_pretraining_curves(curves: pd.DataFrame) -> Path | None:
             if part.empty:
                 continue
             ax.plot(
-                part["step"], part["loss"],
-                label=info["label"], color=info["color"],
-                marker="o" if kind == "val" else None, markersize=2,
+                part["step"],
+                part["loss"],
+                label=info["label"],
+                color=info["color"],
+                marker="o" if kind == "val" else None,
+                markersize=2,
             )
     for ax, title in zip(axes, ["Training loss", "Validation loss"]):
         ax.set_title(title, fontweight="bold")
@@ -240,7 +247,9 @@ def plot_downstream_comparison(summary: pd.DataFrame) -> Path | None:
             info = PRETRAIN_RUNS[tag]
             if tag in sub.index and pd.notna(sub.loc[tag, "mean"]):
                 means.append(sub.loc[tag, "mean"])
-                stds.append(sub.loc[tag, "std"] if pd.notna(sub.loc[tag, "std"]) else 0)
+                stds.append(
+                    sub.loc[tag, "std"] if pd.notna(sub.loc[tag, "std"]) else 0
+                )
                 n_fin = int(sub.loc[tag, "n_finished"])
             else:
                 means.append(0)
@@ -254,13 +263,21 @@ def plot_downstream_comparison(summary: pd.DataFrame) -> Path | None:
         for bar, m, n_lbl in zip(bars, means, labels):
             if m > 0:
                 ax.text(
-                    bar.get_x() + bar.get_width() / 2, m + 0.015,
-                    f"{m:.4f}", ha="center", va="bottom", fontsize=8,
+                    bar.get_x() + bar.get_width() / 2,
+                    m + 0.015,
+                    f"{m:.4f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
                 )
             else:
                 ax.text(
-                    bar.get_x() + bar.get_width() / 2, 0.02,
-                    "no finished\nfolds", ha="center", va="bottom", fontsize=7,
+                    bar.get_x() + bar.get_width() / 2,
+                    0.02,
+                    "no finished\nfolds",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
                 )
         ax.set_xticks(x)
         ax.set_xticklabels(labels, fontsize=7)
@@ -308,13 +325,17 @@ def plot_delta_chart(summary: pd.DataFrame) -> Path | None:
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             d + (0.003 if d >= 0 else -0.003),
-            f"{d:+.4f}", ha="center",
-            va="bottom" if d >= 0 else "top", fontsize=9,
+            f"{d:+.4f}",
+            ha="center",
+            va="bottom" if d >= 0 else "top",
+            fontsize=9,
         )
     ax.set_xticks(range(len(labels)))
     ax.set_xticklabels(labels, fontsize=8)
     ax.set_ylabel("Δ F1 (S1 − M0)")
-    ax.set_title("S1 vs M0: downstream F1 delta (finished folds only)", fontweight="bold")
+    ax.set_title(
+        "S1 vs M0: downstream F1 delta (finished folds only)", fontweight="bold"
+    )
     ax.grid(axis="y", alpha=0.25)
     ax.spines[["top", "right"]].set_visible(False)
     fig.tight_layout()
@@ -366,13 +387,19 @@ def print_results(
         lines.append(f"  {tag}: {dict(states)}")
 
     failed = downstream[downstream["state"] != "finished"]
-    lines.append(
-        f"\nNon-finished runs: {len(failed)} / {len(downstream)}"
-    )
+    lines.append(f"\nNon-finished runs: {len(failed)} / {len(downstream)}")
     if not failed.empty:
         lines.append(
             failed[
-                ["task", "mode", "run_tag", "fold", "state", "wandb_id", "last_step"]
+                [
+                    "task",
+                    "mode",
+                    "run_tag",
+                    "fold",
+                    "state",
+                    "wandb_id",
+                    "last_step",
+                ]
             ]
             .sort_values(["task", "mode", "run_tag", "fold"])
             .to_string(index=False)

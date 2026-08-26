@@ -20,6 +20,7 @@ import re
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -72,6 +73,7 @@ NB_METRIC_MAP = {
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _seed_from_run(run: wandb.apis.public.Run) -> int:
     config = run.config or {}
     value = config.get("seed") or config.get("run", {}).get("seed")
@@ -108,14 +110,17 @@ def _extract_foundry_metrics(
 # NeuralBench reference loading
 # ---------------------------------------------------------------------------
 
+
 def load_neuralbench_reference(nb_task_name: str | None) -> pd.DataFrame:
     """Load NeuralBench test metrics from local job.pkl artifacts."""
     if nb_task_name is None:
         pattern = str(RESULTS_ROOT / NB_EXPERIMENT_PREFIX / "seed=*/job.pkl")
     else:
         pattern = str(
-            RESULTS_ROOT / NB_EXPERIMENT_PREFIX
-            / f"seed=*,task_name={nb_task_name},*" / "job.pkl"
+            RESULTS_ROOT
+            / NB_EXPERIMENT_PREFIX
+            / f"seed=*,task_name={nb_task_name},*"
+            / "job.pkl"
         )
 
     rows: list[dict] = []
@@ -130,14 +135,23 @@ def load_neuralbench_reference(nb_task_name: str | None) -> pd.DataFrame:
         if status != "success" or not isinstance(result, dict):
             print(f"  [warn] NeuralBench job not success: {path}")
             continue
-        rows.append({
-            "seed": int(match.group(1)),
-            **{short: float(result[key]) for short, key in NB_METRIC_MAP.items()
-               if key in result},
-        })
+        rows.append(
+            {
+                "seed": int(match.group(1)),
+                **{
+                    short: float(result[key])
+                    for short, key in NB_METRIC_MAP.items()
+                    if key in result
+                },
+            }
+        )
 
     frame = pd.DataFrame(rows).sort_values("seed").drop_duplicates("seed")
-    missing = sorted(set(SEEDS) - set(frame["seed"])) if not frame.empty else list(SEEDS)
+    missing = (
+        sorted(set(SEEDS) - set(frame["seed"]))
+        if not frame.empty
+        else list(SEEDS)
+    )
     if missing:
         raise RuntimeError(
             f"Missing NeuralBench seeds {missing} for task={nb_task_name}. "
@@ -149,6 +163,7 @@ def load_neuralbench_reference(nb_task_name: str | None) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Foundry run fetching
 # ---------------------------------------------------------------------------
+
 
 def fetch_foundry_matched(
     api: wandb.Api,
@@ -200,7 +215,9 @@ def fetch_val_training_curves(
             run = api.run(f"{path_prefix}/{row['run_id']}")
         except Exception:
             continue
-        history = run.history(keys=["epoch", val_key], samples=10_000, pandas=True)
+        history = run.history(
+            keys=["epoch", val_key], samples=10_000, pandas=True
+        )
         if history.empty or val_key not in history.columns:
             continue
         history = history.dropna(subset=[val_key])
@@ -218,6 +235,7 @@ def fetch_val_training_curves(
 # ---------------------------------------------------------------------------
 # Summary and printing
 # ---------------------------------------------------------------------------
+
 
 def print_task_comparison(
     label: str,
@@ -241,13 +259,13 @@ def print_task_comparison(
     lines.append("\n  NeuralBench EEGNet — per-seed test metrics:")
     nb_cols = ["seed"] + [m for m in CORE_METRICS if m in nb.columns]
     lines.append(
-        nb[nb_cols].to_string(
-            index=False, float_format=lambda v: f"{v:.4f}"
-        )
+        nb[nb_cols].to_string(index=False, float_format=lambda v: f"{v:.4f}")
     )
 
     lines.append("\n  Head-to-head (mean ± SD):")
-    lines.append(f"  {'Metric':<20s} {'Foundry (test)':>18s} {'NeuralBench (test)':>20s} {'Delta':>10s} {'|Delta|':>10s}")
+    lines.append(
+        f"  {'Metric':<20s} {'Foundry (test)':>18s} {'NeuralBench (test)':>20s} {'Delta':>10s} {'|Delta|':>10s}"
+    )
     lines.append("  " + "-" * 82)
     for metric in CORE_METRICS:
         f_col = f"test_{metric}"
@@ -296,13 +314,29 @@ def plot_test_comparison_bars(
         means = [n_mean, f_mean]
         stds = [n_std, f_std]
         labels = ["NeuralBench\nEEGNet", "Foundry\nMatched EEGNet"]
-        colors = [COLORS["NeuralBench EEGNet"], COLORS["Foundry Matched EEGNet"]]
+        colors = [
+            COLORS["NeuralBench EEGNet"],
+            COLORS["Foundry Matched EEGNet"],
+        ]
 
-        bars = ax.bar(x, means, yerr=stds, capsize=5, color=colors,
-                      edgecolor="white", width=0.6)
+        bars = ax.bar(
+            x,
+            means,
+            yerr=stds,
+            capsize=5,
+            color=colors,
+            edgecolor="white",
+            width=0.6,
+        )
         for bar, m in zip(bars, means):
-            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02,
-                    f"{m:.3f}", ha="center", va="bottom", fontsize=10)
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.02,
+                f"{m:.3f}",
+                ha="center",
+                va="bottom",
+                fontsize=10,
+            )
 
         delta = f_mean - n_mean
         ax.set_title(f"{task}\n(delta = {delta:+.1%} pp)", fontsize=11)
@@ -314,7 +348,8 @@ def plot_test_comparison_bars(
     axes[0].set_ylabel("Test balanced accuracy (mean ± SD, 3 seeds)")
     fig.suptitle(
         "Foundry Matched EEGNet vs NeuralBench EEGNet — Test Set",
-        fontsize=13, y=1.02,
+        fontsize=13,
+        y=1.02,
     )
     fig.tight_layout()
     out = FIGURES_DIR / f"{STEM}_test_comparison.png"
@@ -343,16 +378,29 @@ def plot_per_seed_scatter(
         nb_vals = [nb_by_seed[s] for s in common]
         f_vals = [foundry_by_seed[s] for s in common]
 
-        ax.scatter(nb_vals, f_vals, color=COLORS["Foundry Matched EEGNet"],
-                   s=80, zorder=5, edgecolors="white")
+        ax.scatter(
+            nb_vals,
+            f_vals,
+            color=COLORS["Foundry Matched EEGNet"],
+            s=80,
+            zorder=5,
+            edgecolors="white",
+        )
         for s, nv, fv in zip(common, nb_vals, f_vals):
-            ax.annotate(f"s{s}", (nv, fv), textcoords="offset points",
-                        xytext=(6, 6), fontsize=8)
+            ax.annotate(
+                f"s{s}",
+                (nv, fv),
+                textcoords="offset points",
+                xytext=(6, 6),
+                fontsize=8,
+            )
 
         all_vals = nb_vals + f_vals
         lo = min(all_vals) - 0.05
         hi = max(all_vals) + 0.05
-        ax.plot([lo, hi], [lo, hi], "--", color="grey", lw=0.8, alpha=0.6, zorder=1)
+        ax.plot(
+            [lo, hi], [lo, hi], "--", color="grey", lw=0.8, alpha=0.6, zorder=1
+        )
         ax.set_xlim(lo, hi)
         ax.set_ylim(lo, hi)
         ax.set_xlabel("NeuralBench test bal. acc.")
@@ -363,7 +411,8 @@ def plot_per_seed_scatter(
     axes[0].set_ylabel("Foundry test bal. acc.")
     fig.suptitle(
         "Per-seed parity: Foundry Matched EEGNet vs NeuralBench",
-        fontsize=12, y=1.02,
+        fontsize=12,
+        y=1.02,
     )
     fig.tight_layout()
     out = FIGURES_DIR / f"{STEM}_per_seed_scatter.png"
@@ -391,9 +440,15 @@ def plot_training_curves(
             sub = df[df["seed"] == seed].sort_values("epoch")
             if sub.empty:
                 continue
-            ax.plot(sub["epoch"], sub["val_balanced_acc"],
-                    color=seed_colors.get(seed, "#999"), linewidth=1.8,
-                    label=f"seed {seed}", marker="o", markersize=3)
+            ax.plot(
+                sub["epoch"],
+                sub["val_balanced_acc"],
+                color=seed_colors.get(seed, "#999"),
+                linewidth=1.8,
+                label=f"seed {seed}",
+                marker="o",
+                markersize=3,
+            )
         ax.set_title(task, fontsize=11)
         ax.set_xlabel("Epoch")
         ax.legend(frameon=False, fontsize=8)
@@ -402,7 +457,8 @@ def plot_training_curves(
     axes[0].set_ylabel("Val balanced accuracy")
     fig.suptitle(
         "Foundry Matched EEGNet — Validation Training Curves",
-        fontsize=12, y=1.02,
+        fontsize=12,
+        y=1.02,
     )
     fig.tight_layout()
     out = FIGURES_DIR / f"{STEM}_training_curves.png"
@@ -439,18 +495,32 @@ def plot_delta_summary(
 
     ax.barh(y_positions, vals, color=colors, edgecolor="white", height=0.7)
     ax.axvline(0, color="grey", linewidth=0.8)
-    ax.axvline(-0.02, color="red", linewidth=0.8, linestyle="--", alpha=0.5,
-               label="±2 pp threshold")
+    ax.axvline(
+        -0.02,
+        color="red",
+        linewidth=0.8,
+        linestyle="--",
+        alpha=0.5,
+        label="±2 pp threshold",
+    )
     ax.axvline(0.02, color="red", linewidth=0.8, linestyle="--", alpha=0.5)
 
     for yp, v in zip(y_positions, vals):
-        ax.text(v + 0.002 * np.sign(v), yp, f"{v:+.4f}", va="center",
-                fontsize=8, ha="left" if v >= 0 else "right")
+        ax.text(
+            v + 0.002 * np.sign(v),
+            yp,
+            f"{v:+.4f}",
+            va="center",
+            fontsize=8,
+            ha="left" if v >= 0 else "right",
+        )
 
     ax.set_yticks(y_positions)
     ax.set_yticklabels(y_labels, fontsize=8)
     ax.set_xlabel("Delta (Foundry − NeuralBench)")
-    ax.set_title("Test metric deltas: Foundry Matched EEGNet vs NeuralBench", fontsize=11)
+    ax.set_title(
+        "Test metric deltas: Foundry Matched EEGNet vs NeuralBench", fontsize=11
+    )
     ax.legend(frameon=False, fontsize=8)
     ax.spines[["top", "right"]].set_visible(False)
     ax.invert_yaxis()
@@ -465,6 +535,7 @@ def plot_delta_summary(
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     api = wandb.Api()
     all_results: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
@@ -476,25 +547,37 @@ def main() -> None:
         print(f"Processing {label}...")
         print("=" * 72)
 
-        print(f"  Loading NeuralBench reference ({spec['nb_task_name'] or 'p3'})...")
+        print(
+            f"  Loading NeuralBench reference ({spec['nb_task_name'] or 'p3'})..."
+        )
         nb = load_neuralbench_reference(spec["nb_task_name"])
-        nb.to_csv(CSV_DIR / f"{STEM}_{label.lower().replace(' ', '_')}_neuralbench.csv",
-                  index=False)
+        nb.to_csv(
+            CSV_DIR
+            / f"{STEM}_{label.lower().replace(' ', '_')}_neuralbench.csv",
+            index=False,
+        )
 
         print(f"  Fetching Foundry matched runs (group={spec['group']})...")
-        foundry = fetch_foundry_matched(api, spec["group"], spec["foundry_task_key"])
-        foundry.to_csv(CSV_DIR / f"{STEM}_{label.lower().replace(' ', '_')}_foundry.csv",
-                       index=False)
+        foundry = fetch_foundry_matched(
+            api, spec["group"], spec["foundry_task_key"]
+        )
+        foundry.to_csv(
+            CSV_DIR / f"{STEM}_{label.lower().replace(' ', '_')}_foundry.csv",
+            index=False,
+        )
 
         all_results[label] = (foundry, nb)
         txt = print_task_comparison(label, foundry, nb)
         all_text.append(txt)
 
         print(f"\n  Fetching training curves for {label}...")
-        curves = fetch_val_training_curves(api, foundry, spec["foundry_task_key"])
+        curves = fetch_val_training_curves(
+            api, foundry, spec["foundry_task_key"]
+        )
         if not curves.empty:
             curves.to_csv(
-                CSV_DIR / f"{STEM}_{label.lower().replace(' ', '_')}_curves.csv",
+                CSV_DIR
+                / f"{STEM}_{label.lower().replace(' ', '_')}_curves.csv",
                 index=False,
             )
         all_curves[label] = curves
@@ -514,17 +597,19 @@ def main() -> None:
             n_mean = nb[metric].mean()
             n_std = nb[metric].std()
             delta = f_mean - n_mean
-            summary_rows.append({
-                "task": task,
-                "metric": metric,
-                "foundry_mean": f_mean,
-                "foundry_std": f_std,
-                "neuralbench_mean": n_mean,
-                "neuralbench_std": n_std,
-                "delta": delta,
-                "abs_delta": abs(delta),
-                "within_2pp": abs(delta) <= 0.02,
-            })
+            summary_rows.append(
+                {
+                    "task": task,
+                    "metric": metric,
+                    "foundry_mean": f_mean,
+                    "foundry_std": f_std,
+                    "neuralbench_mean": n_mean,
+                    "neuralbench_std": n_std,
+                    "delta": delta,
+                    "abs_delta": abs(delta),
+                    "within_2pp": abs(delta) <= 0.02,
+                }
+            )
     summary = pd.DataFrame(summary_rows)
     summary.to_csv(CSV_DIR / f"{STEM}_parity_summary.csv", index=False)
     print(summary.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
@@ -532,12 +617,18 @@ def main() -> None:
     parity_pass = summary["within_2pp"].all()
     bal_acc_summary = summary[summary["metric"] == "balanced_acc"]
     bal_acc_pass = bal_acc_summary["within_2pp"].all()
-    print(f"\nBalanced accuracy within ±2 pp for ALL tasks: {'YES' if bal_acc_pass else 'NO'}")
-    print(f"All metrics within ±2 pp for ALL tasks: {'YES' if parity_pass else 'NO'}")
+    print(
+        f"\nBalanced accuracy within ±2 pp for ALL tasks: {'YES' if bal_acc_pass else 'NO'}"
+    )
+    print(
+        f"All metrics within ±2 pp for ALL tasks: {'YES' if parity_pass else 'NO'}"
+    )
 
     for _, row in bal_acc_summary.iterrows():
-        print(f"  {row['task']}: delta = {row['delta']:+.4f} "
-              f"({'PASS' if row['within_2pp'] else 'FAIL'})")
+        print(
+            f"  {row['task']}: delta = {row['delta']:+.4f} "
+            f"({'PASS' if row['within_2pp'] else 'FAIL'})"
+        )
 
     # --- Figures ---
     print("\n\nGenerating figures...")
