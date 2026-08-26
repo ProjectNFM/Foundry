@@ -1,9 +1,9 @@
 # Position-conditioned channel values for HERO Motor Imagery learnability
 
-**Status:** Draft
+**Status:** Completed
 **Date started:** 2026-08-26
 **Parent experiment:** [Causal delayed fusion for HERO Motor Imagery learnability](20260826-MS-hero-delayed-fusion-mi-learnability.md)
-**Follow-up experiments:** TBD — a full experiment is permitted **if and only if** this pilot satisfies every pre-registered pilot gate below.
+**Follow-up experiments:** None — the pilot did not satisfy every required gate; no full experiment authorized.
 **Tags:** neuralbench, hero, motor_imagery, absolute_position, channel_identity, spatial_fusion, learnability, validation_only, from_scratch
 
 ## Background
@@ -86,7 +86,9 @@ been established.
   wall-clock time, and the fraction of valid channel positions. The model unit
   test verifies that rebinding positions while holding signals fixed changes
   representations, whereas a joint signal-position permutation remains
-  invariant.
+  invariant. **Post-run audit:** the planned position-validity fraction was
+  not present in the W&B run summaries, so coordinate coverage was not
+  independently confirmed from these runs.
 - **WandB:** project `foundry-neuralbench`, group
   `NB_MI_HERO_POSITION_VALUE_PILOT`.
 
@@ -132,17 +134,78 @@ Implemented pilot config:
 
 ## Results
 
-TBD — run the two-condition local pilot and fetch validation-only W&B metrics.
+### Summary
+
+Both conditions remained near chance on four-class MI validation. Adding
+correctly bound absolute electrode position to the channel value stream
+before spatial fusion produced no measurable improvement over the anonymous
+control. The two runs are functionally indistinguishable in both training
+and validation dynamics.
+
+### Metrics
+
+| Condition | Seed | Run name | Run ID | Val Bal. Acc | Train Bal. Acc | Min Train Loss | Last logged epoch |
+|---|---|---|---|---:|---:|---:|---:|
+| anonymous | 33 | nb_mi_hero_position_value_pilot_anonymous_seed33 | `h051ctmv` | 0.2953 | 0.3049 | 1.3267 | 31 |
+| position_values | 33 | nb_mi_hero_position_value_pilot_position_values_seed33 | `5o9glkt1` | 0.2965 | 0.3054 | 1.3243 | 33 |
+
+**Pre-registered pilot gates:**
+
+| Gate | Criterion | Observed | Result |
+|---|---|---|---|
+| 1 | position-values best val balanced acc >= 0.40 | 0.2965 | **FAIL** |
+| 2 | val balanced acc improvement >= 0.05 over anonymous | +0.0012 | **FAIL** |
+| 3a | peak train balanced acc >= 0.10 above anonymous | +0.0005 | **FAIL** |
+| 3b | min train CE < 1.386 | 1.3243 | PASS |
+
+Snapshot bundle:
+`20260826T154323_NB_MI_HERO_POSITION_VALUE_PILOT_5c4c2257_355bea02`
+(Git SHA `5c4c225737b54537c0b43a80719f8116d50062c7`, branch `milo/hierarchical`)
+
+### Analysis
+
+```bash
+uv run python analysis/20260826-MS-hero-position-value-mi-learnability_analysis.py
+```
+
+### Figures
+
+![Validation balanced accuracy](../../analysis/figures/20260826-MS-hero-position-value-mi-learnability_analysis_validation_balanced_accuracy.png)
+
+![Training curves](../../analysis/figures/20260826-MS-hero-position-value-mi-learnability_analysis_training_curves.png)
 
 ## Conclusions
 
-TBD — the full experiment remains forbidden unless every pilot gate passes.
+**Pilot decision: hypothesis not supported; no full experiment authorized.**
+The position-value condition failed three of the four pre-registered pilot
+gates, so this single-seed pilot provides no evidence that adding correctly
+bound electrode position to the HERO channel value stream makes the flat
+model meaningfully more learnable on NeuralBench MI:
+
+- Both conditions plateau at ~0.295 validation balanced accuracy, far below
+  the 0.40 gate.
+- The position-values condition improves over the anonymous control by only
+  +0.0012 in validation and +0.0005 in training balanced accuracy — both
+  negligible, well below the required +0.05 and +0.10 thresholds.
+- Only gate 3b (train CE < 1.386) passes, confirming the model can fit
+  slightly below the uniform four-class loss, but this is insufficient on
+  its own.
+
+This is sufficient to reject the proposed pilot progression, but not to rule
+out channel identity as a bottleneck in every setting: the comparison has one
+seed and tests only this additive value-stream implementation in the flat
+model. The supported conclusion is narrower: it did not rescue learnability
+under this pre-registered pilot design. No full position-value experiment is
+authorized.
 
 ## Notes for future experiments
 
-- If every gate passes, create a separate full, three-seed validation-only
-  experiment before any test evaluation. Include a position-mismatch control
-  that permutes positions relative to fixed signals.
-- If a gate fails, do not broaden the position-value sweep. Reassess whether
-  the remaining bottleneck is temporal processing, optimization, or an MI
-  data/target contract issue.
+- Do not broaden this position-value sweep or add a position-mismatch control
+  from this pilot. A future experiment may revisit channel identity only with
+  a materially different, independently motivated design.
+- Reassess whether the remaining bottleneck is temporal processing (the flat
+  temporal mode may lack sufficient temporal resolution for sensorimotor
+  rhythm discrimination), optimization dynamics, or a data/target contract
+  issue in the MI task.
+- Consider testing position in combination with delayed fusion or hierarchy,
+  where the interaction might matter more than either intervention alone.
