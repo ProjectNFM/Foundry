@@ -15,6 +15,7 @@ from foundry.models.hero import (
     ChannelTypeEncoder,
     HEROModel,
     RelationalContextEncoder,
+    SharedLocalChannelEncoder,
     SharedLocalContextEncoder,
     SpatialSlotMixer,
     TaskQueryCrossAttention,
@@ -46,6 +47,36 @@ def encode(model, signal, *, rate=128, channel_mask=None, sample_mask=None):
             channel_mask=channel_mask,
             sample_mask=sample_mask,
         )
+
+
+def test_dilated_channel_encoder_has_expected_receptive_field_and_is_causal():
+    torch.manual_seed(3)
+    encoder = SharedLocalChannelEncoder(
+        embed_dim=8,
+        num_layers=4,
+        kernel_size=7,
+        dilations=[1, 2, 4, 8],
+    ).eval()
+    baseline = torch.randn(1, 1, 128)
+    changed_future = baseline.clone()
+    changed_future[..., 96:] += 100.0
+
+    with torch.no_grad():
+        baseline_output = encoder(baseline)
+        changed_output = encoder(changed_future)
+
+    assert encoder.left_paddings == (6, 12, 24, 48)
+    assert encoder.receptive_field_samples == 91
+    torch.testing.assert_close(
+        baseline_output[..., :96], changed_output[..., :96]
+    )
+
+
+def test_channel_encoder_rejects_invalid_dilation_configuration():
+    with pytest.raises(ValueError, match="one value per layer"):
+        SharedLocalChannelEncoder(num_layers=3, dilations=[1, 2])
+    with pytest.raises(ValueError, match="positive"):
+        SharedLocalChannelEncoder(num_layers=2, dilations=[1, 0])
 
 
 @pytest.fixture
@@ -427,6 +458,21 @@ def test_zero_context_gates_exactly_reproduce_signal_only_model():
     assert all(
         torch.equal(value, torch.zeros_like(value))
         for value in contextual.spatial_routing.gate_values.values()
+    )
+
+
+def test_context_gate_initialization_is_configurable():
+    mixer = SpatialSlotMixer(
+        embed_dim=8,
+        num_slots=2,
+        num_heads=2,
+        context_dim=8,
+        context_sources=("position",),
+        context_gate_init=0.1,
+    )
+
+    torch.testing.assert_close(
+        mixer.context_gates["source_position"], torch.full((2,), 0.1)
     )
 
 
@@ -1663,3 +1709,7 @@ def test_tokenize_collate_and_forward_integration():
         torch.zeros_like(batch["input_content_values"].masked_select(~valid)),
     )
     assert output.task_outputs["hero_test"].shape == (1, 2)
+    assert output.diagnostics is not None
+    assert "hero/routing/content_logit_rms_head0" in output.diagnostics
+    assert "hero/routing/attention_entropy" in output.diagnostics
+    assert "hero/routing/channel_00_attention" in output.diagnostics

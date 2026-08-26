@@ -8,6 +8,7 @@ pre-windowed epochs with index-based sampling (not window-based).
 from __future__ import annotations
 
 import logging
+import hashlib
 from collections import Counter
 from typing import Callable, Optional
 
@@ -19,6 +20,66 @@ from torch_brain.batching import collate
 from foundry.data.neuralbench.adapter import NeuralSetAdapter
 
 logger = logging.getLogger(__name__)
+
+
+def _sample_target_index(sample) -> int:
+    """Extract the one-hot class index from a NeuralBench sample."""
+    sample_data = (
+        sample.data
+        if hasattr(sample, "data") and isinstance(sample.data, dict)
+        else sample
+    )
+    target = sample_data["target"]
+    if hasattr(target, "numpy"):
+        target = target.numpy()
+    return int(np.argmax(np.asarray(target).reshape(-1)))
+
+
+def _stratified_subset_indices(
+    dataset,
+    subset_size: int | None,
+    *,
+    seed: int,
+) -> list[int] | None:
+    """Choose an exact-size deterministic subset while retaining every class."""
+    dataset_size = len(dataset)
+    if subset_size is None or subset_size >= dataset_size:
+        return None
+
+    labels = np.asarray(
+        [_sample_target_index(dataset[index]) for index in range(dataset_size)]
+    )
+    classes, counts = np.unique(labels, return_counts=True)
+    if subset_size < len(classes):
+        raise ValueError(
+            f"subset_size={subset_size} cannot retain all {len(classes)} classes."
+        )
+
+    ideal = subset_size * counts / counts.sum()
+    allocation = np.maximum(1, np.floor(ideal).astype(int))
+    allocation = np.minimum(allocation, counts)
+
+    while allocation.sum() < subset_size:
+        candidates = np.flatnonzero(allocation < counts)
+        choice = candidates[
+            np.argmax(ideal[candidates] - allocation[candidates])
+        ]
+        allocation[choice] += 1
+    while allocation.sum() > subset_size:
+        candidates = np.flatnonzero(allocation > 1)
+        choice = candidates[
+            np.argmax(allocation[candidates] - ideal[candidates])
+        ]
+        allocation[choice] -= 1
+
+    rng = np.random.default_rng(seed)
+    selected: list[int] = []
+    for class_index, keep in zip(classes, allocation, strict=True):
+        class_members = np.flatnonzero(labels == class_index)
+        rng.shuffle(class_members)
+        selected.extend(class_members[:keep].tolist())
+    rng.shuffle(selected)
+    return selected
 
 
 def _require_neuralbench() -> None:
@@ -73,6 +134,9 @@ class NeuralBenchDataModule(LightningDataModule):
         label_attr: Interval attribute name for labels.
         interval_name: Interval name on the Data object.
         session_prefix: Prefix for synthetic session IDs.
+        train_subset_size: Optional exact number of stratified training samples.
+        val_subset_size: Optional exact number of stratified validation samples.
+        subset_seed: Seed used to select deterministic split-local subsets.
     """
 
     def __init__(
@@ -89,6 +153,9 @@ class NeuralBenchDataModule(LightningDataModule):
         label_attr: str = "targets",
         interval_name: str = "p300_trials",
         session_prefix: Optional[str] = None,
+        train_subset_size: Optional[int] = None,
+        val_subset_size: Optional[int] = None,
+        subset_seed: int = 33,
     ):
         super().__init__()
         self.nb_task = task
@@ -105,6 +172,15 @@ class NeuralBenchDataModule(LightningDataModule):
         self.session_prefix = (
             session_prefix if session_prefix is not None else f"nb/{task}"
         )
+        for name, value in (
+            ("train_subset_size", train_subset_size),
+            ("val_subset_size", val_subset_size),
+        ):
+            if value is not None and value <= 0:
+                raise ValueError(f"{name} must be positive when provided.")
+        self.train_subset_size = train_subset_size
+        self.val_subset_size = val_subset_size
+        self.subset_seed = subset_seed
 
         self._train_adapter: NeuralSetAdapter | None = None
         self._val_adapter: NeuralSetAdapter | None = None
@@ -205,6 +281,30 @@ class NeuralBenchDataModule(LightningDataModule):
         for split_name, attr_name in split_name_map.items():
             if split_name not in loaders:
                 continue
+            subset_size = {
+                "train": self.train_subset_size,
+                "val": self.val_subset_size,
+                "test": None,
+            }[split_name]
+            subset_indices = _stratified_subset_indices(
+                loaders[split_name].dataset,
+                subset_size,
+                seed=self.subset_seed
+                + {"train": 0, "val": 1, "test": 2}[split_name],
+            )
+            if subset_indices is not None:
+                index_bytes = np.asarray(subset_indices, dtype=np.int64).tobytes()
+                digest = hashlib.sha256(index_bytes).hexdigest()
+                logger.info(
+                    "NeuralBench %s subset: %d / %d samples, seed=%d, "
+                    "index_sha256=%s",
+                    split_name,
+                    len(subset_indices),
+                    len(loaders[split_name].dataset),
+                    self.subset_seed
+                    + {"train": 0, "val": 1, "test": 2}[split_name],
+                    digest,
+                )
             adapter = NeuralSetAdapter(
                 nb_dataset=loaders[split_name].dataset,
                 channel_names=channel_names,
@@ -215,6 +315,7 @@ class NeuralBenchDataModule(LightningDataModule):
                 interval_name=self.interval_name,
                 session_prefix=self.session_prefix,
                 transform=self._tokenizer,
+                indices=subset_indices,
             )
             setattr(self, attr_name, adapter)
             logger.info("  %s: %d samples", split_name, len(adapter))
@@ -301,14 +402,9 @@ class NeuralBenchDataModule(LightningDataModule):
             )
 
         counts_by_task: dict[str, Counter] = {}
-        ds = self._train_adapter.nb_dataset
-        for i in range(len(ds)):
-            sample = ds[i]
-            target = (
-                sample["target"]
-                if isinstance(sample, dict)
-                else sample.data["target"]
-            )
+        for i in range(len(self._train_adapter)):
+            _sample, sample_data = self._train_adapter._get_sample_data(i)
+            target = sample_data["target"]
             target_np = (
                 target.numpy()
                 if hasattr(target, "numpy")

@@ -41,6 +41,7 @@ class ModelOutput:
     task_outputs: dict[str, torch.Tensor] = field(default_factory=dict)
     ssl_meta: dict[str, SSLTaskMeta] | None = None
     viz: ReconstructionVizMeta | None = None
+    diagnostics: dict[str, torch.Tensor] | None = None
 
 
 __all__ = ["SSLTaskMeta", "ReconstructionVizMeta", "ModelOutput"]

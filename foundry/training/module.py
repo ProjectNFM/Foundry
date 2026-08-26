@@ -197,10 +197,12 @@ class FoundryModule(L.LightningModule):
             outputs = model_output.task_outputs
             ssl_meta = model_output.ssl_meta
             reconstruction_viz = model_output.viz
+            diagnostics = model_output.diagnostics
         else:
             outputs = model_output
             ssl_meta = outputs.pop("_ssl_meta", None)
             reconstruction_viz = outputs.pop("_reconstruction_viz", None)
+            diagnostics = None
         ssl_task_names: set[str] = set()
         if ssl_meta is not None:
             for task_name, meta in ssl_meta.items():
@@ -214,6 +216,16 @@ class FoundryModule(L.LightningModule):
         self.log(
             f"{stage}/loss", total_loss, prog_bar=True, batch_size=batch_size
         )
+        if diagnostics:
+            self.log_dict(
+                {
+                    f"{stage}/{name}": value
+                    for name, value in diagnostics.items()
+                },
+                on_step=False,
+                on_epoch=True,
+                batch_size=batch_size,
+            )
 
         metrics_by_stage = {
             "train": self.train_metrics,
@@ -276,6 +288,19 @@ class FoundryModule(L.LightningModule):
             reconstruction_targets=model_inputs.get("reconstruction_targets"),
             input_mask=model_inputs.get("input_mask"),
         )
+
+    def on_after_backward(self) -> None:
+        """Log optional model-specific gradient diagnostics."""
+        diagnostic_fn = getattr(self.model, "gradient_diagnostics", None)
+        if not callable(diagnostic_fn):
+            return
+        diagnostics = diagnostic_fn()
+        if diagnostics:
+            self.log_dict(
+                {f"train/{name}": value for name, value in diagnostics.items()},
+                on_step=False,
+                on_epoch=True,
+            )
 
     def _build_param_groups(self) -> list[dict]:
         """Build optimizer parameter groups with per-component learning rates.

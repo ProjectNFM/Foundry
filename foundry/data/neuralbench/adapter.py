@@ -44,6 +44,7 @@ class NeuralSetAdapter(torch.utils.data.Dataset):
             a sample. Defaults to extracting NeuralSet segment metadata.
         transform: Optional callable applied after Data construction
             (typically ``model.tokenize``).
+        indices: Optional source-dataset indices exposed by this adapter.
     """
 
     def __init__(
@@ -59,6 +60,7 @@ class NeuralSetAdapter(torch.utils.data.Dataset):
         session_prefix: str = "nb/p3",
         identity_fn: Callable | None = None,
         transform: Callable | None = None,
+        indices: list[int] | np.ndarray | None = None,
     ):
         self.nb_dataset = nb_dataset
         self.channel_names = list(channel_names)
@@ -70,6 +72,11 @@ class NeuralSetAdapter(torch.utils.data.Dataset):
         self.session_prefix = session_prefix
         self._identity_fn = identity_fn or _extract_identity
         self.transform = transform
+        self.indices = (
+            None
+            if indices is None
+            else np.asarray(indices, dtype=np.int64).reshape(-1)
+        )
 
         if not self.channel_names:
             raise ValueError("channel_names must not be empty")
@@ -80,7 +87,7 @@ class NeuralSetAdapter(torch.utils.data.Dataset):
             raise ValueError(f"Duplicate channel names: {sorted(dupes)}")
 
     def __len__(self) -> int:
-        return len(self.nb_dataset)
+        return len(self.nb_dataset) if self.indices is None else len(self.indices)
 
     def __getitem__(self, idx: int) -> Data:
         data = self._to_torch_brain_data(idx)
@@ -94,7 +101,8 @@ class NeuralSetAdapter(torch.utils.data.Dataset):
 
     def _get_sample_data(self, idx: int) -> tuple:
         """Return ``(raw_sample, data_dict)`` from the NeuralBench dataset."""
-        sample = self.nb_dataset[idx]
+        source_idx = idx if self.indices is None else int(self.indices[idx])
+        sample = self.nb_dataset[source_idx]
         if hasattr(sample, "data") and isinstance(sample.data, dict):
             return sample, sample.data
         if isinstance(sample, dict):

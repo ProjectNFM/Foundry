@@ -1,0 +1,12 @@
+# @package _global_
+condition_name: early_fusion
+
+model:
+  channel_encoder_layers: 3
+  channel_encoder_kernel_size: 7
+  channel_encoder_dilations: [1, 1, 1]
+  channel_context_mode: disabled
+  channel_type_enabled: false
+  absolute_position_enabled: false
+  context_gate_init: 0.0
+

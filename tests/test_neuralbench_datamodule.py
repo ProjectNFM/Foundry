@@ -13,6 +13,7 @@ from foundry.data.neuralbench.adapter import NeuralSetAdapter
 from foundry.data.neuralbench.datamodule import (
     NeuralBenchDataModule,
     _build_label_map_from_encoder,
+    _stratified_subset_indices,
 )
 from foundry.tasks.config import TaskConfig
 
@@ -182,3 +183,58 @@ def test_class_weights_follow_foundry_output_class_order():
 
     # Output order: Wake (1), N1 (2), N2 (1), N3 (1), REM (1).
     assert weights == [1.2, 0.6, 1.2, 1.2, 1.2]
+
+
+def test_stratified_subset_is_exact_reproducible_and_retains_classes():
+    samples = [
+        _sample(index, (1, 0) if index < 8 else (0, 1))
+        for index in range(10)
+    ]
+    dataset = _Dataset(samples)
+
+    first = _stratified_subset_indices(dataset, 6, seed=33)
+    repeated = _stratified_subset_indices(dataset, 6, seed=33)
+    different = _stratified_subset_indices(dataset, 6, seed=34)
+
+    assert first == repeated
+    assert first != different
+    assert len(first) == 6
+    labels = {
+        int(np.argmax(dataset[index]["target"].reshape(-1))) for index in first
+    }
+    assert labels == {0, 1}
+
+
+def test_setup_applies_subsets_and_class_weights_use_training_subset(monkeypatch):
+    _NBData.loaders = {
+        "train": _Loader(
+            [_sample(index, (1, 0) if index < 8 else (0, 1)) for index in range(10)]
+        ),
+        "val": _Loader(
+            [_sample(index, (1, 0) if index < 4 else (0, 1)) for index in range(6)]
+        ),
+        "test": _Loader([_sample(index) for index in range(3)]),
+    }
+    _install_mock_neuralbench(monkeypatch)
+    monkeypatch.setattr(
+        "foundry.data.neuralbench.datamodule._require_neuralbench", lambda: None
+    )
+
+    dm = NeuralBenchDataModule(
+        task="p3",
+        dataset="mock",
+        train_subset_size=6,
+        val_subset_size=4,
+        subset_seed=33,
+    )
+    dm.setup("fit")
+    task = TaskConfig.from_yaml("configs/tasks/neuralbench/p300.yaml")
+    dm.label_map = {0: 1, 1: 2}
+    dm._task_configs = {task.name: task}
+
+    assert len(dm._train_adapter) == 6
+    assert len(dm._val_adapter) == 4
+    assert len(dm._test_adapter) == 3
+    weights = dm.compute_class_weights()[task.name]
+    assert len(weights) == 2
+    assert weights[0] < weights[1]

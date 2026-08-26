@@ -304,14 +304,14 @@ def _metadata_values(
 
 
 class SharedLocalChannelEncoder(nn.Module):
-    """Three-layer 1-D causal conv stack applied identically per channel.
+    """Configurable 1-D causal conv stack applied identically per channel.
 
     Input:  ``(B*C, 1, T)``
     Output: ``(B*C, D, T)`` reshaped externally to ``(B, C, T, D)``.
 
-    Each layer uses left-padding of ``kernel_size - 1`` for causal
-    alignment, followed by per-time-step LayerNorm and GELU. LayerNorm is
-    intentionally applied only across features so masked padding and future
+    Each layer uses left-padding of ``dilation * (kernel_size - 1)`` for
+    causal alignment, followed by per-time-step LayerNorm and GELU. LayerNorm
+    is intentionally applied only across features so masked padding and future
     samples cannot change an earlier representation.
     """
 
@@ -320,16 +320,42 @@ class SharedLocalChannelEncoder(nn.Module):
         embed_dim: int = 256,
         num_layers: int = 3,
         kernel_size: int = 7,
+        dilations: list[int] | tuple[int, ...] | None = None,
     ):
         super().__init__()
+        if num_layers <= 0:
+            raise ValueError("channel encoder num_layers must be positive.")
+        if kernel_size <= 0:
+            raise ValueError("channel encoder kernel_size must be positive.")
+        if dilations is None:
+            dilations = [1] * num_layers
+        if len(dilations) != num_layers:
+            raise ValueError(
+                "channel encoder dilations must contain one value per layer."
+            )
+        if any(int(dilation) <= 0 for dilation in dilations):
+            raise ValueError("channel encoder dilations must be positive.")
+
         self.embed_dim = embed_dim
         self.kernel_size = kernel_size
-        self.pad = kernel_size - 1
+        self.dilations = tuple(int(dilation) for dilation in dilations)
+        self.left_paddings = tuple(
+            (kernel_size - 1) * dilation for dilation in self.dilations
+        )
+        self.receptive_field_samples = 1 + sum(self.left_paddings)
 
         layers = nn.ModuleList()
         in_ch = 1
-        for _ in range(num_layers):
-            layers.append(nn.Conv1d(in_ch, embed_dim, kernel_size, bias=False))
+        for dilation in self.dilations:
+            layers.append(
+                nn.Conv1d(
+                    in_ch,
+                    embed_dim,
+                    kernel_size,
+                    dilation=dilation,
+                    bias=False,
+                )
+            )
             layers.append(nn.LayerNorm(embed_dim))
             layers.append(nn.GELU())
             in_ch = embed_dim
@@ -357,7 +383,8 @@ class SharedLocalChannelEncoder(nn.Module):
                 mask_f = sample_mask.unsqueeze(1).float()
                 x = x * mask_f
 
-            x = F.pad(x, (self.pad, 0))
+            layer_index = i // 3
+            x = F.pad(x, (self.left_paddings[layer_index], 0))
             x = conv(x)
             x = norm(x.transpose(1, 2)).transpose(1, 2)
             x = act(x)
@@ -751,6 +778,7 @@ class SpatialSlotMixer(nn.Module):
         *,
         context_dim: int = 32,
         context_sources: tuple[str, ...] = (),
+        context_gate_init: float = 0.0,
     ):
         super().__init__()
         if embed_dim % num_heads != 0:
@@ -771,6 +799,9 @@ class SpatialSlotMixer(nn.Module):
         self.context_dim = context_dim
         self.context_head_dim = context_dim // num_heads
         self.context_sources = tuple(context_sources)
+        if not math.isfinite(context_gate_init):
+            raise ValueError("context_gate_init must be finite.")
+        self.context_gate_init = float(context_gate_init)
 
         self.queries = nn.Parameter(torch.randn(num_slots, embed_dim) * 0.02)
         self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False)
@@ -792,8 +823,9 @@ class SpatialSlotMixer(nn.Module):
             self.context_k_proj[key] = nn.Linear(
                 context_dim, context_dim, bias=False
             )
-            # Exact zero is both the initialization and the ablation value.
-            self.context_gates[key] = nn.Parameter(torch.zeros(num_heads))
+            self.context_gates[key] = nn.Parameter(
+                torch.full((num_heads,), self.context_gate_init)
+            )
 
     def forward(
         self,
@@ -1926,6 +1958,7 @@ class HEROModel(nn.Module):
         num_attn_heads: int = 8,
         channel_encoder_layers: int = 3,
         channel_encoder_kernel_size: int = 7,
+        channel_encoder_dilations: list[int] | tuple[int, ...] | None = None,
         task_query_chunk_size: int = 256,
         temporal_mode: TemporalMode = "hierarchical",
         flat_num_local_attn_blocks: int | None = None,
@@ -1942,6 +1975,7 @@ class HEROModel(nn.Module):
         absolute_position_enabled: bool | None = None,
         position_num_fourier_bands: int = 6,
         shuffle_relational_context: bool = False,
+        context_gate_init: float = 0.0,
     ):
         super().__init__()
 
@@ -2017,6 +2051,7 @@ class HEROModel(nn.Module):
             embed_dim=embed_dim,
             num_layers=channel_encoder_layers,
             kernel_size=channel_encoder_kernel_size,
+            dilations=channel_encoder_dilations,
         )
         self.channel_context_encoder = (
             SampleDerivedContextEncoder(
@@ -2057,6 +2092,7 @@ class HEROModel(nn.Module):
             num_heads=num_attn_heads,
             context_dim=context_dim,
             context_sources=tuple(routing_sources),
+            context_gate_init=context_gate_init,
         )
         if temporal_mode == "hierarchical":
             self.encoder = HEROEncoder(
@@ -2485,11 +2521,10 @@ class HEROModel(nn.Module):
 
         combined_valid = token_valid & sample_mask
         fine_rf_intervals = input_rf_intervals
-        channel_layers = len(self.channel_encoder.layers) // 3
-        for _ in range(channel_layers):
+        for left_padding in self.channel_encoder.left_paddings:
             fine_rf_intervals = _expand_receptive_fields(
                 fine_rf_intervals,
-                left=self.channel_encoder.pad,
+                left=left_padding,
                 right=0,
                 valid_mask=combined_valid,
             )
@@ -2826,7 +2861,46 @@ class HEROModel(nn.Module):
             flat_embs[valid], (flat_task[valid] - 1).long()
         )
 
-        return ModelOutput(task_outputs=task_outputs)
+        diagnostics: dict[str, torch.Tensor] = {}
+        if rep.spatial_routing is not None:
+            routing = rep.spatial_routing
+            for source, values in routing.gate_values.items():
+                for head, value in enumerate(values):
+                    diagnostics[f"hero/routing/{source}_gate_head{head}"] = value
+            for source, values in routing.logit_rms.items():
+                for head, value in enumerate(values):
+                    diagnostics[
+                        f"hero/routing/{source}_logit_rms_head{head}"
+                    ] = value
+            probs = routing.attention_mean.clamp_min(1e-8)
+            diagnostics["hero/routing/attention_entropy"] = (
+                -(probs * probs.log()).sum(dim=-1).mean()
+            )
+            channel_attention = routing.attention_mean.mean(dim=(0, 1, 2))
+            for channel_index, value in enumerate(channel_attention):
+                diagnostics[
+                    f"hero/routing/channel_{channel_index:02d}_attention"
+                ] = value
+
+        return ModelOutput(
+            task_outputs=task_outputs,
+            diagnostics=diagnostics or None,
+        )
+
+    def gradient_diagnostics(self) -> dict[str, torch.Tensor]:
+        """Return routing gradient norms after backward for observability."""
+        diagnostics: dict[str, torch.Tensor] = {}
+        for source in self.spatial_mixer.context_sources:
+            key = f"source_{source}"
+            gate_grad = self.spatial_mixer.context_gates[key].grad
+            if gate_grad is not None:
+                diagnostics[f"hero/grad/{source}_gate_norm"] = gate_grad.norm()
+            projection_grad = self.spatial_mixer.context_k_proj[key].weight.grad
+            if projection_grad is not None:
+                diagnostics[
+                    f"hero/grad/{source}_projection_norm"
+                ] = projection_grad.norm()
+        return diagnostics
 
     # ------------------------------------------------------------------
     # Internal helpers

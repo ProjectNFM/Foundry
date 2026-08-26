@@ -1,0 +1,13 @@
+# @package _global_
+condition_name: delayed_fusion_position
+
+model:
+  channel_encoder_layers: 4
+  channel_encoder_kernel_size: 7
+  channel_encoder_dilations: [1, 2, 4, 8]
+  channel_context_mode: position
+  channel_type_enabled: false
+  absolute_position_enabled: true
+  # Avoid starving the position encoder of gradient on the first update.
+  context_gate_init: 0.1
+

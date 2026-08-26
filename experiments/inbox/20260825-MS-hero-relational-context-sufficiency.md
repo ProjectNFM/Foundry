@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-08-25
 **Parent experiment:** [HERO spatial-slot ablation: 1-factor vs 8-slot fusion in a flat temporal control](20260824-MS-hero-spatial-slots.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Causal delayed fusion for HERO Motor Imagery learnability](20260826-MS-hero-delayed-fusion-mi-learnability.md)
 **Tags:** neuralbench, hero, motor_imagery, relational_context, spatial_routing, absolute_position, ablation, from_scratch
 
 ## Background
