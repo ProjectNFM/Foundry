@@ -1,6 +1,6 @@
 # NeuroSoft supervised pretraining roadmap
 
-**Status:** Planning  
+**Status:** In progress (Phase 0 completed)<br>
 **Owner initials:** MS  
 **Scope:** NeuroSoft minipigs and monkeys  
 **Out of scope:** self-supervised pretraining and POYO architecture studies
@@ -65,8 +65,11 @@ of runs launched before the pipeline is trustworthy.
   causal because frequencies were presented in blocks, but the split remains
   the fixed protocol for this roadmap.
 - Determine session eligibility before model training using data integrity and
-  minimum per-class support. Never exclude a session because its model metrics
-  look poor or unusual.
+  label coverage and minimum per-class support. A session is eligible when at
+  least 6 of the 8 mapped bands are represented, the represented band set is
+  identical in causal train/validation/test, and every represented band has at
+  least three causal-training examples. Never exclude a session because its
+  model metrics look poor or unusual.
 
 ### Downstream data fractions
 
@@ -80,12 +83,14 @@ Fractions are drawn only from the causal training partition. Validation and
 test intervals remain identical across fractions and seeds.
 
 The subset builder must be deterministic and class-aware. It should sample each
-class separately, keep the subsets nested, preserve approximately the causal
-training distribution, and enforce a configured minimum number of examples per
-class. Each run must log the requested and realized fraction, per-class counts,
-selected interval identifiers, and any eligibility failure. A fraction that
-cannot meet the minimum support is reported as unavailable rather than being
-silently rebalanced with validation/test data or replacement examples.
+represented class separately, keep the subsets nested, preserve approximately
+the causal training distribution, and enforce a configured minimum number of
+examples per represented class. An absent class is recorded in the manifest but
+does not make the session unavailable. Each run must log the requested and
+realized fraction, represented/absent class lists, per-class counts, selected
+interval identifiers, and any eligibility failure. A fraction that cannot meet
+the minimum support is reported as unavailable rather than being silently
+rebalanced with validation/test data or replacement examples.
 
 ### Seeds
 
@@ -100,16 +105,27 @@ silently rebalanced with validation/test data or replacement examples.
 
 ### Metrics and checkpoint selection
 
-- Select downstream checkpoints using validation macro-F1.
-- Report test macro-F1 from the selected checkpoint as the primary absolute
-  performance metric.
+- Keep the model output at eight logits. Do not mask absent-class logits at
+  inference: predicting an absent class remains an error.
+- Compute per-class metrics first, then macro-average only over classes with
+  positive support in that session's evaluation split. This avoids treating an
+  undefined no-positive AUROC as zero. Log the exact aggregation mask.
+- Select downstream checkpoints using validation macro-F1 over the
+  validation-supported classes.
+- Report test macro-F1 over test-supported classes from the selected checkpoint
+  as the primary absolute performance metric.
 - Also report balanced accuracy, macro-AUROC, macro precision/recall, per-class
-  metrics, class support, and confusion matrices.
+  metrics, class support, confusion matrices, represented/absent class lists,
+  and `num_present_classes` for every session.
+- Report results separately for 6-, 7-, and 8-class sessions, plus an 8/8-only
+  sensitivity analysis. Do not interpret an unstratified absolute metric mean
+  as if every session had the same task cardinality.
 - Keep validation and test metrics distinct. Do not report the maximum test
   metric over epochs.
-- Select the best pretraining checkpoint using the unweighted mean validation
-  macro-F1 across source sessions. This prevents the longest recordings from
-  dominating selection.
+- Select the best pretraining checkpoint using the unweighted mean of each
+  source session's supported-class validation macro-F1. This prevents the
+  longest recordings from dominating selection while avoiding undefined
+  absent-class metrics.
 - Retain a best checkpoint for every pretraining data scale and species
   composition in addition to the fixed compute-milestone checkpoints.
 
@@ -121,7 +137,7 @@ For species summaries, report both:
    existing session-level baseline report.
 
 All pretrained-versus-scratch claims should be paired on target subject,
-session, data fraction, and seed.
+session, represented class set, data fraction, and seed.
 
 ## Efficiency definitions
 
@@ -230,6 +246,10 @@ constraints.
 - Balance the allocation across selected subjects and classes.
 - Replicate which source subjects are selected. Record the complete selection
   manifest in every run.
+- Record the represented-class union and intersection for each selected source
+  set. Match aggregate source-label coverage across diversity bins when
+  feasible; otherwise stratify by it and report it as a design difference, so
+  gains from broader label coverage are not attributed to subject diversity.
 
 ### Species-composition axis
 
@@ -295,6 +315,23 @@ Record realized rather than nominal compute at each milestone.
 
 ### Phase 0 -- Protocol and data audit
 
+**Status:** Completed 2026-08-26. See the
+[protocol and results](../experiments/inbox/20260826-neurosoft-supervised-pretraining-protocol.md),
+[full data audit](neurosoft-phase0-audit.md), and machine-readable
+[audit](neurosoft-phase0-audit.json),
+[split validation](neurosoft-phase0-split-validation.json), and
+[fraction validation](neurosoft-phase0-fraction-validation.json) artifacts.
+
+Audit-adjusted decisions: sessions with at least 6/8 represented bands are
+eligible, yielding 40/41 minipig and 13/27 monkey recordings across 12 target
+subjects. The eligible class-count mix is 8/19/13 minipig and 2/3/8 monkey
+sessions with 6/7/8 represented classes, respectively. Ten fraction cells
+across five otherwise eligible recordings remain
+unavailable under the three-example support rule, leaving 255 supported
+session/fraction cells and 765 three-seed Phase 1 jobs. Phase 4/5 hold species
+composition fixed to same-species sources. After target exclusion, minipigs
+support diversity bins 1/2/4/all (all=6) and monkeys support 1/2/4 (all=4).
+
 Deliverables:
 
 - session/subject/class/channel inventory for both species;
@@ -331,6 +368,10 @@ Exit criteria:
 - repeated manifests are deterministic and nested;
 - validation/test sets are invariant across fractions;
 - all metrics and compute counters are recoverable from WandB;
+- supported-class metric aggregation matches a hand-computed reference and
+  every run logs its represented class set and class count;
+- 6-, 7-, and 8-class summaries and the 8/8 sensitivity analysis can be
+  regenerated from the same run records;
 - aggregate results can be regenerated without hardcoded run values; and
 - failures and ineligible cells are explicit rather than silently omitted.
 
@@ -393,6 +434,8 @@ At matched source-example volume, compare 1, 2, 4, and all available subjects.
 Replicate source-subject selection. Keep architecture, recipe, species
 composition, and downstream evaluation fixed. This phase must remain separate
 from the volume experiment so diversity is not confounded with more examples.
+It must also match source-label coverage across bins or report and stratify the
+coverage difference explicitly.
 
 ### Phase 6 -- Species composition and transfer direction
 
@@ -444,8 +487,8 @@ The setup branch should leave the following reusable pieces:
 7. **Evaluation path** -- test metrics evaluated once from the selected
    validation checkpoint.
 8. **Analysis schema** -- stable WandB keys and API-backed analysis scripts for
-   paired learning curves, time-to-80%, time-to-best, Pareto plots, and
-   variable-`K` amortization.
+   supported-class metrics, class-count-stratified paired learning curves,
+   time-to-80%, time-to-best, Pareto plots, and variable-`K` amortization.
 9. **Validation tests** -- target leakage, subset nesting, determinism, class
    support, split invariance, checkpoint provenance, and compute-counter
    monotonicity.
@@ -460,7 +503,10 @@ Every run should log enough information to reconstruct its scientific cell:
 
 - target species, subject, and session;
 - source species composition and source subject/session manifest hash;
+- represented-class union/intersection and class count for the source manifest;
 - requested and realized source/target fractions and class counts;
+- represented/absent target classes, `num_present_classes`, and the metric
+  aggregation mask;
 - model architecture ID, width/depth preset, and parameter counts;
 - seed and all subset-selection seeds;
 - split type and task;
@@ -482,6 +528,9 @@ checkpoint scale without relying on the name as the sole source of metadata.
 - Use a hierarchical bootstrap (subjects, then sessions within subjects) for
   species-level confidence intervals where practical.
 - Keep minipig and monkey results separate before presenting a combined view.
+- Stratify absolute metrics by 6/7/8 represented classes and include the 8/8
+  sensitivity analysis; class count is a session property, not a seed-level
+  replicate.
 - Report the fraction of sessions helped/hurt as well as the mean effect.
 - For source-diversity experiments, include variability across selected source
   subject sets.

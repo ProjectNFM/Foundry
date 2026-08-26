@@ -1,0 +1,567 @@
+{
+  "status": "passed",
+  "seeds": [
+    42,
+    43,
+    44
+  ],
+  "min_class_support": 3,
+  "min_present_classes": 6,
+  "species": {
+    "minipigs": {
+      "configured_recordings": 41,
+      "eligible_recordings": 40,
+      "unavailable_scientific_cells": 21
+    },
+    "monkeys": {
+      "configured_recordings": 27,
+      "eligible_recordings": 13,
+      "unavailable_scientific_cells": 9
+    }
+  },
+  "eligible_recordings": 53,
+  "available_scientific_cells": 765,
+  "unavailable_scientific_cells": [
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-04_task-AcousStim_acq-LH_desc-raw",
+      "seed": 42,
+      "requested_fraction": 0.05,
+      "realized_fraction": 0.05761316872427984,
+      "per_class_counts": {
+        "low_bass": 3,
+        "mid_bass": 1,
+        "low_mids": 0,
+        "midrange": 3,
+        "high_mids": 3,
+        "low_treble": 1,
+        "mid_treble": 3,
+        "high_treble": 0
+      },
+      "failure_reason": "mid_bass: 1 < 3; low_treble: 1 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-04_task-AcousStim_acq-LH_desc-raw",
+      "seed": 42,
+      "requested_fraction": 0.1,
+      "realized_fraction": 0.1111111111111111,
+      "per_class_counts": {
+        "low_bass": 6,
+        "mid_bass": 1,
+        "low_mids": 0,
+        "midrange": 6,
+        "high_mids": 6,
+        "low_treble": 2,
+        "mid_treble": 6,
+        "high_treble": 0
+      },
+      "failure_reason": "mid_bass: 1 < 3; low_treble: 2 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-04_task-AcousStim_acq-LH_desc-raw",
+      "seed": 42,
+      "requested_fraction": 0.25,
+      "realized_fraction": 0.26337448559670784,
+      "per_class_counts": {
+        "low_bass": 14,
+        "mid_bass": 2,
+        "low_mids": 0,
+        "midrange": 15,
+        "high_mids": 14,
+        "low_treble": 5,
+        "mid_treble": 14,
+        "high_treble": 0
+      },
+      "failure_reason": "mid_bass: 2 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-04_task-AcousStim_acq-LH_desc-raw",
+      "seed": 43,
+      "requested_fraction": 0.05,
+      "realized_fraction": 0.05761316872427984,
+      "per_class_counts": {
+        "low_bass": 3,
+        "mid_bass": 1,
+        "low_mids": 0,
+        "midrange": 3,
+        "high_mids": 3,
+        "low_treble": 1,
+        "mid_treble": 3,
+        "high_treble": 0
+      },
+      "failure_reason": "mid_bass: 1 < 3; low_treble: 1 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-04_task-AcousStim_acq-LH_desc-raw",
+      "seed": 43,
+      "requested_fraction": 0.1,
+      "realized_fraction": 0.1111111111111111,
+      "per_class_counts": {
+        "low_bass": 6,
+        "mid_bass": 1,
+        "low_mids": 0,
+        "midrange": 6,
+        "high_mids": 6,
+        "low_treble": 2,
+        "mid_treble": 6,
+        "high_treble": 0
+      },
+      "failure_reason": "mid_bass: 1 < 3; low_treble: 2 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-04_task-AcousStim_acq-LH_desc-raw",
+      "seed": 43,
+      "requested_fraction": 0.25,
+      "realized_fraction": 0.26337448559670784,
+      "per_class_counts": {
+        "low_bass": 14,
+        "mid_bass": 2,
+        "low_mids": 0,
+        "midrange": 15,
+        "high_mids": 14,
+        "low_treble": 5,
+        "mid_treble": 14,
+        "high_treble": 0
+      },
+      "failure_reason": "mid_bass: 2 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-04_task-AcousStim_acq-LH_desc-raw",
+      "seed": 44,
+      "requested_fraction": 0.05,
+      "realized_fraction": 0.05761316872427984,
+      "per_class_counts": {
+        "low_bass": 3,
+        "mid_bass": 1,
+        "low_mids": 0,
+        "midrange": 3,
+        "high_mids": 3,
+        "low_treble": 1,
+        "mid_treble": 3,
+        "high_treble": 0
+      },
+      "failure_reason": "mid_bass: 1 < 3; low_treble: 1 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-04_task-AcousStim_acq-LH_desc-raw",
+      "seed": 44,
+      "requested_fraction": 0.1,
+      "realized_fraction": 0.1111111111111111,
+      "per_class_counts": {
+        "low_bass": 6,
+        "mid_bass": 1,
+        "low_mids": 0,
+        "midrange": 6,
+        "high_mids": 6,
+        "low_treble": 2,
+        "mid_treble": 6,
+        "high_treble": 0
+      },
+      "failure_reason": "mid_bass: 1 < 3; low_treble: 2 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-04_task-AcousStim_acq-LH_desc-raw",
+      "seed": 44,
+      "requested_fraction": 0.25,
+      "realized_fraction": 0.26337448559670784,
+      "per_class_counts": {
+        "low_bass": 14,
+        "mid_bass": 2,
+        "low_mids": 0,
+        "midrange": 15,
+        "high_mids": 14,
+        "low_treble": 5,
+        "mid_treble": 14,
+        "high_treble": 0
+      },
+      "failure_reason": "mid_bass: 2 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-04_task-AcousStim_acq-RH_desc-raw",
+      "seed": 42,
+      "requested_fraction": 0.05,
+      "realized_fraction": 0.056856187290969896,
+      "per_class_counts": {
+        "low_bass": 3,
+        "mid_bass": 4,
+        "low_mids": 0,
+        "midrange": 3,
+        "high_mids": 3,
+        "low_treble": 1,
+        "mid_treble": 3,
+        "high_treble": 0
+      },
+      "failure_reason": "low_treble: 1 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-04_task-AcousStim_acq-RH_desc-raw",
+      "seed": 42,
+      "requested_fraction": 0.1,
+      "realized_fraction": 0.11036789297658862,
+      "per_class_counts": {
+        "low_bass": 6,
+        "mid_bass": 7,
+        "low_mids": 0,
+        "midrange": 6,
+        "high_mids": 6,
+        "low_treble": 2,
+        "mid_treble": 6,
+        "high_treble": 0
+      },
+      "failure_reason": "low_treble: 2 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-04_task-AcousStim_acq-RH_desc-raw",
+      "seed": 43,
+      "requested_fraction": 0.05,
+      "realized_fraction": 0.056856187290969896,
+      "per_class_counts": {
+        "low_bass": 3,
+        "mid_bass": 4,
+        "low_mids": 0,
+        "midrange": 3,
+        "high_mids": 3,
+        "low_treble": 1,
+        "mid_treble": 3,
+        "high_treble": 0
+      },
+      "failure_reason": "low_treble: 1 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-04_task-AcousStim_acq-RH_desc-raw",
+      "seed": 43,
+      "requested_fraction": 0.1,
+      "realized_fraction": 0.11036789297658862,
+      "per_class_counts": {
+        "low_bass": 6,
+        "mid_bass": 7,
+        "low_mids": 0,
+        "midrange": 6,
+        "high_mids": 6,
+        "low_treble": 2,
+        "mid_treble": 6,
+        "high_treble": 0
+      },
+      "failure_reason": "low_treble: 2 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-04_task-AcousStim_acq-RH_desc-raw",
+      "seed": 44,
+      "requested_fraction": 0.05,
+      "realized_fraction": 0.056856187290969896,
+      "per_class_counts": {
+        "low_bass": 3,
+        "mid_bass": 4,
+        "low_mids": 0,
+        "midrange": 3,
+        "high_mids": 3,
+        "low_treble": 1,
+        "mid_treble": 3,
+        "high_treble": 0
+      },
+      "failure_reason": "low_treble: 1 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-04_task-AcousStim_acq-RH_desc-raw",
+      "seed": 44,
+      "requested_fraction": 0.1,
+      "realized_fraction": 0.11036789297658862,
+      "per_class_counts": {
+        "low_bass": 6,
+        "mid_bass": 7,
+        "low_mids": 0,
+        "midrange": 6,
+        "high_mids": 6,
+        "low_treble": 2,
+        "mid_treble": 6,
+        "high_treble": 0
+      },
+      "failure_reason": "low_treble: 2 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-05_task-AcousStim_acq-LH_desc-raw",
+      "seed": 42,
+      "requested_fraction": 0.05,
+      "realized_fraction": 0.05811138014527845,
+      "per_class_counts": {
+        "low_bass": 4,
+        "mid_bass": 4,
+        "low_mids": 4,
+        "midrange": 2,
+        "high_mids": 4,
+        "low_treble": 1,
+        "mid_treble": 5,
+        "high_treble": 0
+      },
+      "failure_reason": "midrange: 2 < 3; low_treble: 1 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-05_task-AcousStim_acq-LH_desc-raw",
+      "seed": 42,
+      "requested_fraction": 0.1,
+      "realized_fraction": 0.11138014527845036,
+      "per_class_counts": {
+        "low_bass": 8,
+        "mid_bass": 8,
+        "low_mids": 8,
+        "midrange": 3,
+        "high_mids": 8,
+        "low_treble": 2,
+        "mid_treble": 9,
+        "high_treble": 0
+      },
+      "failure_reason": "low_treble: 2 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-05_task-AcousStim_acq-LH_desc-raw",
+      "seed": 43,
+      "requested_fraction": 0.05,
+      "realized_fraction": 0.05811138014527845,
+      "per_class_counts": {
+        "low_bass": 4,
+        "mid_bass": 4,
+        "low_mids": 4,
+        "midrange": 2,
+        "high_mids": 4,
+        "low_treble": 1,
+        "mid_treble": 5,
+        "high_treble": 0
+      },
+      "failure_reason": "midrange: 2 < 3; low_treble: 1 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-05_task-AcousStim_acq-LH_desc-raw",
+      "seed": 43,
+      "requested_fraction": 0.1,
+      "realized_fraction": 0.11138014527845036,
+      "per_class_counts": {
+        "low_bass": 8,
+        "mid_bass": 8,
+        "low_mids": 8,
+        "midrange": 3,
+        "high_mids": 8,
+        "low_treble": 2,
+        "mid_treble": 9,
+        "high_treble": 0
+      },
+      "failure_reason": "low_treble: 2 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-05_task-AcousStim_acq-LH_desc-raw",
+      "seed": 44,
+      "requested_fraction": 0.05,
+      "realized_fraction": 0.05811138014527845,
+      "per_class_counts": {
+        "low_bass": 4,
+        "mid_bass": 4,
+        "low_mids": 4,
+        "midrange": 2,
+        "high_mids": 4,
+        "low_treble": 1,
+        "mid_treble": 5,
+        "high_treble": 0
+      },
+      "failure_reason": "midrange: 2 < 3; low_treble: 1 < 3"
+    },
+    {
+      "species": "minipigs",
+      "recording_id": "sub-07_ses-05_task-AcousStim_acq-LH_desc-raw",
+      "seed": 44,
+      "requested_fraction": 0.1,
+      "realized_fraction": 0.11138014527845036,
+      "per_class_counts": {
+        "low_bass": 8,
+        "mid_bass": 8,
+        "low_mids": 8,
+        "midrange": 3,
+        "high_mids": 8,
+        "low_treble": 2,
+        "mid_treble": 9,
+        "high_treble": 0
+      },
+      "failure_reason": "low_treble: 2 < 3"
+    },
+    {
+      "species": "monkeys",
+      "recording_id": "sub-01_ses-015_task-AcousStim_acq-RH_desc-raw",
+      "seed": 42,
+      "requested_fraction": 0.05,
+      "realized_fraction": 0.05446927374301676,
+      "per_class_counts": {
+        "low_bass": 1,
+        "mid_bass": 4,
+        "low_mids": 4,
+        "midrange": 0,
+        "high_mids": 4,
+        "low_treble": 14,
+        "mid_treble": 4,
+        "high_treble": 8
+      },
+      "failure_reason": "low_bass: 1 < 3"
+    },
+    {
+      "species": "monkeys",
+      "recording_id": "sub-01_ses-015_task-AcousStim_acq-RH_desc-raw",
+      "seed": 42,
+      "requested_fraction": 0.1,
+      "realized_fraction": 0.10474860335195531,
+      "per_class_counts": {
+        "low_bass": 2,
+        "mid_bass": 8,
+        "low_mids": 8,
+        "midrange": 0,
+        "high_mids": 8,
+        "low_treble": 27,
+        "mid_treble": 7,
+        "high_treble": 15
+      },
+      "failure_reason": "low_bass: 2 < 3"
+    },
+    {
+      "species": "monkeys",
+      "recording_id": "sub-01_ses-015_task-AcousStim_acq-RH_desc-raw",
+      "seed": 43,
+      "requested_fraction": 0.05,
+      "realized_fraction": 0.05446927374301676,
+      "per_class_counts": {
+        "low_bass": 1,
+        "mid_bass": 4,
+        "low_mids": 4,
+        "midrange": 0,
+        "high_mids": 4,
+        "low_treble": 14,
+        "mid_treble": 4,
+        "high_treble": 8
+      },
+      "failure_reason": "low_bass: 1 < 3"
+    },
+    {
+      "species": "monkeys",
+      "recording_id": "sub-01_ses-015_task-AcousStim_acq-RH_desc-raw",
+      "seed": 43,
+      "requested_fraction": 0.1,
+      "realized_fraction": 0.10474860335195531,
+      "per_class_counts": {
+        "low_bass": 2,
+        "mid_bass": 8,
+        "low_mids": 8,
+        "midrange": 0,
+        "high_mids": 8,
+        "low_treble": 27,
+        "mid_treble": 7,
+        "high_treble": 15
+      },
+      "failure_reason": "low_bass: 2 < 3"
+    },
+    {
+      "species": "monkeys",
+      "recording_id": "sub-01_ses-015_task-AcousStim_acq-RH_desc-raw",
+      "seed": 44,
+      "requested_fraction": 0.05,
+      "realized_fraction": 0.05446927374301676,
+      "per_class_counts": {
+        "low_bass": 1,
+        "mid_bass": 4,
+        "low_mids": 4,
+        "midrange": 0,
+        "high_mids": 4,
+        "low_treble": 14,
+        "mid_treble": 4,
+        "high_treble": 8
+      },
+      "failure_reason": "low_bass: 1 < 3"
+    },
+    {
+      "species": "monkeys",
+      "recording_id": "sub-01_ses-015_task-AcousStim_acq-RH_desc-raw",
+      "seed": 44,
+      "requested_fraction": 0.1,
+      "realized_fraction": 0.10474860335195531,
+      "per_class_counts": {
+        "low_bass": 2,
+        "mid_bass": 8,
+        "low_mids": 8,
+        "midrange": 0,
+        "high_mids": 8,
+        "low_treble": 27,
+        "mid_treble": 7,
+        "high_treble": 15
+      },
+      "failure_reason": "low_bass: 2 < 3"
+    },
+    {
+      "species": "monkeys",
+      "recording_id": "sub-01_ses-03_task-AcousStim_acq-RH_desc-raw",
+      "seed": 42,
+      "requested_fraction": 0.05,
+      "realized_fraction": 0.05434782608695652,
+      "per_class_counts": {
+        "low_bass": 10,
+        "mid_bass": 4,
+        "low_mids": 3,
+        "midrange": 7,
+        "high_mids": 3,
+        "low_treble": 2,
+        "mid_treble": 2,
+        "high_treble": 4
+      },
+      "failure_reason": "low_treble: 2 < 3; mid_treble: 2 < 3"
+    },
+    {
+      "species": "monkeys",
+      "recording_id": "sub-01_ses-03_task-AcousStim_acq-RH_desc-raw",
+      "seed": 43,
+      "requested_fraction": 0.05,
+      "realized_fraction": 0.05434782608695652,
+      "per_class_counts": {
+        "low_bass": 10,
+        "mid_bass": 4,
+        "low_mids": 3,
+        "midrange": 7,
+        "high_mids": 3,
+        "low_treble": 2,
+        "mid_treble": 2,
+        "high_treble": 4
+      },
+      "failure_reason": "low_treble: 2 < 3; mid_treble: 2 < 3"
+    },
+    {
+      "species": "monkeys",
+      "recording_id": "sub-01_ses-03_task-AcousStim_acq-RH_desc-raw",
+      "seed": 44,
+      "requested_fraction": 0.05,
+      "realized_fraction": 0.05434782608695652,
+      "per_class_counts": {
+        "low_bass": 10,
+        "mid_bass": 4,
+        "low_mids": 3,
+        "midrange": 7,
+        "high_mids": 3,
+        "low_treble": 2,
+        "mid_treble": 2,
+        "high_treble": 4
+      },
+      "failure_reason": "low_treble: 2 < 3; mid_treble: 2 < 3"
+    }
+  ],
+  "software_failures": []
+}
