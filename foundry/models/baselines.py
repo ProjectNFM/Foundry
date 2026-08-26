@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch_brain.data import Data
-from torch_brain.batching import chain, pad8, pad2d
+from torch_brain.batching import chain, pad, pad8, pad2d
 from typing import Dict, Any
 
 from foundry.models.readout import ReadoutRouter, build_readout_router
@@ -198,7 +198,7 @@ class BaselineEEGModel(nn.Module):
 
         return {
             "input_values": pad2d(x),
-            "input_mask": pad8(input_mask),
+            "input_mask": pad(input_mask),
             "task_index": pad8(output_task_index),
             "target_values": chain(output_values, allow_missing_keys=True),
             "target_weights": chain(output_weights, allow_missing_keys=True),
@@ -503,6 +503,7 @@ class GRU(BaselineEEGModel):
             if input_mask is not None:
                 if input_mask.dim() == 1:
                     input_mask = input_mask.unsqueeze(0)  # (1, C) -> broadcast
+                input_mask = input_mask[:, :C]
                 mask_expanded = input_mask.to(x_out.device).unsqueeze(
                     -1
                 )  # (B, C, 1)
@@ -935,6 +936,7 @@ class EEGNetEncoder(BaselineEEGModel):
             if input_mask is not None:
                 if input_mask.dim() == 1:
                     input_mask = input_mask.unsqueeze(0)
+                input_mask = input_mask[:, : self.num_channels]
                 mask_device = input_mask.to(x.device).float()
                 valid_count = mask_device.sum(dim=1, keepdim=True)
                 valid_count = torch.clamp(valid_count, min=1.0)
@@ -999,6 +1001,7 @@ class EEGNetEncoder(BaselineEEGModel):
             if input_mask is not None:
                 if input_mask.dim() == 1:
                     input_mask = input_mask.unsqueeze(0)
+                input_mask = input_mask[:, : self.num_channels]
                 mask_device = input_mask.to(x.device).float()
                 valid_count = mask_device.sum(dim=1, keepdim=True)
                 valid_count = torch.clamp(valid_count, min=1.0)

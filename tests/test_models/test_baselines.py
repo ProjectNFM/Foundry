@@ -532,7 +532,8 @@ class TestEEGNetEncoder:
 
         assert model.num_channels == 4
         assert hasattr(model, "router")
-        assert hasattr(model, "block1")
+        assert hasattr(model, "temporal_conv")
+        assert hasattr(model, "spatial_conv")
         assert hasattr(model, "block2")
 
     def test_extract_features(self, eegnet_model):
@@ -1021,7 +1022,8 @@ class TestVariableChannels:
         tokens2 = model.tokenize(data2)
         batch = collate([tokens1, tokens2])
 
-        assert batch["input_values"].shape == (2, 4, 200)
+        # tokenize emits (T, C); collate stacks to (B, T, C)
+        assert batch["input_values"].shape == (2, 200, 4)
         assert batch["input_mask"].shape == (2, 4)
         assert (
             batch["input_mask"][0].sum() == 2
