@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-08-26
 **Parent experiment:** [Causal delayed fusion for HERO Motor Imagery learnability](20260826-MS-hero-delayed-fusion-mi-learnability.md)
-**Follow-up experiments:** None — the pilot did not satisfy every required gate; no full experiment authorized.
+**Follow-up experiments:** [HERO Motor Imagery small-subset memorization diagnostic](20260826-MS-mi-memorization-diagnostic.md)
 **Tags:** neuralbench, hero, motor_imagery, absolute_position, channel_identity, spatial_fusion, learnability, validation_only, from_scratch
 
 ## Background

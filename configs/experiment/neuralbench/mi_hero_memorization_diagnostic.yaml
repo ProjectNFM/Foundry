@@ -1,0 +1,115 @@
+# @package _global_
+#
+# Deterministic small-subset learnability diagnostic for flat HERO on
+# NeuralBench Motor Imagery.  This is not a generalization experiment:
+# training runs to the fixed epoch cap without early stopping.
+
+defaults:
+  - override /model: hero
+  - override /module: default
+  - override /hydra/launcher: local_gpu
+
+task_configs:
+  - neuralbench/motor_imagery
+
+data:
+  _target_: foundry.data.neuralbench.datamodule.NeuralBenchDataModule
+  task: motor_imagery
+  dataset: schalk2004bci2000
+  cache_dir: ${oc.env:NEURALSET_CACHE_DIR,/network/scratch/s/sobralm/neuralset-data}
+  batch_size: 64
+  num_workers: ${hyperparameters.num_workers}
+  pin_memory: true
+  interval_name: motor_imagery_trials
+  label_attr: targets
+  session_prefix: nb/motor_imagery
+  # Exactly one full balanced batch (16 examples per class when available).
+  # The identical subset_seed and sizes are used by the EEGNet config.
+  train_subset_size: 64
+  val_subset_size: 256
+  subset_seed: ${seed}
+
+model:
+  temporal_mode: flat
+  # The spatial-slot result found no MI gain from eight slots; use the simpler
+  # one-slot control so the diagnostic isolates basic learnability.
+  num_spatial_slots: 1
+
+class_weights:
+  mode: auto
+  smoothing: 1.0
+
+run:
+  name: nb_mi_memorization_hero_seed${seed}
+  evaluate_test: false
+  float32_matmul_precision: highest
+  compile: default
+  group: NB_MI_MEMORIZATION_DIAGNOSTIC
+  tags: [neuralbench, motor_imagery, hero, memorization, diagnostic, validation_only, from_scratch]
+  log_level: INFO
+  project: foundry-neuralbench
+  seed: ${seed}
+
+seed: 33
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 4.0
+  patch_duration: 0.1
+  sampling_rate: 120
+  fold_number: 0
+  num_channels: 64
+  num_workers: 4
+  learning_rate: 1e-4
+  # Remove explicit weight decay for a capacity/optimization diagnostic.
+  weight_decay: 0.0
+  scheduler_name: onecycle
+  warmup: 0
+  start_lr_factor: 1e-4
+  hold: 0
+  hold_scheduler_type: constant
+  decay: 0
+  end_lr_factor: 0.1
+  scheduler_interval: step
+  cwt_lr_multiplier: 1.0
+  backbone_learning_rate: null
+
+trainer:
+  max_epochs: 500
+  precision: 16-mixed
+  gradient_clip_val: 1.0
+  num_sanity_val_steps: 0
+  callbacks:
+    vocab_initializer:
+      _target_: foundry.training.callbacks.VocabInitializerCallback
+    rich_progress_bar:
+      _target_: lightning.pytorch.callbacks.RichProgressBar
+    # The inherited callback remains present after Hydra's mapping merge.  Its
+    # patience exceeds the fixed cap, making it inert rather than validation
+    # selected for this diagnostic.
+    early_stopping:
+      _target_: lightning.pytorch.callbacks.EarlyStopping
+      monitor: val/neuralbench_motor_imagery_balanced_acc
+      mode: max
+      patience: 501
+    # Keep the final checkpoint, but do not select on validation.
+    model_checkpoint:
+      _target_: lightning.pytorch.callbacks.ModelCheckpoint
+      save_last: true
+      save_top_k: 0
+    confusion_matrix:
+      _target_: foundry.training.callbacks.ConfusionMatrixCallback
+    learning_rate_monitor:
+      _target_: lightning.pytorch.callbacks.LearningRateMonitor
+      logging_interval: step
+
+logger:
+  _target_: lightning.pytorch.loggers.WandbLogger
+  project: foundry-neuralbench
+  name: ${run.name}
+  tags: ${run.tags}
+  save_dir: .
+
+hydra:
+  launcher:
+    stop_on_failure: true
