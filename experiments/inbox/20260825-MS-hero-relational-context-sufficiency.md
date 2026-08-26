@@ -1,6 +1,6 @@
 # HERO relational-context sufficiency for Motor Imagery
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-08-25
 **Parent experiment:** [HERO spatial-slot ablation: 1-factor vs 8-slot fusion in a flat temporal control](20260824-MS-hero-spatial-slots.md)
 **Follow-up experiments:** TBD
@@ -32,10 +32,10 @@ follow-up](../_legacy/020-linear-probe-dynamic-channel-emb.md), which showed
 that such cross-channel processing can nevertheless improve downstream
 representations.
 
-The parent experiment is still a draft. Per the experiment decision, Phase 4
-is not launch-gated on its result: all HERO conditions use eight spatial slots
-regardless. This preserves the planned architecture but means a null result
-must be interpreted jointly with the parent's eventual 1-vs-8-slot finding.
+Phase 4 was not launch-gated on the parent result: all HERO conditions use
+eight spatial slots regardless. The completed parent experiment subsequently
+found no 8-versus-1-slot gain on MI, so this null result must be interpreted in
+that context.
 
 ## Question
 
@@ -162,33 +162,110 @@ type, positions, masks, and content values must not be permuted.
 
 ### Summary
 
-TBD
+The relational-context sufficiency hypothesis was not supported. Across the
+three matched seeds, relational-only HERO reached 0.3037 held-out test
+balanced accuracy, essentially tied with signal-only (0.3021), local-context
+(0.3042), and shuffled relational context (0.3054). Therefore the experiment
+does not show either a useful relational gain or sensitivity to correct
+channel--relational-vector binding. Adding absolute position produced a small
+mean lift (position-only: 0.3172; relational + position: 0.3176), but neither
+reached the pre-registered 0.02 margin over relational-only.
+
+The result is better interpreted as a failure of the flat eight-slot HERO
+control to learn Motor Imagery, rather than as a context-specific performance
+dip. Its validation losses across conditions remained around 1.38, close to
+the 1.386 cross-entropy of a uniform four-class predictor, and its test
+balanced accuracy stayed near chance. Under the same data and optimizer
+schedule, matched EEGNet reached 0.5713 ± 0.0016. (Precision and
+early-stopping patience differ between the two model configurations.) The
+parent slot ablation also found no benefit from eight versus one spatial slot
+on MI. This points to an architectural/learnability bottleneck before context
+can be meaningfully evaluated.
 
 ### Metrics
 
-TBD
+Three-seed held-out test balanced accuracy (mean ± SD):
+
+| Condition | Balanced accuracy | Per-seed test balanced accuracy (33, 34, 35) |
+|---|---:|---:|
+| Signal-only | 0.3021 ± 0.0078 | 0.3006, 0.2951, 0.3104 |
+| Type-only | 0.3058 ± 0.0109 | 0.3026, 0.2969, 0.3179 |
+| Local context | 0.3042 ± 0.0051 | 0.3026, 0.3000, 0.3099 |
+| Relational-only | 0.3037 ± 0.0050 | 0.3002, 0.3017, 0.3094 |
+| Position-only | 0.3172 ± 0.0204 | 0.3046, 0.3407, 0.3063 |
+| Relational + position | 0.3176 ± 0.0072 | 0.3190, 0.3240, 0.3098 |
+| Shuffled relational | 0.3054 ± 0.0082 | 0.3056, 0.3135, 0.2971 |
+| Matched EEGNet (external comparator) | 0.5713 ± 0.0016 | 0.5717, 0.5727, 0.5696 |
+
+Pre-registered sufficiency checks:
+
+| Criterion | Result |
+|---|---|
+| Relational-only ≥ signal-only + 0.02 | Fail (+0.0016) |
+| Relational-only ≥ local-context + 0.02 | Fail (−0.0005) |
+| Relational-only within 0.02 of relational + position | Pass (0.0138 below) |
+| Relational-only ≥ shuffled relational + 0.02 | Fail (−0.0017) |
+| At least two matched-seed wins over both signal-only and local-context, with no >0.02 regression vs signal-only | Fail |
+
+Representative seed-33 learning curves corroborate underfitting: signal-only,
+relational-only, and position-only achieved best training losses of 1.3267,
+1.3393, and 1.3332 respectively, versus 0.9704 for matched EEGNet. Their best
+validation balanced accuracies were 0.2953, 0.2954, and 0.2973, versus 0.5102
+for EEGNet.
 
 ### Analysis
 
-Use
+Run
 [`analysis/20260825-MS-hero-relational-context-sufficiency_analysis.py`](../../analysis/20260825-MS-hero-relational-context-sufficiency_analysis.py)
 to fetch the HERO and matched EEGNet groups through the W&B API, cache the
 per-run table, print the pre-registered sufficiency checks, and generate the
-balanced-accuracy comparison figure. Extend the script with attention and
-confusion analyses once the final logging keys are fixed in the launch config.
+balanced-accuracy comparison figure:
+
+```bash
+uv run python analysis/20260825-MS-hero-relational-context-sufficiency_analysis.py
+```
+
+The runs did not contain the planned routing-gate, routing-attention,
+test-confusion, parameter-count, peak-memory, or wall-clock diagnostics, and
+no checkpoint artifact was retained in W&B. Consequently, the final gate
+values cannot be inspected retrospectively; this is an observability gap, not
+evidence of a routing implementation bug.
 
 ### Figures
 
-TBD
+![Three-seed test balanced-accuracy comparison](../../analysis/figures/20260825-MS-hero-relational-context-sufficiency_analysis_test_balanced_accuracy.png)
 
 ## Conclusions
 
-TBD
+**Verdict: refuted / not supported.** Relational context was not sufficient to
+improve eight-slot HERO routing on Motor Imagery: it failed four of the five
+pre-registered criteria, including the correct-binding control. The lack of a
+correct-versus-shuffled relational difference means this study cannot
+attribute any MI gain to relational routing.
+
+There is no confirmed condition-selection or routing implementation defect:
+the W&B-stored configurations match the intended conditions, the immutable
+launch snapshot matches the reviewed implementation, and focused HERO model
+tests pass. However, the experiment does expose a more fundamental problem:
+the flat HERO control underfits MI across every context condition, while EEGNet
+learns the same task substantially better. Early spatial fusion, the limited
+two-block local temporal encoder, and routing-only (rather than value-stream)
+context are plausible architectural contributors. The exactly zero-initialized
+context gates may also make the context branch slow to activate under this
+weak learning signal; their final values were unfortunately not logged.
 
 ## Notes for future experiments
 
-If relational sufficiency is supported, proceed to Phase 5 on at least one
-coordinate-poor ECoG or SEEG task and test channel-removal robustness. If it
-is not supported, use the controls to decide between local raw-signal
-information, absolute-position routing, optimization failure from zero-gated
-sources, and a spatial-slot bottleneck before increasing context capacity.
+- Establish MI learnability before another relational ablation: overfit a
+  small fixed training subset, then compare train and validation curves against
+  EEGNet under the same split.
+- Test an MI-appropriate temporal front end or postpone spatial fusion until
+  after channel-wise temporal feature extraction, preserving channel-specific
+  rhythmic information before the 64-channel bottleneck.
+- Log every routing source's gate magnitude and gradient norm, source-logit
+  RMS, spatial attention summaries, test confusion/per-class recall,
+  parameter count, peak memory, and wall-clock time. Save the best checkpoint
+  as a W&B artifact so a failed context branch can be inspected.
+- Once the base model learns MI, test whether nonzero/warm-started context
+  gates or separate optimizer settings for context sources are needed before
+  increasing relational-context capacity.
