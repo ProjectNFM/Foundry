@@ -20,6 +20,7 @@ import re
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -62,6 +63,7 @@ CORE_METRICS = ("balanced_acc", "f1", "auroc", "acc")
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _seed(run: wandb.apis.public.Run) -> int:
     config = run.config or {}
@@ -115,6 +117,7 @@ def _extract_metrics(
 # Data fetching
 # ---------------------------------------------------------------------------
 
+
 def fetch_poyo_group(
     api: wandb.Api,
     group: str,
@@ -127,7 +130,9 @@ def fetch_poyo_group(
     for run in api.runs(path, filters={"group": group}):
         terminal = run.state in ("finished", "failed", "crashed")
         if split == "test" and run.state != "finished":
-            print(f"  [skip] {run.name} ({run.state}) — need finished for test metrics")
+            print(
+                f"  [skip] {run.name} ({run.state}) — need finished for test metrics"
+            )
             continue
         if not terminal:
             print(f"  [skip] {run.name} ({run.state}) — still running")
@@ -200,7 +205,9 @@ def fetch_val_training_curves(
             run = api.run(f"{path_prefix}/{row['run_id']}")
         except Exception:
             continue
-        history = run.history(keys=["epoch", val_key], samples=10_000, pandas=True)
+        history = run.history(
+            keys=["epoch", val_key], samples=10_000, pandas=True
+        )
         if history.empty or val_key not in history.columns:
             continue
         history = history.dropna(subset=[val_key])
@@ -210,15 +217,22 @@ def fetch_val_training_curves(
         history["seed"] = row["seed"]
         history["condition"] = row["condition"]
         history["run_id"] = row["run_id"]
-        frames.append(history[["epoch", "val_balanced_acc", "seed", "condition", "run_id"]])
+        frames.append(
+            history[
+                ["epoch", "val_balanced_acc", "seed", "condition", "run_id"]
+            ]
+        )
     if not frames:
         return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True).sort_values(["condition", "seed", "epoch"])
+    return pd.concat(frames, ignore_index=True).sort_values(
+        ["condition", "seed", "epoch"]
+    )
 
 
 # ---------------------------------------------------------------------------
 # Summary and printing
 # ---------------------------------------------------------------------------
+
 
 def make_summary(task_df: pd.DataFrame) -> pd.DataFrame:
     agg = (
@@ -237,7 +251,9 @@ def print_task_results(label: str, task_df: pd.DataFrame, split: str) -> str:
     lines.append(f"{label} — per-seed {split_label} metrics")
     lines.append("=" * 72)
 
-    display_cols = ["condition", "seed", "state", "last_epoch"] + list(CORE_METRICS)
+    display_cols = ["condition", "seed", "state", "last_epoch"] + list(
+        CORE_METRICS
+    )
     present = [c for c in display_cols if c in task_df.columns]
     lines.append(
         task_df[present].to_string(
@@ -255,7 +271,9 @@ def print_task_results(label: str, task_df: pd.DataFrame, split: str) -> str:
             s_key = f"{metric}_std"
             n_key = f"{metric}_count"
             if m_key in row and pd.notna(row[m_key]):
-                parts.append(f"  {metric}={row[m_key]:.4f}±{row[s_key]:.4f} (n={int(row[n_key])})")
+                parts.append(
+                    f"  {metric}={row[m_key]:.4f}±{row[s_key]:.4f} (n={int(row[n_key])})"
+                )
         lines.append(" ".join(parts))
 
     output = "\n".join(lines)
@@ -278,7 +296,9 @@ CONDITION_ORDER = ["Matched EEGNet", "CWT-CNN", "ResampleCNN"]
 def plot_test_balanced_accuracy(all_results: dict[str, pd.DataFrame]) -> Path:
     """Bar chart of test balanced accuracy for P300 and MI only."""
     test_tasks = {k: v for k, v in all_results.items() if k != "Sleep Stage"}
-    fig, axes = plt.subplots(1, len(test_tasks), figsize=(5 * len(test_tasks), 5), sharey=True)
+    fig, axes = plt.subplots(
+        1, len(test_tasks), figsize=(5 * len(test_tasks), 5), sharey=True
+    )
     if len(test_tasks) == 1:
         axes = [axes]
 
@@ -294,14 +314,22 @@ def plot_test_balanced_accuracy(all_results: dict[str, pd.DataFrame]) -> Path:
             labels.append(cond)
         x = np.arange(len(labels))
         bars = ax.bar(
-            x, means, yerr=stds, capsize=4,
-            color=[COLORS.get(l, "#999") for l in labels],
-            edgecolor="white", width=0.6,
+            x,
+            means,
+            yerr=stds,
+            capsize=4,
+            color=[COLORS.get(label, "#999") for label in labels],
+            edgecolor="white",
+            width=0.6,
         )
         for bar, m in zip(bars, means):
             ax.text(
-                bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.015,
-                f"{m:.3f}", ha="center", va="bottom", fontsize=9,
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.015,
+                f"{m:.3f}",
+                ha="center",
+                va="bottom",
+                fontsize=9,
             )
         ax.set_xticks(x)
         ax.set_xticklabels(labels, rotation=20, ha="right", fontsize=9)
@@ -310,7 +338,9 @@ def plot_test_balanced_accuracy(all_results: dict[str, pd.DataFrame]) -> Path:
         ax.spines[["top", "right"]].set_visible(False)
 
     axes[0].set_ylabel("Test balanced accuracy (mean ± SD, 3 seeds)")
-    fig.suptitle("POYO Tokenizer Baselines vs Matched EEGNet — Test", fontsize=13, y=1.02)
+    fig.suptitle(
+        "POYO Tokenizer Baselines vs Matched EEGNet — Test", fontsize=13, y=1.02
+    )
     fig.tight_layout()
     out = FIGURES_DIR / f"{STEM}_test_balanced_accuracy.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
@@ -332,14 +362,22 @@ def plot_val_balanced_accuracy_sleep(sleep_df: pd.DataFrame) -> Path:
         labels.append(cond)
     x = np.arange(len(labels))
     bars = ax.bar(
-        x, means, yerr=stds, capsize=4,
-        color=[COLORS.get(l, "#999") for l in labels],
-        edgecolor="white", width=0.6,
+        x,
+        means,
+        yerr=stds,
+        capsize=4,
+        color=[COLORS.get(label, "#999") for label in labels],
+        edgecolor="white",
+        width=0.6,
     )
     for bar, m in zip(bars, means):
         ax.text(
-            bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.015,
-            f"{m:.3f}", ha="center", va="bottom", fontsize=9,
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 0.015,
+            f"{m:.3f}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
         )
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=20, ha="right", fontsize=9)
@@ -350,7 +388,8 @@ def plot_val_balanced_accuracy_sleep(sleep_df: pd.DataFrame) -> Path:
     fig.suptitle(
         "POYO Tokenizer Baselines vs Matched EEGNet — Val only\n"
         "(POYO runs timed out; no test evaluation)",
-        fontsize=11, y=1.04,
+        fontsize=11,
+        y=1.04,
     )
     fig.tight_layout()
     out = FIGURES_DIR / f"{STEM}_sleep_val_balanced_accuracy.png"
@@ -378,14 +417,22 @@ def plot_all_tasks_overview(all_results: dict[str, pd.DataFrame]) -> Path:
             labels.append(cond)
         x = np.arange(len(labels))
         bars = ax.bar(
-            x, means, yerr=stds, capsize=4,
-            color=[COLORS.get(l, "#999") for l in labels],
-            edgecolor="white", width=0.6,
+            x,
+            means,
+            yerr=stds,
+            capsize=4,
+            color=[COLORS.get(label, "#999") for label in labels],
+            edgecolor="white",
+            width=0.6,
         )
         for bar, m in zip(bars, means):
             ax.text(
-                bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.015,
-                f"{m:.3f}", ha="center", va="bottom", fontsize=9,
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.015,
+                f"{m:.3f}",
+                ha="center",
+                va="bottom",
+                fontsize=9,
             )
         ax.set_xticks(x)
         ax.set_xticklabels(labels, rotation=25, ha="right", fontsize=8)
@@ -398,7 +445,8 @@ def plot_all_tasks_overview(all_results: dict[str, pd.DataFrame]) -> Path:
     fig.suptitle(
         "POYO Tokenizer Baselines vs Matched EEGNet\n"
         "P300 & MI = test; *Sleep = best validation (POYO timed out)",
-        fontsize=12, y=1.04,
+        fontsize=12,
+        y=1.04,
     )
     fig.tight_layout()
     out = FIGURES_DIR / f"{STEM}_all_tasks_overview.png"
@@ -412,7 +460,9 @@ def plot_training_curves(
 ) -> Path:
     """Epoch-level val balanced accuracy curves for all tasks."""
     n_tasks = len(curves)
-    fig, axes = plt.subplots(1, n_tasks, figsize=(5.5 * n_tasks, 4.5), sharey=True)
+    fig, axes = plt.subplots(
+        1, n_tasks, figsize=(5.5 * n_tasks, 4.5), sharey=True
+    )
     if n_tasks == 1:
         axes = [axes]
 
@@ -422,18 +472,30 @@ def plot_training_curves(
             continue
         for cond in CONDITION_ORDER:
             for seed in SEEDS:
-                sub = df[(df["condition"] == cond) & (df["seed"] == seed)].sort_values("epoch")
+                sub = df[
+                    (df["condition"] == cond) & (df["seed"] == seed)
+                ].sort_values("epoch")
                 if sub.empty:
                     continue
                 ax.plot(
-                    sub["epoch"], sub["val_balanced_acc"],
-                    color=COLORS.get(cond, "#999"), alpha=0.5, linewidth=1,
+                    sub["epoch"],
+                    sub["val_balanced_acc"],
+                    color=COLORS.get(cond, "#999"),
+                    alpha=0.5,
+                    linewidth=1,
                 )
-            cond_all = df[df["condition"] == cond].groupby("epoch")["val_balanced_acc"].mean()
+            cond_all = (
+                df[df["condition"] == cond]
+                .groupby("epoch")["val_balanced_acc"]
+                .mean()
+            )
             if not cond_all.empty:
                 ax.plot(
-                    cond_all.index, cond_all.values,
-                    color=COLORS.get(cond, "#999"), linewidth=2.5, label=cond,
+                    cond_all.index,
+                    cond_all.values,
+                    color=COLORS.get(cond, "#999"),
+                    linewidth=2.5,
+                    label=cond,
                 )
         ax.set_title(task, fontsize=11)
         ax.set_xlabel("Epoch")
@@ -453,7 +515,9 @@ def plot_per_seed_scatter(all_results: dict[str, pd.DataFrame]) -> Path:
     """Per-seed scatter: POYO (CWT-CNN and ResampleCNN) vs EEGNet baseline."""
     fig, axes = plt.subplots(1, 3, figsize=(14, 4.5))
     for ax, (task, df) in zip(axes, all_results.items()):
-        eegnet = df[df["condition"] == "Matched EEGNet"].set_index("seed")["balanced_acc"]
+        eegnet = df[df["condition"] == "Matched EEGNet"].set_index("seed")[
+            "balanced_acc"
+        ]
         for cond in ["CWT-CNN", "ResampleCNN"]:
             poyo = df[df["condition"] == cond].set_index("seed")["balanced_acc"]
             common_seeds = sorted(set(eegnet.index) & set(poyo.index))
@@ -462,11 +526,15 @@ def plot_per_seed_scatter(all_results: dict[str, pd.DataFrame]) -> Path:
             ax.scatter(
                 [eegnet[s] for s in common_seeds],
                 [poyo[s] for s in common_seeds],
-                label=cond, color=COLORS.get(cond, "#999"),
-                s=60, zorder=5,
+                label=cond,
+                color=COLORS.get(cond, "#999"),
+                s=60,
+                zorder=5,
             )
         lims = ax.get_xlim()
-        ax.plot(lims, lims, "--", color="grey", linewidth=0.8, alpha=0.6, zorder=1)
+        ax.plot(
+            lims, lims, "--", color="grey", linewidth=0.8, alpha=0.6, zorder=1
+        )
         ax.set_xlim(lims)
         ax.set_ylim(lims)
         split_label = "val" if task == "Sleep Stage" else "test"
@@ -486,6 +554,7 @@ def plot_per_seed_scatter(all_results: dict[str, pd.DataFrame]) -> Path:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     api = wandb.Api()
@@ -511,7 +580,9 @@ def main() -> None:
         print(f"\n  Fetching training curves for {label}...")
         curves = fetch_val_training_curves(api, task_df, task_key)
         if not curves.empty:
-            curves.to_csv(CSV_DIR / f"{STEM}_{task_key}_curves.csv", index=False)
+            curves.to_csv(
+                CSV_DIR / f"{STEM}_{task_key}_curves.csv", index=False
+            )
         all_curves[label] = curves
 
     # --- Combined summary table ---
@@ -527,7 +598,9 @@ def main() -> None:
     combined_summary.columns = [
         "_".join(filter(None, c)).rstrip("_") for c in combined_summary.columns
     ]
-    combined_summary.to_csv(CSV_DIR / f"{STEM}_combined_summary.csv", index=False)
+    combined_summary.to_csv(
+        CSV_DIR / f"{STEM}_combined_summary.csv", index=False
+    )
     print(
         combined_summary.to_string(
             index=False, float_format=lambda v: f"{v:.4f}"
@@ -541,7 +614,9 @@ def main() -> None:
     print(f"  Saved: {figs[-1]}")
 
     if "Sleep Stage" in all_results:
-        figs.append(plot_val_balanced_accuracy_sleep(all_results["Sleep Stage"]))
+        figs.append(
+            plot_val_balanced_accuracy_sleep(all_results["Sleep Stage"])
+        )
         print(f"  Saved: {figs[-1]}")
 
     figs.append(plot_all_tasks_overview(all_results))

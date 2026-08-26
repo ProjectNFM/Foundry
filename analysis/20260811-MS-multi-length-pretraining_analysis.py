@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 import wandb
 
-from _wandb_utils import csv_dir, default_entity, figures_dir
+from _wandb_utils import csv_dir, figures_dir
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 

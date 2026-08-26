@@ -229,7 +229,7 @@ def print_task_comparison(
     lines.append(f"{label} — Test-vs-Test Comparison")
     lines.append("=" * 72)
 
-    lines.append(f"\n  Foundry Matched EEGNet — per-seed test metrics:")
+    lines.append("\n  Foundry Matched EEGNet — per-seed test metrics:")
     test_cols = ["seed", "last_epoch"] + [f"test_{m}" for m in CORE_METRICS]
     present = [c for c in test_cols if c in foundry.columns]
     lines.append(
@@ -238,7 +238,7 @@ def print_task_comparison(
         )
     )
 
-    lines.append(f"\n  NeuralBench EEGNet — per-seed test metrics:")
+    lines.append("\n  NeuralBench EEGNet — per-seed test metrics:")
     nb_cols = ["seed"] + [m for m in CORE_METRICS if m in nb.columns]
     lines.append(
         nb[nb_cols].to_string(
@@ -246,7 +246,7 @@ def print_task_comparison(
         )
     )
 
-    lines.append(f"\n  Head-to-head (mean ± SD):")
+    lines.append("\n  Head-to-head (mean ± SD):")
     lines.append(f"  {'Metric':<20s} {'Foundry (test)':>18s} {'NeuralBench (test)':>20s} {'Delta':>10s} {'|Delta|':>10s}")
     lines.append("  " + "-" * 82)
     for metric in CORE_METRICS:
