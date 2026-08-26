@@ -35,14 +35,14 @@ class TestClassificationMetrics:
     def test_binary_metrics_accept_two_class_inputs(self):
         metrics = classification_metrics(num_classes=2)
 
-        preds = torch.sigmoid(torch.randn(8))
+        preds = torch.softmax(torch.randn(8, 2), dim=-1)
         targets = torch.randint(0, 2, (8,))
         metrics.update(preds, targets)
         computed = metrics.compute()
 
         assert "acc" in computed
         assert computed["acc"].ndim == 0
-        assert type(metrics["acc"]).__name__ == "BinaryAccuracy"
+        assert type(metrics["acc"]).__name__ == "MulticlassAccuracy"
 
 
 class TestRegressionMetrics:

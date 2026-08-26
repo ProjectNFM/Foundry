@@ -118,7 +118,7 @@ def test_sequence_weighted_multitask_loss_matches_spec_id_weighting():
             "neurosoft_on_vs_off",
             torch.tensor([[1.0, 0.0], [0.0, 1.0]]),
             torch.tensor([1, 0]),
-            (2,),
+            (2, 2),
         ),
         (
             "sleep_stage_5class",
@@ -149,12 +149,10 @@ def test_prepare_for_metrics_uses_task_config_kind(
 
     assert metric_preds.shape == expected_pred_shape
     assert torch.equal(metric_targets, targets)
-    if cfg.kind == "multiclass":
+    if cfg.kind in ("multiclass", "binary"):
         assert torch.allclose(
             metric_preds.sum(dim=-1), torch.ones(preds.shape[0])
         )
-    if cfg.kind == "binary":
-        assert torch.all((metric_preds >= 0) & (metric_preds <= 1))
 
 
 def test_cwt_lr_param_groups_separate_tokenizer_cwt_params():
