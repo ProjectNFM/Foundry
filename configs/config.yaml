@@ -25,6 +25,9 @@ hyperparameters:
   scheduler_interval: "epoch"
   learning_rate: ???  
   weight_decay: ???
+  # "phased" is Foundry's warmup/hold/decay scheduler; "onecycle" mirrors
+  # NeuralBench's EEGNet optimizer schedule.
+  scheduler_name: phased
   cwt_lr_multiplier: 1.0
   backbone_learning_rate: null
 
@@ -51,6 +54,9 @@ run:
   # Keep fresh runs independent unless resume is explicitly requested.
   # SLURM restarts still auto-resume from last.ckpt in main.py.
   resume_if_checkpoint_exists: false
+  # Evaluate the best validation checkpoint on the datamodule's test split
+  # after fitting. Disabled by default to prevent accidental test-set use.
+  evaluate_test: false
   # Transfer mode for pretrained weight loading: "strict" (default) raises
   # on missing/mismatched keys; "permissive" loads what it can and warns.
   # Null selects random initialization; downstream transfer experiments set

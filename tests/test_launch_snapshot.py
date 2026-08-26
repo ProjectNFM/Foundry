@@ -15,6 +15,8 @@ from hydra_plugins.foundry_launcher.launch_snapshot import (
     COMPLETION_MARKER,
     _validate_clean_repo,
     build_setup_commands,
+    get_slurm_job_identifiers,
+    get_snapshot_provenance_for_wandb,
     prepare_snapshot,
     verify_import_paths,
     verify_snapshot,
@@ -42,6 +44,36 @@ def test_hydra_plugin_discovery_imports_snapshot_module() -> None:
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_slurm_array_job_identifier_uses_array_syntax(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Expose array jobs as ``<array job>_<task>`` rather than raw IDs."""
+    monkeypatch.setenv("SLURM_JOB_ID", "10438115")
+    monkeypatch.setenv("SLURM_ARRAY_JOB_ID", "10438107")
+    monkeypatch.setenv("SLURM_ARRAY_TASK_ID", "1")
+
+    assert get_slurm_job_identifiers() == {
+        "slurm_job_id": "10438107_1",
+        "slurm_array_job_id": "10438107",
+        "slurm_array_task_id": "1",
+        "slurm_raw_job_id": "10438115",
+    }
+
+
+def test_wandb_snapshot_provenance_uses_canonical_array_job_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FOUNDRY_SNAPSHOT_BUNDLE_DIR", "/tmp/bundle")
+    monkeypatch.setenv("SLURM_JOB_ID", "10438115")
+    monkeypatch.setenv("SLURM_ARRAY_JOB_ID", "10438107")
+    monkeypatch.setenv("SLURM_ARRAY_TASK_ID", "1")
+
+    provenance = get_snapshot_provenance_for_wandb()
+
+    assert provenance["provenance.slurm_job_id"] == "10438107_1"
+    assert provenance["provenance.slurm_raw_job_id"] == "10438115"
 
 
 def _run_git(repo: Path, *args: str) -> None:

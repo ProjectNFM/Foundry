@@ -85,7 +85,10 @@ class RelativeChannelEncoder(nn.Module):
         weights = weights.masked_fill(~mask_expand, 0.0)
         if token_mask is not None:
             weights = weights.masked_fill(~token_mask, 0.0)
-        pooled = torch.einsum("bcn,bcnd->bcd", weights, tokens)  # (B, C, D)
+        # Elementwise reduction is algebraically equivalent to the einsum but
+        # avoids its expensive BmmBackward kernel for the many small
+        # per-channel matrices in EEG batches.
+        pooled = (weights.unsqueeze(-1) * tokens).sum(dim=2)  # (B, C, D)
 
         # Stage 2: cross-channel attention
         # key_padding_mask: True means "ignore this position" in PyTorch MHA

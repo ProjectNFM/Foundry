@@ -85,6 +85,7 @@ def instantiation_context() -> DictConfig:
                 "num_workers": 0,
                 "learning_rate": 1e-3,
                 "weight_decay": 0.01,
+                "scheduler_name": "phased",
                 "warmup": 0,
                 "start_lr_factor": 1e-4,
                 "hold": 0,

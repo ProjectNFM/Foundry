@@ -1,0 +1,116 @@
+# @package _global_
+#
+# NeuralBench Sleep Stage / Kemp2000Analysis — EEGNet parameter match.
+# Mirrors NeuralBench v0.2.3's EEGNet architecture, optimizer, scheduler,
+# early stopping, and DataLoader settings for a test-to-test comparison.
+
+defaults:
+  - override /model: eegnet
+  - override /module: default
+  - override /hydra/launcher: slurm_default
+
+task_configs:
+  - neuralbench/sleep_stage
+
+data:
+  _target_: foundry.data.neuralbench.datamodule.NeuralBenchDataModule
+  task: sleep_stage
+  dataset: kemp2000analysis
+  cache_dir: ${oc.env:NEURALSET_CACHE_DIR,/network/scratch/s/sobralm/neuralset-data}
+  batch_size: 64
+  num_workers: ${hyperparameters.num_workers}
+  pin_memory: true
+  interval_name: sleep_stages
+  label_attr: targets
+  session_prefix: nb/sleep_stage
+
+model:
+  num_samples: 3600
+  kernel_length: 64
+  F1: 8
+  D: 2
+  F2: 16
+  dropout_rate: 0.25
+  bn_momentum: 0.01
+  bn_eps: 1e-3
+  spatial_max_norm: 1.0
+
+class_weights:
+  mode: auto
+  smoothing: 1.0
+
+run:
+  name: nb_sleep_eegnet_matched_seed${seed}
+  evaluate_test: true
+  float32_matmul_precision: highest
+  group: NB_SLEEP_EEGNET_MATCHED
+  tags: [neuralbench, sleep_stage, eegnet, matched]
+  log_level: INFO
+  project: foundry-neuralbench
+  seed: ${seed}
+
+seed: 33
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 30.0
+  patch_duration: 0.1
+  sampling_rate: 120
+  fold_number: 0
+  num_channels: 2
+  num_workers: 10
+  learning_rate: 1e-4
+  weight_decay: 0.05
+  scheduler_name: onecycle
+  warmup: 0
+  start_lr_factor: 1e-4
+  hold: 0
+  hold_scheduler_type: constant
+  decay: 0
+  end_lr_factor: 0.1
+  scheduler_interval: step
+  cwt_lr_multiplier: 1.0
+  backbone_learning_rate: null
+
+trainer:
+  max_epochs: 40
+  precision: 32-true
+  gradient_clip_val: 1.0
+  num_sanity_val_steps: 0
+  callbacks:
+    early_stopping:
+      _target_: lightning.pytorch.callbacks.EarlyStopping
+      monitor: val/neuralbench_sleep_stage_balanced_acc
+      mode: max
+      patience: 5
+    model_checkpoint:
+      _target_: lightning.pytorch.callbacks.ModelCheckpoint
+      monitor: val/neuralbench_sleep_stage_balanced_acc
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_balanced_acc_{val/neuralbench_sleep_stage_balanced_acc:.4f}"
+      save_last: true
+
+logger:
+  _target_: lightning.pytorch.loggers.WandbLogger
+  project: foundry-neuralbench
+  name: ${run.name}
+  tags: ${run.tags}
+  save_dir: .
+
+hydra:
+  sweeper:
+    params:
+      seed: 33,34,35
+  launcher:
+    tasks_per_node: 1
+    cpus_per_task: 10
+    mem_gb: 64
+    gres: gpu:rtx8000:1
+    timeout_min: 720
+    partition: long
+    setup:
+      - "set -a"
+      - "source .env"
+      - "set +a"
+      - "export RANK=0"

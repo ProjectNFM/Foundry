@@ -660,6 +660,21 @@ class SeparableConv2d(nn.Module):
         return x
 
 
+class _MaxNormConstraint(nn.Module):
+    """Parametrization that clips weights to a max L2 norm per output filter."""
+
+    def __init__(self, max_norm: float):
+        super().__init__()
+        self.max_norm = max_norm
+
+    def forward(self, w: torch.Tensor) -> torch.Tensor:
+        norms = torch.linalg.vector_norm(
+            w.flatten(1), dim=1, keepdim=True
+        ).clamp(min=1e-7)
+        desired = torch.clamp(norms, max=self.max_norm)
+        return w * (desired / norms).view(-1, *([1] * (w.dim() - 1)))
+
+
 class EEGNetEncoder(BaselineEEGModel):
     """
     EEGNet: Compact Convolutional Neural Network for EEG-based BCIs.
@@ -677,6 +692,10 @@ class EEGNetEncoder(BaselineEEGModel):
         F2 (int, optional): Pointwise filter count. Typically F1*D. Default: 16.
         kernel_length (int, optional): Temporal filter kernel length. Default: 64.
         dropout_rate (float, optional): Dropout probability. Default: 0.5.
+        bn_momentum (float, optional): BatchNorm momentum. Default: 0.1 (PyTorch default).
+        bn_eps (float, optional): BatchNorm epsilon. Default: 1e-5 (PyTorch default).
+        spatial_max_norm (float | None, optional): Max-norm constraint on the
+            depthwise spatial conv weight. ``None`` disables the constraint.
     """
 
     def __init__(
@@ -689,6 +708,9 @@ class EEGNetEncoder(BaselineEEGModel):
         F2: int = 16,
         kernel_length: int = 64,
         dropout_rate: float = 0.5,
+        bn_momentum: float = 0.1,
+        bn_eps: float = 1e-5,
+        spatial_max_norm: float | None = None,
         **kwargs,
     ):
         super().__init__(
@@ -697,35 +719,40 @@ class EEGNetEncoder(BaselineEEGModel):
             task_configs=task_configs,
         )
 
+        bn_kwargs = {"momentum": bn_momentum, "eps": bn_eps}
+
         # ----------------------------------------------------------------------
         # Block 1: Bandpass & Spatial Filtering
         # ----------------------------------------------------------------------
+        spatial_conv = nn.Conv2d(
+            F1,
+            F1 * D,
+            kernel_size=(num_channels, 1),
+            groups=F1,
+            bias=False,
+        )
+        if spatial_max_norm is not None:
+            from torch.nn.utils.parametrize import register_parametrization
+
+            register_parametrization(
+                spatial_conv,
+                "weight",
+                _MaxNormConstraint(spatial_max_norm),
+            )
+
         self.block1 = nn.Sequential(
-            # 1. Temporal Convolution
-            # Intuition: Learns frequency-specific bandpass filters (e.g., Alpha, Beta bands)
             nn.Conv2d(
                 1,
                 F1,
                 kernel_size=(1, kernel_length),
-                padding="same",  # CHECK: padding=(0, kernel_length // 2)
+                padding="same",
                 bias=False,
             ),
-            nn.BatchNorm2d(F1),  # CHECK: momentum=0.01, eps=1e-3
-            # 2. Depthwise Spatial Convolution
-            # Intuition: Acts as a data-driven spatial filter (similar to CSP).
-            # Using groups=F1 ensures each temporal bandpass filter gets 'D' dedicated spatial filters.
-            nn.Conv2d(
-                F1,
-                F1 * D,
-                kernel_size=(num_channels, 1),
-                groups=F1,
-                bias=False,
-                # CHECK: max_norm=0.25
-            ),
-            nn.BatchNorm2d(F1 * D),  # CHECK: momentum=0.01, eps=1e-3
-            nn.ELU(),  # ELU performs better than ReLU for EEG signals
-            # Downsample to reduce dimensionality and aggregate temporal information
-            nn.AvgPool2d(kernel_size=(1, 4)),  # CHECK: kernel_size
+            nn.BatchNorm2d(F1, **bn_kwargs),
+            spatial_conv,
+            nn.BatchNorm2d(F1 * D, **bn_kwargs),
+            nn.ELU(),
+            nn.AvgPool2d(kernel_size=(1, 4)),
             nn.Dropout(dropout_rate),
         )
 
@@ -733,17 +760,14 @@ class EEGNetEncoder(BaselineEEGModel):
         # Block 2: Feature Mixing & Downsampling
         # ----------------------------------------------------------------------
         self.block2 = nn.Sequential(
-            # Separable Convolution
-            # Intuition: Efficiently summarizes temporal patterns within each feature map
-            # before mixing them to form final high-level representations.
             SeparableConv2d(
                 F1 * D,
                 F2,
                 kernel_size=(1, 16),
                 bias=False,
             ),
-            nn.BatchNorm2d(F2),  # CHECK: momentum=0.01, eps=1e-3
-            nn.ELU(),  # CHECK: Is there ELU?
+            nn.BatchNorm2d(F2, **bn_kwargs),
+            nn.ELU(),
             nn.AvgPool2d(kernel_size=(1, 8)),
             nn.Dropout(dropout_rate),
         )
@@ -751,9 +775,7 @@ class EEGNetEncoder(BaselineEEGModel):
         # ----------------------------------------------------------------------
         # Classifier Head
         # ----------------------------------------------------------------------
-        out_dim = self._calculate_out_dim(
-            num_channels, num_samples
-        )  # CHECK: out_dim == F2
+        out_dim = self._calculate_out_dim(num_channels, num_samples)
 
         self.router = self._build_router(out_dim)
 

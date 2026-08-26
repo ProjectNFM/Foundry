@@ -1,0 +1,29 @@
+name: neuralbench_p300
+
+class_mapping:
+  mapping:
+    1: NonTarget
+    2: Target
+  order: [NonTarget, Target]
+
+head:
+  _target_: foundry.tasks.heads.ReadoutHead
+
+target_extractor:
+  _target_: foundry.tasks.targets.TargetExtractor
+  timestamp_key: p300_trials.timestamps
+  value_key: p300_trials.targets
+
+loss:
+  _target_: foundry.tasks.losses.CrossEntropyTaskLoss
+  label_smoothing: 0.1
+
+metrics:
+  _target_: foundry.tasks.metrics.classification_metrics
+
+metric_summary_modes:
+  acc: max
+  f1: max
+  auroc: max
+  balanced_acc: max
+  loss: min

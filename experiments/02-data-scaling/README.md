@@ -95,7 +95,7 @@ contained an information leak in the `RelativeChannelEncoder`: the encoder's
 temporal pooling attended over **all** token embeddings — including masked
 reconstruction targets — giving the decoder a shortcut to lower loss without
 the backbone learning richer representations. This leak was discovered and
-fixed on 2026-08-12 (see [Channel Encoder Leak Fix Impact](../inbox/20260812-MS-channel-encoder-leak-fix-impact.md)).
+fixed on 2026-08-12 (see [Channel Encoder Leak Fix Impact](../05-pretraining-parameter-exploration/20260812-MS-channel-encoder-leak-fix-impact.md)).
 
 **Impact on these results:** Every pretraining checkpoint in this group
 benefited from the leak, meaning reconstruction losses were artificially low
@@ -120,14 +120,14 @@ interpreted with this caveat.
   ChannelMasking (spatial), or hybrid approaches — could produce fundamentally
   different representations. The optimal masking strategy likely depends on
   which downstream task the representations need to support.
-  → Follow-up: [Masking Parameter Sweep](../inbox/20260811-MS-masking-parameter-sweep.md)
+  → Follow-up: [Masking Parameter Sweep](../05-pretraining-parameter-exploration/20260811-MS-masking-parameter-sweep.md)
 
 - **Sequence length mismatch.** All pretraining used 2s windows, but downstream
   tasks range from 1s (P300) to 30s (Sleep). Representations learned on 2s
   windows may miss longer-range temporal structure critical for sleep staging
   (spindles, K-complexes, slow waves). Training on varied sequence lengths or
   longer windows could yield more versatile representations.
-  → Follow-up: [Multi-Length Pretraining](../inbox/20260811-MS-multi-length-pretraining.md)
+  → Follow-up: [Multi-Length Pretraining](../05-pretraining-parameter-exploration/20260811-MS-multi-length-pretraining.md)
 
 - **Data augmentation.** None of the pretraining runs used data augmentation.
   Standard EEG augmentations (time shift, amplitude scaling, channel dropout,

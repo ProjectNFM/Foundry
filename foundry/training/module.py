@@ -55,6 +55,7 @@ class FoundryModule(L.LightningModule):
         weight_decay: float = 0.01,
         cwt_lr_multiplier: float = 1.0,
         backbone_learning_rate: float | None = None,
+        scheduler_name: str = "phased",
         warmup: int = 0,
         start_lr_factor: float = 1e-4,
         hold: int = 0,
@@ -69,6 +70,7 @@ class FoundryModule(L.LightningModule):
         self.weight_decay = weight_decay
         self.cwt_lr_multiplier = cwt_lr_multiplier
         self.backbone_learning_rate = backbone_learning_rate
+        self.scheduler_name = scheduler_name
         self.warmup = warmup
         self.hold = hold
         self.hold_scheduler_type = hold_scheduler_type
@@ -81,6 +83,7 @@ class FoundryModule(L.LightningModule):
         self._task_losses = nn.ModuleDict()
         self.train_metrics = nn.ModuleDict()
         self.val_metrics = nn.ModuleDict()
+        self.test_metrics = nn.ModuleDict()
         self._val_confusion_trackers: dict[str, ConfusionMatrixTracker] = {}
 
         for name, cfg in model.task_configs.items():
@@ -92,6 +95,7 @@ class FoundryModule(L.LightningModule):
                     prefix=f"train/{name}_"
                 )
                 self.val_metrics[name] = metrics.clone(prefix=f"val/{name}_")
+                self.test_metrics[name] = metrics.clone(prefix=f"test/{name}_")
 
             if (
                 cfg.kind in ("binary", "multiclass")
@@ -106,9 +110,11 @@ class FoundryModule(L.LightningModule):
         self, task_name: str, metric_name: str, cfg: Any
     ) -> str:
         """Resolve the WandB summary mode (``"min"``/``"max"``) for a metric."""
-        short_name = metric_name.removeprefix(
-            f"train/{task_name}_"
-        ).removeprefix(f"val/{task_name}_")
+        short_name = (
+            metric_name.removeprefix(f"train/{task_name}_")
+            .removeprefix(f"val/{task_name}_")
+            .removeprefix(f"test/{task_name}_")
+        )
         return cfg.metric_summary_modes.get(short_name, "min")
 
     def _prepare_for_metrics(
@@ -117,11 +123,15 @@ class FoundryModule(L.LightningModule):
         predictions: torch.Tensor,
         targets: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Convert raw logits to the format expected by torchmetrics."""
-        if cfg.kind == "multiclass":
+        """Convert raw logits to the format expected by torchmetrics.
+
+        All classification metrics now use ``task="multiclass"`` (even for
+        2-class problems) so that ``average="macro"`` is respected for
+        balanced accuracy.  This means the full softmax probability vector
+        is always passed.
+        """
+        if cfg.kind in ("multiclass", "binary"):
             return torch.softmax(predictions, dim=-1), targets
-        if cfg.kind == "binary":
-            return torch.softmax(predictions, dim=-1)[:, 1], targets
         return _squeeze_scalar_predictions(predictions, targets), targets
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
@@ -152,6 +162,13 @@ class FoundryModule(L.LightningModule):
     ) -> Dict[str, Any]:
         """Lightning validation step — delegates to :meth:`_shared_step`."""
         step_output = self._shared_step("val", batch)
+        return {"loss": step_output.loss, "step_output": step_output}
+
+    def test_step(
+        self, batch: Dict[str, Any], batch_idx: int
+    ) -> Dict[str, Any]:
+        """Lightning test step — evaluates the selected checkpoint on held-out data."""
+        step_output = self._shared_step("test", batch)
         return {"loss": step_output.loss, "step_output": step_output}
 
     def _shared_step(self, stage: str, batch: Dict[str, Any]) -> StepOutput:
@@ -198,7 +215,12 @@ class FoundryModule(L.LightningModule):
             f"{stage}/loss", total_loss, prog_bar=True, batch_size=batch_size
         )
 
-        metrics = self.train_metrics if stage == "train" else self.val_metrics
+        metrics_by_stage = {
+            "train": self.train_metrics,
+            "val": self.val_metrics,
+            "test": self.test_metrics,
+        }
+        metrics = metrics_by_stage[stage]
 
         for name, cfg in self.model.task_configs.items():
             preds = outputs.get(name)
@@ -393,11 +415,35 @@ class FoundryModule(L.LightningModule):
     def configure_optimizers(self):
         """Build AdamW optimizer and multi-phase LR scheduler.
 
-        Constructs a :class:`SequentialLR` with up to three phases: linear
+        ``scheduler_name="onecycle"`` uses PyTorch's :class:`OneCycleLR` with
+        its native defaults, matching NeuralBench's EEGNet recipe. Otherwise,
+        constructs a :class:`SequentialLR` with up to three phases: linear
         warmup, constant/cosine hold, and cosine decay.
         """
         param_groups = self._build_param_groups()
         optimizer = torch.optim.AdamW(param_groups)
+
+        if self.scheduler_name == "onecycle":
+            scheduler = torch.optim.lr_scheduler.OneCycleLR(
+                optimizer,
+                max_lr=self.learning_rate,
+                total_steps=self.trainer.estimated_stepping_batches,
+                pct_start=0.1,
+                anneal_strategy="cos",
+            )
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": self.scheduler_interval,
+                    "frequency": 1,
+                },
+            }
+        if self.scheduler_name != "phased":
+            raise ValueError(
+                f"Unknown scheduler_name: {self.scheduler_name}. "
+                "Must be 'phased' or 'onecycle'."
+            )
 
         schedulers = []
         milestones = []
@@ -484,23 +530,27 @@ class FoundryModule(L.LightningModule):
             return
 
         experiment = self.logger.experiment
-        for prefix in ("train", "val"):
+        for prefix in ("train", "val", "test"):
             experiment.define_metric(f"{prefix}/loss", summary="min")
 
         for name, cfg in self.model.task_configs.items():
-            for prefix in ("train", "val"):
+            for prefix in ("train", "val", "test"):
                 experiment.define_metric(f"{prefix}/{name}_loss", summary="min")
             for metric_name, mode in cfg.metric_summary_modes.items():
                 if metric_name == "loss":
                     continue
-                for prefix in ("train", "val"):
+                for prefix in ("train", "val", "test"):
                     experiment.define_metric(
                         f"{prefix}/{name}_{metric_name}", summary=mode
                     )
 
         for name in self.model.task_configs:
             cfg = self.model.task_configs[name]
-            for metrics_dict in (self.train_metrics, self.val_metrics):
+            for metrics_dict in (
+                self.train_metrics,
+                self.val_metrics,
+                self.test_metrics,
+            ):
                 if name not in metrics_dict:
                     continue
                 for metric_name in metrics_dict[name]:

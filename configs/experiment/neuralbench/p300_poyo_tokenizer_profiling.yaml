@@ -1,0 +1,45 @@
+# @package _global_
+#
+# Short GPU profiling run for the NeuralBench P300 POYO tokenizer baseline.
+# This preserves the production model/data settings while capturing only enough
+# training batches to measure steady-state CPU and CUDA operator costs.
+
+defaults:
+  - /experiment/neuralbench/p300_poyo_tokenizer_baselines
+  - _self_
+
+run:
+  name: nb_p300_poyo_dynamic_channel_cwt_gpu_profile
+  group: NB_P300_POYO_TOKENIZER_PROFILE
+  evaluate_test: false
+
+trainer:
+  max_epochs: 1
+  limit_train_batches: 20
+  limit_val_batches: 0
+  profiler:
+    _target_: lightning.pytorch.profilers.PyTorchProfiler
+    dirpath: /network/scratch/s/sobralm/runs/NB_P300_POYO_TOKENIZER_PROFILE/profiler
+    filename: p300_poyo
+    export_to_chrome: true
+    row_limit: ${profiling.row_limit}
+    sort_by_key: ${profiling.sort_by_key}
+    schedule:
+      _target_: torch.profiler.schedule
+      wait: ${profiling.schedule.wait}
+      warmup: ${profiling.schedule.warmup}
+      active: ${profiling.schedule.active}
+      repeat: ${profiling.schedule.repeat}
+    on_trace_ready:
+      _target_: torch.profiler.tensorboard_trace_handler
+      dir_name: /network/scratch/s/sobralm/runs/NB_P300_POYO_TOKENIZER_PROFILE/profiler
+    record_shapes: ${profiling.record_shapes}
+    profile_memory: ${profiling.profile_memory}
+    with_stack: ${profiling.with_stack}
+    with_flops: ${profiling.with_flops}
+
+hydra:
+  sweeper:
+    params:
+      model/tokenizer: per_channel_cwt_cnn
+      seed: 33

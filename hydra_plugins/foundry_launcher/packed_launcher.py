@@ -138,15 +138,12 @@ class PackedSubmititLauncher(BaseSubmititLauncher):
             else:
                 snapshot_root = project_root / ".snapshots"
 
-            sweep_name = str(
-                OmegaConf.select(
-                    self.config,
-                    "run.group",
-                    default=OmegaConf.select(
-                        self.config, "run.name", default="sweep"
-                    ),
+            sweep_name = OmegaConf.select(self.config, "run.group")
+            if sweep_name is None:
+                sweep_name = OmegaConf.select(
+                    self.config, "run.name", default="sweep"
                 )
-            )
+            sweep_name = str(sweep_name)
 
             snapshot = prepare_snapshot(
                 project_root=project_root,

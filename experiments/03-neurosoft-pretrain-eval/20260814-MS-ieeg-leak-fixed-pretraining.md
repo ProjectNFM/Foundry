@@ -2,13 +2,13 @@
 
 **Status:** Completed
 **Date started:** 2026-08-14
-**Parent experiment:** [Information Leak Fixes: Channel Encoder Masking + Signal Zeroing + Tokenizer Comparison](../inbox/20260812-MS-channel-encoder-leak-fix-impact.md)
+**Parent experiment:** [Information Leak Fixes: Channel Encoder Masking + Signal Zeroing + Tokenizer Comparison](../05-pretraining-parameter-exploration/20260812-MS-channel-encoder-leak-fix-impact.md)
 **Follow-up experiments:** [NeuroSoft Intrasession Multisubject From-Scratch Baselines](20260817-MS-neurosoft-intrasession-baselines.md), [NeuroSoft Leave-One-Subject-Out From-Scratch Baselines](20260817-MS-neurosoft-loso-baselines.md)
 **Tags:** pretraining, mae, ieeg, kochi, neurosoft, data_composition, channel_encoder, information_leak, signal_zeroing, cwt_cnn
 
 ## Background
 
-The [information-leak fix experiment](../inbox/20260812-MS-channel-encoder-leak-fix-impact.md)
+The [information-leak fix experiment](../05-pretraining-parameter-exploration/20260812-MS-channel-encoder-leak-fix-impact.md)
 showed that masking channel-encoder pooling and zeroing masked raw signal remove
 large decoder-side shortcuts.  Both are now the default and must be retained for
 all new pretraining.  Although the fixes substantially increase reconstruction

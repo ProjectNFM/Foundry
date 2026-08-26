@@ -16,6 +16,7 @@ from omegaconf import DictConfig, OmegaConf
 from rich.logging import RichHandler
 
 from foundry.config_resolvers import hydra_main_wrapper, register_resolvers
+from foundry.core import VocabManager
 from foundry.data.datamodules.base import normalize_data_config
 from foundry.seed import set_seed
 from foundry.tools.stage_data import (
@@ -205,6 +206,12 @@ def _stage_data_if_needed(cfg: DictConfig) -> None:
 # -- Component construction ------------------------------------------------
 
 
+def _is_neuralbench_data(cfg: DictConfig) -> bool:
+    """Check if the data config targets a NeuralBenchDataModule."""
+    target = OmegaConf.select(cfg, "data._target_", default="")
+    return "NeuralBenchDataModule" in target
+
+
 def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
     """Auto-derive session_configs and num_channels from the dataset when missing."""
     session_configs = OmegaConf.select(
@@ -217,14 +224,20 @@ def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
     if session_configs is not None and num_channels is not None:
         return
 
-    normalize_data_config(cfg.data)
-    dm = instantiate(cfg.data, tokenizer=None)
+    if _is_neuralbench_data(cfg):
+        dm = instantiate(cfg.data, tokenizer=None)
+    else:
+        normalize_data_config(cfg.data)
+        dm = instantiate(cfg.data, tokenizer=None)
     dm.setup("fit")
 
     if session_configs is None:
-        from foundry.data.utils import get_session_configs
+        if hasattr(dm, "get_session_configs"):
+            session_configs = dm.get_session_configs()
+        else:
+            from foundry.data.utils import get_session_configs
 
-        session_configs = get_session_configs(dm.dataset)
+            session_configs = get_session_configs(dm.dataset)
         OmegaConf.update(
             cfg,
             "hyperparameters.session_configs",
@@ -238,9 +251,12 @@ def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
         )
 
     if num_channels is None:
-        from foundry.data.utils import get_max_channels
+        if hasattr(dm, "get_num_channels"):
+            num_channels = dm.get_num_channels()
+        else:
+            from foundry.data.utils import get_max_channels
 
-        num_channels = get_max_channels(dm.dataset)
+            num_channels = get_max_channels(dm.dataset)
         OmegaConf.update(
             cfg,
             "hyperparameters.num_channels",
@@ -400,7 +416,8 @@ def _build_model_and_data(cfg: DictConfig):
     _populate_data_driven_hyperparams(cfg)
 
     task_configs = _load_task_configs(cfg)
-    normalize_data_config(cfg.data)
+    if not _is_neuralbench_data(cfg):
+        normalize_data_config(cfg.data)
     datamodule = instantiate(cfg.data, tokenizer=None)
     datamodule._task_configs = task_configs
 
@@ -410,7 +427,7 @@ def _build_model_and_data(cfg: DictConfig):
     )
 
     # Apply auto class weights for CrossEntropy; reuse setup state from above
-    task_configs, _ = _apply_auto_class_weights(
+    task_configs, setup_done = _apply_auto_class_weights(
         cfg, datamodule, task_configs, setup_done=setup_done
     )
 
@@ -432,6 +449,21 @@ def _build_model_and_data(cfg: DictConfig):
         model_kwargs.update(session_emb_cfg)
 
     model = ModelClass(task_configs=task_configs, **model_kwargs)
+
+    # DataLoader workers apply ``model.tokenize`` in their own processes.  Lazy
+    # vocabularies must consequently be initialized here, before attaching the
+    # tokenizer, rather than waiting for Lightning's on_fit_start callback.
+    if isinstance(model, VocabManager) and model.has_lazy_vocabs():
+        if not setup_done:
+            datamodule.setup("fit")
+        vocab_info = {}
+        for method_name, key in [
+            ("get_recording_ids", "session_ids"),
+            ("get_channel_ids", "channel_ids"),
+        ]:
+            if hasattr(datamodule, method_name):
+                vocab_info[key] = getattr(datamodule, method_name)()
+        model.initialize_vocabs(vocab_info)
 
     if getattr(model, "session_emb_mode", None) == "dynamic":
         session_context_cfg = OmegaConf.select(
@@ -568,17 +600,12 @@ def _log_config_to_wandb(trainer, cfg: DictConfig):
         for key in loggable_keys
         if key in cfg
     }
-    slurm_job_id = os.environ.get("SLURM_JOB_ID")
-    if slurm_job_id:
-        config_to_log["slurm_job_id"] = slurm_job_id
-        array_task_id = os.environ.get("SLURM_ARRAY_TASK_ID")
-        if array_task_id:
-            config_to_log["slurm_array_task_id"] = array_task_id
-
     from hydra_plugins.foundry_launcher.launch_snapshot import (
+        get_slurm_job_identifiers,
         get_snapshot_provenance_for_wandb,
     )
 
+    config_to_log.update(get_slurm_job_identifiers())
     provenance = get_snapshot_provenance_for_wandb()
     if provenance:
         config_to_log.update(provenance)
@@ -688,7 +715,14 @@ def _write_snapshot_task_provenance(output_dir: str) -> None:
     snapshot = LaunchSnapshot.from_json(
         Path(manifest_path).with_name("snapshot-descriptor.json").read_text()
     )
-    task_index = int(HydraConfig.get().job.num)
+    # Hydra leaves ``job.num`` as a mandatory-but-unresolved value for a
+    # one-item local multirun.  That task still maps to the first snapshot
+    # config, so use index 0 when no explicit job number is available.
+    task_index = int(
+        OmegaConf.select(
+            HydraConfig.get(), "job.num", default=0, throw_on_missing=False
+        )
+    )
     task_config_path = (
         Path(snapshot.bundle_dir)
         / "task-configs"
@@ -713,7 +747,8 @@ def main(cfg: DictConfig):
 
     Orchestrates logging setup, SLURM resume detection, WandB configuration,
     data staging, model/data construction, optional pretrained weight
-    transfer, ``torch.compile``, and ``trainer.fit()``.
+    transfer, ``torch.compile``, training, and optional best-checkpoint test
+    evaluation.
     """
     setup_logging(cfg.run.log_level)
     torch.set_float32_matmul_precision(
@@ -730,12 +765,16 @@ def main(cfg: DictConfig):
     logger.info("Starting training: %s", cfg.run.name)
 
     slurm_restart_count = _get_slurm_restart_count()
-    slurm_job_id = os.environ.get("SLURM_JOB_ID")
-    if slurm_job_id:
+    from hydra_plugins.foundry_launcher.launch_snapshot import (
+        get_slurm_job_identifiers,
+    )
+
+    slurm_ids = get_slurm_job_identifiers()
+    if slurm_ids:
         logger.info(
-            "SLURM job_id=%s array_task=%s restart_count=%s",
-            slurm_job_id,
-            os.environ.get("SLURM_ARRAY_TASK_ID"),
+            "SLURM job_id=%s raw_job_id=%s restart_count=%s",
+            slurm_ids["slurm_job_id"],
+            slurm_ids.get("slurm_raw_job_id"),
             slurm_restart_count,
         )
 
@@ -755,7 +794,8 @@ def main(cfg: DictConfig):
     _log_output_destinations(
         cfg, output_dir, checkpoint_dir, using_wandb_logger
     )
-    _stage_data_if_needed(cfg)
+    if not _is_neuralbench_data(cfg):
+        _stage_data_if_needed(cfg)
 
     # Eagerly resolve cfg.run so that ${data.subject} (and similar
     # interpolation-only keys) are baked in before normalize_data_config
@@ -807,7 +847,7 @@ def main(cfg: DictConfig):
 
     _validate_checkpoint_policy(ckpt_path, pretrained_ckpt)
 
-    train_failed = False
+    run_failed = False
     try:
         trainer.fit(
             lightning_module,
@@ -815,13 +855,22 @@ def main(cfg: DictConfig):
             ckpt_path=ckpt_path,
             weights_only=False,
         )
+        if OmegaConf.select(cfg, "run.evaluate_test", default=False):
+            logger.info(
+                "Evaluating the best validation checkpoint on the test split."
+            )
+            trainer.test(
+                lightning_module,
+                datamodule=datamodule,
+                ckpt_path="best",
+            )
     except BaseException:
-        train_failed = True
+        run_failed = True
         traceback.print_exc(file=sys.stderr)
         raise
     finally:
         if using_wandb_logger:
-            _finish_active_wandb_run(exit_code=1 if train_failed else 0)
+            _finish_active_wandb_run(exit_code=1 if run_failed else 0)
 
 
 if __name__ == "__main__":

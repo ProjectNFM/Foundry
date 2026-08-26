@@ -1,0 +1,111 @@
+# @package _global_
+# NeuralBench Motor Imagery / Schalk2004Bci2000 — from-scratch POYO tokenizer baseline.
+
+defaults:
+  - override /model: poyo_eeg
+  - override /model/tokenizer: per_channel_cwt_cnn
+  - override /model/session_emb: disabled
+  - override /module: default
+  - override /hydra/launcher: slurm_default
+
+task_configs:
+  - neuralbench/motor_imagery
+
+data:
+  _target_: foundry.data.neuralbench.datamodule.NeuralBenchDataModule
+  task: motor_imagery
+  dataset: schalk2004bci2000
+  cache_dir: ${oc.env:NEURALSET_CACHE_DIR,/network/scratch/s/sobralm/neuralset-data}
+  batch_size: 64
+  num_workers: ${hyperparameters.num_workers}
+  pin_memory: true
+  interval_name: motor_imagery_trials
+  label_attr: targets
+  session_prefix: nb/motor_imagery
+
+model:
+  embed_dim: 256
+  depth: 4
+  channel_emb_mode: dynamic
+
+class_weights:
+  mode: auto
+  smoothing: 1.0
+
+run:
+  name: nb_mi_poyo_${hydra:runtime.choices.model/tokenizer}_seed${seed}
+  evaluate_test: true
+  compile: default
+  float32_matmul_precision: highest
+  group: NB_MI_POYO_TOKENIZER_BASELINES
+  tags: [neuralbench, motor_imagery, poyo, tokenizer, baseline, from_scratch]
+  log_level: INFO
+  project: foundry-neuralbench
+  seed: ${seed}
+
+seed: 33
+
+hyperparameters:
+  batch_size: 64
+  sequence_length: 4.0
+  patch_duration: 0.1
+  sampling_rate: 120
+  fold_number: 0
+  num_channels: 64
+  num_workers: 6
+  learning_rate: 1e-4
+  weight_decay: 0.05
+  scheduler_name: onecycle
+  warmup: 0
+  start_lr_factor: 1e-4
+  hold: 0
+  hold_scheduler_type: constant
+  decay: 0
+  end_lr_factor: 0.1
+  scheduler_interval: step
+  cwt_lr_multiplier: 1.0
+  backbone_learning_rate: null
+
+trainer:
+  max_epochs: 40
+  precision: 16-mixed
+  gradient_clip_val: 1.0
+  num_sanity_val_steps: 0
+  callbacks:
+    early_stopping:
+      _target_: lightning.pytorch.callbacks.EarlyStopping
+      monitor: val/neuralbench_motor_imagery_balanced_acc
+      mode: max
+      patience: 5
+    model_checkpoint:
+      _target_: lightning.pytorch.callbacks.ModelCheckpoint
+      monitor: val/neuralbench_motor_imagery_balanced_acc
+      mode: max
+      auto_insert_metric_name: false
+      filename: "best-epoch{epoch:03d}-val_balanced_acc_{val/neuralbench_motor_imagery_balanced_acc:.4f}"
+      save_last: true
+
+logger:
+  _target_: lightning.pytorch.loggers.WandbLogger
+  project: foundry-neuralbench
+  name: ${run.name}
+  tags: ${run.tags}
+  save_dir: .
+
+hydra:
+  sweeper:
+    params:
+      model/tokenizer: per_channel_cwt_cnn,per_channel_resample_cnn
+      seed: 33,34,35
+  launcher:
+    tasks_per_node: 1
+    cpus_per_task: 6
+    mem_gb: 64
+    gres: gpu:rtx8000:1
+    timeout_min: 360
+    partition: long
+    setup:
+      - "set -a"
+      - "source .env"
+      - "set +a"
+      - "export RANK=0"
