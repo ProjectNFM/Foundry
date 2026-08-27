@@ -26,6 +26,7 @@ def classification_metrics(num_classes: int) -> MetricCollection:
             "auroc": AUROC(
                 task="multiclass",
                 num_classes=num_classes,
+                average="macro",
             ),
             "precision": Precision(
                 task="multiclass", num_classes=num_classes, average="macro"
