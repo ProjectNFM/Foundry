@@ -9,6 +9,7 @@ reports.
 Usage::
 
     uv run python analysis/20260826-MS-neurosoft-eegnet-learning-curves_analysis.py
+    uv run python analysis/20260826-MS-neurosoft-eegnet-learning-curves_analysis.py --include-optimization-history
     uv run python analysis/20260826-MS-neurosoft-eegnet-learning-curves_analysis.py --offline
 """
 
@@ -90,6 +91,8 @@ RUN_COLUMNS = [
     "audit_expected_split_class_counts",
     "split_type",
     "state",
+    "created_at",
+    "is_retry",
     "finished",
     "failed",
     "test_f1",
@@ -414,6 +417,8 @@ def fetch_group_runs(
                 "split_type": get_neurosoft_field(config, "split_type")
                 or _nested_get(config, "data", "split_type"),
                 "state": run.state,
+                "created_at": getattr(run, "created_at", None),
+                "is_retry": "retry" in set(getattr(run, "tags", []) or []),
                 "finished": run.state == "finished",
                 "failed": run.state in ("failed", "crashed"),
             }
@@ -433,6 +438,49 @@ def fetch_group_runs(
         print(f"  WARNING: could not query {path}: {exc}")
 
     return rows
+
+
+def canonical_test_runs(runs: pd.DataFrame) -> pd.DataFrame:
+    """Select one complete test result per planned session/fraction/seed.
+
+    Retry submissions intentionally share the original run name and seed.  They
+    are retained in the per-run export and integrity report, but must not count
+    as additional independent seed observations in summaries or figures.  A
+    successful primary run is preferred; otherwise a successful retry supplies
+    the cell.  ``created_at`` makes the selection deterministic within either
+    category.
+    """
+    if runs.empty:
+        return runs.copy()
+
+    test_columns = [
+        f"test_{metric.removeprefix('supported_')}" for metric in TEST_METRICS
+    ]
+    complete = runs[runs["finished"]].copy()
+    complete = complete.dropna(subset=test_columns)
+    if complete.empty:
+        return complete
+
+    complete["is_retry"] = complete["is_retry"].fillna(False).astype(bool)
+    return (
+        complete.sort_values(
+            [
+                "species",
+                "recording_id",
+                "fraction",
+                "fraction_seed",
+                "is_retry",
+                "created_at",
+                "run_id",
+            ],
+            na_position="last",
+        )
+        .drop_duplicates(
+            ["species", "recording_id", "fraction", "fraction_seed"],
+            keep="first",
+        )
+        .reset_index(drop=True)
+    )
 
 
 def fetch_optimization_history(
@@ -507,6 +555,25 @@ def compute_data_to_80(runs: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def cumulative_data_to_80(data_to_80: pd.DataFrame) -> pd.DataFrame:
+    """Count sessions that have reached their 80%-of-final target by each budget."""
+    rows: list[dict[str, Any]] = []
+    for species, species_data in data_to_80.groupby("species", dropna=False):
+        n_sessions = len(species_data)
+        for fraction in FRACTIONS:
+            reached = species_data["data_to_80_fraction"].le(fraction).sum()
+            rows.append(
+                {
+                    "species": species,
+                    "fraction": fraction,
+                    "n_sessions": n_sessions,
+                    "n_reached_80pct": int(reached),
+                    "share_reached_80pct": reached / n_sessions if n_sessions else np.nan,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def compute_optimization_to_80(
     runs: pd.DataFrame,
     api: wandb.Api,
@@ -514,15 +581,37 @@ def compute_optimization_to_80(
     project: str,
     *,
     offline: bool,
+    cache_path: Path,
 ) -> pd.DataFrame:
-    """First validation event reaching 80% of eventual best supported val F1."""
+    """First validation event reaching 80% of eventual best supported val F1.
+
+    Progress is cached incrementally because the full sweep requires hundreds
+    of public-API history requests. Interrupted runs resume from the cache.
+    """
     if offline or runs.empty:
         return pd.DataFrame()
 
-    rows: list[dict[str, Any]] = []
     candidates = runs[runs["finished"]].copy()
+    candidate_ids = set(candidates["run_id"])
+    if cache_path.exists() and cache_path.stat().st_size > 0:
+        try:
+            cached = pd.read_csv(cache_path)
+        except pd.errors.EmptyDataError:
+            cached = pd.DataFrame()
+        if "run_id" in cached.columns:
+            cached = cached[cached["run_id"].isin(candidate_ids)]
+        else:
+            cached = pd.DataFrame()
+    else:
+        cached = pd.DataFrame()
+
+    rows: list[dict[str, Any]] = cached.to_dict("records")
+    cached_ids = set(cached.get("run_id", pd.Series(dtype=str)).dropna())
+    fetched = 0
 
     for _, row in candidates.iterrows():
+        if row["run_id"] in cached_ids:
+            continue
         best_val = row.get("best_val_supported_f1")
         if best_val is None or pd.isna(best_val) or best_val <= 0:
             continue
@@ -577,8 +666,14 @@ def compute_optimization_to_80(
                 else first.get("compute/elapsed_wall_time_s"),
             }
         )
+        fetched += 1
+        if fetched % 25 == 0:
+            pd.DataFrame(rows).to_csv(cache_path, index=False)
+            print(f"  Cached {len(rows)} / {len(candidates)} validation histories")
 
-    return pd.DataFrame(rows)
+    result = pd.DataFrame(rows)
+    result.to_csv(cache_path, index=False)
+    return result
 
 
 def compute_time_compute_to_best(runs: pd.DataFrame) -> pd.DataFrame:
@@ -819,7 +914,11 @@ def build_integrity_table(
 
     observed_keys = set()
     if not runs.empty:
-        for _, row in runs.iterrows():
+        test_columns = [
+            f"test_{metric.removeprefix('supported_')}" for metric in TEST_METRICS
+        ]
+        complete_tests = runs[runs["finished"]].dropna(subset=test_columns)
+        for _, row in complete_tests.iterrows():
             if row.get("fraction") is None:
                 continue
             observed_keys.add(
@@ -839,11 +938,24 @@ def build_integrity_table(
             int(cell["fraction_seed"]),
         )
         if key not in observed_keys:
+            has_submission = False
+            if not runs.empty:
+                submitted = runs[
+                    (runs["species"] == key[0])
+                    & (runs["recording_id"] == key[1])
+                    & np.isclose(runs["fraction"], key[2], equal_nan=False)
+                    & (runs["fraction_seed"] == key[3])
+                ]
+                has_submission = not submitted.empty
             issues.append(
                 {
-                    "issue_type": "missing_expected_run",
+                    "issue_type": (
+                        "skipped_no_test_result"
+                        if has_submission
+                        else "missing_expected_test_result"
+                    ),
                     "detail": (
-                        f"missing {cell['species']} "
+                        f"no finished test result; skipped {cell['species']} "
                         f"{cell['recording_id']} f={cell['fraction']} "
                         f"seed={cell['fraction_seed']}"
                     ),
@@ -902,11 +1014,9 @@ def learning_curve_summary(runs: pd.DataFrame) -> pd.DataFrame:
 
 
 def plot_learning_curves(
-    runs: pd.DataFrame,
-    expected: pd.DataFrame,
     curve_summary: pd.DataFrame,
 ) -> Path:
-    """Plot supported test F1 vs fraction for each species."""
+    """Plot subject-balanced supported test F1 vs fraction for each species."""
     fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
 
     for ax, species in zip(axes, ("minipigs", "monkeys")):
@@ -920,35 +1030,7 @@ def plot_learning_curves(
                 capsize=4,
                 color=SPECIES_COLORS[species],
                 linewidth=2,
-                label="finished runs (mean ± SD)",
-            )
-
-        failed = runs[
-            (runs["species"] == species)
-            & runs["failed"]
-            & runs["fraction"].notna()
-        ]
-        for fraction in sorted(failed["fraction"].unique()):
-            ax.scatter(
-                [fraction],
-                [0.02],
-                marker="x",
-                color="crimson",
-                s=60,
-                zorder=4,
-            )
-
-        unavailable = expected[
-            (expected["species"] == species) & ~expected["fraction_available"]
-        ]
-        unavailable_fracs = sorted(unavailable["fraction"].unique())
-        for fraction in unavailable_fracs:
-            ax.axvline(
-                fraction,
-                color="grey",
-                linestyle=":",
-                alpha=0.35,
-                linewidth=1,
+                label="subject-balanced mean ± SD",
             )
 
         ax.set_xscale("log")
@@ -960,35 +1042,187 @@ def plot_learning_curves(
         ax.grid(alpha=0.25)
         ax.spines[["top", "right"]].set_visible(False)
 
-    axes[0].set_ylabel("Test supported macro-F1")
-    handles = [
-        plt.Line2D(
-            [0],
-            [0],
-            color=SPECIES_COLORS["minipigs"],
-            marker="o",
-            label="mean ± SD",
-        ),
-        plt.Line2D(
-            [0],
-            [0],
-            color="crimson",
-            marker="x",
-            linestyle="",
-            label="failed run",
-        ),
-        plt.Line2D(
-            [0], [0], color="grey", linestyle=":", label="unavailable cell"
-        ),
-    ]
-    fig.legend(handles=handles, loc="upper center", ncol=3, frameon=False)
+    axes[0].set_ylabel("Subject-balanced test supported macro-F1")
     fig.suptitle(
-        "Phase 1 EEGNet learning curves — test supported macro-F1",
+        "Phase 1 EEGNet learning curves — subject-balanced test macro-F1 (mean ± SD)",
         fontsize=13,
-        y=1.05,
+        y=0.99,
     )
     fig.tight_layout()
     out = FIGURES_DIR / f"{OUTPUT_PREFIX}_learning_curves.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def plot_session_trajectories(runs: pd.DataFrame) -> Path:
+    """Show seed-averaged learning curves for individual sessions and species."""
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+    session_means = (
+        runs.groupby(["species", "recording_id", "fraction"], dropna=False)[
+            "test_f1"
+        ]
+        .mean()
+        .reset_index()
+    )
+
+    for ax, species in zip(axes, ("minipigs", "monkeys")):
+        species_sessions = session_means[session_means["species"] == species]
+        for _, session in species_sessions.groupby("recording_id", dropna=False):
+            ax.plot(
+                session["fraction"],
+                session["test_f1"],
+                color="0.6",
+                alpha=0.35,
+                linewidth=0.9,
+                zorder=1,
+            )
+
+        species_mean = (
+            species_sessions.groupby("fraction")["test_f1"].mean().reset_index()
+        )
+        ax.plot(
+            species_mean["fraction"],
+            species_mean["test_f1"],
+            marker="o",
+            color=SPECIES_COLORS[species],
+            linewidth=2.5,
+            label="session mean",
+            zorder=3,
+        )
+        ax.set_xscale("log")
+        ax.set_xticks(FRACTIONS)
+        ax.set_xticklabels([f"{f:.0%}" for f in FRACTIONS])
+        ax.set_xlabel("Training fraction")
+        ax.set_title(species.capitalize())
+        ax.set_ylim(0, 1.0)
+        ax.grid(alpha=0.25)
+        ax.spines[["top", "right"]].set_visible(False)
+
+    axes[0].set_ylabel("Seed-averaged test supported macro-F1")
+    fig.suptitle("Phase 1 EEGNet — per-session learning trajectories", y=0.99)
+    fig.tight_layout()
+    out = FIGURES_DIR / f"{OUTPUT_PREFIX}_session_trajectories.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def plot_data_efficiency(cumulative: pd.DataFrame) -> Path:
+    """Plot cumulative target attainment by available training-data budget."""
+    fig, ax = plt.subplots(figsize=(7.5, 4.5))
+
+    for species in ("minipigs", "monkeys"):
+        species_data = cumulative[cumulative["species"] == species]
+        if species_data.empty:
+            continue
+        n_sessions = int(species_data["n_sessions"].iloc[0])
+        ax.plot(
+            species_data["fraction"],
+            species_data["share_reached_80pct"] * 100,
+            marker="o",
+            linewidth=2.5,
+            color=SPECIES_COLORS[species],
+            label=f"{species} (n={n_sessions})",
+        )
+
+    ax.set_xscale("log")
+    ax.set_xticks(FRACTIONS)
+    ax.set_xticklabels([f"{fraction:.0%}" for fraction in FRACTIONS])
+    ax.set_xlabel("Training-data budget")
+    ax.set_ylabel("Sessions reaching 80% of own 100%-data test F1 (%)")
+    ax.set_ylim(0, 100)
+    ax.grid(alpha=0.25)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.legend(frameon=False)
+    fig.tight_layout()
+    out = FIGURES_DIR / f"{OUTPUT_PREFIX}_data_to_80.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def plot_optimization_to_80_distribution(opt_to_80: pd.DataFrame) -> Path | None:
+    """Show the session-level distribution of training examples to 80% validation F1."""
+    if opt_to_80.empty:
+        return None
+
+    completed = opt_to_80[
+        opt_to_80["opt_to_80_reached"]
+        & opt_to_80["opt_to_80_processed_examples"].notna()
+    ].copy()
+    if completed.empty:
+        return None
+
+    sessions = (
+        completed.groupby(["species", "recording_id", "fraction"], dropna=False)[
+            "opt_to_80_processed_examples"
+        ]
+        .mean()
+        .reset_index(name="mean_processed_examples_to_80")
+    )
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    positions = np.arange(len(FRACTIONS))
+    width = 0.32
+    rng = np.random.default_rng(20260826)
+
+    for offset, species in [(-width / 2, "minipigs"), (width / 2, "monkeys")]:
+        species_data = sessions[sessions["species"] == species]
+        values = [
+            species_data.loc[
+                np.isclose(species_data["fraction"], fraction),
+                "mean_processed_examples_to_80",
+            ].dropna()
+            for fraction in FRACTIONS
+        ]
+        valid = [(i, value) for i, value in enumerate(values) if not value.empty]
+        if not valid:
+            continue
+        box_positions = [positions[i] + offset for i, _ in valid]
+        box_values = [value.to_numpy() for _, value in valid]
+        box = ax.boxplot(
+            box_values,
+            positions=box_positions,
+            widths=width * 0.8,
+            patch_artist=True,
+            showfliers=False,
+            manage_ticks=False,
+        )
+        for patch in box["boxes"]:
+            patch.set_facecolor(SPECIES_COLORS[species])
+            patch.set_alpha(0.35)
+        for index, value in valid:
+            jitter = rng.uniform(-width * 0.22, width * 0.22, size=len(value))
+            ax.scatter(
+                np.full(len(value), positions[index] + offset) + jitter,
+                value,
+                color=SPECIES_COLORS[species],
+                alpha=0.45,
+                s=18,
+                zorder=3,
+            )
+
+    ax.set_yscale("log")
+    ax.set_xticks(positions)
+    ax.set_xticklabels([f"{fraction:.0%}" for fraction in FRACTIONS])
+    ax.set_xlabel("Training-data fraction")
+    ax.set_ylabel("Processed examples to 80% of own best validation F1")
+    ax.set_title("Optimization speed to normalized validation performance")
+    ax.grid(axis="y", alpha=0.25)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.legend(
+        handles=[
+            plt.Line2D(
+                [0], [0], color=SPECIES_COLORS[species], lw=8, alpha=0.45,
+                label=species,
+            )
+            for species in ("minipigs", "monkeys")
+        ],
+        frameon=False,
+    )
+    fig.tight_layout()
+    out = FIGURES_DIR / f"{OUTPUT_PREFIX}_optimization_to_80_distribution.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return out
@@ -1071,6 +1305,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip WandB API calls (writes empty run tables if no cache).",
     )
+    parser.add_argument(
+        "--include-optimization-history",
+        action="store_true",
+        help=(
+            "Fetch the optional per-run validation histories for the "
+            "optimization-to-80% table (this is slow for the full sweep)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -1104,15 +1346,20 @@ def main() -> None:
             print(f"  {len(group_rows)} runs returned")
             rows.extend(group_rows)
 
-    runs = pd.DataFrame(rows) if rows else empty_runs_frame()
-    if not runs.empty:
-        runs = runs.sort_values(
+    raw_runs = pd.DataFrame(rows) if rows else empty_runs_frame()
+    if not raw_runs.empty:
+        raw_runs = raw_runs.sort_values(
             ["species", "recording_id", "fraction", "model_seed"]
         ).reset_index(drop=True)
 
     runs_path = CSV_DIR / f"{OUTPUT_PREFIX}_per_run_metrics.csv"
-    runs.to_csv(runs_path, index=False)
+    raw_runs.to_csv(runs_path, index=False)
     print(f"\nWrote {runs_path}")
+
+    runs = canonical_test_runs(raw_runs)
+    canonical_path = CSV_DIR / f"{OUTPUT_PREFIX}_canonical_test_results.csv"
+    runs.to_csv(canonical_path, index=False)
+    print(f"Wrote {canonical_path} ({len(runs)} canonical test results)")
 
     curve_summary = learning_curve_summary(runs)
     curve_summary.to_csv(
@@ -1121,9 +1368,17 @@ def main() -> None:
 
     data_to_80 = compute_data_to_80(runs)
     data_to_80.to_csv(CSV_DIR / f"{OUTPUT_PREFIX}_data_to_80.csv", index=False)
+    cumulative_to_80 = cumulative_data_to_80(data_to_80)
+    cumulative_to_80.to_csv(
+        CSV_DIR / f"{OUTPUT_PREFIX}_cumulative_data_to_80.csv", index=False
+    )
 
-    if args.offline:
-        opt_to_80 = pd.DataFrame()
+    optimization_cache_path = CSV_DIR / f"{OUTPUT_PREFIX}_optimization_to_80.csv"
+    if args.offline or not args.include_optimization_history:
+        if optimization_cache_path.exists() and optimization_cache_path.stat().st_size:
+            opt_to_80 = pd.read_csv(optimization_cache_path)
+        else:
+            opt_to_80 = pd.DataFrame()
     else:
         print("\nFetching validation histories for optimization-to-80%...")
         opt_to_80 = compute_optimization_to_80(
@@ -1132,10 +1387,8 @@ def main() -> None:
             args.entity,
             args.project,
             offline=args.offline,
+            cache_path=optimization_cache_path,
         )
-    opt_to_80.to_csv(
-        CSV_DIR / f"{OUTPUT_PREFIX}_optimization_to_80.csv", index=False
-    )
 
     time_best = compute_time_compute_to_best(runs)
     time_best.to_csv(
@@ -1156,15 +1409,31 @@ def main() -> None:
     )
 
     integrity = build_integrity_table(
-        runs, expected, supported, recording_lookup, audit
+        raw_runs, expected, supported, recording_lookup, audit
     )
     integrity.to_csv(CSV_DIR / f"{OUTPUT_PREFIX}_integrity.csv", index=False)
 
     print_primary_summaries(balanced, unweighted, class_summary, integrity)
 
-    if not curve_summary.empty or not runs.empty:
-        fig_path = plot_learning_curves(runs, expected, curve_summary)
-        print(f"\nSaved figure: {fig_path}")
+    if not curve_summary.empty or not raw_runs.empty:
+        balanced_curve_summary = balanced.rename(
+            columns={
+                "n_subjects": "n_runs",
+                "test_f1_mean": "mean",
+                "test_f1_std": "std",
+            }
+        )
+        figures = [
+            plot_learning_curves(balanced_curve_summary),
+            plot_session_trajectories(runs),
+            plot_data_efficiency(cumulative_to_80),
+        ]
+        optimization_figure = plot_optimization_to_80_distribution(opt_to_80)
+        if optimization_figure is not None:
+            figures.append(optimization_figure)
+        print("\nSaved figures:")
+        for fig_path in figures:
+            print(f"  {fig_path}")
     else:
         print("\nNo data available for learning-curve figure.")
 
