@@ -982,3 +982,292 @@ class TestBaselineIntegration:
         assert "input_values" in tokens
         assert "task_index" in tokens
         assert tokens["input_values"].obj.shape == (200, 4)
+
+
+class TestBaselineChannelStrategyPad:
+    """Test baselines with fixed padding strategy (pad to max channels)."""
+
+    def test_pad_strategy_heterogeneous_sessions_eegnet(self, task_configs):
+        """Test EEGNet with pad strategy on heterogeneous channel sessions."""
+        from foundry.models import EEGNetEncoder
+        from foundry.models.embeddings import FixedChannelStrategy
+
+        # Two sessions with different channel counts; pad to max (8)
+        max_channels = 8
+        strategy = FixedChannelStrategy(num_channels=max_channels)
+
+        model = EEGNetEncoder(
+            task_configs=task_configs,
+            num_channels=max_channels,
+            num_samples=512,
+            channel_strategy=strategy,
+        )
+
+        # Session 1: 4 channels
+        data1 = create_baseline_data_sample(
+            num_channels=4, num_samples=512, session_id="s1"
+        )
+        # Session 2: 8 channels
+        data2 = create_baseline_data_sample(
+            num_channels=8, num_samples=512, session_id="s2"
+        )
+
+        tokens1 = model.tokenize(data1)
+        tokens2 = model.tokenize(data2)
+
+        # Both should be padded to 8. Channel-strategy tokenize uses (C, T),
+        # matching POYO's prepare_pretokenize layout.
+        assert tokens1["input_values"].obj.shape == (max_channels, 512)
+        assert tokens2["input_values"].obj.shape == (max_channels, 512)
+        assert "input_mask" in tokens1
+        assert "input_mask" in tokens2
+
+        # Masks should indicate real vs padded channels
+        assert tokens1["input_mask"].sum() == 4  # 4 real channels
+        assert tokens2["input_mask"].sum() == 8  # 8 real channels
+
+    @pytest.mark.parametrize(
+        "model_cls,model_kwargs",
+        [
+            (Linear, {"num_samples": 200}),
+            (MLP, {"num_samples": 200}),
+            (GRU, {"num_samples": 200}),
+            (TemporalConvAvgPool, {}),
+            (ShallowConvNet, {"num_samples": 200}),
+            (EEGNetEncoder, {"num_samples": 200}),
+        ],
+        ids=["linear", "mlp", "gru", "temporalcnn", "shallowcnn", "eegnet"],
+    )
+    def test_pad_strategy_collate_and_forward(
+        self, task_configs, model_cls, model_kwargs
+    ):
+        """Pad strategy: mixed-C collate + forward for every baseline."""
+        from foundry.models.embeddings import FixedChannelStrategy
+
+        max_channels = 8
+        num_samples = model_kwargs.get("num_samples", 200)
+        strategy = FixedChannelStrategy(num_channels=max_channels)
+        model = model_cls(
+            task_configs=task_configs,
+            num_channels=max_channels,
+            channel_strategy=strategy,
+            **model_kwargs,
+        )
+
+        data1 = create_baseline_data_sample(
+            num_channels=4, num_samples=num_samples, session_id="s1"
+        )
+        data2 = create_baseline_data_sample(
+            num_channels=8, num_samples=num_samples, session_id="s2"
+        )
+        batch = collate([model.tokenize(data1), model.tokenize(data2)])
+        model_inputs, _, _, _ = model.unpack_batch(batch)
+
+        with torch.no_grad():
+            outputs = model(**model_inputs, unpack_output=False)
+
+        assert isinstance(outputs, dict)
+        assert len(outputs) > 0
+
+    def test_pad_strategy_zeros_are_real(self, task_configs):
+        """Verify that padded electrode slots remain zero through forward pass."""
+        from foundry.models import Linear
+        from foundry.models.embeddings import FixedChannelStrategy
+
+        max_channels = 8
+        strategy = FixedChannelStrategy(num_channels=max_channels)
+
+        model = Linear(
+            task_configs=task_configs,
+            num_channels=max_channels,
+            num_samples=100,
+            channel_strategy=strategy,
+        )
+
+        # Create sample with 4 real channels
+        data = create_baseline_data_sample(num_channels=4, num_samples=100)
+        tokens = model.tokenize(data)
+
+        # Check that padded channels (indices 4-7) are zero. Layout is (C, T).
+        padded_values = tokens["input_values"].obj[4:, :]
+        assert (padded_values == 0).all(), (
+            "Padded electrode slots should be zero"
+        )
+
+
+class TestBaselineChannelStrategySession:
+    """Test baselines with per-session projection strategy."""
+
+    def test_session_projection_strategy_eegnet(self, task_configs):
+        """Test EEGNet with per-session projection strategy."""
+        from foundry.models import EEGNetEncoder
+        from foundry.models.embeddings import (
+            SpatialProjectionStrategy,
+            SessionSpatialProjector,
+        )
+
+        # Sessions: s1 has 4 channels, s2 has 8 channels
+        session_configs = {"s1": 4, "s2": 8}
+        num_sources = 6  # Common latent space size
+        max_channels = max(session_configs.values())
+
+        projector = SessionSpatialProjector(
+            session_configs=session_configs,
+            num_sources=num_sources,
+            common_layer=True,
+        )
+
+        strategy = SpatialProjectionStrategy(
+            num_channels=max_channels,
+            num_sources=num_sources,
+            projector=projector,
+        )
+
+        model = EEGNetEncoder(
+            task_configs=task_configs,
+            num_channels=num_sources,  # Architecture sees num_sources channels
+            num_samples=512,
+            channel_strategy=strategy,
+        )
+
+        # Session 1: 4 channels
+        data1 = create_baseline_data_sample(
+            num_channels=4, num_samples=512, session_id="s1"
+        )
+        # Session 2: 8 channels
+        data2 = create_baseline_data_sample(
+            num_channels=8, num_samples=512, session_id="s2"
+        )
+
+        tokens1 = model.tokenize(data1)
+        tokens2 = model.tokenize(data2)
+
+        # Both are padded to max (8); projection to num_sources happens in forward.
+        assert tokens1["input_values"].obj.shape == (max_channels, 512)
+        assert tokens2["input_values"].obj.shape == (max_channels, 512)
+
+        # Session IDs are attached for projector
+        assert tokens1["input_session_ids"] == "s1"
+        assert tokens2["input_session_ids"] == "s2"
+
+        # Channel counts are attached
+        assert tokens1["input_channel_counts"] == 4
+        assert tokens2["input_channel_counts"] == 8
+
+    @pytest.mark.parametrize(
+        "model_cls,model_kwargs",
+        [
+            (Linear, {"num_samples": 128}),
+            (MLP, {"num_samples": 128}),
+            (GRU, {"num_samples": 128}),
+            (TemporalConvAvgPool, {}),
+            (ShallowConvNet, {"num_samples": 128}),
+            (EEGNetEncoder, {"num_samples": 128}),
+        ],
+        ids=["linear", "mlp", "gru", "temporalcnn", "shallowcnn", "eegnet"],
+    )
+    def test_session_projection_training_unpack_forward(
+        self, task_configs, model_cls, model_kwargs
+    ):
+        """Session projection for every baseline, with training-style unpack.
+
+        FoundryModule pops ``session_id`` before the forward pass, so the
+        projector must receive ``input_session_ids`` from tokenize/collate.
+        """
+        from foundry.models.embeddings import (
+            SpatialProjectionStrategy,
+            SessionSpatialProjector,
+        )
+
+        session_configs = {"s1": 4, "s2": 8}
+        num_sources = 6
+        num_samples = model_kwargs.get("num_samples", 128)
+        projector = SessionSpatialProjector(
+            session_configs=session_configs,
+            num_sources=num_sources,
+            common_layer=True,
+        )
+        strategy = SpatialProjectionStrategy(
+            num_channels=max(session_configs.values()),
+            num_sources=num_sources,
+            projector=projector,
+        )
+        model = model_cls(
+            task_configs=task_configs,
+            num_channels=num_sources,
+            channel_strategy=strategy,
+            **model_kwargs,
+        )
+
+        data1 = create_baseline_data_sample(
+            num_channels=4, num_samples=num_samples, session_id="s1"
+        )
+        data2 = create_baseline_data_sample(
+            num_channels=8, num_samples=num_samples, session_id="s2"
+        )
+        batch = collate([model.tokenize(data1), model.tokenize(data2)])
+
+        # Mimic FoundryModule._unpack_batch: session_id is dropped.
+        batch.pop("target_values")
+        batch.pop("target_weights")
+        batch.pop("session_id", None)
+        batch.pop("absolute_start", None)
+        assert "input_session_ids" in batch
+
+        with torch.no_grad():
+            outputs = model(**batch, unpack_output=False)
+
+        assert isinstance(outputs, dict)
+        assert len(outputs) > 0
+
+    def test_session_projection_gradients_flow(self, task_configs):
+        """Verify gradients flow through per-session layers."""
+        from foundry.models import Linear
+        from foundry.models.embeddings import (
+            SpatialProjectionStrategy,
+            SessionSpatialProjector,
+        )
+
+        session_configs = {"s1": 4, "s2": 6}
+        num_sources = 5
+        max_channels = max(session_configs.values())
+
+        projector = SessionSpatialProjector(
+            session_configs=session_configs,
+            num_sources=num_sources,
+        )
+
+        strategy = SpatialProjectionStrategy(
+            num_channels=max_channels,
+            num_sources=num_sources,
+            projector=projector,
+        )
+
+        model = Linear(
+            task_configs=task_configs,
+            num_channels=num_sources,
+            num_samples=100,
+            channel_strategy=strategy,
+        )
+
+        data = create_baseline_data_sample(
+            num_channels=4, num_samples=100, session_id="s1"
+        )
+        tokens = model.tokenize(data)
+
+        batch = collate([tokens])
+        model_inputs, target_values, target_weights, task_index = (
+            model.unpack_batch(batch)
+        )
+
+        # Forward and loss
+        outputs = model(**model_inputs, unpack_output=False)
+        loss = compute_multitask_loss(
+            model, outputs, target_values, target_weights, task_index
+        )
+
+        # Backward should work without errors
+        loss.backward()
+
+        # Check that projector gradients exist (direct Linear, no hidden MLP)
+        assert projector.session_layers["s1"].weight.grad is not None
