@@ -7,7 +7,7 @@
 #   uv run python main.py experiment=auditory_decoding/eegnet_neurosoft_8band_singlesess
 
 defaults:
-  - override /model: gru
+  - override /model: eegnet
   - override /data: neurosoft_minipigs/multisess_raw
   - override /model/channel_strategy: session
 
@@ -16,7 +16,7 @@ task_configs:
 
 model:
   # Session projection maps variable electrode counts to num_sources, which
-  # is the channel axis EEGNet's spatial conv actually sees.
+  # is the channel axis GRU's input_projactually sees.
   num_channels: ${hyperparameters.num_sources}
   num_samples: 1000
 
@@ -27,7 +27,7 @@ data:
 run:
   project: auditory_decoding
   name: ${hydra:runtime.choices.model}_neurosoft_8band_${data.dataset_kwargs.recording_ids.0}
-  group: TEST #NEUROSOFT_INTRASESSION_MULTISUBJ
+  group: HYPER-PARAM-SEARCH
   tags:
     - baselines
     - ${hydra:runtime.choices.model}
