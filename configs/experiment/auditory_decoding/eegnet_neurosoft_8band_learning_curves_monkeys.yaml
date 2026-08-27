@@ -70,8 +70,8 @@ trainer:
       # Set from a validated profiler run for this realized model/input shape
       # before submitting production jobs. The callback refuses to run without it.
       require_flops: true
-      flops_per_window: ???
-      flop_method: ???
+      flops_per_window: 78487808
+      flop_method: torch-flop-counter-v1
 
 hydra:
   sweeper:
