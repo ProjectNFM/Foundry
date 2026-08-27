@@ -10,9 +10,10 @@ import torch
 import torch.nn as nn
 from torch_brain.data import Data
 from torch_brain.batching import chain, pad8, pad2d
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from foundry.models.readout import ReadoutRouter, build_readout_router
+from foundry.models.embeddings.channel import ChannelStrategy
 from foundry.tasks.config import TaskConfig
 from foundry.tasks.targets import extract_multitask_targets
 
@@ -29,18 +30,23 @@ class BaselineEEGModel(nn.Module):
         num_channels: int,
         task_configs: dict[str, TaskConfig],
         num_samples: int | None = None,
+        channel_strategy: Optional[ChannelStrategy] = None,
     ):
         """
         Args:
-            num_channels (int): Number of EEG channels.
+            num_channels (int): Number of EEG channels (or post-strategy channels if strategy is set).
             task_configs: Mapping from task name to :class:`~foundry.tasks.config.TaskConfig`.
             num_samples (int | None, optional): Number of time samples per input window. Subclasses that require
                 a fixed window length (e.g., for shape checks or flattened readout dimensions) should pass this value.
                 Subclasses with adaptive pooling (e.g., TemporalConvAvgPool) may leave it as None. Default: None.
+            channel_strategy (ChannelStrategy | None, optional): Channel handling strategy (e.g., pad to max,
+                or per-session projection). When set, ``num_channels`` becomes the post-strategy channel count.
+                Default: None (no channel transformation).
         """
         super().__init__()
         self.num_channels = num_channels
         self.num_samples = num_samples
+        self.channel_strategy = channel_strategy
         self._task_configs = TaskConfig.normalize_task_configs(task_configs)
 
     @property
@@ -67,52 +73,73 @@ class BaselineEEGModel(nn.Module):
             flat_embs[valid], (flat_task_index[valid] - 1).long()
         )
 
-    def _normalize_input_shape(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Normalizes input tensor to (B, C, T) format.
+    def _apply_channel_strategy(
+        self, x: torch.Tensor, **kwargs
+    ) -> torch.Tensor:
+        """Run the channel strategy, mapping ``session_id`` if needed."""
+        if "input_session_ids" not in kwargs and "session_id" in kwargs:
+            kwargs = {**kwargs, "input_session_ids": kwargs["session_id"]}
+        return self.channel_strategy(x, **kwargs)
 
-        Converts (B, T, C) to (B, C, T) if the last dimension matches num_channels.
+    def _normalize_input_shape(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+        """
+        Normalizes input tensor to (B, C, T) format and applies channel strategy if set.
+
+        When channel_strategy is set, applies it before shape normalization.
+        Converts (B, T, C) to (B, C, T) if the last dimension matches num_channels (only when no strategy).
         This is a generic shape normalization utility for all baseline models.
 
         Args:
             x (torch.Tensor): Input of shape (B, C, T) or (B, T, C).
+            **kwargs: Additional arguments (e.g., for channel strategy).
 
         Returns:
             torch.Tensor: Input tensor of shape (B, C, T).
         """
-        if len(x.shape) == 3:
+        if self.channel_strategy is not None:
+            x = self._apply_channel_strategy(x, **kwargs)
+        elif len(x.shape) == 3:
             # Convert (B, T, C) to (B, C, T) if needed.
             if x.shape[-1] == self.num_channels:
                 x = x.transpose(1, 2)
         return x
 
-    def _check_input_shape_conv1d(self, x: torch.Tensor) -> torch.Tensor:
+    def _check_input_shape_conv1d(
+        self, x: torch.Tensor, **kwargs
+    ) -> torch.Tensor:
         """
         Ensures input tensor has correct shape for Conv1d layer: (B, C, T).
 
         Args:
             x (torch.Tensor): Input of shape (B, C, T) or (B, T, C).
+            **kwargs: Additional arguments (e.g., for channel strategy).
 
         Returns:
             torch.Tensor: Input tensor of shape (B, C, T).
         """
-        return self._normalize_input_shape(x)
+        return self._normalize_input_shape(x, **kwargs)
 
-    def _check_input_shape_conv2d(self, x: torch.Tensor) -> torch.Tensor:
+    def _check_input_shape_conv2d(
+        self, x: torch.Tensor, **kwargs
+    ) -> torch.Tensor:
         """
         Ensures input tensor has correct shape for Conv2d layer: (B, 1, C, T).
+        Applies channel strategy if set.
 
         Args:
             x (torch.Tensor): Input of shape (B, C, T) or (B, T, C).
+            **kwargs: Additional arguments (e.g., for channel strategy).
 
         Returns:
             torch.Tensor: Input tensor of shape (B, 1, C, T).
         """
-        if len(x.shape) == 3:
+        if self.channel_strategy is not None:
+            x = self._apply_channel_strategy(x, **kwargs)
+        elif len(x.shape) == 3:
             # Convert (B, T, C) to (B, C, T) if needed.
             if x.shape[-1] == self.num_channels:
                 x = x.transpose(1, 2)
-            # Add extra channel dimension
+        if len(x.shape) == 3:
             x = x.unsqueeze(1)
         return x
 
@@ -120,18 +147,24 @@ class BaselineEEGModel(nn.Module):
         """
         Converts a TemporalData EEG/ECoG sample to model-ready tensors and multitask readout targets.
 
+        When channel_strategy is set, applies prepare_pretokenize to handle heterogeneous electrode counts.
+
         Args:
             data (torch_brain.data.Data): Input data structure containing an "eeg" or "ecog" field
                 along with "channels" and task-specific label fields.
 
         Returns:
             dict: {
-                "input_values" (torch.Tensor): Model input of shape (T, C),
+                "input_values" (torch.Tensor): Model input of shape (T, C) or padded/projected,
                 "task_index" (torch.Tensor): Target output decoder indices,
                 "target_values" (dict[str, torch.Tensor] or similar): Multitask target values,
                 "target_weights" (dict[str, torch.Tensor] or similar): Multitask target weights,
                 "session_id" (Any): Session identifier,
                 "absolute_start" (Any): Absolute segment start time,
+                "input_mask" (torch.Tensor, optional): Mask for real channels (if strategy set),
+                "input_session_ids" (str, optional): Session ID for strategy (if strategy set),
+                "input_channel_counts" (torch.Tensor, optional): Actual channel count per sample (if strategy set),
+                "input_seq_len" (torch.Tensor, optional): Actual sequence length (if strategy set),
             }
 
         Note:
@@ -171,14 +204,13 @@ class BaselineEEGModel(nn.Module):
         )
 
         signal = np.asarray(signal, dtype=np.float32)
-        x = torch.from_numpy(signal[:, modality_mask])
+        signal_filtered = signal[:, modality_mask]
 
         output_values, output_task_index, output_weights = (
             self._extract_targets(data)
         )
 
-        return {
-            "input_values": pad2d(x),
+        result = {
             "task_index": pad8(output_task_index),
             "target_values": chain(output_values, allow_missing_keys=True),
             "target_weights": chain(output_weights, allow_missing_keys=True),
@@ -186,8 +218,51 @@ class BaselineEEGModel(nn.Module):
             "absolute_start": float(data.absolute_start),
         }
 
+        # Apply channel strategy if present
+        if self.channel_strategy is not None:
+            # Get sampling rate (assume it exists on the signal object)
+            if hasattr(
+                data.eeg if has_eeg else (data.ecog if has_ecog else data.seeg),
+                "sampling_rate",
+            ):
+                sampling_rate = (
+                    data.eeg
+                    if has_eeg
+                    else (data.ecog if has_ecog else data.seeg)
+                ).sampling_rate
+            else:
+                sampling_rate = 1.0  # fallback
+
+            # Create dummy channel tokens (baselines don't use channel vocab)
+            dummy_channel_tokens = np.arange(
+                signal_filtered.shape[1], dtype=np.int64
+            )
+
+            # Apply strategy preparation (padding/projection setup)
+            strategy_result = self.channel_strategy.prepare_pretokenize(
+                signal_filtered,
+                dummy_channel_tokens,
+                sampling_rate,
+            )
+            result.update(strategy_result)
+            result["input_values"] = pad2d(result["input_values"])
+            # SessionSpatialProjector looks up per-session layers by this key.
+            # Training pops ``session_id`` before the forward pass, so the
+            # projector id must live on its own collated field (same as POYO).
+            result["input_session_ids"] = str(data.session.id)
+        else:
+            # Standard path: no channel strategy
+            result["input_values"] = pad2d(torch.from_numpy(signal_filtered))
+
+        return result
+
     def unpack_batch(self, batch: Dict[str, Any]) -> tuple:
         """Extract model inputs and targets from batch.
+
+        Pops target/metadata keys so remaining tensors — including channel-
+        strategy fields such as ``input_session_ids`` — can be forwarded.
+        Matches :meth:`foundry.training.module.FoundryModule._unpack_batch`
+        aside from not returning ``session_id``.
 
         Args:
             batch: Batch dictionary from dataloader
@@ -201,12 +276,7 @@ class BaselineEEGModel(nn.Module):
         batch.pop("absolute_start", None)
         batch.pop("eval_mask", None)
         task_index = batch["task_index"]
-
-        model_inputs = {
-            "input_values": batch["input_values"],
-            "task_index": task_index,
-        }
-        return model_inputs, target_values, target_weights, task_index
+        return batch, target_values, target_weights, task_index
 
 
 class Linear(BaselineEEGModel):
@@ -223,17 +293,20 @@ class Linear(BaselineEEGModel):
         task_configs: dict[str, TaskConfig],
         num_channels: int = 64,
         num_samples: int = 128,
+        channel_strategy: Optional[ChannelStrategy] = None,
     ):
         """
         Args:
             task_configs: Mapping from task name to TaskConfig. Readout specification(s).
-            num_channels (int, optional): Number of EEG channels. Default: 64.
+            num_channels (int, optional): Number of EEG channels (or post-strategy). Default: 64.
             num_samples (int, optional): Number of time samples per input window. Default: 128.
+            channel_strategy: Optional channel strategy for heterogeneous electrode counts.
         """
         super().__init__(
             num_channels=num_channels,
             num_samples=num_samples,
             task_configs=task_configs,
+            channel_strategy=channel_strategy,
         )
 
         out_dim = num_channels * num_samples
@@ -252,11 +325,12 @@ class Linear(BaselineEEGModel):
         Args:
             input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
             task_index (torch.Tensor): Task index tensor of shape (B, n_out).
+            **kwargs: Additional arguments (e.g., channel strategy kwargs).
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
         """
-        x = self._normalize_input_shape(input_values)
+        x = self._normalize_input_shape(input_values, **kwargs)
         if x.shape[-1] != self.num_samples:
             raise ValueError(
                 f"Expected input with {self.num_samples} time samples, got {x.shape[-1]}"
@@ -291,19 +365,22 @@ class MLP(BaselineEEGModel):
         num_samples: int = 128,
         hidden_dims: list[int] | None = None,
         dropout_rate: float = 0.5,
+        channel_strategy: Optional[ChannelStrategy] = None,
     ):
         """
         Args:
             task_configs: Mapping from task name to TaskConfig. Readout specification(s).
-            num_channels (int, optional): Number of EEG channels. Default: 64.
+            num_channels (int, optional): Number of EEG channels (or post-strategy). Default: 64.
             num_samples (int, optional): Number of time samples per input window. Default: 128.
             hidden_dims (list[int], optional): Hidden layer dimensions. Default: [128, 64].
             dropout_rate (float, optional): Dropout rate after each hidden layer. Default: 0.5.
+            channel_strategy: Optional channel strategy for heterogeneous electrode counts.
         """
         super().__init__(
             num_channels=num_channels,
             num_samples=num_samples,
             task_configs=task_configs,
+            channel_strategy=channel_strategy,
         )
 
         if hidden_dims is None:
@@ -335,11 +412,12 @@ class MLP(BaselineEEGModel):
         Args:
             input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
             task_index (torch.Tensor): Task index tensor of shape (B, n_out).
+            **kwargs: Additional arguments (e.g., channel strategy kwargs).
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
         """
-        x = self._normalize_input_shape(input_values)
+        x = self._normalize_input_shape(input_values, **kwargs)
         if x.shape[-1] != self.num_samples:
             raise ValueError(
                 f"Expected input with {self.num_samples} time samples, got {x.shape[-1]}"
@@ -374,26 +452,29 @@ class GRU(BaselineEEGModel):
         num_layers: int = 2,
         bidirectional: bool = True,
         dropout_rate: float = 0.3,
+        channel_strategy: Optional[ChannelStrategy] = None,
     ):
         """
         Args:
             task_configs: Mapping from task name to TaskConfig. Readout specification(s).
-            num_channels (int, optional): Number of EEG channels. Default: 64.
+            num_channels (int, optional): Number of EEG channels (or post-strategy). Default: 64.
             num_samples (int, optional): Number of time samples per input window. Default: 128.
             input_proj_dim (int, optional): Per-timestep channel projection dimension. Default: 128.
             hidden_size (int, optional): GRU hidden size per direction. Default: 128.
             num_layers (int, optional): Number of stacked GRU layers. Default: 2.
             bidirectional (bool, optional): Whether to use bidirectional GRU. Default: True.
             dropout_rate (float, optional): Dropout rate between stacked GRU layers. Default: 0.3.
+            channel_strategy: Optional channel strategy for heterogeneous electrode counts.
         """
         super().__init__(
             num_channels=num_channels,
             num_samples=num_samples,
             task_configs=task_configs,
+            channel_strategy=channel_strategy,
         )
 
-        self.input_norm = nn.LayerNorm(num_channels)
-        self.input_proj = nn.Linear(num_channels, input_proj_dim)
+        self.input_norm = nn.LayerNorm(self.num_channels)
+        self.input_proj = nn.Linear(self.num_channels, input_proj_dim)
         self.gru = nn.GRU(
             input_size=input_proj_dim,
             hidden_size=hidden_size,
@@ -419,11 +500,12 @@ class GRU(BaselineEEGModel):
         Args:
             input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
             task_index (torch.Tensor): Task index tensor of shape (B, n_out).
+            **kwargs: Additional arguments (e.g., channel strategy kwargs).
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
         """
-        x = self._normalize_input_shape(input_values)
+        x = self._normalize_input_shape(input_values, **kwargs)
         if x.shape[-1] != self.num_samples:
             raise ValueError(
                 f"Expected input with {self.num_samples} time samples, got {x.shape[-1]}"
@@ -460,19 +542,22 @@ class TemporalConvAvgPool(BaselineEEGModel):
         num_channels: int = 64,
         num_filters: int = 32,
         kernel_size: int = 64,
+        channel_strategy: Optional[ChannelStrategy] = None,
         **kwargs,
     ):
         """
         Args:
             task_configs: Mapping from task name to TaskConfig. Readout specification(s).
-            num_channels (int, optional): Number of EEG channels. Default: 64.
+            num_channels (int, optional): Number of EEG channels (or post-strategy). Default: 64.
             num_filters (int, optional): Number of convolutional filters. Default: 32.
             kernel_size (int, optional): Temporal kernel size for Conv1d. Default: 64.
+            channel_strategy: Optional channel strategy for heterogeneous electrode counts.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(
             num_channels=num_channels,
             task_configs=task_configs,
+            channel_strategy=channel_strategy,
         )
 
         self.conv = nn.Conv1d(
@@ -497,11 +582,12 @@ class TemporalConvAvgPool(BaselineEEGModel):
         Args:
             input_values (torch.Tensor): EEG input tensor, shape (B, C, T) or (B, T, C).
             task_index (torch.Tensor): Task index tensor of shape (B, n_out).
+            **kwargs: Additional arguments (e.g., channel strategy kwargs).
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
         """
-        x = self._check_input_shape_conv1d(input_values)
+        x = self._check_input_shape_conv1d(input_values, **kwargs)
         x = self.conv(x)
         x = self.bn(x)
         x = self.act(x)
@@ -532,20 +618,23 @@ class ShallowConvNet(BaselineEEGModel):
         dropout_rate: float = 0.5,
         kernel_length: int = 13,
         F1: int = 40,
+        channel_strategy: Optional[ChannelStrategy] = None,
     ):
         """
         Args:
             task_configs: Mapping from task name to TaskConfig. Readout specification(s).
-            num_channels (int, optional): Number of EEG channels. Default: 64.
+            num_channels (int, optional): Number of EEG channels (or post-strategy). Default: 64.
             num_samples (int, optional): Number of samples (length of EEG input). Default: 128.
             dropout_rate (float, optional): Dropout rate after pooling. Default: 0.5.
             kernel_length (int, optional): Temporal convolution kernel length. Default: 13.
             F1 (int, optional): Number of spatial/temporal filters. Default: 40.
+            channel_strategy: Optional channel strategy for heterogeneous electrode counts.
         """
         super().__init__(
             num_channels=num_channels,
             num_samples=num_samples,
             task_configs=task_configs,
+            channel_strategy=channel_strategy,
         )
 
         # Temporal convolution
@@ -555,14 +644,14 @@ class ShallowConvNet(BaselineEEGModel):
         self.bn1 = nn.BatchNorm2d(F1)
 
         # Spatial convolution
-        self.conv2 = nn.Conv2d(F1, F1, (num_channels, 1), bias=False)
+        self.conv2 = nn.Conv2d(F1, F1, (self.num_channels, 1), bias=False)
         self.bn2 = nn.BatchNorm2d(F1)
         self.act = nn.ELU()
         self.pool = nn.AvgPool2d((1, 35))
         self.dropout = nn.Dropout(dropout_rate)
         self.flatten = nn.Flatten()
 
-        out_dim = F1 * (num_samples // 35)
+        out_dim = F1 * (self.num_samples // 35)
         self.router = self._build_router(out_dim)
 
     def forward(
@@ -578,11 +667,12 @@ class ShallowConvNet(BaselineEEGModel):
         Args:
             input_values (torch.Tensor): EEG input tensor, shape (B, T, C).
             task_index (torch.Tensor): Task index tensor (B, n_out).
+            **kwargs: Additional arguments (e.g., channel strategy kwargs).
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
         """
-        x = self._check_input_shape_conv2d(input_values)
+        x = self._check_input_shape_conv2d(input_values, **kwargs)
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.conv2(x)
@@ -685,7 +775,7 @@ class EEGNetEncoder(BaselineEEGModel):
 
     Args:
         task_configs: Mapping from task name to TaskConfig.
-        num_channels (int, optional): Number of EEG electrodes/channels. Default: 64.
+        num_channels (int, optional): Number of EEG electrodes/channels (or post-strategy). Default: 64.
         num_samples (int, optional): Number of samples in an EEG trial/window. Default: 128.
         F1 (int, optional): Temporal filter count ("bandpass" filters). Default: 8.
         D (int, optional): Depthwise spatial multiplier (# spatial filters per F1). Default: 2.
@@ -696,6 +786,7 @@ class EEGNetEncoder(BaselineEEGModel):
         bn_eps (float, optional): BatchNorm epsilon. Default: 1e-5 (PyTorch default).
         spatial_max_norm (float | None, optional): Max-norm constraint on the
             depthwise spatial conv weight. ``None`` disables the constraint.
+        channel_strategy: Optional channel strategy for heterogeneous electrode counts.
     """
 
     def __init__(
@@ -711,12 +802,14 @@ class EEGNetEncoder(BaselineEEGModel):
         bn_momentum: float = 0.1,
         bn_eps: float = 1e-5,
         spatial_max_norm: float | None = None,
+        channel_strategy: Optional[ChannelStrategy] = None,
         **kwargs,
     ):
         super().__init__(
             num_channels=num_channels,
             num_samples=num_samples,
             task_configs=task_configs,
+            channel_strategy=channel_strategy,
         )
 
         bn_kwargs = {"momentum": bn_momentum, "eps": bn_eps}
@@ -727,7 +820,7 @@ class EEGNetEncoder(BaselineEEGModel):
         spatial_conv = nn.Conv2d(
             F1,
             F1 * D,
-            kernel_size=(num_channels, 1),
+            kernel_size=(self.num_channels, 1),
             groups=F1,
             bias=False,
         )
@@ -801,6 +894,7 @@ class EEGNetEncoder(BaselineEEGModel):
     def extract_features(
         self,
         input_values: torch.Tensor,
+        **kwargs,
     ) -> torch.Tensor:
         """
         Extracts deep feature representation (before readout head).
@@ -809,12 +903,13 @@ class EEGNetEncoder(BaselineEEGModel):
         Accepts flexible input shapes and corrects them as needed.
 
         Args:
-            x (torch.Tensor): EEG batch; (B, C, T), (B, T, C), or (B, 1, C, T).
+            input_values (torch.Tensor): EEG batch; (B, C, T), (B, T, C), or (B, 1, C, T).
+            **kwargs: Additional arguments (e.g., channel strategy kwargs) passed to shape checks.
 
         Returns:
             torch.Tensor: 4D feature tensor (B, F, H, W) prior to flattening.
         """
-        x = self._check_input_shape_conv2d(input_values)
+        x = self._check_input_shape_conv2d(input_values, **kwargs)
         x = self.block1(x)
         x = self.block2(x)
         return x
@@ -832,11 +927,12 @@ class EEGNetEncoder(BaselineEEGModel):
         Args:
             input_values (torch.Tensor): EEG batch, (B, C, T), (B, T, C), or (B, 1, C, T).
             task_index (torch.Tensor): Task index tensor (B, n_out).
+            **kwargs: Additional arguments (e.g., channel strategy kwargs).
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary of multitask readout outputs.
         """
-        x = self.extract_features(input_values)
+        x = self.extract_features(input_values, **kwargs)
 
         batch_size = x.shape[0]
         n_out = task_index.shape[1]
