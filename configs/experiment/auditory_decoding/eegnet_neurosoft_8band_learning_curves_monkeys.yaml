@@ -1,0 +1,84 @@
+# @package _global_
+#
+# Phase 1: EEGNet single-session learning curves on monkey data.
+# Sweeps 62 supported recording/fraction cells × 3 seeds = 186 jobs.
+#
+# Usage:
+#   python main.py experiment=auditory_decoding/eegnet_neurosoft_8band_learning_curves_monkeys hydra/launcher=slurm_default -m
+
+defaults:
+  - override /model: eegnet
+  - override /data: neurosoft_monkeys/singlesess
+
+task_configs:
+  - neurosoft_acoustic_stim_8band
+
+phase1_cell: ???
+
+model:
+  num_channels: ${get_num_ecog_channels_by_name:${data.root}/neurosoft_monkeys_2026,${data.dataset_kwargs.recording_ids.0}}
+  num_samples: 1000
+
+data:
+  split_type: intrasession-causal
+  audit_json: docs/neurosoft-phase0-audit.json
+  audit_species: monkeys
+  task_type: acoustic_stim
+  training_fraction_task: neurosoft_acoustic_stim_8band
+  training_fraction: ${phase1_cell_fraction:${phase1_cell}}
+  training_fraction_seed: ${run.seed}
+  training_fraction_min_class_support: 3
+  training_fraction_min_present_classes: 6
+  dataset_kwargs:
+    recording_ids:
+      - ${phase1_cell_recording:${phase1_cell}}
+
+run:
+  project: neurosoft_supervised_pretraining
+  name: eegnet_mk_${data.dataset_kwargs.recording_ids.0}_f${data.training_fraction}_s${run.seed}
+  group: PHASE1_EEGNET_MONKEYS
+  tags: [phase1, eegnet, monkeys, 8band, learning-curves]
+  seed: ???
+  log_level: INFO
+  evaluate_test: true
+
+hyperparameters:
+  batch_size: 16
+  sequence_length: 0.5
+  fold_number: 0
+  num_workers: 4
+  learning_rate: 0.015
+  weight_decay: 0.018
+
+trainer:
+  max_epochs: 1000
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      patience: 20
+    model_checkpoint:
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      auto_insert_metric_name: false
+    compute_tracking:
+      _target_: foundry.training.callbacks.ComputeTrackingCallback
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      sequence_length: ${hyperparameters.sequence_length}
+      # Set from a validated profiler run for this realized model/input shape
+      # before submitting production jobs. The callback refuses to run without it.
+      require_flops: true
+      flops_per_window: ???
+      flop_method: ???
+
+hydra:
+  sweeper:
+    max_batch_size: 1000
+    params:
+      phase1_cell: ${neurosoft_supported_cell_sweep_choices:docs/neurosoft-phase0-audit.json,monkeys}
+      run.seed: 42,43,44
+  launcher:
+    partition: long
+    gres: gpu:a100:1

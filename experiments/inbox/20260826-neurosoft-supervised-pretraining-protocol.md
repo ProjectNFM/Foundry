@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-08-26
 **Parent experiment:** [Causal Split Baselines](../02-neurosoft-intrasession-multisubj/20260805-LS-causal-split.md)
-**Follow-up experiments:** TBD (Phase 1 EEGNet learning curves)
+**Follow-up experiments:** [Phase 1 EEGNet Learning Curves](20260826-MS-neurosoft-eegnet-learning-curves.md)
 **Tags:** neurosoft, protocol, preregistration, data-audit, 8band, intrasession-causal, supervised-pretraining
 
 ## Background
