@@ -86,6 +86,14 @@ class PackedSubmititLauncher(BaseSubmititLauncher):
 
         task_id = submitit.JobEnvironment().global_rank
 
+        if task_id >= len(sweep_overrides):
+            log.info(
+                "Task %d has no work (batch size %d); exiting cleanly.",
+                task_id,
+                len(sweep_overrides),
+            )
+            return None
+
         result = self(
             sweep_overrides[task_id],
             job_dir_key[task_id],
