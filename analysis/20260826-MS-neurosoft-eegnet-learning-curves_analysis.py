@@ -568,7 +568,9 @@ def cumulative_data_to_80(data_to_80: pd.DataFrame) -> pd.DataFrame:
                     "fraction": fraction,
                     "n_sessions": n_sessions,
                     "n_reached_80pct": int(reached),
-                    "share_reached_80pct": reached / n_sessions if n_sessions else np.nan,
+                    "share_reached_80pct": reached / n_sessions
+                    if n_sessions
+                    else np.nan,
                 }
             )
     return pd.DataFrame(rows)
@@ -669,7 +671,9 @@ def compute_optimization_to_80(
         fetched += 1
         if fetched % 25 == 0:
             pd.DataFrame(rows).to_csv(cache_path, index=False)
-            print(f"  Cached {len(rows)} / {len(candidates)} validation histories")
+            print(
+                f"  Cached {len(rows)} / {len(candidates)} validation histories"
+            )
 
     result = pd.DataFrame(rows)
     result.to_csv(cache_path, index=False)
@@ -915,7 +919,8 @@ def build_integrity_table(
     observed_keys = set()
     if not runs.empty:
         test_columns = [
-            f"test_{metric.removeprefix('supported_')}" for metric in TEST_METRICS
+            f"test_{metric.removeprefix('supported_')}"
+            for metric in TEST_METRICS
         ]
         complete_tests = runs[runs["finished"]].dropna(subset=test_columns)
         for _, row in complete_tests.iterrows():
@@ -1068,7 +1073,9 @@ def plot_session_trajectories(runs: pd.DataFrame) -> Path:
 
     for ax, species in zip(axes, ("minipigs", "monkeys")):
         species_sessions = session_means[session_means["species"] == species]
-        for _, session in species_sessions.groupby("recording_id", dropna=False):
+        for _, session in species_sessions.groupby(
+            "recording_id", dropna=False
+        ):
             ax.plot(
                 session["fraction"],
                 session["test_f1"],
@@ -1142,7 +1149,9 @@ def plot_data_efficiency(cumulative: pd.DataFrame) -> Path:
     return out
 
 
-def plot_optimization_to_80_distribution(opt_to_80: pd.DataFrame) -> Path | None:
+def plot_optimization_to_80_distribution(
+    opt_to_80: pd.DataFrame,
+) -> Path | None:
     """Show the session-level distribution of training examples to 80% validation F1."""
     if opt_to_80.empty:
         return None
@@ -1155,9 +1164,9 @@ def plot_optimization_to_80_distribution(opt_to_80: pd.DataFrame) -> Path | None
         return None
 
     sessions = (
-        completed.groupby(["species", "recording_id", "fraction"], dropna=False)[
-            "opt_to_80_processed_examples"
-        ]
+        completed.groupby(
+            ["species", "recording_id", "fraction"], dropna=False
+        )["opt_to_80_processed_examples"]
         .mean()
         .reset_index(name="mean_processed_examples_to_80")
     )
@@ -1176,7 +1185,9 @@ def plot_optimization_to_80_distribution(opt_to_80: pd.DataFrame) -> Path | None
             ].dropna()
             for fraction in FRACTIONS
         ]
-        valid = [(i, value) for i, value in enumerate(values) if not value.empty]
+        valid = [
+            (i, value) for i, value in enumerate(values) if not value.empty
+        ]
         if not valid:
             continue
         box_positions = [positions[i] + offset for i, _ in valid]
@@ -1214,7 +1225,11 @@ def plot_optimization_to_80_distribution(opt_to_80: pd.DataFrame) -> Path | None
     ax.legend(
         handles=[
             plt.Line2D(
-                [0], [0], color=SPECIES_COLORS[species], lw=8, alpha=0.45,
+                [0],
+                [0],
+                color=SPECIES_COLORS[species],
+                lw=8,
+                alpha=0.45,
                 label=species,
             )
             for species in ("minipigs", "monkeys")
@@ -1373,9 +1388,14 @@ def main() -> None:
         CSV_DIR / f"{OUTPUT_PREFIX}_cumulative_data_to_80.csv", index=False
     )
 
-    optimization_cache_path = CSV_DIR / f"{OUTPUT_PREFIX}_optimization_to_80.csv"
+    optimization_cache_path = (
+        CSV_DIR / f"{OUTPUT_PREFIX}_optimization_to_80.csv"
+    )
     if args.offline or not args.include_optimization_history:
-        if optimization_cache_path.exists() and optimization_cache_path.stat().st_size:
+        if (
+            optimization_cache_path.exists()
+            and optimization_cache_path.stat().st_size
+        ):
             opt_to_80 = pd.read_csv(optimization_cache_path)
         else:
             opt_to_80 = pd.DataFrame()

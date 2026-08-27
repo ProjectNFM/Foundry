@@ -302,9 +302,9 @@ class TestSupportedMetrics:
         targets = torch.arange(num_classes)
 
         wrong_preds = torch.full((num_classes, num_classes), -10.0)
-        wrong_preds[
-            torch.arange(num_classes), (targets + 1) % num_classes
-        ] = 10.0
+        wrong_preds[torch.arange(num_classes), (targets + 1) % num_classes] = (
+            10.0
+        )
         metrics.update(wrong_preds, targets)
         metrics.compute()  # Simulate sanity-validation epoch-end logging.
         metrics.reset()

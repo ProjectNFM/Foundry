@@ -283,9 +283,7 @@ def _load_neurosoft_audit(audit_path: str) -> dict:
 
     expected_hash = audit.get("artifact_sha256")
     if not expected_hash:
-        raise ValueError(
-            f"Audit file {audit_path} is missing artifact_sha256"
-        )
+        raise ValueError(f"Audit file {audit_path} is missing artifact_sha256")
     payload = {k: v for k, v in audit.items() if k != "artifact_sha256"}
     canonical = json.dumps(
         payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True
@@ -330,9 +328,7 @@ def _neurosoft_supported_cell_sweep_choices(
             f"No supported cells found for species={species!r} in {audit_path}"
         )
 
-    return ",".join(
-        "'" + cell.replace("'", "\\'") + "'" for cell in cells
-    )
+    return ",".join("'" + cell.replace("'", "\\'") + "'" for cell in cells)
 
 
 def _phase1_cell_recording(cell: str) -> str:
