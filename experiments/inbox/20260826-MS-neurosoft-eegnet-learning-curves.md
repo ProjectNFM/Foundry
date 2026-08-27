@@ -1,6 +1,6 @@
 # Phase 1 -- EEGNet Single-Session Learning Curves
 
-**Status:** Draft
+**Status:** Running
 **Date started:** 2026-08-26
 **Parent experiment:** [NeuroSoft Supervised-Pretraining Protocol and Data Audit](20260826-neurosoft-supervised-pretraining-protocol.md)
 **Follow-up experiments:** TBD
@@ -89,8 +89,8 @@ the singlesession EEGNet baseline:
 
 | Launch | Slurm job ID | Snapshot bundle path |
 |--------|--------------|----------------------|
-| Minipigs (`eegnet_neurosoft_8band_learning_curves_minipigs`) | TBD | TBD |
-| Monkeys (`eegnet_neurosoft_8band_learning_curves_monkeys`) | TBD | TBD |
+| Minipigs (`eegnet_neurosoft_8band_learning_curves_minipigs`) | 10521500 (73 array elements, 579 tasks) | `/network/scratch/s/sobralm/foundry-launches/20260827T152641_PHASE1_EEGNET_MINIPIGS_b6c65640_6c083754` |
+| Monkeys (`eegnet_neurosoft_8band_learning_curves_monkeys`) | 10521501 (24 array elements, 186 tasks) | `/network/scratch/s/sobralm/foundry-launches/20260827T152736_PHASE1_EEGNET_MONKEYS_b6c65640_6262e1ed` |
 
 ## Results
 
