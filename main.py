@@ -486,6 +486,33 @@ def _build_model_and_data(cfg: DictConfig):
     return model, datamodule
 
 
+def _resolve_pretrained_components(
+    model: torch.nn.Module,
+    cfg: DictConfig,
+) -> tuple[str, ...] | None:
+    """Resolve an optional model-declared pretrained transfer regime."""
+    regime = OmegaConf.select(
+        cfg, "run.pretrained_transfer_regime", default=None
+    )
+    if regime is None:
+        return None
+
+    components_for_mode = getattr(
+        model, "transferable_components_for_mode", None
+    )
+    if not callable(components_for_mode):
+        raise ValueError(
+            f"Model {type(model).__name__} does not support named pretrained "
+            f"transfer regimes; cannot use {regime!r}."
+        )
+    components = tuple(components_for_mode(str(regime)))
+    if not components:
+        raise ValueError(
+            f"Pretrained transfer regime {regime!r} selected no components."
+        )
+    return components
+
+
 def _build_lightning_module(cfg: DictConfig, model, datamodule):
     """Instantiate the :class:`FoundryModule` Lightning wrapper from config."""
     return instantiate(cfg.module, model=model)
@@ -1005,8 +1032,13 @@ def main(cfg: DictConfig):
             cfg, "run.pretrained_transfer_mode", default="strict"
         )
         transfer_mode = TransferMode(transfer_mode_str)
+        components = _resolve_pretrained_components(model, cfg)
         load_pretrained_weights(
-            model, pretrained_ckpt, freeze=freeze, mode=transfer_mode
+            model,
+            pretrained_ckpt,
+            freeze=freeze,
+            mode=transfer_mode,
+            components=components,
         )
     elif OmegaConf.select(cfg, "run.freeze_backbone", default=False):
         if hasattr(model, "transferable_components"):
