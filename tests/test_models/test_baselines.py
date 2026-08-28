@@ -920,6 +920,207 @@ class TestGRU:
                 break
         assert has_gradients
 
+    @pytest.mark.parametrize(
+        "conv_type,use_input_proj",
+        [
+            ("spatial", True),
+            ("spatial", False),
+            ("temporal", True),
+            ("temporal", False),
+            ("spatiotemporal", True),
+            ("spatiotemporal", False),
+        ],
+        ids=[
+            "spatial_both",
+            "spatial_replace",
+            "temporal_both",
+            "temporal_replace",
+            "spatiotemporal_both",
+            "spatiotemporal_replace",
+        ],
+    )
+    def test_conv_types_forward(self, task_configs, conv_type, use_input_proj):
+        """Test GRU with different conv types and use_input_proj settings."""
+        model = GRU(
+            task_configs=task_configs,
+            num_channels=4,
+            num_samples=200,
+            input_proj_dim=64,
+            hidden_size=32,
+            num_layers=1,
+            bidirectional=False,
+            conv=conv_type,
+            use_input_proj=use_input_proj,
+            conv_filters=8,
+            conv_kernel=32,
+            conv_depth_multiplier=2,
+        )
+
+        assert model.conv_type == conv_type
+        assert model.conv is not None
+
+        expected_feat = {
+            "spatial": 8,  # conv_filters; kernel (K, 1) collapses channels
+            "temporal": 8 * 4,  # conv_filters * num_channels
+            "spatiotemporal": 8 * 2,  # F1 * D
+        }[conv_type]
+        assert model._get_conv_out_channels(conv_type, 8, 2) == expected_feat
+
+        if use_input_proj:
+            assert model.input_proj is not None
+            assert model.input_norm is None
+            assert model.input_proj.in_features == expected_feat
+            assert model.gru.input_size == 64
+        else:
+            assert model.input_proj is None
+            assert model.input_norm is None
+            assert model.gru.input_size == expected_feat
+
+        data = create_baseline_data_sample(num_channels=4, num_samples=200)
+        tokens = model.tokenize(data)
+        batch = collate([tokens])
+
+        x = batch["input_values"]
+        task_index = batch["task_index"]
+
+        outputs = model(
+            input_values=x,
+            task_index=task_index,
+        )
+
+        assert isinstance(outputs, dict)
+        assert "test_baseline_task" in outputs
+
+    @pytest.mark.parametrize(
+        "conv_type,use_input_proj",
+        [
+            ("spatial", True),
+            ("spatial", False),
+            ("temporal", True),
+            ("temporal", False),
+            ("spatiotemporal", True),
+            ("spatiotemporal", False),
+        ],
+    )
+    def test_conv_types_backward(self, task_configs, conv_type, use_input_proj):
+        """Test GRU conv types backward pass."""
+        model = GRU(
+            task_configs=task_configs,
+            num_channels=4,
+            num_samples=200,
+            input_proj_dim=64,
+            hidden_size=32,
+            num_layers=1,
+            bidirectional=False,
+            conv=conv_type,
+            use_input_proj=use_input_proj,
+            conv_filters=8,
+            conv_kernel=32,
+            conv_depth_multiplier=2,
+        )
+
+        data = create_baseline_data_sample(num_channels=4, num_samples=200)
+        tokens = model.tokenize(data)
+        batch = collate([tokens])
+
+        x = batch["input_values"]
+        task_index = batch["task_index"]
+        target_values = batch["target_values"]
+        target_weights = batch["target_weights"]
+
+        outputs = model(
+            input_values=x,
+            task_index=task_index,
+        )
+
+        loss = compute_multitask_loss(
+            model,
+            outputs,
+            target_values,
+            target_weights,
+            task_index,
+        )
+
+        assert loss.requires_grad
+        loss.backward()
+
+        has_gradients = False
+        for param in model.parameters():
+            if param.grad is not None:
+                has_gradients = True
+                break
+        assert has_gradients
+
+    def test_conv_session_projection(self, task_configs):
+        """Test GRU with spatial conv and session projection strategy."""
+        from foundry.models.embeddings import (
+            SpatialProjectionStrategy,
+            SessionSpatialProjector,
+        )
+
+        session_configs = {"s1": 4, "s2": 6}
+        num_sources = 8
+        max_channels = max(session_configs.values())
+
+        projector = SessionSpatialProjector(
+            session_configs=session_configs,
+            num_sources=num_sources,
+            common_layer=True,
+        )
+
+        strategy = SpatialProjectionStrategy(
+            num_channels=max_channels,
+            num_sources=num_sources,
+            projector=projector,
+        )
+
+        model = GRU(
+            task_configs=task_configs,
+            num_channels=num_sources,
+            num_samples=200,
+            input_proj_dim=64,
+            hidden_size=32,
+            num_layers=1,
+            bidirectional=False,
+            channel_strategy=strategy,
+            conv="spatial",
+            use_input_proj=True,
+            conv_filters=8,
+            conv_kernel=32,
+        )
+
+        data1 = create_baseline_data_sample(
+            num_channels=4, num_samples=200, session_id="s1"
+        )
+        data2 = create_baseline_data_sample(
+            num_channels=6, num_samples=200, session_id="s2"
+        )
+
+        tokens1 = model.tokenize(data1)
+        tokens2 = model.tokenize(data2)
+
+        assert tokens1["input_values"].obj.shape == (max_channels, 200)
+        assert tokens2["input_values"].obj.shape == (max_channels, 200)
+        assert tokens1["input_session_ids"] == "s1"
+        assert tokens2["input_session_ids"] == "s2"
+
+        batch = collate([tokens1, tokens2])
+        batch_dict, target_values, target_weights, task_index = (
+            model.unpack_batch(batch)
+        )
+
+        x = batch_dict.pop("input_values")
+        batch_dict.pop("task_index")
+
+        outputs = model(
+            input_values=x,
+            task_index=task_index,
+            **batch_dict,
+        )
+
+        assert isinstance(outputs, dict)
+        assert "test_baseline_task" in outputs
+
 
 # ============================================================================
 # Integration Tests
