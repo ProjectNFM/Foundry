@@ -1,15 +1,40 @@
 # NeuroSoft convolution--BiGRU implementation handoff
 
-**Status:** Design handoff -- do not treat this document as a completed
-implementation.  
-**Purpose:** Define the standalone model that will become the matched
+**Status:** Core implementation complete (2026-08-28).
+**Purpose:** Record the implemented standalone model used as the matched
 from-scratch and supervised-pretraining architecture in Phase 2 onward of the
 [NeuroSoft supervised-pretraining roadmap](neurosoft-supervised-pretraining-roadmap.md).
 
+## Implementation completion record
+
+The model and its transfer contract are implemented in
+`foundry/models/neurosoft_conv_bigru.py`, exported from `foundry.models`, and
+configured by `configs/model/neurosoft_conv_bigru.yaml`. The implementation:
+
+- provides one fresh, session-specific `Linear(C_session, adapter_dim)` input
+  adapter per configured recording, with padded channels excluded before the
+  adapter;
+- implements the shared depthwise-separable temporal frontend, bidirectional
+  GRU, masked mean pooling, and shared `ReadoutRouter` described below;
+- preserves zero time padding after learned normalization and after each
+  temporal block, so a batch's padding cannot affect valid right-edge
+  convolution windows or pooled predictions; and
+- exposes full-finetuning and frozen-representation component selections.
+  `load_pretrained_weights(..., components=...)` records the selected transfer
+  boundary, and the standard training entry point accepts
+  `run.pretrained_transfer_regime=frozen_representation` together with
+  `run.freeze_pretrained=true` to load/freeze only `temporal_frontend` and
+  `gru`. The target adapter and router remain newly initialized and trainable.
+
+Focused model, transfer, and transfer-regime regression tests cover this
+contract. The separate Phase-2 experiment matrix, FLOP validation, and
+end-to-end scientific runs described below remain experiment work rather than
+part of this core implementation.
+
 ## Decision summary
 
-Implement a new `NeurosoftConvBiGRU` model.  Do **not** add it to
-`foundry/models/baselines.py` or subclass `BaselineEEGModel`.
+`NeurosoftConvBiGRU` is implemented as a new standalone model. It is not in
+`foundry/models/baselines.py` and does not subclass `BaselineEEGModel`.
 
 The initial, fixed recipe is:
 
@@ -64,14 +89,14 @@ transfer boundary or pretraining behavior.
 
 ## Module location and minimal integration
 
-Create the model in a new module, for example:
+The model is implemented in:
 
 ```text
 foundry/models/neurosoft_conv_bigru.py
 ```
 
-Export `NeurosoftConvBiGRU` from `foundry/models/__init__.py` and add a dedicated
-Hydra model config such as:
+`NeurosoftConvBiGRU` is exported from `foundry/models/__init__.py`, and its
+dedicated Hydra model config is:
 
 ```text
 configs/model/neurosoft_conv_bigru.yaml
@@ -291,12 +316,12 @@ as such in the `TransferReport`.
    a strict linear probe because the input adapter is learned; use this full
    name in reports.
 
-The third mode needs an explicit loader/config option because its classifier
-policy differs from `transferable_components()` in full fine-tuning.  Do not
-implement it by loading the router and then randomly overwriting it without a
-recorded transfer report.  Either add a named component-selection argument to
-the checkpoint loader or a model method that returns a declared component tuple
-for each transfer regime.
+The third mode is implemented through the model's
+`transferable_components_for_mode("frozen_representation")`, which returns
+`("temporal_frontend", "gru")`. The checkpoint loader accepts this explicit
+component tuple, and `main.py` resolves it from
+`run.pretrained_transfer_regime`. This avoids loading and then overwriting the
+router, while keeping the selected transfer boundary in the transfer report.
 
 In all modes, verify that the target adapter has a different state-dict prefix
 and is not present in the loaded-key list.  Source adapter tensors should be
@@ -350,10 +375,11 @@ and recurrent operations, as the roadmap requires.
 
 ## Tests and acceptance criteria
 
-Add focused tests in a new file such as
-`tests/test_models/test_neurosoft_conv_bigru.py`, plus transfer/config tests as
-needed.  The implementation is not ready for scientific jobs until all of the
-following pass.
+Focused contract tests are implemented in
+`tests/test_models/test_neurosoft_conv_bigru.py`, with CLI transfer-regime
+coverage in `tests/test_pretrained_transfer_regimes.py`. The remaining
+end-to-end and experiment-matrix requirements below still apply before
+scientific jobs are launched.
 
 ### Architecture and data-path tests
 
