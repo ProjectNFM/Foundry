@@ -1,0 +1,94 @@
+# @package _global_
+#
+# Single-seed, validation-only normalization ablation on the representative
+# NeuroSoft monkey causal session.  The CLI sweeps `model` and
+# `data.input_normalization.mode` to form the four comparison cells.  Here
+# "GRU" denotes the Phase-2 `NeurosoftConvBiGRU` recovery architecture.
+
+defaults:
+  - override /model: eegnet
+  - override /data: neurosoft_monkeys/singlesess
+
+task_configs:
+  - neurosoft_acoustic_stim_8band
+
+normalization_ablation_recording_id: ???
+
+model:
+  num_samples: 1000
+
+data:
+  split_type: intrasession-causal
+  audit_json: docs/neurosoft-phase0-audit.json
+  audit_species: monkeys
+  task_type: acoustic_stim
+  training_fraction_task: neurosoft_acoustic_stim_8band
+  training_fraction: 1.0
+  training_fraction_seed: ${run.seed}
+  training_fraction_min_class_support: 3
+  training_fraction_min_present_classes: 6
+  input_normalization:
+    mode: disabled
+    supported_modalities: [eeg, ecog, seeg, ieeg]
+    scale_floor: 1.0e-8
+    accumulator_dtype: float64
+  dataset_kwargs:
+    recording_ids:
+      - ${normalization_ablation_recording_id}
+
+# Keep one common optimization recipe across EEGNet and Conv--BiGRU.  This is a
+# controlled normalization screen, not a per-architecture tuning exercise.
+class_weights:
+  mode: none
+
+run:
+  project: neurosoft_supervised_pretraining
+  name: norm_ablation_${hydra:runtime.choices.model}_mk_${data.dataset_kwargs.recording_ids.0}_${data.input_normalization.mode}_s${run.seed}
+  group: PHASE2_INPUT_NORMALIZATION_ABLATION
+  tags: [phase2, input-normalization, eegnet, conv-bigru, monkeys, 8band, causal, validation-only]
+  seed: 42
+  log_level: INFO
+  evaluate_test: false
+
+hyperparameters:
+  batch_size: 16
+  sequence_length: 0.5
+  fold_number: 0
+  num_workers: 1
+  # The training entrypoint derives this from the selected recording.  Keeping
+  # it outside `model` lets EEGNet consume it without passing an unsupported
+  # `num_channels` argument to Conv--BiGRU.
+  num_channels: null
+  # Populated from the selected dataset before model instantiation when the
+  # Conv--BiGRU cell is composed.
+  session_configs: null
+  learning_rate: 0.0015
+  weight_decay: 0.018
+
+trainer:
+  max_epochs: 200
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      patience: 40
+    model_checkpoint:
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      auto_insert_metric_name: false
+    # Profiling is not an experimental axis.  Do not reuse architecture-specific
+    # FLOP values from the historical EEGNet or Conv--BiGRU pilots.
+    compute_tracking:
+      _target_: foundry.training.callbacks.ComputeTrackingCallback
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      sequence_length: ${hyperparameters.sequence_length}
+      require_flops: false
+      flops_per_window: null
+      flop_method: null
+
+hydra:
+  sweeper:
+    # The local launcher executes one cell at a time on the selected GPU.
+    max_batch_size: 1

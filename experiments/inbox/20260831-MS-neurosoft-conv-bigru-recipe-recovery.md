@@ -3,7 +3,7 @@
 **Status:** Screened
 **Date started:** 2026-08-31
 **Parent experiment:** [Phase 2 -- Convolution--BiGRU Scratch Pilot](20260828-MS-neurosoft-conv-bigru-pilot.md)
-**Follow-up experiments:** [Phase 2 -- Convolution--BiGRU Compact Capacity Screen](20260831-MS-neurosoft-conv-bigru-compact-capacity.md)
+**Follow-up experiments:** [Phase 2 -- Convolution--BiGRU Compact Capacity Screen](20260831-MS-neurosoft-conv-bigru-compact-capacity.md), [NeuroSoft Input Normalization Recovery Ablation](20260831-MS-neurosoft-input-normalization-ablation.md)
 **Tags:** neurosoft, phase2, convolution-bigru, scratch, recipe-recovery, hyperparameters, intrasession-causal
 
 ## Background
