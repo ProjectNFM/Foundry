@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Literal, Optional
 
 import numpy as np
@@ -21,6 +22,7 @@ from torch_brain.data.arraydict import ArrayDict
 
 from foundry.data.normalization import (
     RecordingChannelStats,
+    _sampling_rate_from_signal_source,
     fit_recording_stats,
     load_normalization_stats,
     merge_time_intervals,
@@ -97,6 +99,15 @@ def _make_intervals(starts, ends) -> Interval:
     return Interval(
         np.asarray(starts, dtype=np.float64), np.asarray(ends, dtype=np.float64)
     )
+
+
+class TestSamplingRateResolution:
+    def test_derives_rate_from_timestamp_only_source(self):
+        source = SimpleNamespace(
+            timestamps=np.arange(20, dtype=np.float64) / 2000
+        )
+
+        assert _sampling_rate_from_signal_source(source) == 2000.0
 
 
 # ─── RecordingChannelStats ────────────────────────────────────────────────────

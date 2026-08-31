@@ -141,6 +141,31 @@ def _interval_sample_bounds(
     return int(indices[0]), int(indices[1])
 
 
+def _sampling_rate_from_signal_source(signal_source: object) -> float:
+    """Return a source's sampling rate, deriving it from regular timestamps.
+
+    ``RegularTimeSeries`` exposes ``sampling_rate`` directly, while the
+    ArrayDict-backed NeuroSoft recordings expose only regular timestamps.
+    Both representations describe the same sampled signal.
+    """
+    sampling_rate = getattr(signal_source, "sampling_rate", None)
+    if sampling_rate is None:
+        timestamps = np.asarray(getattr(signal_source, "timestamps"))
+        if timestamps.ndim != 1 or len(timestamps) < 2:
+            raise ValueError(
+                "Signal source must provide a positive sampling_rate or at "
+                "least two one-dimensional timestamps"
+            )
+        sampling_rate = 1.0 / float(timestamps[1] - timestamps[0])
+
+    sampling_rate = float(sampling_rate)
+    if not np.isfinite(sampling_rate) or sampling_rate <= 0:
+        raise ValueError(
+            f"Signal source has invalid sampling_rate {sampling_rate!r}"
+        )
+    return sampling_rate
+
+
 def _validate_fit_parameters(
     scale_floor: float, accumulator_dtype: np.dtype
 ) -> np.dtype:
@@ -217,12 +242,7 @@ def fit_recording_stats(
     sq_sum_accum = np.zeros(n_channels, dtype=accumulator_dtype)
     count_accum = 0
 
-    sampling_rate = float(signal_source.sampling_rate)
-    if not np.isfinite(sampling_rate) or sampling_rate <= 0:
-        raise ValueError(
-            f"Recording {recording_id!r} has invalid sampling_rate "
-            f"{sampling_rate!r}"
-        )
+    sampling_rate = _sampling_rate_from_signal_source(signal_source)
     domain_starts = np.asarray(data.domain.start, dtype=np.float64).reshape(-1)
     if len(domain_starts) != 1:
         raise ValueError(
