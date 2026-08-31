@@ -409,6 +409,19 @@ class TestFitRecordingStats:
         stats = fit_recording_stats(dataset, "sess1", train_iv)
         assert stats.sampling_rate == stats_sr
 
+    def test_uses_timestamps_for_discontiguous_recording_domains(self):
+        signal = np.arange(200, dtype=np.float32).reshape(-1, 1)
+        dataset, train_iv = self._make_dataset(
+            signal, [0.0, 1.0], [0.5, 1.5], sampling_rate=100.0
+        )
+        recording = dataset.get_recording("sess1")
+        recording._domain = Interval(np.array([0.0, 1.0]), np.array([0.5, 1.5]))
+
+        stats = fit_recording_stats(dataset, "sess1", train_iv)
+
+        expected = np.concatenate([signal[:50], signal[100:150]]).mean()
+        np.testing.assert_allclose(stats.mean, [expected])
+
 
 # ─── save_normalization_stats ─────────────────────────────────────────────────
 

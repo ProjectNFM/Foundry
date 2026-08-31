@@ -166,6 +166,26 @@ def _sampling_rate_from_signal_source(signal_source: object) -> float:
     return sampling_rate
 
 
+def _interval_sample_bounds_from_timestamps(
+    start: float,
+    end: float,
+    timestamps: np.ndarray,
+) -> tuple[int, int]:
+    """Map a half-open time interval onto a timestamped sample array."""
+    if timestamps.ndim != 1 or len(timestamps) < 1:
+        raise ValueError(
+            "Signal timestamps must be a non-empty one-dimensional array"
+        )
+    if not np.all(np.isfinite(timestamps)) or np.any(np.diff(timestamps) <= 0):
+        raise ValueError(
+            "Signal timestamps must be finite and strictly increasing"
+        )
+    return (
+        int(np.searchsorted(timestamps, start, side="left")),
+        int(np.searchsorted(timestamps, end, side="left")),
+    )
+
+
 def _validate_fit_parameters(
     scale_floor: float, accumulator_dtype: np.dtype
 ) -> np.dtype:
@@ -243,22 +263,36 @@ def fit_recording_stats(
     count_accum = 0
 
     sampling_rate = _sampling_rate_from_signal_source(signal_source)
-    domain_starts = np.asarray(data.domain.start, dtype=np.float64).reshape(-1)
-    if len(domain_starts) != 1:
-        raise ValueError(
-            f"Recording {recording_id!r} must have one contiguous domain, got "
-            f"{len(domain_starts)} intervals"
+    timestamps = np.asarray(
+        getattr(signal_source, "timestamps", ()), dtype=np.float64
+    )
+    has_sample_timestamps = (
+        timestamps.ndim == 1 and len(timestamps) == signal.shape[0]
+    )
+    if not has_sample_timestamps:
+        domain_starts = np.asarray(data.domain.start, dtype=np.float64).reshape(
+            -1
         )
-    domain_start = float(domain_starts[0])
+        if len(domain_starts) != 1:
+            raise ValueError(
+                f"Recording {recording_id!r} has {len(domain_starts)} domains "
+                "but its signal source provides no timestamp per sample"
+            )
+        domain_start = float(domain_starts[0])
 
     for iv_start, iv_end in zip(merged_starts, merged_ends):
-        idx_start, idx_end = _interval_sample_bounds(
-            iv_start,
-            iv_end,
-            domain_start=domain_start,
-            sampling_rate=sampling_rate,
-            n_samples=signal.shape[0],
-        )
+        if has_sample_timestamps:
+            idx_start, idx_end = _interval_sample_bounds_from_timestamps(
+                iv_start, iv_end, timestamps
+            )
+        else:
+            idx_start, idx_end = _interval_sample_bounds(
+                iv_start,
+                iv_end,
+                domain_start=domain_start,
+                sampling_rate=sampling_rate,
+                n_samples=signal.shape[0],
+            )
         if idx_start >= idx_end:
             continue
         for chunk_start in range(idx_start, idx_end, chunk_samples):
