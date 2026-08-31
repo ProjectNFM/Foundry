@@ -68,6 +68,9 @@ def nested(config: dict[str, Any], *keys: str) -> Any:
 
 
 def species_from_config(config: dict[str, Any]) -> str | None:
+    audit = nested(config, "data", "audit_species")
+    if audit:
+        return str(audit)
     root = str(nested(config, "data", "root") or "").lower()
     if "minipig" in root:
         return "minipigs"
@@ -77,6 +80,9 @@ def species_from_config(config: dict[str, Any]) -> str | None:
 
 
 def scalar(summary: dict[str, Any], key: str, summary_key: str = "last") -> Any:
+    flat_key = f"{key}.{summary_key}" if summary_key else key
+    if flat_key in summary:
+        return summary[flat_key]
     return unwrap_summary_value(summary.get(key), summary_key)
 
 
@@ -96,6 +102,14 @@ def collect_runs(
         fraction = nested(config, "data", "training_fraction")
         seed = nested(config, "run", "seed")
         species = species_from_config(config)
+        flop_method = None
+        callbacks = nested(config, "trainer", "callbacks") or []
+        if isinstance(callbacks, list):
+            for cb in callbacks:
+                if isinstance(cb, dict) and "flop_method" in cb:
+                    flop_method = cb["flop_method"]
+                    break
+
         rows.append(
             {
                 "run_id": run.id,
@@ -109,9 +123,9 @@ def collect_runs(
                 "test_supported_f1": scalar(
                     summary, f"test/{TASK}_supported_f1", "max"
                 ),
-                "best_step": scalar(summary, "compute/best_step"),
-                "best_flops": scalar(summary, "compute/best_flops"),
-                "flop_method": scalar(summary, "compute/flop_method"),
+                "best_step": summary.get("compute/best_step"),
+                "best_flops": summary.get("compute/best_flops"),
+                "flop_method": flop_method,
             }
         )
         history = run.history(keys=["epoch", MONITOR], pandas=True)

@@ -152,11 +152,69 @@ than tuning individual sessions, fractions, or seeds.
 
 ### Summary
 
-TBD
+All eight production-semantic pilot runs finished successfully. The two
+overfit diagnostics (step 1 in the sequential plan) were skipped; production
+runs proceeded directly.
+
+All runs produced finite losses, used `bf16-mixed` precision on a Quadro RTX
+8000, and logged the required compute/provenance fields with
+`flops_per_window=768098304` (`torch-flop-counter-v1`). Every run selected a
+best checkpoint via early stopping and evaluated the test split exactly once
+from that checkpoint.
+
+**Minipig session** (`sub-06_ses-02`): The BiGRU collapsed to near-chance
+performance across all conditions. The three 100%-data seeds converged to
+identical test F1 (0.041) with best checkpoints selected very early
+(steps 67--201). In all cases the model predicted only a single class
+(`high_treble`). The 25% run barely edged above (0.053 test F1).
+
+**Monkey session** (`sub-01_ses-04`): The BiGRU learned meaningful
+representations. The three 100%-data seeds showed seed variability
+(test F1 0.122--0.150) with improving training trajectories and best
+checkpoints at later steps (2,622--8,211). The 25% run was lower (0.063)
+as expected.
+
+**EEGNet comparison** (same sessions, same protocol from Phase 1): The BiGRU
+substantially underperforms EEGNet on both sessions. The minipig 100% test F1
+(0.041) is 30% of EEGNet's (0.135). The monkey 100% test F1 (0.134) is 64%
+of EEGNet's (0.208).
 
 ### Metrics
 
-TBD
+#### BiGRU pilot runs
+
+| Species | Recording ID | Frac | Seed | Best Val F1 | Test F1 | Best Step | Run name (ID) |
+|---------|-------------|-----:|-----:|------------:|--------:|----------:|---------------|
+| Minipig | `sub-06_ses-02_…_acq-LH_desc-raw` | 0.25 | 42 | 0.052 | 0.053 | 476 | `conv_bigru_mp_…_f0.25_s42` (`bllrxdk0`) |
+| Minipig | `sub-06_ses-02_…_acq-LH_desc-raw` | 1.00 | 42 | 0.043 | 0.041 | 134 | `conv_bigru_mp_…_f1.0_s42` (`gfq4bwpz`) |
+| Minipig | `sub-06_ses-02_…_acq-LH_desc-raw` | 1.00 | 43 | 0.043 | 0.041 | 201 | `conv_bigru_mp_…_f1.0_s43` (`stwk7pnh`) |
+| Minipig | `sub-06_ses-02_…_acq-LH_desc-raw` | 1.00 | 44 | 0.043 | 0.041 | 67 | `conv_bigru_mp_…_f1.0_s44` (`if60yvwy`) |
+| Monkey | `sub-01_ses-04_…_acq-RH_desc-raw` | 0.25 | 42 | 0.064 | 0.063 | 17 | `conv_bigru_mk_…_f0.25_s42` (`j4sm8f00`) |
+| Monkey | `sub-01_ses-04_…_acq-RH_desc-raw` | 1.00 | 42 | 0.141 | 0.131 | 2,622 | `conv_bigru_mk_…_f1.0_s42` (`kpjzkpux`) |
+| Monkey | `sub-01_ses-04_…_acq-RH_desc-raw` | 1.00 | 43 | 0.195 | 0.150 | 8,211 | `conv_bigru_mk_…_f1.0_s43` (`st6qasjj`) |
+| Monkey | `sub-01_ses-04_…_acq-RH_desc-raw` | 1.00 | 44 | 0.156 | 0.122 | 5,106 | `conv_bigru_mk_…_f1.0_s44` (`rfn7o5bg`) |
+
+#### BiGRU vs EEGNet -- same sessions, same protocol (test supported macro-F1)
+
+Per-seed comparison at matching fractions:
+
+| Species | Frac | Seed | BiGRU | EEGNet | Ratio |
+|---------|-----:|-----:|------:|-------:|------:|
+| Minipig | 0.25 | 42 | 0.053 | 0.104 | 0.51 |
+| Minipig | 1.00 | 42 | 0.041 | 0.111 | 0.37 |
+| Minipig | 1.00 | 43 | 0.041 | 0.149 | 0.28 |
+| Minipig | 1.00 | 44 | 0.041 | 0.146 | 0.28 |
+| Monkey | 0.25 | 42 | 0.063 | 0.171 | 0.37 |
+| Monkey | 1.00 | 42 | 0.131 | 0.199 | 0.66 |
+| Monkey | 1.00 | 43 | 0.150 | 0.213 | 0.70 |
+| Monkey | 1.00 | 44 | 0.122 | 0.213 | 0.57 |
+
+Seed-averaged summary at 100% data:
+
+| Species | BiGRU test F1 | EEGNet test F1 | BiGRU / EEGNet |
+|---------|:-------------:|:--------------:|:--------------:|
+| Minipigs | 0.041 ± 0.000 | 0.135 ± 0.021 | 0.30 |
+| Monkeys | 0.134 ± 0.014 | 0.208 ± 0.008 | 0.64 |
 
 ### Analysis
 
@@ -166,7 +224,9 @@ uv run python analysis/20260828-MS-neurosoft-conv-bigru-pilot_analysis.py
 
 ### Figures
 
-TBD
+Validation learning curves for all eight production runs:
+
+![Phase-2 BiGRU pilot validation curves](../../analysis/figures/20260828-MS-neurosoft-conv-bigru-pilot_validation_curves.png)
 
 ## Conclusions
 
