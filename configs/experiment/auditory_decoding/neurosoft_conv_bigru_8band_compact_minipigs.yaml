@@ -1,0 +1,78 @@
+# @package _global_
+#
+# Compact Conv-BiGRU capacity control. This mirrors the original pre-screen
+# pilot recipe while changing only the model scale.
+
+defaults:
+  - override /model: neurosoft_conv_bigru_compact
+  - override /data: neurosoft_minipigs/singlesess
+
+task_configs:
+  - neurosoft_acoustic_stim_8band
+
+phase2_compact_recording_id: ???
+
+data:
+  split_type: intrasession-causal
+  audit_json: docs/neurosoft-phase0-audit.json
+  audit_species: minipigs
+  task_type: acoustic_stim
+  training_fraction_task: neurosoft_acoustic_stim_8band
+  training_fraction: 1.0
+  training_fraction_seed: ${run.seed}
+  training_fraction_min_class_support: 3
+  training_fraction_min_present_classes: 6
+  dataset_kwargs:
+    recording_ids:
+      - ${phase2_compact_recording_id}
+
+# The pre-screen pilot and Phase-1 EEGNet baseline used no loss balancing.
+# Keep it explicit so this is a capacity-only comparison.
+class_weights:
+  mode: none
+
+run:
+  project: neurosoft_supervised_pretraining
+  name: conv_bigru_compact_control_mp_${data.dataset_kwargs.recording_ids.0}_s${run.seed}
+  group: PHASE2_CONV_BIGRU_COMPACT_CONTROL
+  tags: [phase2, conv-bigru, compact, minipigs, 8band, capacity, scratch]
+  seed: 42
+  log_level: INFO
+  evaluate_test: true
+
+hyperparameters:
+  batch_size: 16
+  sequence_length: 0.5
+  fold_number: 0
+  num_workers: 1
+  learning_rate: 0.0015
+  weight_decay: 0.018
+
+trainer:
+  max_epochs: 200
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      patience: 40
+    model_checkpoint:
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      auto_insert_metric_name: false
+    # The compact architecture requires its own validated, species-specific
+    # FLOP profile. Do not reuse the full model's 768,098,304 value.
+    compute_tracking:
+      _target_: foundry.training.callbacks.ComputeTrackingCallback
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      sequence_length: ${hyperparameters.sequence_length}
+      require_flops: false
+      flops_per_window: null
+      flop_method: null
+
+hydra:
+  sweeper:
+    max_batch_size: 1
+    params:
+      run.seed: 42,43,44

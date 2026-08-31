@@ -1,9 +1,9 @@
 # Phase 2 -- Convolution--BiGRU Recipe Recovery
 
-**Status:** Draft
+**Status:** Screened
 **Date started:** 2026-08-31
 **Parent experiment:** [Phase 2 -- Convolution--BiGRU Scratch Pilot](20260828-MS-neurosoft-conv-bigru-pilot.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Phase 2 -- Convolution--BiGRU Compact Capacity Screen](20260831-MS-neurosoft-conv-bigru-compact-capacity.md)
 **Tags:** neurosoft, phase2, convolution-bigru, scratch, recipe-recovery, hyperparameters, intrasession-causal
 
 ## Background
@@ -149,12 +149,123 @@ optimization conclusions.
 
 ## Results
 
-TBD
+### Execution record
+
+- **Git SHA:** `579904f9`
+- **Branch:** `milo/neurosoft-gru`
+- **Minipig snapshot:**
+  `20260831T142854_PHASE2_CONV_BIGRU_RECIPE_screen_579904f9_4660fc22`
+- **Monkey snapshot:**
+  `20260831T145141_PHASE2_CONV_BIGRU_RECIPE_screen_579904f9_b76f6c6e`
+- **Hardware:** Single Quadro RTX 8000, 8-way concurrent via
+  `hydra.launcher.gpus=[0,0,0,0,0,0,0,0]`
+- **WandB group:** `PHASE2_CONV_BIGRU_RECIPE_screen`
+
+### Minipig screen (`sub-06_ses-02_task-AcousStim_acq-LH_desc-raw`)
+
+All 12 recipes collapsed to the class-prior prediction.  Best checkpoints were
+saved at epoch 0–3 in every case; no recipe ever improved beyond the initial
+validation F1.
+
+| LR       | Dropout | WD    | Val F1 | Train F1 | Best epoch | WandB ID   |
+|----------|---------|-------|--------|----------|------------|------------|
+| 0.00015  | 0.0     | 0.0   | 0.043  | 0.096    | 1          | `ehishyz3` |
+| 0.00015  | 0.0     | 0.003 | 0.043  | 0.096    | 1          | `fmluhkpd` |
+| 0.00015  | 0.1     | 0.0   | 0.043  | 0.093    | 1          | `ng693nl9` |
+| 0.00015  | 0.1     | 0.003 | 0.043  | 0.093    | 1          | `eky5up1t` |
+| 0.0005   | 0.0     | 0.0   | 0.043  | 0.104    | 1          | `5te09d8g` |
+| 0.0005   | 0.0     | 0.003 | 0.043  | 0.104    | 1          | `g4ds5oee` |
+| 0.0005   | 0.1     | 0.0   | 0.043  | 0.098    | 1          | `8buki6nc` |
+| 0.0005   | 0.1     | 0.003 | 0.043  | 0.098    | 1          | `xfufwshm` |
+| 0.0015   | 0.0     | 0.0   | 0.043  | 0.116    | 3          | `rhxd03jo` |
+| 0.0015   | 0.0     | 0.003 | 0.043  | 0.116    | 3          | `05zfu40y` |
+| 0.0015   | 0.1     | 0.0   | 0.043  | 0.121    | 1          | `7gkn93nj` |
+| 0.0015   | 0.1     | 0.003 | 0.043  | 0.120    | 1          | `9t68zzop` |
+
+**Gate verdict — FAIL.**  Every minipig recipe has best validation F1 = 0.043,
+identical to the class-prior baseline.  No recipe exceeded the pilot's
+class-prior by the required 0.02.  The fixed-architecture Conv--BiGRU cannot
+learn this minipig session under any combination in the screened grid.
+
+### Monkey screen (`sub-01_ses-04_task-AcousStim_acq-RH_desc-raw`)
+
+Eight of twelve recipes learned beyond the class-prior; the four LR=0.00015
+recipes collapsed identically to the pilot.
+
+| LR       | Dropout | WD    | Val F1 | Train F1 | Best epoch | WandB ID   |
+|----------|---------|-------|--------|----------|------------|------------|
+| 0.00015  | 0.0     | 0.0   | 0.064  | 0.101    | 0          | `rheamwzz` |
+| 0.00015  | 0.0     | 0.003 | 0.064  | 0.101    | 0          | `ni6z0keo` |
+| 0.00015  | 0.1     | 0.0   | 0.064  | 0.099    | 0          | `0ug3772l` |
+| 0.00015  | 0.1     | 0.003 | 0.064  | 0.099    | 0          | `lbdxpw9q` |
+| 0.0005   | 0.0     | 0.0   | 0.168  | 0.170    | 60         | `q0k93mt4` |
+| 0.0005   | 0.0     | 0.003 | 0.156  | 0.173    | 51         | `3pg9ybw7` |
+| **0.0005** | **0.1** | **0.0** | **0.249** | **0.194** | **123** | `uv7xlypi` |
+| 0.0005   | 0.1     | 0.003 | 0.231  | 0.204    | 199        | `4v4une8o` |
+| 0.0015   | 0.0     | 0.0   | 0.156  | 0.187    | 43         | `ko91ppq6` |
+| 0.0015   | 0.0     | 0.003 | 0.181  | 0.172    | 37         | `a13yg456` |
+| 0.0015   | 0.1     | 0.0   | 0.169  | 0.194    | 96         | `ik7a5kb1` |
+| 0.0015   | 0.1     | 0.003 | 0.170  | 0.176    | 48         | `6kfa1f8p` |
+
+**Gate verdict — PASS** for the best recipe (LR=0.0005, dropout=0.1, WD=0.0):
+
+1. Finite losses, trained to epoch 163 (early-stopped), and predicts multiple
+   validation classes (val F1 = 0.249 far exceeds a single-class prior).
+2. Val F1 0.249 exceeds the pilot's class-prior 0.064 by 0.185 (>> 0.02).
+3. Train F1 0.194 is above the class-prior floor, showing conditional learning.
+4. Val F1 0.249 exceeds the matched EEGNet reference of 0.208.
+
+The runner-up recipe (LR=0.0005, DO=0.1, WD=0.003, val F1=0.231) also passes
+all gate criteria.  Dropout 0.1 at LR=0.0005 is the clear winning regime for
+monkeys — both entries outperform every other cell by a wide margin.
+
+### Gate summary
+
+| Species  | Gate 1 (multi-class) | Gate 2 (>prior+0.02) | Gate 3 (train>prior) | Selected recipe                    |
+|----------|----------------------|----------------------|----------------------|------------------------------------|
+| Minipig  | FAIL                 | FAIL                 | marginal             | None — proceed to compact capacity |
+| Monkey   | PASS                 | PASS                 | PASS                 | LR=0.0005, DO=0.1, WD=0.0         |
 
 ## Conclusions
 
-TBD
+The hypothesis is **partially rejected**: the recipe screen recovered
+learnability for the monkey session (best val F1 = 0.249, exceeding the EEGNet
+reference of 0.208) but **failed completely for the minipig session**, where
+all 12 recipes remained locked to the class-prior prediction.
+
+Key findings:
+
+1. **Minipig collapse is architecture-driven, not recipe-driven.** Varying
+   the learning rate across a 10× range, removing all dropout and weight
+   decay, and adding inverse-frequency class weights had zero effect on the
+   minipig validation F1.  The fixed-architecture Conv--BiGRU with 510K
+   parameters cannot learn this 18-channel minipig session.
+
+2. **Monkey learning is sensitive to dropout at moderate LR.** The two best
+   monkey recipes both use LR=0.0005 with dropout=0.1, and weight decay has
+   only a secondary effect (0.249 vs 0.231).  Without dropout at the same LR,
+   val F1 drops to 0.156–0.168.  The higher LR=0.0015 recipes are
+   competitive (0.156–0.181) but less stable.
+
+3. **LR=0.00015 is too slow for both species.** All four monkey runs at
+   LR=0.00015 collapsed to the class-prior, and minipig runs at that rate
+   showed the lowest train F1 in the grid.
+
+### Next steps
+
+- **Monkey:** Proceed to three-seed confirmation (seeds 42/43/44) with the
+  selected recipe (LR=0.0005, DO=0.1, WD=0.0) and `run.evaluate_test=true`.
+- **Minipig:** Per the gate criteria, create a compact-capacity experiment
+  (`adapter_dim=32`, `temporal_channels=64`, `gru_hidden_size=64`,
+  `gru_num_layers=1`) to disentangle capacity from optimization.
 
 ## Notes for future experiments
 
-TBD
+- The minipig failure across all 12 recipe cells strongly suggests the
+  510K-parameter Conv--BiGRU is over-parameterized for the 18-channel minipig
+  data and collapses regardless of regularization.  A capacity reduction is
+  the next diagnostic lever.
+- Monkey dropout sensitivity (0.1 vs 0.0 at fixed LR) implies the 29-channel
+  monkey data benefits from mild regularization even when class weights are
+  present.  The compact-capacity screen for minipigs should also include a
+  dropout comparison.
