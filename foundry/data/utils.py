@@ -143,6 +143,67 @@ def get_min_channels(dataset) -> int:
     return min(get_channel_counts(dataset).values())
 
 
+def resolve_neural_signal(
+    data,
+    supported_modalities: frozenset[str] = NEURAL_MODALITIES,
+) -> tuple[str, object, np.ndarray, np.ndarray]:
+    """Resolve the first present neural signal field and supported channel mask.
+
+    Matches the selection logic in ``NeurosoftConvBiGRU.tokenize``: pick the
+    first present field from ``(eeg, ecog, seeg, ieeg)`` and filter channels
+    whose type (case-insensitive) is in *supported_modalities*.
+
+    Args:
+        data: A ``torch_brain.data.Data`` object (recording or window).
+        supported_modalities: Lowercase modality strings to keep.
+
+    Returns:
+        ``(field_name, signal_source, keep_mask, channel_names)`` where
+        *keep_mask* is a boolean array over all channels and *channel_names*
+        are the IDs of the kept channels in their original order.
+
+    Raises:
+        ValueError: If no supported neural signal field is present.
+    """
+    signal_source = None
+    field_name = None
+    default_type = None
+    for name, modality in (
+        ("eeg", "EEG"),
+        ("ecog", "ECOG"),
+        ("seeg", "SEEG"),
+        ("ieeg", "IEEG"),
+    ):
+        if hasattr(data, name) and getattr(data, name) is not None:
+            signal_source = getattr(data, name)
+            field_name = name
+            default_type = modality
+            break
+
+    if signal_source is None:
+        raise ValueError(
+            "Data must contain an EEG, ECoG, sEEG, or iEEG signal field"
+        )
+
+    channel_types = (
+        data.channels.type.astype(str)
+        if hasattr(data.channels, "type")
+        else np.array([default_type] * len(data.channels.id), dtype=str)
+    )
+    normalized_modalities = frozenset(
+        str(modality).lower() for modality in supported_modalities
+    )
+    if not normalized_modalities <= NEURAL_MODALITIES:
+        raise ValueError(
+            "supported_modalities must be drawn from "
+            f"{sorted(NEURAL_MODALITIES)}"
+        )
+    keep = np.isin(np.char.lower(channel_types), sorted(normalized_modalities))
+    channel_names = np.asarray(data.channels.id)[keep]
+
+    return field_name, signal_source, keep, channel_names
+
+
 def get_session_configs(dataset) -> dict[str, int]:
     """Build the ``session_configs`` mapping for :class:`SpatialProjectionStrategy`.
 
@@ -176,4 +237,5 @@ __all__ = [
     "get_max_channels",
     "get_min_channels",
     "get_session_configs",
+    "resolve_neural_signal",
 ]

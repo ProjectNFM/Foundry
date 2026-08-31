@@ -85,6 +85,7 @@ class FoundryModule(L.LightningModule):
         self.val_metrics = nn.ModuleDict()
         self.test_metrics = nn.ModuleDict()
         self._val_confusion_trackers: dict[str, ConfusionMatrixTracker] = {}
+        self.input_normalization_artifacts: dict[str, str] | None = None
 
         for name, cfg in model.task_configs.items():
             self._task_losses[name] = instantiate(cfg.loss)
@@ -105,6 +106,13 @@ class FoundryModule(L.LightningModule):
                     num_classes=cfg.output_dim,
                     class_names=cfg.get_class_names(),
                 )
+
+    def on_save_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        """Record immutable input-normalization artifact identity in checkpoints."""
+        if self.input_normalization_artifacts is not None:
+            checkpoint["input_normalization"] = dict(
+                self.input_normalization_artifacts
+            )
 
     def _metric_summary_mode(
         self, task_name: str, metric_name: str, cfg: Any

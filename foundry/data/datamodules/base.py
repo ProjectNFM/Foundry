@@ -8,6 +8,8 @@ model-specific preprocessing.
 from __future__ import annotations
 
 import gc
+import hashlib
+import json
 import logging
 import math
 from copy import deepcopy
@@ -39,6 +41,7 @@ from foundry.tasks.classification_mapping import (
 )
 
 if TYPE_CHECKING:
+    from foundry.data.normalization import RecordingChannelStats
     from foundry.tasks.config import TaskConfig
 
 logger = logging.getLogger(__name__)
@@ -154,6 +157,7 @@ class NeuralDataModule(LightningDataModule):
         training_fraction_min_present_classes: int = 6,
         audit_json: str | None = None,
         audit_species: str | None = None,
+        input_normalization: Optional[dict] = None,
     ):
         """Initialize the data module.
 
@@ -203,6 +207,12 @@ class NeuralDataModule(LightningDataModule):
                 fraction manifests are accepted.
             audit_species: Species key used to disambiguate duplicated BIDS
                 recording IDs in the Phase 0 audit.
+            input_normalization: Optional normalization configuration dict.
+                When ``mode`` is ``"recording_train_channel_zscore"``,
+                per-channel mean/scale statistics are fitted from the
+                training partition only and applied to all splits.
+                Keys: ``mode``, ``supported_modalities``,
+                ``scale_floor``, ``accumulator_dtype``.
         """
         super().__init__()
         if isinstance(dataset_class, str):
@@ -265,24 +275,37 @@ class NeuralDataModule(LightningDataModule):
         self._fraction_audit_records: dict[str, dict] = {}
         self._fraction_audit_artifact_sha256: str | None = None
 
+        self._user_transforms: list[Callable] = list(transforms or [])
         self._tokenizer = tokenizer
+        self._standardizer: Optional[Callable] = None
+        self._input_normalization_cfg = input_normalization
+        self._normalization_stats: Optional[
+            dict[str, "RecordingChannelStats"]
+        ] = None
 
-        transform_list = transforms or []
-        if tokenizer is not None:
-            transform_list = list(transform_list) + [tokenizer]
-
-        self.transform = transform_list if transform_list else None
+        self.transform = self._build_transform_list()
         self.dataset = None
 
-    def setup(self, stage: Optional[str] = None):
-        """Setup the DataModule.
+    # -- Transform pipeline management -----------------------------------------
 
-        Args:
-            stage: Stage to setup the DataModule for ('fit', 'test', 'validate').
+    def _build_transform_list(self) -> list[Callable] | None:
+        """Assemble the non-required transform pipeline from components.
+
+        Order: ``user_transforms -> [standardizer] -> [tokenizer]``.
+        Required dataset transforms are prepended separately in
+        :meth:`setup` / :meth:`_rebuild_dataset_transform`.
         """
-        if self.dataset is not None:
-            return
+        parts = list(self._user_transforms)
+        if self._standardizer is not None:
+            parts.append(self._standardizer)
+        if self._tokenizer is not None:
+            parts.append(self._tokenizer)
+        return parts if parts else None
 
+    def _rebuild_dataset_transform(self) -> None:
+        """Rebuild the dataset's composed transform from current components."""
+        if self.dataset is None:
+            return
         transform_list = list(self.transform) if self.transform else []
         if self.task_type is not None and hasattr(
             self.dataset_class, "get_required_transforms"
@@ -291,33 +314,17 @@ class NeuralDataModule(LightningDataModule):
                 self.task_type
             )
             transform_list = list(required) + transform_list
-
-        transform = Compose(transform_list) if transform_list else None
-
-        self.dataset = self.dataset_class(
-            root=self.root,
-            transform=transform,
-            **self.dataset_kwargs,
+        self.dataset.transform = (
+            Compose(transform_list) if transform_list else None
         )
 
-        if self._task_configs:
-            validate_task_mappings(self._task_configs, self.dataset)
+    def setup(self, stage: Optional[str] = None):
+        """Setup the DataModule.
 
-    def set_tokenizer(self, tokenizer: Optional[Callable]) -> None:
-        """Replace the tokenizer in the transform pipeline.
-
-        Can be called before or after :meth:`setup`.  When the dataset
-        already exists, its transform is rebuilt in-place.
+        Args:
+            stage: Stage to setup the DataModule for ('fit', 'test', 'validate').
         """
-        old = self._tokenizer
-        self._tokenizer = tokenizer
-
-        base = [t for t in (self.transform or []) if t is not old]
-        if tokenizer is not None:
-            base = list(base) + [tokenizer]
-        self.transform = base if base else None
-
-        if self.dataset is not None:
+        if self.dataset is None:
             transform_list = list(self.transform) if self.transform else []
             if self.task_type is not None and hasattr(
                 self.dataset_class, "get_required_transforms"
@@ -326,9 +333,214 @@ class NeuralDataModule(LightningDataModule):
                     self.task_type
                 )
                 transform_list = list(required) + transform_list
-            self.dataset.transform = (
-                Compose(transform_list) if transform_list else None
+
+            transform = Compose(transform_list) if transform_list else None
+
+            self.dataset = self.dataset_class(
+                root=self.root,
+                transform=transform,
+                **self.dataset_kwargs,
             )
+
+            if self._task_configs:
+                validate_task_mappings(self._task_configs, self.dataset)
+
+        self._maybe_fit_normalization()
+
+    def set_tokenizer(self, tokenizer: Optional[Callable]) -> None:
+        """Replace the tokenizer in the transform pipeline.
+
+        Can be called before or after :meth:`setup`.  When the dataset
+        already exists, its transform is rebuilt in-place.
+        """
+        self._tokenizer = tokenizer
+        self.transform = self._build_transform_list()
+        self._rebuild_dataset_transform()
+
+    # -- Input normalization ---------------------------------------------------
+
+    def _maybe_fit_normalization(self) -> None:
+        """Fit train-only per-channel statistics if normalization is configured."""
+        if self._input_normalization_cfg is None:
+            return
+        mode = self._input_normalization_cfg.get("mode", "disabled")
+        if mode == "disabled":
+            return
+        if mode != "recording_train_channel_zscore":
+            raise ValueError(
+                f"Unsupported input_normalization.mode={mode!r}; "
+                f"expected 'disabled' or 'recording_train_channel_zscore'"
+            )
+        if self._standardizer is not None:
+            return
+        # Hyperparameter discovery creates a temporary datamodule before task
+        # configs are attached.  A fraction manifest cannot be resolved there,
+        # so fitting at that point would use the wrong train population.
+        if self.training_fraction is not None and not self._task_configs:
+            logger.debug(
+                "Deferring normalization until training-fraction task configs "
+                "are attached"
+            )
+            return
+        self.prepare_training_fraction_manifests()
+        self._fit_and_insert_normalization()
+
+    def _fit_and_insert_normalization(self) -> None:
+        """Fit per-channel stats and insert standardizer into the pipeline."""
+        from foundry.data.normalization import fit_recording_stats
+        from foundry.data.transforms import RecordingChannelStandardize
+
+        cfg = self._input_normalization_cfg
+        supported_modalities = frozenset(
+            str(modality).lower()
+            for modality in cfg.get(
+                "supported_modalities", ["eeg", "ecog", "seeg", "ieeg"]
+            )
+        )
+        from foundry.data.utils import NEURAL_MODALITIES
+
+        if (
+            not supported_modalities
+            or not supported_modalities <= NEURAL_MODALITIES
+        ):
+            raise ValueError(
+                "input_normalization.supported_modalities must be a non-empty "
+                f"subset of {sorted(NEURAL_MODALITIES)}"
+            )
+        scale_floor = float(cfg.get("scale_floor", 1e-8))
+        if not np.isfinite(scale_floor) or scale_floor <= 0:
+            raise ValueError(
+                "input_normalization.scale_floor must be a finite positive value"
+            )
+        accumulator_dtype_name = str(cfg.get("accumulator_dtype", "float64"))
+        if accumulator_dtype_name != "float64":
+            raise ValueError(
+                "input_normalization.accumulator_dtype must be 'float64'"
+            )
+
+        train_intervals = self._effective_sampling_intervals("train")
+
+        stats_by_recording: dict[str, RecordingChannelStats] = {}
+        for rid, intervals in train_intervals.items():
+            if len(intervals) == 0:
+                continue
+            stats = fit_recording_stats(
+                self.dataset,
+                rid,
+                intervals,
+                supported_modalities=supported_modalities,
+                scale_floor=scale_floor,
+                accumulator_dtype=np.float64,
+            )
+            stats_by_recording[rid] = stats
+
+        all_rids: set[str] = set()
+        for split in ("train", "valid", "test"):
+            ivls = self._effective_sampling_intervals(split)
+            for rid, intervals in ivls.items():
+                if len(intervals) > 0:
+                    all_rids.add(rid)
+
+        missing = all_rids - set(stats_by_recording)
+        if missing:
+            raise RuntimeError(
+                f"Recording(s) {sorted(missing)} appear in validation/test "
+                f"splits but have no train intervals. Within-recording "
+                f"normalization requires train-derived statistics for every "
+                f"recording."
+            )
+
+        if not stats_by_recording:
+            raise RuntimeError(
+                "No recordings with non-empty train intervals found; "
+                "cannot fit normalization statistics"
+            )
+
+        self._standardizer = RecordingChannelStandardize(
+            stats_by_recording=stats_by_recording,
+            supported_modalities=supported_modalities,
+            scale_floor=scale_floor,
+        )
+        self._normalization_stats = stats_by_recording
+
+        self.transform = self._build_transform_list()
+        self._rebuild_dataset_transform()
+
+        logger.info(
+            "Fitted input normalization for %d recording(s) "
+            "(mode=recording_train_channel_zscore, scale_floor=%.1e)",
+            len(stats_by_recording),
+            scale_floor,
+        )
+
+    @property
+    def normalization_stats(
+        self,
+    ) -> Optional[dict[str, "RecordingChannelStats"]]:
+        """Read-only view of fitted normalization statistics, if any."""
+        return (
+            dict(self._normalization_stats)
+            if self._normalization_stats
+            else None
+        )
+
+    @property
+    def input_normalization_config(self) -> Optional[dict]:
+        """Read-only view of the input normalization configuration."""
+        if self._input_normalization_cfg is None:
+            return None
+        return dict(self._input_normalization_cfg)
+
+    def write_normalization_artifacts(
+        self, output_dir: str, *, git_sha: str | None = None
+    ) -> dict[str, str] | None:
+        """Write frozen normalization stats and return their artifact metadata."""
+        if not self._normalization_stats:
+            return None
+        from foundry.data.normalization import save_normalization_stats
+
+        train_intervals = self._effective_sampling_intervals("train")
+        interval_payload = [
+            {
+                "recording_id": recording_id,
+                "start": float(start).hex(),
+                "end": float(end).hex(),
+            }
+            for recording_id, intervals in sorted(train_intervals.items())
+            for start, end in zip(intervals.start, intervals.end)
+        ]
+        train_interval_hash = hashlib.sha256(
+            json.dumps(interval_payload, separators=(",", ":")).encode()
+        ).hexdigest()
+        provenance = {
+            "git_sha": git_sha,
+            "train_interval_hash": train_interval_hash,
+            "fraction_manifest_hashes": {
+                recording_id: manifest.manifest_hash
+                for recording_id, manifest in self._fraction_manifests.items()
+            },
+            "phase0_audit_artifact_sha256": self._fraction_audit_artifact_sha256,
+        }
+        stats_path, manifest_path = save_normalization_stats(
+            self._normalization_stats,
+            output_dir,
+            self._input_normalization_cfg or {},
+            provenance=provenance,
+        )
+        metadata = {
+            "stats_path": str(stats_path),
+            "manifest_path": str(manifest_path),
+            "stats_sha256": hashlib.sha256(stats_path.read_bytes()).hexdigest(),
+            "train_interval_hash": train_interval_hash,
+        }
+        logger.info(
+            "Wrote input-normalization artifacts to %s (sha256=%s…)",
+            stats_path.parent,
+            metadata["stats_sha256"][:16],
+        )
+        return metadata
+
+    # -- Class weights ---------------------------------------------------------
 
     def compute_class_weights(
         self, smoothing: float = 1.0
@@ -705,6 +917,23 @@ class NeuralDataModule(LightningDataModule):
             rid: ivl for rid, ivl in sampling_intervals.items() if rid in keep
         }
 
+    def _effective_sampling_intervals(
+        self,
+        split: Literal["train", "valid", "test"],
+    ) -> dict:
+        """Return exactly the intervals that the split's loader will sample."""
+        sampling_intervals = self.dataset.get_sampling_intervals(split=split)
+        if split == "train" and self._fraction_manifests:
+            sampling_intervals = self._apply_fraction_selection(
+                sampling_intervals
+            )
+        sampling_intervals = self._filter_intervals(sampling_intervals)
+        if self._session_pct:
+            sampling_intervals = self._subsample_sessions(
+                sampling_intervals, split
+            )
+        return sampling_intervals
+
     def _create_dataloader(
         self, split: Literal["train", "valid", "test"]
     ) -> DataLoader:
@@ -716,16 +945,7 @@ class NeuralDataModule(LightningDataModule):
         Returns:
             DataLoader for the split.
         """
-        sampling_intervals = self.dataset.get_sampling_intervals(split=split)
-        if split == "train" and self._fraction_manifests:
-            sampling_intervals = self._apply_fraction_selection(
-                sampling_intervals
-            )
-        sampling_intervals = self._filter_intervals(sampling_intervals)
-        if self._session_pct:
-            sampling_intervals = self._subsample_sessions(
-                sampling_intervals, split
-            )
+        sampling_intervals = self._effective_sampling_intervals(split)
 
         split_seed = self.seed + self._SPLIT_SEED_OFFSETS[split]
         gen = torch.Generator().manual_seed(split_seed)

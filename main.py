@@ -642,6 +642,32 @@ def _log_config_to_wandb(trainer, cfg: DictConfig):
     )
 
 
+def _log_normalization_artifacts_to_wandb(
+    trainer, artifacts: dict[str, str] | None
+) -> None:
+    """Upload the immutable input-normalization artifacts when WandB is active."""
+    if artifacts is None or not isinstance(trainer.logger, WandbLogger):
+        return
+    import wandb
+
+    trainer.logger.experiment.config.update(
+        {
+            "input_normalization/stats_sha256": artifacts["stats_sha256"],
+            "input_normalization/train_interval_hash": artifacts[
+                "train_interval_hash"
+            ],
+        },
+        allow_val_change=True,
+    )
+    artifact = wandb.Artifact(
+        name=f"input-normalization-{artifacts['stats_sha256'][:16]}",
+        type="input-normalization",
+    )
+    artifact.add_file(artifacts["stats_path"])
+    artifact.add_file(artifacts["manifest_path"])
+    trainer.logger.experiment.log_artifact(artifact)
+
+
 def _parse_bids_components(recording_id: str) -> dict[str, str]:
     """Extract BIDS components (sub, ses, acq, etc.) from a recording ID."""
     components = {}
@@ -1023,6 +1049,18 @@ def main(cfg: DictConfig):
             datamodule.setup("fit")
         datamodule.prepare_training_fraction_manifests()
 
+    normalization_artifacts = None
+    if getattr(datamodule, "input_normalization_config", None):
+        normalization_cfg = datamodule.input_normalization_config
+        if normalization_cfg and normalization_cfg.get("mode") != "disabled":
+            # Fit before any loader is constructed, then capture the exact
+            # frozen artifact used by this run.
+            datamodule.setup("fit")
+            normalization_artifacts = datamodule.write_normalization_artifacts(
+                output_dir,
+                git_sha=os.environ.get("FOUNDRY_SNAPSHOT_GIT_SHA"),
+            )
+
     pretrained_ckpt = OmegaConf.select(
         cfg, "run.pretrained_checkpoint", default=None
     )
@@ -1061,9 +1099,11 @@ def main(cfg: DictConfig):
         model = torch.compile(model, mode=str(compile_mode))
 
     lightning_module = _build_lightning_module(cfg, model, datamodule)
+    lightning_module.input_normalization_artifacts = normalization_artifacts
     trainer = _build_trainer(cfg)
 
     _log_config_to_wandb(trainer, cfg)
+    _log_normalization_artifacts_to_wandb(trainer, normalization_artifacts)
 
     # Log fraction provenance to WandB if manifests were prepared.
     neurosoft_provenance = _prepare_fraction_provenance(

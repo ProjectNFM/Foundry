@@ -19,6 +19,7 @@ from torch_brain.data import Data
 
 from foundry.models.readout import ReadoutRouter, build_readout_router
 from foundry.tasks.config import TaskConfig
+from foundry.data.utils import resolve_neural_signal
 from foundry.tasks.targets import extract_multitask_targets
 
 
@@ -451,29 +452,8 @@ class NeurosoftConvBiGRU(nn.Module):
 
     def tokenize(self, data: Data) -> dict[str, Any]:
         """Convert a raw NeuroSoft EEG/ECoG window into collatable tensors."""
-        signal_source = None
-        default_type = None
-        for name, modality in (
-            ("eeg", "EEG"),
-            ("ecog", "ECOG"),
-            ("seeg", "SEEG"),
-            ("ieeg", "IEEG"),
-        ):
-            if hasattr(data, name) and getattr(data, name) is not None:
-                signal_source = getattr(data, name)
-                default_type = modality
-                break
-        if signal_source is None:
-            raise ValueError(
-                "Data must contain EEG, ECoG, sEEG, or iEEG signal data"
-            )
-        channel_types = (
-            data.channels.type.astype(str)
-            if hasattr(data.channels, "type")
-            else np.array([default_type] * len(data.channels), dtype=str)
-        )
-        keep = np.isin(
-            np.char.lower(channel_types), list(self.SUPPORTED_MODALITIES)
+        _, signal_source, keep, _ = resolve_neural_signal(
+            data, frozenset(self.SUPPORTED_MODALITIES)
         )
         signal = np.asarray(signal_source.signal, dtype=np.float32)[:, keep]
         session_id = str(data.session.id)

@@ -31,6 +31,11 @@ data:
   training_fraction_seed: ${run.seed}
   training_fraction_min_class_support: 3
   training_fraction_min_present_classes: 6
+  input_normalization:
+    mode: recording_train_channel_zscore
+    supported_modalities: [eeg, ecog, seeg, ieeg]
+    scale_floor: 1.0e-8
+    accumulator_dtype: float64
   dataset_kwargs:
     recording_ids:
       - ${phase2_pilot_recording_id}
@@ -39,7 +44,7 @@ run:
   project: neurosoft_supervised_pretraining
   name: conv_bigru_mk_${data.dataset_kwargs.recording_ids.0}_f${data.training_fraction}_s${run.seed}
   group: PHASE2_CONV_BIGRU_PILOT
-  tags: [phase2, conv-bigru, monkeys, 8band, pilot, scratch]
+  tags: [phase2, conv-bigru, monkeys, 8band, pilot, scratch, input-normalized]
   seed: ???
   log_level: INFO
   evaluate_test: true
