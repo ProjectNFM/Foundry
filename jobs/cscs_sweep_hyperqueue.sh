@@ -110,12 +110,11 @@ if (( CORES_PER_GPU % AGENTS_PER_GPU != 0 )); then
     exit 1
 fi
 CPUS_PER_AGENT=$((CORES_PER_GPU / AGENTS_PER_GPU))
-GPU_FRACTION=$(awk -v n="${AGENTS_PER_GPU}" 'BEGIN { printf "%.4f", 1 / n }')
 
 echo "GPUs allocated: ${GPUS_AVAILABLE}"
 echo "Agents: ${NUM_AGENTS} (${AGENTS_PER_GPU} per GPU)"
 echo "CPUs per GPU / agent: ${CORES_PER_GPU} / ${CPUS_PER_AGENT}"
-echo "HQ GPU request per agent: ${GPU_FRACTION}"
+echo "HQ slot request per agent: 1 (${AGENTS_PER_GPU} slots/GPU)"
 
 MPS_PREFIX="/tmp/${USER}/slurm-${SLURM_JOBID:-local}/nvidia"
 stop_mps() {
@@ -184,41 +183,59 @@ echo "[$(date)] HyperQueue server started successfully (PID: ${SERVER_PID})"
 start_mps
 trap stop_mps EXIT
 
-# One worker per physical GPU. Tasks share that GPU via a fractional
-# gpus/nvidia request; CUDA_VISIBLE_DEVICES stays pinned to this GPU.
+# One worker per physical GPU. Do not pass --gpus-per-task: srun would
+# reset CUDA_VISIBLE_DEVICES to 0,1,2,3 and HQ would advertise 4 GPUs per
+# worker. The wrapper pins a single GPU *after* srun starts. Packing uses
+# a logical `slots` resource so HQ does not rewrite CUDA_VISIBLE_DEVICES.
+WORKER_SCRIPT="${PROJECT_DIR}/jobs/cscs_hq_worker.sh"
+if [[ ! -f "${WORKER_SCRIPT}" ]]; then
+    echo "[$(date)] ERROR: worker script not found at ${WORKER_SCRIPT}"
+    hq server stop
+    exit 1
+fi
+chmod +x "${WORKER_SCRIPT}"
+
 echo "[$(date)] Starting ${GPUS_AVAILABLE} HyperQueue workers (one per GPU)..."
 WORKER_PIDS=()
+MPS_ARG=""
+if [[ "${AGENTS_PER_GPU}" -gt 1 ]]; then
+    MPS_ARG="${MPS_PREFIX}"
+fi
 for gpu_id in $(seq 0 $((GPUS_AVAILABLE - 1))); do
-    worker_env=(
-        CUDA_VISIBLE_DEVICES="${gpu_id}"
-    )
-    if [[ "${AGENTS_PER_GPU}" -gt 1 ]]; then
-        worker_env+=(
-            CUDA_MPS_PIPE_DIRECTORY="${MPS_PREFIX}-mps-${gpu_id}"
-            CUDA_MPS_LOG_DIRECTORY="${MPS_PREFIX}-log-${gpu_id}"
-            CUDA_DEVICE_MAX_CONNECTIONS=8
-            CUDA_DEVICE_MAX_COPY_CONNECTIONS=8
-        )
-    fi
-    srun --overlap --exact --ntasks=1 --cpus-per-task="${CORES_PER_GPU}" \
-        --cpu-bind=cores --gpus-per-task=1 \
-        env "${worker_env[@]}" \
-        hq worker start --cpus="${CORES_PER_GPU}" &
+    core_start=$((gpu_id * CORES_PER_GPU))
+    core_end=$((core_start + CORES_PER_GPU - 1))
+    core_list="$(seq -s, "${core_start}" "${core_end}")"
+    srun --overlap --ntasks=1 \
+        "${WORKER_SCRIPT}" \
+        "${gpu_id}" \
+        "${core_list}" \
+        "${AGENTS_PER_GPU}" \
+        "${MPS_ARG}" &
     WORKER_PIDS+=($!)
 done
 
-# Give workers time to connect
-sleep 5
-if ! hq worker list | grep -q RUNNING; then
-    echo "[$(date)] WARNING: No RUNNING workers detected; check hq worker list"
-fi
+# Wait until workers register; do not submit tasks into an empty cluster.
+WORKERS_READY=0
+for _ in $(seq 1 12); do
+    sleep 5
+    if hq worker list | grep -q RUNNING; then
+        WORKERS_READY=1
+        break
+    fi
+done
 hq worker list
+if [[ "${WORKERS_READY}" -ne 1 ]]; then
+    echo "[$(date)] ERROR: HyperQueue workers failed to start; not submitting agents."
+    echo "Check srun errors above. Typical cause: worker command not found or GPU bind failed."
+    hq server stop
+    exit 1
+fi
 
 # Submit wandb agent tasks
 echo "[$(date)] Submitting ${NUM_AGENTS} wandb agent tasks..."
 hq submit \
     --cpus="${CPUS_PER_AGENT}" \
-    --resource "gpus/nvidia=${GPU_FRACTION}" \
+    --resource "slots=1" \
     --array "1-${NUM_AGENTS}" \
     "${TASK_SCRIPT}" \
     "${SWEEP_ID}" \
