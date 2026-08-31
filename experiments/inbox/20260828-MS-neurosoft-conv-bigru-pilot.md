@@ -3,7 +3,7 @@
 **Status:** In Progress
 **Date started:** 2026-08-28
 **Parent experiment:** [Phase 1 -- EEGNet Single-Session Learning Curves](20260826-MS-neurosoft-eegnet-learning-curves.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Phase 2 -- Convolution--BiGRU Recipe Recovery](20260831-MS-neurosoft-conv-bigru-recipe-recovery.md)
 **Tags:** neurosoft, phase2, convolution-bigru, scratch, pilot, intrasession-causal
 
 ## Background

@@ -1,0 +1,82 @@
+# @package _global_
+#
+# Monkey counterpart of the Phase 2 Conv-BiGRU recipe recovery screen.  Keep
+# this grid identical to minipigs so its selected recipe is comparable.
+
+defaults:
+  - override /model: neurosoft_conv_bigru
+  - override /data: neurosoft_monkeys/singlesess
+
+task_configs:
+  - neurosoft_acoustic_stim_8band
+
+phase2_recovery_recording_id: ???
+recovery_stage: screen
+
+data:
+  split_type: intrasession-causal
+  audit_json: docs/neurosoft-phase0-audit.json
+  audit_species: monkeys
+  task_type: acoustic_stim
+  training_fraction_task: neurosoft_acoustic_stim_8band
+  training_fraction: 1.0
+  training_fraction_seed: ${run.seed}
+  training_fraction_min_class_support: 3
+  training_fraction_min_present_classes: 6
+  dataset_kwargs:
+    recording_ids:
+      - ${phase2_recovery_recording_id}
+
+class_weights:
+  mode: auto
+  smoothing: 0.5
+
+run:
+  project: neurosoft_supervised_pretraining
+  name: conv_bigru_recovery_${recovery_stage}_mk_${data.dataset_kwargs.recording_ids.0}_lr${hyperparameters.learning_rate}_do${model.dropout_rate}_wd${hyperparameters.weight_decay}_s${run.seed}
+  group: PHASE2_CONV_BIGRU_RECIPE_${recovery_stage}
+  tags: [phase2, conv-bigru, monkeys, 8band, recipe-recovery, scratch]
+  seed: 42
+  log_level: INFO
+  evaluate_test: false
+
+hyperparameters:
+  batch_size: 16
+  sequence_length: 0.5
+  fold_number: 0
+  num_workers: 1
+  learning_rate: 0.0005
+  weight_decay: 0.003
+
+trainer:
+  max_epochs: 200
+  precision: 16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      patience: 40
+    model_checkpoint:
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      auto_insert_metric_name: false
+    parameter_watcher:
+      param_patterns: [session_adapter.*, temporal_frontend.*, gru.*, router.*]
+      log_every_n_steps: 20
+      log_gradients: true
+    compute_tracking:
+      _target_: foundry.training.callbacks.ComputeTrackingCallback
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      sequence_length: ${hyperparameters.sequence_length}
+      require_flops: true
+      flops_per_window: 768098304
+      flop_method: torch-flop-counter-v1
+
+hydra:
+  sweeper:
+    max_batch_size: 12
+    params:
+      hyperparameters.learning_rate: 0.00015,0.0005,0.0015
+      model.dropout_rate: 0.0,0.1
+      hyperparameters.weight_decay: 0.0,0.003

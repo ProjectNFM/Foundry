@@ -87,9 +87,16 @@ def scalar(summary: dict[str, Any], key: str, summary_key: str = "last") -> Any:
 
 
 def collect_runs(
-    entity: str,
+    entity: str | None,
 ) -> tuple[pd.DataFrame, list[tuple[str, pd.DataFrame]]]:
     api = wandb.Api()
+    # ``WANDB_ENTITY`` is optional.  When it is absent, use the authenticated
+    # account rather than constructing the invalid path ``None/<project>``.
+    entity = entity or api.default_entity
+    if not entity:
+        raise RuntimeError(
+            "Could not resolve a W&B entity; set WANDB_ENTITY or log in to W&B."
+        )
     rows: list[dict[str, Any]] = []
     histories: list[tuple[str, pd.DataFrame]] = []
     for run in api.runs(f"{entity}/{PROJECT}", filters={"group": GROUP}):
