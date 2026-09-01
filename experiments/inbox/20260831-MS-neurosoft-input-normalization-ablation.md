@@ -3,7 +3,7 @@
 **Status:** In Progress
 **Date started:** 2026-08-31
 **Parent experiment:** [Phase 2 -- Convolution--BiGRU Recipe Recovery](20260831-MS-neurosoft-conv-bigru-recipe-recovery.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Phase 3 -- NeuroSoft Input-Normalization Seed Replication](20260901-MS-neurosoft-input-normalization-replication.md)
 **Tags:** neurosoft, input-normalization, eegnet, convolution-bigru, recovery, ablation, intrasession-causal
 
 ## Background
