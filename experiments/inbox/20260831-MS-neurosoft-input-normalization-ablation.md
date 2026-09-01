@@ -60,6 +60,19 @@ python main.py \
 
 Record the four snapshot paths and WandB run IDs here after the launchers return.
 
+### Launch record
+
+Launched locally on 2026-09-01 with all four cells sharing GPU 0. The parent
+processes ran under existing Slurm allocation `10617291`; no new Slurm job was
+submitted.
+
+- **Minipigs snapshot:** `/network/scratch/s/sobralm/foundry-launches/20260901T141343_PHASE2_INPUT_NORMALIZATION_ABLATION_b76b1f38_36610cfd`
+  - GRU: [`sjd058s0`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/sjd058s0)
+  - EEGNet: [`2ibkohn5`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/2ibkohn5)
+- **Monkeys snapshot:** `/network/scratch/s/sobralm/foundry-launches/20260901T141343_PHASE2_INPUT_NORMALIZATION_ABLATION_b76b1f38_c8249aef`
+  - GRU: [`902pw4ml`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/902pw4ml)
+  - EEGNet: [`mpghfxip`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/mpghfxip)
+
 ### Key config overrides
 
 - New experiment configs: `configs/experiment/auditory_decoding/neurosoft_input_normalization_ablation_{minipigs,monkeys}.yaml`.
