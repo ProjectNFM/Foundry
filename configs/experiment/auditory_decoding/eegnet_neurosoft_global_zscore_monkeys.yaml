@@ -79,7 +79,3 @@ hydra:
     params:
       phase1_cell: ${neurosoft_supported_cell_sweep_choices:docs/neurosoft-phase0-audit.json,monkeys}
       run.seed: 42,43,44
-  launcher:
-    partition: normal
-    timeout_min: 240
-    jobs_per_gpu: 1
