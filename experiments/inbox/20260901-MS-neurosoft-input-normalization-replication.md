@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-09-01
 **Parent experiment:** [NeuroSoft Input Normalization Recovery Ablation](20260831-MS-neurosoft-input-normalization-ablation.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Scratch Baselines Normalization](20260901-MS-scratch-baselines-normalization.md)
 **Tags:** neurosoft, input-normalization, eegnet, convolution-bigru, replication, seeds, intrasession-causal
 
 ## Background
