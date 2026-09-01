@@ -402,6 +402,23 @@ def _run_claimed_cell(
         command = [sys.executable, str(Path(snapshot.source_dir) / "main.py")]
         command.extend(overrides)
         child_env = dict(os.environ)
+        # Each cell is an independent single-GPU run, not part of a
+        # distributed group.  Clear the rank variables inherited from the
+        # parent srun task so that Lightning treats every subprocess as
+        # rank 0 (required for WandB logging and checkpoint callbacks).
+        for _rank_key in (
+            "RANK",
+            "LOCAL_RANK",
+            "WORLD_SIZE",
+            "LOCAL_WORLD_SIZE",
+            "SLURM_PROCID",
+            "SLURM_LOCALID",
+            "SLURM_NTASKS",
+            "SLURM_NPROCS",
+            "PMI_RANK",
+            "PMI_SIZE",
+        ):
+            child_env.pop(_rank_key, None)
         child_env["FOUNDRY_SNAPSHOT_TASK_INDEX"] = str(cell["position"])
         child_env["FOUNDRY_CLARIDEN_CELL_ID"] = str(cell["cell_id"])
         child_env["FOUNDRY_CLARIDEN_ATTEMPT"] = str(attempt)
