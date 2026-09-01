@@ -1,6 +1,6 @@
 # Phase 3 -- NeuroSoft Input-Normalization Seed Replication
 
-**Status:** Draft
+**Status:** In Progress
 **Date started:** 2026-09-01
 **Parent experiment:** [NeuroSoft Input Normalization Recovery Ablation](20260831-MS-neurosoft-input-normalization-ablation.md)
 **Follow-up experiments:** TBD
