@@ -1,6 +1,6 @@
 # Phase 3 -- NeuroSoft Input-Normalization Seed Replication
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-09-01
 **Parent experiment:** [NeuroSoft Input Normalization Recovery Ablation](20260831-MS-neurosoft-input-normalization-ablation.md)
 **Follow-up experiments:** TBD
@@ -72,6 +72,10 @@ allocation `10617291`; no new Slurm job was submitted.
 
 - **Minipigs snapshot:** `/network/scratch/s/sobralm/foundry-launches/20260901T143741_PHASE3_INPUT_NORMALIZATION_REPLICATION_cd80a9d1_7251c5ff`
 - **Monkeys snapshot:** `/network/scratch/s/sobralm/foundry-launches/20260901T143741_PHASE3_INPUT_NORMALIZATION_REPLICATION_cd80a9d1_13382065`
+- **Minipig EEGNet:** raw s43 [`mwmn8x2x`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/mwmn8x2x), raw s44 [`rz4oz730`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/rz4oz730); channel s43 [`b8mgqcz6`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/b8mgqcz6), channel s44 [`hmyhig85`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/hmyhig85); global s43 [`wxu4n4ec`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/wxu4n4ec), global s44 [`nq9kbihj`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/nq9kbihj).
+- **Minipig GRU:** raw s43 [`mjzj4tob`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/mjzj4tob), raw s44 [`wpv7ecv0`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/wpv7ecv0); channel s43 [`h2j5p5lh`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/h2j5p5lh), channel s44 [`b66bwtd3`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/b66bwtd3); global s43 [`xfl90aok`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/xfl90aok), global s44 [`fsa0gjgm`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/fsa0gjgm).
+- **Monkey EEGNet:** raw s43 [`ppt1ztz0`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/ppt1ztz0), raw s44 [`6yz8d6b1`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/6yz8d6b1); channel s43 [`z2wexlq7`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/z2wexlq7), channel s44 [`5sgss10z`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/5sgss10z); global s43 [`op5kynka`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/op5kynka), global s44 [`0wlsb9ef`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/0wlsb9ef).
+- **Monkey GRU:** raw s43 [`c2o7pjz4`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/c2o7pjz4), raw s44 [`89da04k4`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/89da04k4); channel s43 [`cvgayoyl`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/cvgayoyl), channel s44 [`l81jzhma`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/l81jzhma); global s43 [`o0ikrv2z`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/o0ikrv2z), global s44 [`rhfrie4u`](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/rhfrie4u).
 
 ### Key config overrides
 
@@ -84,11 +88,31 @@ allocation `10617291`; no new Slurm job was submitted.
 
 ### Summary
 
-TBD
+All 24 replication cells completed successfully, yielding a balanced
+three-seed comparison with the parent seed-42 screen. The predicted pattern
+replicated: both normalization modes robustly rescued GRU, global z-scoring
+matched channel-wise z-scoring for monkey GRU, and global z-scoring improved
+EEGNet relative to channel-wise z-scoring while raw EEGNet remained strongest.
 
 ### Metrics
 
-TBD
+Three-seed mean ± sample standard deviation of best validation supported
+macro-F1, reproduced by the analysis script:
+
+| Species | Model | Input normalization | Seeds | Mean F1 ± SD |
+|---|---|---|---:|---:|
+| Minipigs | EEGNet | Raw | 3 | 0.1937 ± 0.0237 |
+| Minipigs | EEGNet | Train-channel z-score | 3 | 0.1846 ± 0.0302 |
+| Minipigs | EEGNet | Train-global z-score | 3 | 0.1899 ± 0.0227 |
+| Minipigs | GRU | Raw | 3 | 0.0427 ± 0.0000 |
+| Minipigs | GRU | Train-channel z-score | 3 | 0.2477 ± 0.0120 |
+| Minipigs | GRU | Train-global z-score | 3 | 0.2375 ± 0.0244 |
+| Monkeys | EEGNet | Raw | 3 | 0.3490 ± 0.1036 |
+| Monkeys | EEGNet | Train-channel z-score | 3 | 0.2339 ± 0.0185 |
+| Monkeys | EEGNet | Train-global z-score | 3 | 0.2620 ± 0.0521 |
+| Monkeys | GRU | Raw | 3 | 0.1642 ± 0.0277 |
+| Monkeys | GRU | Train-channel z-score | 3 | 0.7359 ± 0.0038 |
+| Monkeys | GRU | Train-global z-score | 3 | 0.7368 ± 0.0145 |
 
 ### Analysis
 
@@ -100,14 +124,20 @@ uv run python analysis/20260901-MS-neurosoft-input-normalization-replication_ana
 
 ### Figures
 
-TBD
+![Three-seed input-normalization summary](../../analysis/figures/20260901-MS-neurosoft-input-normalization-replication_summary.png)
 
 ## Conclusions
 
-TBD
+The hypothesis is confirmed across the three fixed seeds. Input normalization
+is necessary for GRU learning in the minipig session and strongly beneficial in
+the monkey session. For both EEGNet datasets, global z-scoring consistently
+preserves more validation F1 than channel-wise z-scoring, but neither
+normalization mode matches raw EEGNet. The remaining uncertainty is external
+validity: these are two representative sessions rather than all available
+sessions.
 
 ## Notes for future experiments
 
-- Treat the three-seed comparison as evidence for the two selected representative sessions, not as a population-level species estimate.
-- Inspect both the mean and per-seed ordering before choosing a normalization mode for a later test-set evaluation.
-- Preserve each run's normalization-statistics SHA-256 to document train-only fitting across all seeds.
+- Run EEGNet and GRU across all eligible minipig and monkey sessions with the
+  same raw, train-channel-z-score, and train-global-z-score conditions to test
+  whether the replicated two-session ranking generalizes across recordings.

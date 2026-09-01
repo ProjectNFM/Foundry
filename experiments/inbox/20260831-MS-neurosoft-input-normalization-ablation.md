@@ -1,6 +1,6 @@
 # NeuroSoft Input Normalization Recovery Ablation
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-08-31
 **Parent experiment:** [Phase 2 -- Convolution--BiGRU Recipe Recovery](20260831-MS-neurosoft-conv-bigru-recipe-recovery.md)
 **Follow-up experiments:** [Phase 3 -- NeuroSoft Input-Normalization Seed Replication](20260901-MS-neurosoft-input-normalization-replication.md)
@@ -85,11 +85,32 @@ submitted.
 
 ### Summary
 
-TBD
+At seed 42, both train-only z-score modes recovered the GRU from the raw
+minipig class-prior regime and from the weaker monkey raw baseline. Global
+z-scoring preserved EEGNet better than channel-wise z-scoring in both species,
+but raw EEGNet remained the strongest condition. This completed the originally
+missing global-normalization cells and motivated the linked three-seed
+[Phase 3 replication](20260901-MS-neurosoft-input-normalization-replication.md).
 
 ### Metrics
 
-TBD
+Best validation supported macro-F1 for the seed-42 screen, reproduced by the
+analysis script:
+
+| Species | Model | Input normalization | Best F1 | Best epoch | WandB run |
+|---|---|---|---:|---:|---|
+| Minipigs | EEGNet | Raw | 0.1722 | 24 | [EEGNet minipig raw s42 (`1qwq1x7r`)](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/1qwq1x7r) |
+| Minipigs | EEGNet | Train-channel z-score | 0.1568 | 4 | [EEGNet minipig channel s42 (`lx7f8e1t`)](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/lx7f8e1t) |
+| Minipigs | EEGNet | Train-global z-score | 0.1642 | 6 | [EEGNet minipig global s42 (`2ibkohn5`)](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/2ibkohn5) |
+| Minipigs | GRU | Raw | 0.0427 | 1 | [GRU minipig raw s42 (`xfo8t5yt`)](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/xfo8t5yt) |
+| Minipigs | GRU | Train-channel z-score | 0.2538 | 50 | [GRU minipig channel s42 (`l7gek5ps`)](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/l7gek5ps) |
+| Minipigs | GRU | Train-global z-score | 0.2332 | 19 | [GRU minipig global s42 (`sjd058s0`)](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/sjd058s0) |
+| Monkeys | EEGNet | Raw | 0.4559 | 40 | [EEGNet monkey raw s42 (`gvpixafp`)](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/gvpixafp) |
+| Monkeys | EEGNet | Train-channel z-score | 0.2379 | 78 | [EEGNet monkey channel s42 (`fu7dnhkn`)](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/fu7dnhkn) |
+| Monkeys | EEGNet | Train-global z-score | 0.2810 | 57 | [EEGNet monkey global s42 (`mpghfxip`)](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/mpghfxip) |
+| Monkeys | GRU | Raw | 0.1413 | 37 | [GRU monkey raw s42 (`cra6xbbd`)](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/cra6xbbd) |
+| Monkeys | GRU | Train-channel z-score | 0.7403 | 34 | [GRU monkey channel s42 (`677tch9g`)](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/677tch9g) |
+| Monkeys | GRU | Train-global z-score | 0.7474 | 54 | [GRU monkey global s42 (`902pw4ml`)](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/902pw4ml) |
 
 ### Analysis
 
@@ -99,19 +120,23 @@ The completed seed-42 diagnostic is reproducible with:
 uv run python analysis/20260831-MS-neurosoft-input-normalization-ablation_analysis.py
 ```
 
-It dynamically collects the original WandB group, so rerun it after the four Phase-2 cells finish to produce the 12-cell comparison.
+It dynamically collects the 12-cell seed-42 WandB group.
 
 ### Figures
 
-TBD
+![Seed-42 validation supported macro-F1 curves](../../analysis/figures/20260831-MS-neurosoft-input-normalization-ablation_validation_curves.png)
 
 ## Conclusions
 
-TBD
+The seed-42 evidence supports the stated scale-recovery mechanism: global
+z-scoring raises GRU validation F1 far above raw input in both species, and it
+is less damaging to EEGNet than per-channel normalization. It does not restore
+EEGNet to the raw-input peak, especially for monkey. The subsequently completed
+[Phase 3 replication](20260901-MS-neurosoft-input-normalization-replication.md)
+confirmed that these condition rankings generalize across the two added seeds.
 
 ## Notes for future experiments
 
-- Treat the resulting 12-cell screen as mechanistic, single-seed evidence only; repeat across seeds before making a performance claim.
-- Preserve the generated normalization stats manifest SHA-256 for every enabled run; it establishes that validation data did not influence fitted statistics.
-- Compare EEGNet's trajectories as well as peak F1; its monkey raw peak was much higher than its typical trajectory.
-- If global z-scoring preserves EEGNet and rescues GRU, evaluate a later global-scale-only mode (division by train-only recording standard deviation without centering) to isolate whether centering contributes.
+- **Completed follow-up:** repeat the full 12-cell validation comparison at
+  seeds 43 and 44, then assess mean and per-seed ordering. This work is
+  recorded in the linked Phase 3 replication experiment.
