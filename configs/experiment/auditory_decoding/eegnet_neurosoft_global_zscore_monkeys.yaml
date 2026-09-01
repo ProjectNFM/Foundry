@@ -1,0 +1,85 @@
+# @package _global_
+# EEGNet global-normalization learning curves: 62 cells x 3 seeds = 186 jobs.
+
+defaults:
+  - override /model: eegnet
+  - override /data: neurosoft_monkeys/singlesess
+  - override /cluster: cscs
+
+task_configs: [neurosoft_acoustic_stim_8band]
+phase1_cell: ???
+
+model:
+  num_channels: ${get_num_ecog_channels_by_name:${data.root}/neurosoft_monkeys_2026,${data.dataset_kwargs.recording_ids.0}}
+  num_samples: 1000
+
+data:
+  split_type: intrasession-causal
+  audit_json: docs/neurosoft-phase0-audit.json
+  audit_species: monkeys
+  task_type: acoustic_stim
+  training_fraction_task: neurosoft_acoustic_stim_8band
+  training_fraction: ${phase1_cell_fraction:${phase1_cell}}
+  training_fraction_seed: ${run.seed}
+  training_fraction_min_class_support: 3
+  training_fraction_min_present_classes: 6
+  input_normalization:
+    mode: recording_train_global_zscore
+    supported_modalities: [eeg, ecog, seeg, ieeg]
+    scale_floor: 1.0e-8
+    accumulator_dtype: float64
+  dataset_kwargs:
+    recording_ids:
+      - ${phase1_cell_recording:${phase1_cell}}
+
+run:
+  project: neurosoft_supervised_pretraining
+  name: norm_eegnet_mk_${data.dataset_kwargs.recording_ids.0}_f${data.training_fraction}_s${run.seed}
+  group: NORM_GLOBAL_EEGNET_MONKEYS
+  tags: [normalization-baseline, global-zscore, eegnet, monkeys, 8band, learning-curves]
+  seed: ???
+  log_level: INFO
+  evaluate_test: true
+
+hyperparameters:
+  batch_size: 16
+  sequence_length: 0.5
+  fold_number: 0
+  num_workers: 1
+  learning_rate: 0.015
+  weight_decay: 0.018
+
+stage:
+  mode: direct
+
+trainer:
+  max_epochs: 200
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      patience: 40
+    model_checkpoint:
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      auto_insert_metric_name: false
+    compute_tracking:
+      _target_: foundry.training.callbacks.ComputeTrackingCallback
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      sequence_length: ${hyperparameters.sequence_length}
+      require_flops: true
+      flops_per_window: 78487808
+      flop_method: torch-flop-counter-v1
+
+hydra:
+  sweeper:
+    max_batch_size: 1000
+    params:
+      phase1_cell: ${neurosoft_supported_cell_sweep_choices:docs/neurosoft-phase0-audit.json,monkeys}
+      run.seed: 42,43,44
+  launcher:
+    partition: normal
+    timeout_min: 240
+    jobs_per_gpu: 1

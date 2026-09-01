@@ -1,0 +1,42 @@
+defaults:
+  - foundry_clariden_slurm
+
+_target_: hydra_plugins.foundry_launcher.clariden_launcher.ClaridenNodePoolLauncher
+
+name: ${run.group}
+submitit_folder: ${hydra.sweep.dir}/slurm_logs/%j
+stderr_to_stdout: true
+account: ${oc.env:CSCS_ACCOUNT,???}
+partition: normal
+nodes: 1
+timeout_min: 240
+signal_delay_s: 300
+exclusive: true
+mem_gb: 450
+gpus_per_node: 4
+
+# These are logical worker-pool resources, not fractional Slurm allocations.
+# The three shares are derived and checked in Python before submission.
+jobs_per_gpu: 1
+workers_per_node: null
+cpus_per_worker: null
+memory_per_worker_gb: null
+drain_guard_min: 10
+minimum_start_budget_min: 0
+
+container_environment: ${oc.env:FOUNDRY_CLARIDEN_EDF,???}
+application_environment_file: ${oc.env:FOUNDRY_ENV_FILE,???}
+data_root: ${oc.env:FOUNDRY_DATA_ROOT,/capstor/store/cscs/swissai/a0091/processed}
+resume_snapshot: null
+retry_failed: true
+
+additional_parameters:
+  no-requeue: true
+setup: []
+
+snapshot:
+  enabled: true
+  root: ${oc.env:FOUNDRY_SNAPSHOT_ROOT,???}
+  require_clean_git: true
+  verify_on_worker: true
+  environment_file: ${hydra.launcher.application_environment_file}

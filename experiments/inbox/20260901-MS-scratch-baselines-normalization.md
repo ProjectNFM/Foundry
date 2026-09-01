@@ -79,21 +79,14 @@ recording, fraction, and seed.
 
 ### Launch command
 
-New production Hydra configs are required before launch so that the audited
-Phase-1 cell sweep can be reused for each model with its declared global
-normalization and model-specific recipe.  Once those committed configs exist,
-submit the two species sweeps on the `long` partition using the normal
-snapshot workflow:
+The four production Hydra configs reuse the audited Phase-1 cell sweep with
+global normalization and model-specific recipes. Once they are committed,
+submit four independent one-node Clariden pools using the snapshot workflow:
 
 ```bash
 git status --short  # must print nothing
-export FOUNDRY_SNAPSHOT_ROOT=/network/scratch/s/sobralm/foundry-launches
-
-# EEGNet global-normalization learning curves, then Conv--BiGRU global-normalization
-# learning curves; one committed config per species/model condition.
-python main.py experiment=auditory_decoding/<committed-config> \
-  hydra/launcher=slurm_default \
-  -m
+export FOUNDRY_SNAPSHOT_ROOT=<mounted-clariden-shared-path>/foundry-launches
+scripts/launch_clariden_normalization.sh
 ```
 
 Record every Slurm job ID and snapshot bundle path here immediately after

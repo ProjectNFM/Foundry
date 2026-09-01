@@ -79,6 +79,13 @@ def _configure_wandb(cfg: DictConfig, output_dir: str) -> None:
         return
 
     OmegaConf.update(cfg, "logger.save_dir", output_dir)
+    # Node-pool attempts need a unique, parent-recorded identity even if an
+    # experiment config happened to provide a reusable logger ID.
+    foundry_run_id = os.environ.get("FOUNDRY_WANDB_RUN_ID")
+    if foundry_run_id:
+        OmegaConf.update(cfg, "logger.id", foundry_run_id)
+        return
+
     if OmegaConf.select(cfg, "logger.id") is not None:
         return
 
@@ -954,8 +961,11 @@ def _write_snapshot_task_provenance(output_dir: str) -> None:
     # Hydra leaves ``job.num`` as a mandatory-but-unresolved value for a
     # one-item local multirun.  That task still maps to the first snapshot
     # config, so use index 0 when no explicit job number is available.
+    task_index_raw = os.environ.get("FOUNDRY_SNAPSHOT_TASK_INDEX")
     task_index = int(
-        OmegaConf.select(
+        task_index_raw
+        if task_index_raw is not None
+        else OmegaConf.select(
             HydraConfig.get(), "job.num", default=0, throw_on_missing=False
         )
     )
