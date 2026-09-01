@@ -14,6 +14,7 @@ import hydra_plugins.foundry_launcher.clariden_launcher as clariden_launcher
 from hydra_plugins.foundry_launcher.clariden_launcher import (
     MAX_MPS_CLIENTS_PER_GPU,
     _run_claimed_cell,
+    _sweep_name,
     _worker_identity,
     validate_clariden_config,
 )
@@ -66,6 +67,20 @@ def _launcher_params(tmp_path: Path, *, mps: bool = False) -> dict:
             "environment_file": str(env_file),
         },
     }
+
+
+def test_sweep_name_does_not_resolve_cell_only_run_name() -> None:
+    config = OmegaConf.create(
+        {
+            "run": {
+                "group": "NORM_GLOBAL_EEGNET_MINIPIGS",
+                "name": "cell_${phase1_cell}",
+            },
+            "phase1_cell": "???",
+        }
+    )
+
+    assert _sweep_name(config) == "NORM_GLOBAL_EEGNET_MINIPIGS"
 
 
 def test_clariden_resources_are_derived_in_python(tmp_path: Path) -> None:

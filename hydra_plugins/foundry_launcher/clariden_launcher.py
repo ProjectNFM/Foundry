@@ -230,6 +230,20 @@ def _resolve_bundle(value: str | Path) -> LaunchSnapshot:
     return snapshot
 
 
+def _sweep_name(config: DictConfig) -> str:
+    """Resolve a batch label without touching cell-only interpolations."""
+    group = OmegaConf.select(
+        config, "run.group", default=None, throw_on_missing=False
+    )
+    if group is not None:
+        return str(group)
+
+    name = OmegaConf.select(
+        config, "run.name", default=None, throw_on_missing=False
+    )
+    return "clariden-sweep" if name is None else str(name)
+
+
 def _remaining_seconds(timeout_min: int, started: float) -> float:
     raw_end = os.environ.get("SLURM_JOB_END_TIME")
     if raw_end:
@@ -601,15 +615,7 @@ class ClaridenNodePoolLauncher(Launcher):
             if not job_overrides:
                 raise ValueError("Clariden launcher received an empty sweep")
             project_root = Path(sys.argv[0]).resolve().parent
-            sweep_name = str(
-                OmegaConf.select(
-                    self.config,
-                    "run.group",
-                    default=OmegaConf.select(
-                        self.config, "run.name", default="clariden-sweep"
-                    ),
-                )
-            )
+            sweep_name = _sweep_name(self.config)
             snapshot = prepare_snapshot(
                 project_root=project_root,
                 snapshot_root=Path(snapshot_cfg["root"]),
