@@ -199,7 +199,7 @@ def _validate_fit_parameters(
     return dtype
 
 
-def fit_recording_stats(
+def _collect_recording_moments(
     dataset,
     recording_id: str,
     train_intervals,
@@ -207,30 +207,8 @@ def fit_recording_stats(
     scale_floor: float = 1e-8,
     accumulator_dtype=np.float64,
     chunk_samples: int = 1_000_000,
-) -> RecordingChannelStats:
-    """Fit per-channel mean and scale from training-split samples only.
-
-    Statistics are accumulated in *accumulator_dtype* (default ``float64``)
-    over merged, deduplicated time intervals.  The population standard
-    deviation (``ddof=0``) is used, and a configurable *scale_floor*
-    prevents division by near-zero values.
-
-    Args:
-        dataset: A ``torch_brain`` dataset with ``get_recording()``.
-        recording_id: Canonical recording identifier.
-        train_intervals: An ``Interval`` object with ``.start`` / ``.end``
-            arrays for the training partition of this recording.
-        supported_modalities: Modality strings to include.
-        scale_floor: Positive lower bound on per-channel scale.
-        accumulator_dtype: Numpy dtype for intermediate sums.
-
-    Returns:
-        Frozen :class:`RecordingChannelStats` for the recording.
-
-    Raises:
-        RuntimeError: If the recording has no train samples.
-        ValueError: If non-finite statistics are produced.
-    """
+) -> tuple[str, tuple[str, ...], float, np.ndarray, np.ndarray, int]:
+    """Accumulate per-channel train-split moments for one recording."""
     accumulator_dtype = _validate_fit_parameters(scale_floor, accumulator_dtype)
     if chunk_samples <= 0:
         raise ValueError("chunk_samples must be positive")
@@ -313,8 +291,66 @@ def fit_recording_stats(
     if count_accum == 0:
         raise RuntimeError(
             f"Recording {recording_id!r} has no train samples within "
-            f"the provided intervals"
+            "the provided intervals"
         )
+    return (
+        field_name,
+        tuple(str(n) for n in channel_names),
+        sampling_rate,
+        sum_accum,
+        sq_sum_accum,
+        count_accum,
+    )
+
+
+def fit_recording_stats(
+    dataset,
+    recording_id: str,
+    train_intervals,
+    supported_modalities: frozenset[str] = NEURAL_MODALITIES,
+    scale_floor: float = 1e-8,
+    accumulator_dtype=np.float64,
+    chunk_samples: int = 1_000_000,
+) -> RecordingChannelStats:
+    """Fit per-channel mean and scale from training-split samples only.
+
+    Statistics are accumulated in *accumulator_dtype* (default ``float64``)
+    over merged, deduplicated time intervals.  The population standard
+    deviation (``ddof=0``) is used, and a configurable *scale_floor*
+    prevents division by near-zero values.
+
+    Args:
+        dataset: A ``torch_brain`` dataset with ``get_recording()``.
+        recording_id: Canonical recording identifier.
+        train_intervals: An ``Interval`` object with ``.start`` / ``.end``
+            arrays for the training partition of this recording.
+        supported_modalities: Modality strings to include.
+        scale_floor: Positive lower bound on per-channel scale.
+        accumulator_dtype: Numpy dtype for intermediate sums.
+
+    Returns:
+        Frozen :class:`RecordingChannelStats` for the recording.
+
+    Raises:
+        RuntimeError: If the recording has no train samples.
+        ValueError: If non-finite statistics are produced.
+    """
+    (
+        field_name,
+        channel_names,
+        sampling_rate,
+        sum_accum,
+        sq_sum_accum,
+        count_accum,
+    ) = _collect_recording_moments(
+        dataset,
+        recording_id,
+        train_intervals,
+        supported_modalities=supported_modalities,
+        scale_floor=scale_floor,
+        accumulator_dtype=accumulator_dtype,
+        chunk_samples=chunk_samples,
+    )
 
     mean = sum_accum / count_accum
     variance = sq_sum_accum / count_accum - mean**2
@@ -338,10 +374,67 @@ def fit_recording_stats(
     return RecordingChannelStats(
         recording_id=recording_id,
         signal_field=field_name,
-        channel_names=tuple(str(n) for n in channel_names),
+        channel_names=channel_names,
         mean=mean.astype(np.float32),
         scale=std.astype(np.float32),
         sample_count=count_accum,
+        floored_channels=(),
+        sampling_rate=sampling_rate,
+    )
+
+
+def fit_recording_global_stats(
+    dataset,
+    recording_id: str,
+    train_intervals,
+    supported_modalities: frozenset[str] = NEURAL_MODALITIES,
+    scale_floor: float = 1e-8,
+    accumulator_dtype=np.float64,
+    chunk_samples: int = 1_000_000,
+) -> RecordingChannelStats:
+    """Fit one recording-wide z-score from training-split samples only.
+
+    The scalar mean and standard deviation are accumulated across both time
+    and supported channels, then broadcast over channels for compatibility
+    with :class:`RecordingChannelStandardize`.  This preserves all relative
+    channel amplitudes while correcting recording-wide offset and scale.
+    """
+    (
+        field_name,
+        channel_names,
+        sampling_rate,
+        sum_accum,
+        sq_sum_accum,
+        count_per_channel,
+    ) = _collect_recording_moments(
+        dataset,
+        recording_id,
+        train_intervals,
+        supported_modalities=supported_modalities,
+        scale_floor=scale_floor,
+        accumulator_dtype=accumulator_dtype,
+        chunk_samples=chunk_samples,
+    )
+    sample_count = count_per_channel * len(channel_names)
+    mean = float(sum_accum.sum() / sample_count)
+    variance = float(sq_sum_accum.sum() / sample_count - mean**2)
+    scale = float(np.sqrt(max(variance, 0.0)))
+    if not np.isfinite(scale):
+        raise ValueError(
+            f"Non-finite global scale for recording {recording_id!r}"
+        )
+    if scale <= scale_floor:
+        raise ValueError(
+            f"Recording {recording_id!r} has global scale at or below "
+            f"scale_floor={scale_floor:.2e}"
+        )
+    return RecordingChannelStats(
+        recording_id=recording_id,
+        signal_field=field_name,
+        channel_names=channel_names,
+        mean=np.full(len(channel_names), mean, dtype=np.float32),
+        scale=np.full(len(channel_names), scale, dtype=np.float32),
+        sample_count=sample_count,
         floored_channels=(),
         sampling_rate=sampling_rate,
     )

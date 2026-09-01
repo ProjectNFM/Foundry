@@ -1,8 +1,8 @@
 # @package _global_
 #
-# Single-seed, validation-only normalization ablation on the representative
-# NeuroSoft monkey causal session.  The CLI sweeps `model` and
-# `data.input_normalization.mode` to form the four comparison cells.  Here
+# Phase-2, single-seed global-normalization extension on the representative
+# NeuroSoft monkey causal session.  The CLI sweeps `model` only while the
+# config fixes `recording_train_global_zscore`, forming two missing cells. Here
 # "GRU" denotes the Phase-2 `NeurosoftConvBiGRU` recovery architecture.
 
 defaults:
@@ -28,7 +28,7 @@ data:
   training_fraction_min_class_support: 3
   training_fraction_min_present_classes: 6
   input_normalization:
-    mode: disabled
+    mode: recording_train_global_zscore
     supported_modalities: [eeg, ecog, seeg, ieeg]
     scale_floor: 1.0e-8
     accumulator_dtype: float64

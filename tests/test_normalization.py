@@ -23,6 +23,7 @@ from torch_brain.data.arraydict import ArrayDict
 from foundry.data.normalization import (
     RecordingChannelStats,
     _sampling_rate_from_signal_source,
+    fit_recording_global_stats,
     fit_recording_stats,
     load_normalization_stats,
     merge_time_intervals,
@@ -328,6 +329,36 @@ class TestFitRecordingStats:
         np.testing.assert_allclose(stats.mean[1], -2.0, atol=0.1)
         np.testing.assert_allclose(stats.scale[0], 3.0, atol=0.2)
         np.testing.assert_allclose(stats.scale[1], 0.5, atol=0.1)
+
+    def test_global_stats_use_one_scalar_across_channels(self):
+        """Global z-score preserves relative channel scale after fitting."""
+        signal = np.array(
+            [[0.0, 10.0], [2.0, 14.0], [4.0, 18.0]], dtype=np.float32
+        )
+        dataset, train_iv = self._make_dataset(
+            signal, [0.0], [0.03], sampling_rate=100.0
+        )
+
+        stats = fit_recording_global_stats(dataset, "sess1", train_iv)
+
+        expected_mean = signal.mean()
+        expected_scale = signal.std(ddof=0)
+        np.testing.assert_allclose(stats.mean, expected_mean)
+        np.testing.assert_allclose(stats.scale, expected_scale)
+        assert stats.sample_count == signal.size
+
+    def test_global_stats_allow_constant_individual_channel(self):
+        """A globally varying recording need not vary in every channel."""
+        signal = np.column_stack(
+            [np.ones(100, dtype=np.float32), np.arange(100, dtype=np.float32)]
+        )
+        dataset, train_iv = self._make_dataset(
+            signal, [0.0], [1.0], sampling_rate=100.0
+        )
+
+        stats = fit_recording_global_stats(dataset, "sess1", train_iv)
+
+        assert stats.scale[0] > 0
 
     def test_disjoint_intervals(self):
         """Statistics computed over disjoint train intervals."""
@@ -841,6 +872,19 @@ class TestDataModuleNormalization:
         stats = dm.normalization_stats["rec1"]
         assert stats.sample_count > 0
         assert len(stats.channel_names) == 3
+
+    def test_global_mode_fits_broadcast_statistics(self):
+        dm = self._make_dm(
+            normalization_cfg={
+                "mode": "recording_train_global_zscore",
+                "scale_floor": 1e-8,
+            }
+        )
+        dm.setup("fit")
+
+        stats = dm.normalization_stats["rec1"]
+        assert np.all(stats.mean == stats.mean[0])
+        assert np.all(stats.scale == stats.scale[0])
 
     def test_standardizer_in_transform_pipeline(self):
         dm = self._make_dm(

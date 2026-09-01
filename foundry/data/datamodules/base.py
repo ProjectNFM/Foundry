@@ -208,9 +208,9 @@ class NeuralDataModule(LightningDataModule):
             audit_species: Species key used to disambiguate duplicated BIDS
                 recording IDs in the Phase 0 audit.
             input_normalization: Optional normalization configuration dict.
-                When ``mode`` is ``"recording_train_channel_zscore"``,
-                per-channel mean/scale statistics are fitted from the
-                training partition only and applied to all splits.
+                When ``mode`` is ``"recording_train_channel_zscore"`` or
+                ``"recording_train_global_zscore"``, frozen train-only
+                statistics are fitted per recording and applied to all splits.
                 Keys: ``mode``, ``supported_modalities``,
                 ``scale_floor``, ``accumulator_dtype``.
         """
@@ -360,16 +360,20 @@ class NeuralDataModule(LightningDataModule):
     # -- Input normalization ---------------------------------------------------
 
     def _maybe_fit_normalization(self) -> None:
-        """Fit train-only per-channel statistics if normalization is configured."""
+        """Fit train-only recording statistics if normalization is configured."""
         if self._input_normalization_cfg is None:
             return
         mode = self._input_normalization_cfg.get("mode", "disabled")
         if mode == "disabled":
             return
-        if mode != "recording_train_channel_zscore":
+        if mode not in {
+            "recording_train_channel_zscore",
+            "recording_train_global_zscore",
+        }:
             raise ValueError(
                 f"Unsupported input_normalization.mode={mode!r}; "
-                f"expected 'disabled' or 'recording_train_channel_zscore'"
+                "expected 'disabled', 'recording_train_channel_zscore', or "
+                "'recording_train_global_zscore'"
             )
         if self._standardizer is not None:
             return
@@ -386,11 +390,15 @@ class NeuralDataModule(LightningDataModule):
         self._fit_and_insert_normalization()
 
     def _fit_and_insert_normalization(self) -> None:
-        """Fit per-channel stats and insert standardizer into the pipeline."""
-        from foundry.data.normalization import fit_recording_stats
+        """Fit configured recording statistics and insert standardizer."""
+        from foundry.data.normalization import (
+            fit_recording_global_stats,
+            fit_recording_stats,
+        )
         from foundry.data.transforms import RecordingChannelStandardize
 
         cfg = self._input_normalization_cfg
+        mode = cfg["mode"]
         supported_modalities = frozenset(
             str(modality).lower()
             for modality in cfg.get(
@@ -424,7 +432,12 @@ class NeuralDataModule(LightningDataModule):
         for rid, intervals in train_intervals.items():
             if len(intervals) == 0:
                 continue
-            stats = fit_recording_stats(
+            fit_stats = (
+                fit_recording_global_stats
+                if mode == "recording_train_global_zscore"
+                else fit_recording_stats
+            )
+            stats = fit_stats(
                 self.dataset,
                 rid,
                 intervals,
@@ -468,8 +481,9 @@ class NeuralDataModule(LightningDataModule):
 
         logger.info(
             "Fitted input normalization for %d recording(s) "
-            "(mode=recording_train_channel_zscore, scale_floor=%.1e)",
+            "(mode=%s, scale_floor=%.1e)",
             len(stats_by_recording),
+            mode,
             scale_floor,
         )
 
