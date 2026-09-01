@@ -1,6 +1,6 @@
 # Scratch Baselines Normalization
 
-**Status:** Draft
+**Status:** In Progress
 **Date started:** 2026-09-01
 **Parent experiment:** [Phase 3 -- NeuroSoft Input-Normalization Seed Replication](20260901-MS-neurosoft-input-normalization-replication.md)
 **Follow-up experiments:** TBD
@@ -91,6 +91,20 @@ scripts/launch_clariden_normalization.sh
 
 Record every Slurm job ID and snapshot bundle path here immediately after
 submission.
+
+The first throughput canary uses the EEGNet minipig pool so its 579 queued
+cells can keep 192 MPS workers busy across multiple waves:
+
+- **Submitted:** 2026-09-01 at 22:37:13 CEST.
+- **Slurm job:** `3257306` (`debug`, one exclusive GH200 node).
+- **Start:** 2026-09-01 at 22:37:14 CEST on `nid007512` (no queue wait).
+- **Expected end:** approximately 22:57:14 CEST after the 20-minute limit.
+- **Concurrency:** `hydra.launcher.jobs_per_gpu=48` (192 workers/node).
+- **Canary overrides:** `timeout_min=20`, `drain_guard_min=1`, and
+  `signal_delay_s=60`.
+- **Snapshot:**
+  `/capstor/scratch/cscs/milosobral/foundry-launches/20260901T203654_NORM_GLOBAL_EEGNET_MINIPIGS_a7ce1664_b4d52560`
+- **Git commit:** `a7ce166451d3db48a0a5cae72b1ac55c79734197`.
 
 ### Key config overrides
 
