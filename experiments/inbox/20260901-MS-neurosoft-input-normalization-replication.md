@@ -64,6 +64,15 @@ python main.py \
 
 Record the two snapshot bundle paths and the 24 WandB run names and IDs here after the launchers return.
 
+### Launch record
+
+Launched locally on 2026-09-01 with eight concurrent cells sharing GPU 0 (four
+worker slots per species sweep). The parent processes ran under existing Slurm
+allocation `10617291`; no new Slurm job was submitted.
+
+- **Minipigs snapshot:** `/network/scratch/s/sobralm/foundry-launches/20260901T143741_PHASE3_INPUT_NORMALIZATION_REPLICATION_cd80a9d1_7251c5ff`
+- **Monkeys snapshot:** `/network/scratch/s/sobralm/foundry-launches/20260901T143741_PHASE3_INPUT_NORMALIZATION_REPLICATION_cd80a9d1_13382065`
+
 ### Key config overrides
 
 - Reuses `configs/experiment/auditory_decoding/neurosoft_input_normalization_ablation_{minipigs,monkeys}.yaml`.
