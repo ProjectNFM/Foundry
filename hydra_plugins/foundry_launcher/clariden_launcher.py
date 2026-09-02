@@ -266,7 +266,14 @@ def _numa_node_for_current_affinity() -> int:
         numa_result = subprocess.run(
             [
                 "hwloc-calc",
-                "--physical",
+                # hwloc-bind --taskset emits Linux OS CPU indexes.  Those are
+                # physical PU indexes, whereas hwloc-calc otherwise treats a
+                # bitmap argument as logical PU indexes.  On a GH200 this
+                # turns a single CPU affinity mask into an apparent set of
+                # NUMA domains.  Preserve physical indexes on both sides of
+                # the conversion so a rank is assigned to its actual domain.
+                "--physical-input",
+                "--physical-output",
                 "--intersect",
                 "NUMAnode",
                 mask_result.stdout.strip(),

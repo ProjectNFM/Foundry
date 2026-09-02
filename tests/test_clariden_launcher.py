@@ -126,6 +126,32 @@ def test_clariden_rejects_oversubscription_without_mps(tmp_path: Path) -> None:
         validate_clariden_config(params)
 
 
+def test_numa_affinity_uses_physical_indexes_for_taskset_mask(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        stdout = "0x1000\n" if command[0] == "hwloc-bind" else "2\n"
+        return subprocess.CompletedProcess(command, 0, stdout=stdout)
+
+    monkeypatch.setattr(clariden_launcher.subprocess, "run", fake_run)
+
+    assert clariden_launcher._numa_node_for_current_affinity() == 2
+    assert commands == [
+        ["hwloc-bind", "--get", "--taskset"],
+        [
+            "hwloc-calc",
+            "--physical-input",
+            "--physical-output",
+            "--intersect",
+            "NUMAnode",
+            "0x1000",
+        ],
+    ]
+
+
 def test_mps_worker_uses_actual_numa_domain_for_gpu_binding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
