@@ -266,14 +266,10 @@ def _numa_node_for_current_affinity() -> int:
         numa_result = subprocess.run(
             [
                 "hwloc-calc",
-                # hwloc-bind --taskset emits Linux OS CPU indexes.  Those are
-                # physical PU indexes, whereas hwloc-calc otherwise treats a
-                # bitmap argument as logical PU indexes.  On a GH200 this
-                # turns a single CPU affinity mask into an apparent set of
-                # NUMA domains.  Preserve physical indexes on both sides of
-                # the conversion so a rank is assigned to its actual domain.
-                "--physical-input",
-                "--physical-output",
+                # Taskset masks are always physical CPU masks.  Request
+                # physical NUMA indexes as well, so the GPU-adjacent domains
+                # use the stable 0--3 topology identifiers.
+                "--physical",
                 "--intersect",
                 "NUMAnode",
                 mask_result.stdout.strip(),
@@ -288,19 +284,26 @@ def _numa_node_for_current_affinity() -> int:
             "hwloc-calc commands inside the container"
         ) from error
 
-    numa_nodes = numa_result.stdout.split()
-    if len(numa_nodes) != 1 or not numa_nodes[0].isdigit():
+    raw_numa_nodes = numa_result.stdout.strip()
+    try:
+        numa_nodes = [
+            int(node) for node in raw_numa_nodes.replace(",", " ").split()
+        ]
+    except ValueError:
+        numa_nodes = []
+
+    # GH200 CPU affinities intersect the local CPU/GPU NUMA domain plus its
+    # memory-only NUMA nodes.  Only domains 0--3 have an adjacent GPU, so the
+    # complete list is not expected to contain a single value.  What matters
+    # for MPS placement is that it contains exactly one GPU-associated domain.
+    gpu_domains = [node for node in numa_nodes if 0 <= node < 4]
+    if len(gpu_domains) != 1:
         raise RuntimeError(
-            "MPS worker CPU affinity must belong to exactly one physical NUMA "
-            f"node; mask={mask_result.stdout.strip()!r}, "
-            f"NUMA nodes={numa_result.stdout.strip()!r}"
+            "MPS worker CPU affinity must intersect exactly one GPU-associated "
+            f"physical NUMA domain; mask={mask_result.stdout.strip()!r}, "
+            f"NUMA nodes={raw_numa_nodes!r}, GPU domains={gpu_domains!r}"
         )
-    numa_node = int(numa_nodes[0])
-    if not 0 <= numa_node < 4:
-        raise RuntimeError(
-            f"Expected a GH200 GPU/NUMA domain in [0, 3], got {numa_node}"
-        )
-    return numa_node
+    return gpu_domains[0]
 
 
 def _worker_identity(jobs_per_gpu: int) -> tuple[dict[str, Any], str]:

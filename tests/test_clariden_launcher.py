@@ -126,14 +126,18 @@ def test_clariden_rejects_oversubscription_without_mps(tmp_path: Path) -> None:
         validate_clariden_config(params)
 
 
-def test_numa_affinity_uses_physical_indexes_for_taskset_mask(
+def test_numa_affinity_selects_gpu_domain_from_physical_numa_indexes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     commands: list[list[str]] = []
 
     def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         commands.append(command)
-        stdout = "0x1000\n" if command[0] == "hwloc-bind" else "2\n"
+        stdout = (
+            "0x1000\n"
+            if command[0] == "hwloc-bind"
+            else "2,21,22,23,24,25,26,27\n"
+        )
         return subprocess.CompletedProcess(command, 0, stdout=stdout)
 
     monkeypatch.setattr(clariden_launcher.subprocess, "run", fake_run)
@@ -143,13 +147,25 @@ def test_numa_affinity_uses_physical_indexes_for_taskset_mask(
         ["hwloc-bind", "--get", "--taskset"],
         [
             "hwloc-calc",
-            "--physical-input",
-            "--physical-output",
+            "--physical",
             "--intersect",
             "NUMAnode",
             "0x1000",
         ],
     ]
+
+
+def test_numa_affinity_rejects_multiple_gpu_domains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        stdout = "0x3\n" if command[0] == "hwloc-bind" else "1,2,21\n"
+        return subprocess.CompletedProcess(command, 0, stdout=stdout)
+
+    monkeypatch.setattr(clariden_launcher.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="exactly one GPU-associated"):
+        clariden_launcher._numa_node_for_current_affinity()
 
 
 def test_mps_worker_uses_actual_numa_domain_for_gpu_binding(
