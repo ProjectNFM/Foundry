@@ -117,12 +117,22 @@ The subsequent production submissions did not yield usable experiment cells:
 | `3257662` | EEGNet monkeys | `/capstor/scratch/cscs/milosobral/foundry-launches/20260901T213929_NORM_GLOBAL_EEGNET_MONKEYS_cceed1a3_48b6f364` | All workers stopped during MPS NUMA-domain detection. |
 | `3257667` | Conv--BiGRU monkeys | `/capstor/scratch/cscs/milosobral/foundry-launches/20260901T214040_NORM_GLOBAL_CONV_BIGRU_MONKEYS_cceed1a3_f689014b` | All workers stopped during MPS NUMA-domain detection. |
 
-The MPS bug was that `hwloc-bind --taskset` produces Linux physical CPU
-indexes, but the launcher passed that mask to `hwloc-calc` as logical indexes.
-The resulting false multi-NUMA result halted every rank before it could claim
-or execute a cell.  The verified fix uses `--physical-input` and
-`--physical-output`; replacement jobs must use a snapshot at or after Git
-commit `fe55162`.
+The initial MPS validator treated the complete hwloc NUMA result as though it
+had to contain one node.  On GH200, each CPU affinity also intersects
+memory-only NUMA nodes, so that assumption halted every rank before it could
+claim a cell.  The final topology-aware fix is recorded below.
+
+### 2026-09-02 30-minute MPS canary
+
+| Slurm job | Snapshot | Outcome |
+| --- | --- | --- |
+| `3264419` | `/capstor/scratch/cscs/milosobral/foundry-launches/20260902T130847_NORM_GLOBAL_EEGNET_MINIPIGS_d6d38741_1f05e154` | Cancelled after confirming that the first NUMA fix still rejected GH200 memory-only NUMA domains. |
+| `3264441` | `/capstor/scratch/cscs/milosobral/foundry-launches/20260902T131036_NORM_GLOBAL_EEGNET_MINIPIGS_d6d38741_4456f5c7` | Cancelled because its immutable snapshot predated the corrected topology-aware validator. |
+| `3264476` | `/capstor/scratch/cscs/milosobral/foundry-launches/20260902T131915_NORM_GLOBAL_EEGNET_MINIPIGS_f3078ff7_519eb3be` | Running on `nid006990` (`debug`, 30 minutes). At 15:28 CEST it claimed 192 cells; snapshot-resident logs confirm those cells entered training with zero failed cells. |
+
+The final binding logic requires exactly one GPU-associated physical NUMA
+domain (`0`--`3`) in a worker's hwloc result, while allowing the expected
+memory-only NUMA domains.  It is committed as `f3078ff`.
 
 ### Key config overrides
 
