@@ -129,6 +129,7 @@ claim a cell.  The final topology-aware fix is recorded below.
 | `3264419` | `/capstor/scratch/cscs/milosobral/foundry-launches/20260902T130847_NORM_GLOBAL_EEGNET_MINIPIGS_d6d38741_1f05e154` | Cancelled after confirming that the first NUMA fix still rejected GH200 memory-only NUMA domains. |
 | `3264441` | `/capstor/scratch/cscs/milosobral/foundry-launches/20260902T131036_NORM_GLOBAL_EEGNET_MINIPIGS_d6d38741_4456f5c7` | Cancelled because its immutable snapshot predated the corrected topology-aware validator. |
 | `3264476` | `/capstor/scratch/cscs/milosobral/foundry-launches/20260902T131915_NORM_GLOBAL_EEGNET_MINIPIGS_f3078ff7_519eb3be` | Running on `nid006990` (`debug`, 30 minutes). At 15:28 CEST it claimed 192 cells; snapshot-resident logs confirm those cells entered training with zero failed cells. |
+| `3264754` | `/capstor/scratch/cscs/milosobral/foundry-launches/20260902T140619_NORM_GLOBAL_EEGNET_MINIPIGS_CANARY_OFFLINE_16_c1b9ff60_449657bf` | Reached the 30-minute `debug` limit after the 64-worker offline-W&B canary. Of 579 submitted cells, 568 completed successfully; one active cell was stopped at the limit and ten had no final attempt record. No application failure was identified. |
 
 The final binding logic requires exactly one GPU-associated physical NUMA
 domain (`0`--`3`) in a worker's hwloc result, while allowing the expected
