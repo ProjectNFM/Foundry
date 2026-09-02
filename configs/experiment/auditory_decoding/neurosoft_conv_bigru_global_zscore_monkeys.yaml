@@ -5,6 +5,7 @@ defaults:
   - override /model: neurosoft_conv_bigru
   - override /data: neurosoft_monkeys/singlesess
   - override /cluster: cscs
+  - override /logger: wandb_high_concurrency
 
 task_configs: [neurosoft_acoustic_stim_8band]
 phase1_cell: ???
@@ -59,7 +60,13 @@ stage:
 trainer:
   max_epochs: 200
   precision: bf16-mixed
+  # Match the minipig pool's W&B-safe telemetry cadence.
+  log_every_n_steps: 50
   callbacks:
+    parameter_watcher:
+      log_every_n_steps: 200
+    learning_rate_monitor:
+      logging_interval: epoch
     early_stopping:
       monitor: val/neurosoft_acoustic_stim_8band_supported_f1
       mode: max
