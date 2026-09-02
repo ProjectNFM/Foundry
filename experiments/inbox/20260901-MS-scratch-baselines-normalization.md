@@ -106,6 +106,24 @@ cells can keep 192 MPS workers busy across multiple waves:
   `/capstor/scratch/cscs/milosobral/foundry-launches/20260901T203654_NORM_GLOBAL_EEGNET_MINIPIGS_a7ce1664_b4d52560`
 - **Git commit:** `a7ce166451d3db48a0a5cae72b1ac55c79734197`.
 
+The subsequent production submissions did not yield usable experiment cells:
+
+| Slurm job | Pool | Snapshot | Outcome |
+| --- | --- | --- | --- |
+| `3257481` | EEGNet minipigs | `/capstor/scratch/cscs/milosobral/foundry-launches/20260901T210135_NORM_GLOBAL_EEGNET_MINIPIGS_f23b8c75_40829b94` | Child processes inherited Slurm rank variables and failed when configuring WandB. Superseded by `cceed1a`, which clears those variables. |
+| `3257560` | EEGNet minipigs | `/capstor/scratch/cscs/milosobral/foundry-launches/20260901T212243_NORM_GLOBAL_EEGNET_MINIPIGS_cceed1a3_d0378503` | All workers stopped during MPS NUMA-domain detection. |
+| `3257632` | EEGNet minipigs | `/capstor/scratch/cscs/milosobral/foundry-launches/20260901T213448_NORM_GLOBAL_EEGNET_MINIPIGS_cceed1a3_dec0c317` | All workers stopped during MPS NUMA-domain detection. |
+| `3257647` | Conv--BiGRU minipigs | `/capstor/scratch/cscs/milosobral/foundry-launches/20260901T213705_NORM_GLOBAL_CONV_BIGRU_MINIPIGS_cceed1a3_2a435564` | All workers stopped during MPS NUMA-domain detection. |
+| `3257662` | EEGNet monkeys | `/capstor/scratch/cscs/milosobral/foundry-launches/20260901T213929_NORM_GLOBAL_EEGNET_MONKEYS_cceed1a3_48b6f364` | All workers stopped during MPS NUMA-domain detection. |
+| `3257667` | Conv--BiGRU monkeys | `/capstor/scratch/cscs/milosobral/foundry-launches/20260901T214040_NORM_GLOBAL_CONV_BIGRU_MONKEYS_cceed1a3_f689014b` | All workers stopped during MPS NUMA-domain detection. |
+
+The MPS bug was that `hwloc-bind --taskset` produces Linux physical CPU
+indexes, but the launcher passed that mask to `hwloc-calc` as logical indexes.
+The resulting false multi-NUMA result halted every rank before it could claim
+or execute a cell.  The verified fix uses `--physical-input` and
+`--physical-output`; replacement jobs must use a snapshot at or after Git
+commit `fe55162`.
+
 ### Key config overrides
 
 - Reuse the Phase-0 eligibility manifest, nested-fraction resolver, causal
