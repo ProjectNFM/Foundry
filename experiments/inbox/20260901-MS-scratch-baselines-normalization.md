@@ -135,6 +135,19 @@ The final binding logic requires exactly one GPU-associated physical NUMA
 domain (`0`--`3`) in a worker's hwloc result, while allowing the expected
 memory-only NUMA domains.  It is committed as `f3078ff`.
 
+### 2026-09-02 production pools
+
+All production pools use offline W&B, 16 workers/GPU (64 workers/node), the
+`normal` partition, and a 90-minute limit. They were submitted from commit
+`114337e`.
+
+| Slurm job | Group | Snapshot | Scheduler start |
+| --- | --- | --- | --- |
+| `3265931` | `NORM_GLOBAL_EEGNET_MINIPIGS_PROD_OFFLINE_16_20260902` | `/capstor/scratch/cscs/milosobral/foundry-launches/20260902T154917_NORM_GLOBAL_EEGNET_MINIPIGS_PROD_OFFLINE_16_20260902_114337ec_df5ae191` | Started 2026-09-02 17:49:49 CEST (17 seconds after submission) on `nid006986`. |
+| `3265945` | `NORM_GLOBAL_CONV_BIGRU_MINIPIGS_PROD_OFFLINE_16_20260902` | `/capstor/scratch/cscs/milosobral/foundry-launches/20260902T155156_NORM_GLOBAL_CONV_BIGRU_MINIPIGS_PROD_OFFLINE_16_20260902_114337ec_722ac6b6` | Started 2026-09-02 17:52:28 CEST (16 seconds after submission) on `nid006220`. |
+| `3265970` | `NORM_GLOBAL_EEGNET_MONKEYS_PROD_OFFLINE_16_20260902` | `/capstor/scratch/cscs/milosobral/foundry-launches/20260902T155342_NORM_GLOBAL_EEGNET_MONKEYS_PROD_OFFLINE_16_20260902_114337ec_fa8067ce` | Started 2026-09-02 17:54:02 CEST (6 seconds after submission) on `nid006238`. |
+| `3266014` | `NORM_GLOBAL_CONV_BIGRU_MONKEYS_PROD_OFFLINE_16_20260902` | `/capstor/scratch/cscs/milosobral/foundry-launches/20260902T155537_NORM_GLOBAL_CONV_BIGRU_MONKEYS_PROD_OFFLINE_16_20260902_114337ec_1e6ade9b` | Started 2026-09-02 17:56:08 CEST (14 seconds after submission) on `nid006280`. |
+
 ### Key config overrides
 
 - Reuse the Phase-0 eligibility manifest, nested-fraction resolver, causal
