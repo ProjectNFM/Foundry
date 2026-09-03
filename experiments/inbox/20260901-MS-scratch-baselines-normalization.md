@@ -1,6 +1,6 @@
 # Scratch Baselines Normalization
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-09-01
 **Parent experiment:** [Phase 3 -- NeuroSoft Input-Normalization Seed Replication](20260901-MS-neurosoft-input-normalization-replication.md)
 **Follow-up experiments:** TBD
@@ -76,6 +76,11 @@ recording, fraction, and seed.
 - **WandB:** project `neurosoft_supervised_pretraining`; use distinct,
   species-specific groups for the two new conditions and retain the Phase-1
   groups as a read-only reference in the analysis.
+- **Final WandB groups:** `NORM_GLOBAL_EEGNET_MINIPIGS_PROD_OFFLINE_16_20260902`,
+  `NORM_GLOBAL_EEGNET_MONKEYS_PROD_OFFLINE_16_20260902`,
+  `NORM_GLOBAL_CONV_BIGRU_MINIPIGS_PROD_OFFLINE_16_20260902`, and
+  `NORM_GLOBAL_CONV_BIGRU_MONKEYS_PROD_OFFLINE_16_20260902`; reference groups
+  `PHASE1_EEGNET_MINIPIGS` and `PHASE1_EEGNET_MONKEYS`.
 
 ### Launch command
 
@@ -166,29 +171,114 @@ All production pools use offline W&B, 16 workers/GPU (64 workers/node), the
 
 ### Summary
 
-TBD
+The reproducible WandB query resolved 2,361 raw records across the six declared
+groups.  After retaining one finished test result per condition, recording,
+fraction, and seed (primary before retry), 2,291 canonical test cells remained:
+764 raw EEGNet reference cells, 763 global-normalized EEGNet cells, and 764
+global-normalized Conv--BiGRU cells.  The global EEGNet set lacks test results
+for monkey `sub-03_ses-01` at 100%/seed 42 and `sub-04_ses-01` at 5%/seed 42.
+The pre-existing Phase-1 raw reference lacks its documented monkey 100%/seed-44
+result; no missing result was imputed.
+
+With train-global z-scoring held fixed, Conv--BiGRU had higher subject-balanced
+test supported macro-F1 than EEGNet at all five training fractions in both
+species.  The paired Conv--BiGRU-minus-EEGNet mean difference was positive at
+every fraction: +0.012 to +0.038 in minipigs and +0.047 to +0.122 in monkeys.
+Global-normalized EEGNet was near the raw reference rather than consistently
+below it: its paired difference relative to raw ranged from -0.010 to +0.028
+in minipigs and -0.024 to +0.029 in monkeys.
+
+The 80%-of-own-full-data measure gives a more qualified picture of data
+efficiency.  At 50%, Conv--BiGRU reached its own target for 80.0% of minipig
+sessions and 76.9% of monkey sessions, versus 77.5% and 46.2% for global
+EEGNet.  At the 5% and 10% budgets, however, Conv--BiGRU did not consistently
+reach its target in a greater share of sessions.
+
+To separate absolute performance from this relative target, the analysis also
+computes a performance-qualified version.  A recording is retained when its
+100%-data F1, averaged across all three conditions, is at least the
+species-specific median; this gives one shared 20-recording minipig set and
+seven-recording monkey set.  Within the qualified monkey set, Conv--BiGRU
+reached its target for all recordings by 50%, versus 42.9% for global EEGNet;
+the corresponding minipig shares were 75.0% for both global conditions and
+90.0% for raw EEGNet.
 
 ### Metrics
 
-TBD
+Subject-balanced test supported macro-F1 (mean +/- SD across subjects; seeds
+are averaged within each recording before subject and species aggregation):
+
+| Training fraction | Minipig raw EEGNet | Minipig global EEGNet | Minipig global Conv--BiGRU |
+|------------------:|-------------------:|----------------------:|----------------------------:|
+| 5% | 0.191 +/- 0.066 | 0.218 +/- 0.063 | 0.242 +/- 0.055 |
+| 10% | 0.246 +/- 0.086 | 0.247 +/- 0.081 | 0.275 +/- 0.047 |
+| 25% | 0.288 +/- 0.085 | 0.285 +/- 0.083 | 0.326 +/- 0.068 |
+| 50% | 0.351 +/- 0.093 | 0.339 +/- 0.093 | 0.370 +/- 0.085 |
+| 100% | 0.379 +/- 0.100 | 0.394 +/- 0.103 | 0.421 +/- 0.104 |
+
+| Training fraction | Monkey raw EEGNet | Monkey global EEGNet | Monkey global Conv--BiGRU |
+|------------------:|------------------:|---------------------:|---------------------------:|
+| 5% | 0.198 +/- 0.092 | 0.232 +/- 0.091 | 0.313 +/- 0.174 |
+| 10% | 0.275 +/- 0.161 | 0.271 +/- 0.134 | 0.360 +/- 0.200 |
+| 25% | 0.336 +/- 0.188 | 0.317 +/- 0.171 | 0.386 +/- 0.190 |
+| 50% | 0.347 +/- 0.183 | 0.332 +/- 0.174 | 0.419 +/- 0.193 |
+| 100% | 0.343 +/- 0.185 | 0.371 +/- 0.171 | 0.454 +/- 0.171 |
+
+Cumulative share of sessions reaching 80% of their own condition-specific
+full-data test F1:
+
+| Training fraction | Minipig raw / global EEGNet / Conv--BiGRU | Monkey raw / global EEGNet / Conv--BiGRU |
+|------------------:|------------------------------------------:|------------------------------------------:|
+| 5% | 15.0% / 22.5% / 10.0% | 23.1% / 23.1% / 7.7% |
+| 10% | 20.0% / 30.0% / 17.5% | 46.2% / 23.1% / 15.4% |
+| 25% | 47.5% / 42.5% / 42.5% | 76.9% / 38.5% / 53.8% |
+| 50% | 90.0% / 77.5% / 80.0% | 92.3% / 46.2% / 76.9% |
+| 100% | 100.0% / 100.0% / 100.0% | 100.0% / 100.0% / 100.0% |
 
 ### Analysis
 
-TBD — create `analysis/20260901-MS-scratch-baselines-normalization_analysis.py`
-after runs are available.  It must fetch all three conditions through the
-WandB API, produce paired raw-vs-global EEGNet and global EEGNet-vs-BiGRU
-tables, and regenerate both requested learning-curve figures.
+The analysis script fetches all three conditions through `wandb.Api()`, selects
+canonical cells, regenerates the summary tables, and reports paired raw-vs-global
+EEGNet and global EEGNet-vs-Conv--BiGRU contrasts:
+
+```bash
+GOMAXPROCS=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+  uv run python analysis/20260901-MS-scratch-baselines-normalization.py
+```
 
 ### Figures
 
-TBD — subject-balanced test supported macro-F1 by training fraction, and the
-cumulative percentage of sessions reaching 80% of condition-specific full-data
-test performance.
+Subject-balanced test supported macro-F1 by training fraction:
+
+![Subject-balanced learning curves](../../analysis/figures/20260901-MS-scratch-baselines-normalization_learning_curves.png)
+
+Cumulative percentage of sessions reaching 80% of condition-specific full-data
+test performance:
+
+![Condition-specific data efficiency](../../analysis/figures/20260901-MS-scratch-baselines-normalization_data_efficiency.png)
+
+Paired differences for the two planned contrasts:
+
+![Paired test-macro-F1 contrasts](../../analysis/figures/20260901-MS-scratch-baselines-normalization_paired_contrasts.png)
+
+Data efficiency after restricting every condition to the same recordings whose
+pooled 100%-data F1 is at least the species-specific median:
+
+![Performance-qualified data efficiency](../../analysis/figures/20260901-MS-scratch-baselines-normalization_performance-qualified_data_efficiency.png)
 
 ## Conclusions
 
-TBD
+**Verdict: confirmed (investigator interpretation).** Under matched
+train-global normalization, Conv--BiGRU consistently outperformed EEGNet in
+test supported macro-F1 across both species and all five training budgets; the
+paired effects are positive throughout and are substantial for monkeys.  The
+global-normalized EEGNet comparison refines the expected normalization claim:
+raw EEGNet was not uniformly superior, because the global-minus-raw effect was
+near zero and changed sign across fractions.  Likewise, higher Conv--BiGRU F1
+did not translate into uniformly greater low-budget 80%-target attainment,
+though it was stronger than global EEGNet at the 50% budget in both species.
 
 ## Notes for future experiments
 
-TBD
+- Repeat the performance-qualified analysis with a pre-registered absolute F1
+  threshold or several quantiles to check sensitivity to the median cutoff.
