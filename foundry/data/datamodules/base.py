@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 from copy import deepcopy
 from typing import TYPE_CHECKING, Callable, Literal, Optional, Type
 
@@ -42,12 +43,32 @@ from foundry.tasks.classification_mapping import (
 
 if TYPE_CHECKING:
     from foundry.data.normalization import RecordingChannelStats
+    from foundry.data.source_manifest import SourceSelectionManifest
     from foundry.tasks.config import TaskConfig
 
 logger = logging.getLogger(__name__)
 
 
 _INTERPOLATION_ONLY_KEYS = ("subject", "held_out_subject")
+
+
+class _DatasetNamespaceAnnotation:
+    """Transform that annotates data objects with their species namespace.
+
+    Used in source pretraining to enable species-qualified session routing.
+    The model's ``tokenize()`` reads ``data.dataset_namespace`` to resolve
+    ambiguous raw recording IDs through the alias map.
+    """
+
+    def __init__(self, rid_to_species: dict[str, str]) -> None:
+        self._rid_to_species = dict(rid_to_species)
+
+    def __call__(self, data):
+        session_id = str(data.session.id)
+        species = self._rid_to_species.get(session_id)
+        if species is not None:
+            data.dataset_namespace = species
+        return data
 
 
 def _disable_gc_in_worker(worker_id: int) -> None:
@@ -158,6 +179,9 @@ class NeuralDataModule(LightningDataModule):
         audit_json: str | None = None,
         audit_species: str | None = None,
         input_normalization: Optional[dict] = None,
+        role: str | None = None,
+        selection_manifest: str | None = None,
+        source_test_policy: str | None = None,
     ):
         """Initialize the data module.
 
@@ -213,6 +237,12 @@ class NeuralDataModule(LightningDataModule):
                 statistics are fitted per recording and applied to all splits.
                 Keys: ``mode``, ``supported_modalities``,
                 ``scale_floor``, ``accumulator_dtype``.
+            role: Optional datamodule role, e.g. ``"source_pretraining"``.
+            selection_manifest: Path to a :class:`SourceSelectionManifest` JSON
+                file for multi-recording source pretraining.
+            source_test_policy: Test access policy for source pretraining.
+                Defaults to ``"forbidden"`` when ``role`` is
+                ``"source_pretraining"``.
         """
         super().__init__()
         if isinstance(dataset_class, str):
@@ -255,6 +285,24 @@ class NeuralDataModule(LightningDataModule):
                     )
                 self._session_pct[split_name] = pct
 
+        if selection_manifest is not None and training_fraction is not None:
+            raise ValueError(
+                "selection_manifest and training_fraction are mutually exclusive"
+            )
+        if role == "source_pretraining" and selection_manifest is None:
+            raise ValueError(
+                "selection_manifest is required when role='source_pretraining'"
+            )
+
+        self.role = role
+        self.selection_manifest_path = selection_manifest
+        if source_test_policy == "forbidden":
+            self.source_test_policy = "forbidden"
+        elif role == "source_pretraining":
+            self.source_test_policy = "forbidden"
+        else:
+            self.source_test_policy = source_test_policy
+
         self.training_fraction = training_fraction
         self.training_fraction_seed = training_fraction_seed
         self.training_fraction_task = training_fraction_task
@@ -274,6 +322,7 @@ class NeuralDataModule(LightningDataModule):
         ] = {}
         self._fraction_audit_records: dict[str, dict] = {}
         self._fraction_audit_artifact_sha256: str | None = None
+        self._source_manifest: SourceSelectionManifest | None = None
 
         self._user_transforms: list[Callable] = list(transforms or [])
         self._tokenizer = tokenizer
@@ -341,6 +390,12 @@ class NeuralDataModule(LightningDataModule):
                 transform=transform,
                 **self.dataset_kwargs,
             )
+
+            if (
+                self.selection_manifest_path is not None
+                and self._source_manifest is None
+            ):
+                self._load_source_manifest()
 
             if self._task_configs:
                 validate_task_mappings(self._task_configs, self.dataset)
@@ -845,6 +900,127 @@ class NeuralDataModule(LightningDataModule):
         """SHA-256 of the verified Phase 0 artifact, if auditing is enabled."""
         return self._fraction_audit_artifact_sha256
 
+    def _resolve_manifest_path(self) -> str:
+        """Resolve the source selection manifest path."""
+        path = self.selection_manifest_path
+        if os.path.isfile(path):
+            return path
+        try:
+            from hydra.utils import get_original_cwd
+
+            resolved = os.path.join(get_original_cwd(), path)
+            if os.path.isfile(resolved):
+                return resolved
+        except (ImportError, ValueError):
+            pass
+        raise FileNotFoundError(f"Source selection manifest not found: {path}")
+
+    def _load_source_manifest(self) -> None:
+        """Load and validate the configured source selection manifest."""
+        from foundry.data.source_manifest import SourceSelectionManifest
+
+        manifest = SourceSelectionManifest.load(self._resolve_manifest_path())
+        manifest.validate_no_leakage()
+        manifest.validate_test_policy()
+        manifest.validate_summary_consistency()
+
+        if self.audit_json:
+            from foundry.config_resolvers import _load_neurosoft_audit
+
+            audit = _load_neurosoft_audit(self.audit_json)
+            if audit["artifact_sha256"] != manifest.phase0_audit_sha256:
+                raise RuntimeError(
+                    "Source manifest audit hash does not match loaded audit"
+                )
+
+        dataset_rids = set(self.dataset.recording_ids)
+        for rec in manifest.recordings:
+            if rec.recording_id not in dataset_rids:
+                raise RuntimeError(
+                    f"Recording {rec.recording_id!r} from source manifest "
+                    f"not found in dataset"
+                )
+
+        self._source_manifest = manifest
+
+        rid_to_species = {
+            rec.recording_id: rec.species
+            for rec in manifest.recordings
+        }
+        self._namespace_annotator = _DatasetNamespaceAnnotation(rid_to_species)
+        self._user_transforms = [self._namespace_annotator] + list(
+            self._user_transforms
+        )
+        self.transform = self._build_transform_list()
+        self._rebuild_dataset_transform()
+
+    @property
+    def source_manifest(self) -> "SourceSelectionManifest | None":
+        """Read-only view of the loaded source selection manifest, if any."""
+        return self._source_manifest
+
+    @property
+    def source_recording_ids(self) -> list[str] | None:
+        """Raw recording IDs from the source manifest, if loaded."""
+        if self._source_manifest is None:
+            return None
+        return [rec.recording_id for rec in self._source_manifest.recordings]
+
+    @property
+    def source_canonical_recording_ids(self) -> list[str] | None:
+        """Canonical recording IDs from the source manifest, if loaded."""
+        if self._source_manifest is None:
+            return None
+        return [
+            rec.canonical_recording_id for rec in self._source_manifest.recordings
+        ]
+
+    def get_source_session_configs(self) -> dict[str, int] | None:
+        """Return canonical recording ID to supported channel count mapping."""
+        if self._source_manifest is None:
+            return None
+        return {
+            rec.canonical_recording_id: rec.supported_channel_count
+            for rec in self._source_manifest.recordings
+        }
+
+    def get_source_id_aliases(self) -> dict[str, dict[str, str]] | None:
+        """Return species namespace alias map for source pretraining."""
+        if self._source_manifest is None:
+            return None
+        aliases: dict[str, dict[str, str]] = {}
+        for rec in self._source_manifest.recordings:
+            ns = rec.species
+            if ns not in aliases:
+                aliases[ns] = {}
+            aliases[ns][rec.recording_id] = rec.canonical_recording_id
+        return aliases
+
+    def _apply_source_manifest_selection(
+        self,
+        sampling_intervals: dict,
+        split: Literal["train", "valid"],
+    ) -> dict:
+        """Select manifest-specified intervals for source pretraining."""
+        manifest_by_rid = {
+            rec.recording_id: rec for rec in self._source_manifest.recordings
+        }
+        result = {}
+        for rid, intervals in sampling_intervals.items():
+            rec = manifest_by_rid.get(rid)
+            if rec is None:
+                continue
+            if split == "train":
+                n = len(intervals)
+                mask = np.zeros(n, dtype=bool)
+                for idx in rec.train_selected_indices:
+                    if idx < n:
+                        mask[idx] = True
+                result[rid] = intervals.select_by_mask(mask)
+            else:
+                result[rid] = intervals
+        return result
+
     def _apply_fraction_selection(
         self,
         sampling_intervals: dict,
@@ -936,8 +1112,18 @@ class NeuralDataModule(LightningDataModule):
         split: Literal["train", "valid", "test"],
     ) -> dict:
         """Return exactly the intervals that the split's loader will sample."""
+        if split == "test" and self.source_test_policy == "forbidden":
+            raise RuntimeError(
+                "Source test access is forbidden in source_pretraining mode"
+            )
+
         sampling_intervals = self.dataset.get_sampling_intervals(split=split)
-        if split == "train" and self._fraction_manifests:
+        if self._source_manifest is not None:
+            if split in ("train", "valid"):
+                sampling_intervals = self._apply_source_manifest_selection(
+                    sampling_intervals, split
+                )
+        elif split == "train" and self._fraction_manifests:
             sampling_intervals = self._apply_fraction_selection(
                 sampling_intervals
             )
@@ -1017,4 +1203,11 @@ class NeuralDataModule(LightningDataModule):
 
     def test_dataloader(self) -> DataLoader:
         """Create test DataLoader."""
+        if (
+            self.role == "source_pretraining"
+            and self.source_test_policy == "forbidden"
+        ):
+            raise RuntimeError(
+                "Source test access is forbidden in source_pretraining mode"
+            )
         return self._create_dataloader("test")

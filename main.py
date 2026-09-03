@@ -26,6 +26,10 @@ from foundry.tools.stage_data import (
     stage_data,
 )
 from foundry.training.pretrained import TransferMode, load_pretrained_weights
+from foundry.training.checkpoint_manifest import (
+    load_checkpoint_manifest,
+    verify_checkpoint_integrity,
+)
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 logger = logging.getLogger(__name__)
@@ -986,6 +990,237 @@ def _write_snapshot_task_provenance(output_dir: str) -> None:
 # -- Entry point ------------------------------------------------------------
 
 
+def _load_and_validate_checkpoint_manifest(
+    cfg: DictConfig,
+    datamodule,
+) -> dict | None:
+    """Load a checkpoint manifest, validate provenance, and return it.
+
+    Returns ``None`` when ``run.pretrained_checkpoint_manifest`` is not set.
+    Raises on provenance mismatches so no bad transfer can proceed.
+    """
+    manifest_path = OmegaConf.select(
+        cfg, "run.pretrained_checkpoint_manifest", default=None
+    )
+    if manifest_path is None:
+        return None
+
+    pretrained_ckpt = OmegaConf.select(
+        cfg, "run.pretrained_checkpoint", default=None
+    )
+    if pretrained_ckpt:
+        raise ValueError(
+            "run.pretrained_checkpoint and run.pretrained_checkpoint_manifest "
+            "are mutually exclusive."
+        )
+
+    manifest = load_checkpoint_manifest(manifest_path)
+
+    checkpoint_root = os.environ.get("FOUNDRY_CHECKPOINT_ROOT")
+    if checkpoint_root:
+        verify_checkpoint_integrity(manifest, checkpoint_root)
+    else:
+        manifest_dir = str(Path(manifest_path).parent.parent)
+        verify_checkpoint_integrity(manifest, manifest_dir)
+
+    trained_on = manifest.get("trained_on", {})
+    excluded = trained_on.get("excluded_target", {})
+    species = _derive_species(datamodule) if hasattr(datamodule, "dataset_class") else None
+    if species and excluded.get("species") != species:
+        logger.warning(
+            "Checkpoint manifest was trained excluding species=%r but "
+            "downstream uses species=%r",
+            excluded.get("species"),
+            species,
+        )
+
+    logger.info(
+        "Loaded checkpoint manifest: kind=%s monitor=%s score=%.4f "
+        "excluded_target=%s/%s source=%s",
+        manifest["checkpoint"]["kind"],
+        manifest["selection"]["monitor"],
+        manifest["selection"]["monitor_value"],
+        excluded.get("species"),
+        excluded.get("subject"),
+        trained_on.get("source_selection_id"),
+    )
+
+    return manifest
+
+
+def _apply_manifest_transfer(
+    model: torch.nn.Module,
+    manifest: dict,
+    cfg: DictConfig,
+    output_dir: str,
+) -> None:
+    """Apply pretrained weights from a checkpoint manifest.
+
+    Resolves the checkpoint path, loads weights using the existing strict
+    transfer pipeline, and persists the transfer report.
+    """
+    checkpoint_root = os.environ.get("FOUNDRY_CHECKPOINT_ROOT")
+    checkpoint_info = manifest["checkpoint"]
+    rel_path = checkpoint_info["path"]
+
+    if checkpoint_root:
+        ckpt_path = Path(checkpoint_root) / rel_path
+    else:
+        ckpt_path = Path(cfg.run.pretrained_checkpoint_manifest).parent.parent / rel_path
+
+    if not ckpt_path.exists():
+        raise FileNotFoundError(
+            f"Checkpoint not found at resolved path: {ckpt_path}"
+        )
+
+    regime = OmegaConf.select(
+        cfg, "run.pretrained_transfer_regime", default=None
+    )
+    if regime is None:
+        raise ValueError(
+            "run.pretrained_transfer_regime must be set when using "
+            "pretrained_checkpoint_manifest (e.g. 'full_finetuning' or "
+            "'frozen_representation')"
+        )
+
+    components = _resolve_pretrained_components(model, cfg)
+    freeze = regime == "frozen_representation"
+
+    report = load_pretrained_weights(
+        model,
+        ckpt_path,
+        freeze=freeze,
+        mode=TransferMode.STRICT,
+        components=components,
+    )
+
+    report_dict = {
+        "source_checkpoint_manifest": str(
+            OmegaConf.select(cfg, "run.pretrained_checkpoint_manifest")
+        ),
+        "source_checkpoint_path": str(ckpt_path),
+        "source_checkpoint_sha256": checkpoint_info["sha256"],
+        "transfer_regime": regime,
+        "components": list(components) if components else [],
+        "loaded": report.loaded,
+        "skipped_excluded": report.skipped_excluded,
+        "missing_in_checkpoint": report.missing_in_checkpoint,
+        "unexpected_in_checkpoint": report.unexpected_in_checkpoint,
+        "shape_mismatched": report.shape_mismatched,
+        "dtype_mismatched": report.dtype_mismatched,
+    }
+
+    import json as _json
+
+    report_json_path = os.path.join(output_dir, "transfer-report.json")
+    with open(report_json_path, "w") as f:
+        _json.dump(report_dict, f, indent=2, ensure_ascii=True)
+
+    report_md_lines = [
+        "# Transfer Report",
+        "",
+        f"- **Regime:** {regime}",
+        f"- **Checkpoint:** `{ckpt_path}`",
+        f"- **SHA-256:** `{checkpoint_info['sha256']}`",
+        f"- **Loaded:** {len(report.loaded)}",
+        f"- **Excluded (by design):** {len(report.skipped_excluded)}",
+        f"- **Missing in checkpoint:** {len(report.missing_in_checkpoint)}",
+        f"- **Shape mismatched:** {len(report.shape_mismatched)}",
+        f"- **Dtype mismatched:** {len(report.dtype_mismatched)}",
+        "",
+        "## Loaded Parameters",
+        "",
+    ]
+    for key in report.loaded[:50]:
+        report_md_lines.append(f"- `{key}`")
+    if len(report.loaded) > 50:
+        report_md_lines.append(f"- ... and {len(report.loaded) - 50} more")
+    report_md_lines.extend(["", "## Excluded Parameters", ""])
+    for key in report.skipped_excluded[:50]:
+        report_md_lines.append(f"- `{key}`")
+    if len(report.skipped_excluded) > 50:
+        report_md_lines.append(
+            f"- ... and {len(report.skipped_excluded) - 50} more"
+        )
+
+    report_md_path = os.path.join(output_dir, "transfer-report.md")
+    with open(report_md_path, "w") as f:
+        f.write("\n".join(report_md_lines))
+
+    logger.info(
+        "Transfer from manifest: loaded=%d excluded=%d regime=%s report=%s",
+        len(report.loaded),
+        len(report.skipped_excluded),
+        regime,
+        report_json_path,
+    )
+
+
+def _build_source_model_and_data(cfg: DictConfig):
+    """Build model and datamodule for source pretraining with canonical session IDs.
+
+    When the datamodule uses a source manifest, session configs and ID aliases
+    are derived from the manifest recordings instead of from the dataset's
+    default session structure.
+    """
+    _populate_data_driven_hyperparams(cfg)
+
+    task_configs = _load_task_configs(cfg)
+    if not _is_neuralbench_data(cfg):
+        normalize_data_config(cfg.data)
+
+    datamodule = instantiate(cfg.data, tokenizer=None)
+    datamodule._task_configs = task_configs
+
+    task_configs, setup_done = _validate_and_apply_focal_loss_weights(
+        cfg, datamodule, task_configs
+    )
+    task_configs, setup_done = _apply_auto_class_weights(
+        cfg, datamodule, task_configs, setup_done=setup_done
+    )
+
+    if not setup_done:
+        datamodule.setup("fit")
+        setup_done = True
+
+    source_session_configs = getattr(
+        datamodule, "get_source_session_configs", lambda: None
+    )()
+    source_id_aliases = getattr(
+        datamodule, "get_source_id_aliases", lambda: None
+    )()
+
+    if source_session_configs is not None:
+        OmegaConf.update(
+            cfg,
+            "hyperparameters.session_configs",
+            source_session_configs,
+            force_add=True,
+        )
+        logger.info(
+            "Source pretraining: derived session_configs from manifest "
+            "(%d sessions).",
+            len(source_session_configs),
+        )
+
+    ModelClass = get_class(cfg.model._target_)
+    model_kwargs = {
+        k: instantiate(v) if OmegaConf.is_config(v) else v
+        for k, v in cfg.model.items()
+        if k != "_target_"
+    }
+    model_kwargs.pop("session_emb", None)
+    if source_id_aliases is not None:
+        model_kwargs["id_aliases"] = source_id_aliases
+
+    model = ModelClass(task_configs=task_configs, **model_kwargs)
+
+    tokenizer = model.tokenize if hasattr(model, "tokenize") else None
+    datamodule.set_tokenizer(tokenizer)
+
+    return model, datamodule
+
+
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 @hydra_main_wrapper
 def main(cfg: DictConfig):
@@ -1048,7 +1283,13 @@ def main(cfg: DictConfig):
     # strips them from cfg.data.
     OmegaConf.resolve(cfg.run)
 
-    model, datamodule = _build_model_and_data(cfg)
+    is_source_pretraining = (
+        OmegaConf.select(cfg, "data.role", default=None) == "source_pretraining"
+    )
+    if is_source_pretraining:
+        model, datamodule = _build_source_model_and_data(cfg)
+    else:
+        model, datamodule = _build_model_and_data(cfg)
 
     # Prepare fraction manifests before WandB logging and training.
     if (
@@ -1071,10 +1312,16 @@ def main(cfg: DictConfig):
                 git_sha=os.environ.get("FOUNDRY_SNAPSHOT_GIT_SHA"),
             )
 
+    # -- Pretrained weight transfer -------------------------------------------
+
     pretrained_ckpt = OmegaConf.select(
         cfg, "run.pretrained_checkpoint", default=None
     )
-    if pretrained_ckpt:
+    checkpoint_manifest = _load_and_validate_checkpoint_manifest(cfg, datamodule)
+
+    if checkpoint_manifest is not None:
+        _apply_manifest_transfer(model, checkpoint_manifest, cfg, output_dir)
+    elif pretrained_ckpt:
         freeze = OmegaConf.select(cfg, "run.freeze_pretrained", default=False)
         transfer_mode_str = OmegaConf.select(
             cfg, "run.pretrained_transfer_mode", default="strict"
@@ -1128,7 +1375,10 @@ def main(cfg: DictConfig):
         cfg, checkpoint_dir, slurm_restart_count
     )
 
-    _validate_checkpoint_policy(ckpt_path, pretrained_ckpt)
+    effective_pretrained = pretrained_ckpt or (
+        OmegaConf.select(cfg, "run.pretrained_checkpoint_manifest", default=None)
+    )
+    _validate_checkpoint_policy(ckpt_path, effective_pretrained)
 
     run_failed = False
     try:

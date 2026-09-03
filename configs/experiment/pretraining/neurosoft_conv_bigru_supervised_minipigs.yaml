@@ -1,0 +1,80 @@
+# @package _global_
+# NeuroSoft Phase 3 supervised source pretraining for minipigs.
+
+defaults:
+  - override /model: neurosoft_conv_bigru
+  - override /data: neurosoft_minipigs/source_pretraining
+  - override /logger: wandb
+
+task_configs: [neurosoft_acoustic_stim_8band]
+source_manifest: ???
+
+model:
+  num_samples: 1000
+
+data:
+  split_type: intrasession-causal
+  audit_json: docs/neurosoft-phase0-audit.json
+  audit_species: minipigs
+  task_type: acoustic_stim
+  input_normalization:
+    mode: recording_train_global_zscore
+    supported_modalities: [eeg, ecog, seeg, ieeg]
+    scale_floor: 1.0e-8
+    accumulator_dtype: float64
+
+class_weights:
+  mode: none
+
+run:
+  project: neurosoft_supervised_pretraining
+  name: src_mp_${data.target_subject}_${data.source_manifest_family}_s${run.seed}
+  group: NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS
+  tags: [source-pretraining, minipigs, 8band, phase3]
+  seed: ???
+  log_level: INFO
+  evaluate_test: false
+
+hyperparameters:
+  batch_size: 16
+  sequence_length: 0.5
+  fold_number: 0
+  num_workers: 1
+  num_channels: null
+  session_configs: null
+  learning_rate: 0.0015
+  weight_decay: 0.018
+
+stage:
+  mode: direct
+
+trainer:
+  max_steps: ???
+  max_epochs: -1
+  precision: bf16-mixed
+  gradient_clip_val: 1.0
+  log_every_n_steps: 50
+  val_check_interval: ???
+  callbacks:
+    learning_rate_monitor:
+      logging_interval: epoch
+    early_stopping:
+      monitor: val/source_session_mean_supported_f1
+      mode: max
+      patience: 40
+    model_checkpoint:
+      monitor: val/source_session_mean_supported_f1
+      mode: max
+      auto_insert_metric_name: false
+    source_session_metrics:
+      _target_: foundry.training.callbacks.SourceSessionMetricsCallback
+      monitor_task: neurosoft_acoustic_stim_8band
+      num_classes: 8
+    compute_tracking:
+      _target_: foundry.training.callbacks.ComputeTrackingCallback
+      monitor: val/source_session_mean_supported_f1
+      mode: max
+      sequence_length: ${hyperparameters.sequence_length}
+      require_flops: false
+    compute_milestones:
+      _target_: foundry.training.callbacks.ComputeMilestoneCheckpointCallback

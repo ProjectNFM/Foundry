@@ -1,0 +1,24 @@
+_target_: foundry.data.datamodules.NeuralDataModule
+
+dataset_class: foundry.data.datasets.NeurosoftMinipigs2026
+
+root: ./data/processed/
+batch_size: ${hyperparameters.batch_size}
+num_workers: ${hyperparameters.num_workers}
+pin_memory: false
+sequence_length: ${hyperparameters.sequence_length}
+seed: ${run.seed}
+
+input_normalization:
+  mode: recording_train_global_zscore
+  supported_modalities: [eeg, ecog, seeg, ieeg]
+  scale_floor: 1.0e-8
+  accumulator_dtype: float64
+
+split_type: intrasession-causal
+role: source_pretraining
+selection_manifest: ${source_manifest}
+source_test_policy: forbidden
+
+dataset_kwargs:
+  fold: ${hyperparameters.fold_number}

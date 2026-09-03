@@ -1,0 +1,84 @@
+# @package _global_
+# NeuroSoft Phase 3 transfer evaluation for monkeys.
+
+defaults:
+  - override /model: neurosoft_conv_bigru
+  - override /data: neurosoft_monkeys/singlesess
+  - override /logger: wandb
+
+task_configs: [neurosoft_acoustic_stim_8band]
+
+model:
+  num_samples: 1000
+
+data:
+  split_type: intrasession-causal
+  audit_json: docs/neurosoft-phase0-audit.json
+  audit_species: monkeys
+  task_type: acoustic_stim
+  training_fraction_task: neurosoft_acoustic_stim_8band
+  training_fraction: 1.0
+  training_fraction_seed: ${run.seed}
+  training_fraction_min_class_support: 3
+  training_fraction_min_present_classes: 6
+  input_normalization:
+    mode: recording_train_global_zscore
+    supported_modalities: [eeg, ecog, seeg, ieeg]
+    scale_floor: 1.0e-8
+    accumulator_dtype: float64
+  dataset_kwargs:
+    recording_ids:
+      - ???
+
+class_weights:
+  mode: none
+
+run:
+  project: neurosoft_supervised_pretraining
+  name: tgt_mk_${data.dataset_kwargs.recording_ids.0}_${run.pretrained_transfer_regime}_s${run.seed}
+  group: NEUROSOFT_TRANSFER_MONKEYS
+  tags: [transfer, monkeys, 8band, phase3]
+  seed: 42
+  log_level: INFO
+  evaluate_test: false
+  pretrained_checkpoint: null
+  pretrained_checkpoint_manifest: ???
+  pretrained_transfer_regime: ???
+
+hyperparameters:
+  batch_size: 16
+  sequence_length: 0.5
+  fold_number: 0
+  num_workers: 1
+  num_channels: null
+  session_configs: null
+  learning_rate: 0.0015
+  weight_decay: 0.018
+
+stage:
+  mode: direct
+
+trainer:
+  max_epochs: 200
+  precision: bf16-mixed
+  gradient_clip_val: 1.0
+  log_every_n_steps: 50
+  callbacks:
+    learning_rate_monitor:
+      logging_interval: epoch
+    early_stopping:
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      patience: 40
+    model_checkpoint:
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      auto_insert_metric_name: false
+    compute_tracking:
+      _target_: foundry.training.callbacks.ComputeTrackingCallback
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      sequence_length: ${hyperparameters.sequence_length}
+      require_flops: true
+      flops_per_window: 768098304
+      flop_method: torch-flop-counter-v1

@@ -375,6 +375,99 @@ def hydra_main_wrapper(func):
     return wrapper
 
 
+_source_manifest_index_cache: dict[str, dict] = {}
+
+
+def _load_source_manifest_index(index_path: str) -> dict:
+    """Load and cache the source manifest index for Hydra resolvers."""
+    import json
+
+    resolved = index_path
+    if not os.path.isabs(resolved) and not os.path.isfile(resolved):
+        try:
+            from hydra.utils import get_original_cwd
+
+            resolved = os.path.join(get_original_cwd(), index_path)
+        except (ImportError, ValueError):
+            pass
+
+    if resolved in _source_manifest_index_cache:
+        return _source_manifest_index_cache[resolved]
+
+    if not os.path.isfile(resolved):
+        raise FileNotFoundError(f"Source manifest index not found: {index_path}")
+
+    with open(resolved) as f:
+        index = json.load(f)
+
+    _source_manifest_index_cache[resolved] = index
+    return index
+
+
+def _source_manifest_by_id(
+    index_path: str, selection_id: str
+) -> str:
+    """Return the relative file path for a manifest selection ID."""
+    index = _load_source_manifest_index(index_path)
+    entries = index.get("entries", [])
+    for entry in entries:
+        if entry.get("selection_id") == selection_id:
+            resolved = index_path
+            if not os.path.isabs(resolved):
+                try:
+                    from hydra.utils import get_original_cwd
+
+                    resolved = os.path.join(get_original_cwd(), resolved)
+                except (ImportError, ValueError):
+                    pass
+            index_dir = os.path.dirname(resolved)
+            return os.path.join(index_dir, entry["path"])
+    raise ValueError(
+        f"Selection ID {selection_id!r} not found in {index_path}"
+    )
+
+
+def _source_manifest_sweep(
+    index_path: str,
+    family: str,
+    species: str | None = None,
+    target_subject: str | None = None,
+) -> str:
+    """Return a Hydra sweep choice string of manifest paths for a given family."""
+    index = _load_source_manifest_index(index_path)
+    entries = index.get("entries", [])
+
+    paths: list[str] = []
+    for entry in entries:
+        if entry.get("family") != family:
+            continue
+        if species and entry.get("target_species") != species:
+            continue
+        if target_subject and entry.get("target_subject") != target_subject:
+            continue
+        if not entry.get("eligible", True):
+            continue
+
+        resolved = index_path
+        if not os.path.isabs(resolved):
+            try:
+                from hydra.utils import get_original_cwd
+
+                resolved = os.path.join(get_original_cwd(), resolved)
+            except (ImportError, ValueError):
+                pass
+        index_dir = os.path.dirname(resolved)
+        paths.append(os.path.join(index_dir, entry["path"]))
+
+    if not paths:
+        raise ValueError(
+            f"No manifests found for family={family!r} species={species!r} "
+            f"target_subject={target_subject!r} in {index_path}"
+        )
+
+    return ",".join("'" + p.replace("'", "\\'") + "'" for p in paths)
+
+
 def register_resolvers() -> None:
     """Register all custom OmegaConf resolvers (idempotent)."""
     _resolvers = {
@@ -392,6 +485,8 @@ def register_resolvers() -> None:
         "neurosoft_supported_cell_sweep_choices": _neurosoft_supported_cell_sweep_choices,
         "phase1_cell_recording": _phase1_cell_recording,
         "phase1_cell_fraction": _phase1_cell_fraction,
+        "source_manifest_by_id": _source_manifest_by_id,
+        "source_manifest_sweep": _source_manifest_sweep,
     }
     for name, fn in _resolvers.items():
         if not OmegaConf.has_resolver(name):

@@ -215,6 +215,7 @@ class NeurosoftConvBiGRU(nn.Module):
         gru_num_layers: int = 2,
         gru_bidirectional: bool = True,
         gru_dropout: float = 0.0,
+        id_aliases: dict[str, dict[str, str]] | None = None,
     ):
         super().__init__()
         if num_samples <= 0 or adapter_dim <= 0 or temporal_channels <= 0:
@@ -252,6 +253,23 @@ class NeurosoftConvBiGRU(nn.Module):
         self.gru_num_layers = gru_num_layers
         self.gru_bidirectional = gru_bidirectional
         self._task_configs = TaskConfig.normalize_task_configs(task_configs)
+        if id_aliases is None:
+            self._id_aliases = None
+            self._raw_to_canonical = None
+        else:
+            self._id_aliases = id_aliases
+            raw_to_canonical: dict[str, str] = {}
+            ambiguous: set[str] = set()
+            for mapping in id_aliases.values():
+                for raw_id, canonical_id in mapping.items():
+                    if raw_id in ambiguous:
+                        continue
+                    if raw_id in raw_to_canonical:
+                        del raw_to_canonical[raw_id]
+                        ambiguous.add(raw_id)
+                    else:
+                        raw_to_canonical[raw_id] = canonical_id
+            self._raw_to_canonical = raw_to_canonical
         self.session_adapter = SessionInputAdapter(session_configs, adapter_dim)
 
         # The first block is the declared 64-sample/stride-4 recipe. Extra
@@ -298,6 +316,39 @@ class NeurosoftConvBiGRU(nn.Module):
     @property
     def task_configs(self) -> dict[str, TaskConfig]:
         return self._task_configs
+
+    @property
+    def configured_session_ids(self) -> set[str]:
+        return set(self.session_adapter.layers.keys())
+
+    def resolve_session_id(
+        self, raw_id: str, namespace: str | None = None
+    ) -> str:
+        if self._id_aliases is None:
+            return raw_id
+        if namespace is not None:
+            try:
+                return self._id_aliases[namespace][raw_id]
+            except KeyError as exc:
+                raise KeyError(
+                    f"Unknown session ID {raw_id!r} for namespace {namespace!r}"
+                ) from exc
+        if (
+            self._raw_to_canonical is not None
+            and raw_id in self._raw_to_canonical
+        ):
+            return self._raw_to_canonical[raw_id]
+        namespaces_with_id = [
+            ns
+            for ns, mapping in self._id_aliases.items()
+            if raw_id in mapping
+        ]
+        if len(namespaces_with_id) > 1:
+            raise KeyError(
+                f"Session ID {raw_id!r} is ambiguous across namespaces "
+                f"{namespaces_with_id}; provide dataset_namespace"
+            )
+        raise KeyError(f"Unknown session ID {raw_id!r}")
 
     def transferable_components(self) -> tuple[str, ...]:
         return self._TRANSFERABLE_COMPONENTS
@@ -456,7 +507,9 @@ class NeurosoftConvBiGRU(nn.Module):
             data, frozenset(self.SUPPORTED_MODALITIES)
         )
         signal = np.asarray(signal_source.signal, dtype=np.float32)[:, keep]
-        session_id = str(data.session.id)
+        raw_session_id = str(data.session.id)
+        namespace = getattr(data, "dataset_namespace", None)
+        session_id = self.resolve_session_id(raw_session_id, namespace)
         if session_id not in self.session_adapter.layers:
             raise KeyError(f"Unknown NeuroSoft session ID {session_id!r}")
         if signal.shape[1] != self.session_adapter.channel_counts[session_id]:

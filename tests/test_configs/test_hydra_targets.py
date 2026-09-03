@@ -28,6 +28,8 @@ _SKIP_TARGET_PATHS = {
     ("trainer/default.yaml", ""),
     ("data/neurosoft_minipigs/singlesubject.yaml", ""),
     ("data/neurosoft_monkeys/singlesubject.yaml", ""),
+    ("data/neurosoft_minipigs/source_pretraining.yaml", ""),
+    ("data/neurosoft_monkeys/source_pretraining.yaml", ""),
 }
 
 
