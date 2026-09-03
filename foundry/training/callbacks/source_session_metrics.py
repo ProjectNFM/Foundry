@@ -113,17 +113,19 @@ class SourceSessionMetricsCallback(L.Callback):
 
         if not self._val_session_buffers:
             self._clear_buffers()
-            return
+            raise RuntimeError(
+                "SourceSessionMetrics received no validation predictions for "
+                f"task {self.monitor_task!r}; cannot select a source checkpoint"
+            )
 
         model = pl_module.model if hasattr(pl_module, "model") else pl_module
         cfg = model.task_configs.get(self.monitor_task)
         if cfg is None:
-            log.warning(
-                "SourceSessionMetrics: monitor task %r not found in task configs.",
-                self.monitor_task,
-            )
             self._clear_buffers()
-            return
+            raise RuntimeError(
+                "SourceSessionMetrics monitor task is not configured: "
+                f"{self.monitor_task!r}"
+            )
 
         session_f1_values: list[float] = []
         logger_metrics: dict[str, Any] = {}
@@ -140,13 +142,12 @@ class SourceSessionMetricsCallback(L.Callback):
                 targets = targets[valid]
 
             if targets.numel() == 0:
-                if had_predictions:
-                    log.debug(
-                        "SourceSessionMetrics: session %s has predictions but "
-                        "no valid targets after filtering; skipping.",
-                        session_id,
-                    )
-                continue
+                self._clear_buffers()
+                raise RuntimeError(
+                    "SourceSessionMetrics found an undefined validation session "
+                    f"for {session_id!r}: predictions={had_predictions}, "
+                    "valid targets=0"
+                )
 
             metric_preds, metric_targets = pl_module._prepare_for_metrics(
                 cfg, preds, targets
@@ -155,7 +156,11 @@ class SourceSessionMetricsCallback(L.Callback):
                 metric_preds, metric_targets
             )
             if session_result is None:
-                continue
+                self._clear_buffers()
+                raise RuntimeError(
+                    "SourceSessionMetrics found no supported classes for "
+                    f"validation session {session_id!r}"
+                )
 
             supported_f1, per_class_f1, support, class_mask = session_result
             session_f1_values.append(supported_f1)
@@ -176,38 +181,37 @@ class SourceSessionMetricsCallback(L.Callback):
 
         session_count = len(session_f1_values)
         if session_count == 0:
-            log.warning(
-                "SourceSessionMetrics: no sessions produced a valid supported F1 "
-                "for task %r at epoch %d.",
-                self.monitor_task,
-                trainer.current_epoch,
+            self._clear_buffers()
+            raise RuntimeError(
+                "SourceSessionMetrics produced no valid source-session F1 "
+                f"values for task {self.monitor_task!r} at epoch "
+                f"{trainer.current_epoch}"
             )
-        else:
-            mean_f1 = sum(session_f1_values) / session_count
-            pl_module.log(
-                self.metric_key,
-                mean_f1,
-                logger=True,
-                sync_dist=False,
-                on_step=False,
-                on_epoch=True,
-            )
-            pl_module.log(
-                "val/source_session_count",
-                float(session_count),
-                logger=True,
-                sync_dist=False,
-                on_step=False,
-                on_epoch=True,
-            )
-            log.info(
-                "SourceSessionMetrics: %s=%.4f over %d sessions (task=%r, epoch=%d).",
-                self.metric_key,
-                mean_f1,
-                session_count,
-                self.monitor_task,
-                trainer.current_epoch,
-            )
+        mean_f1 = sum(session_f1_values) / session_count
+        pl_module.log(
+            self.metric_key,
+            mean_f1,
+            logger=True,
+            sync_dist=False,
+            on_step=False,
+            on_epoch=True,
+        )
+        pl_module.log(
+            "val/source_session_count",
+            float(session_count),
+            logger=True,
+            sync_dist=False,
+            on_step=False,
+            on_epoch=True,
+        )
+        log.info(
+            "SourceSessionMetrics: %s=%.4f over %d sessions (task=%r, epoch=%d).",
+            self.metric_key,
+            mean_f1,
+            session_count,
+            self.monitor_task,
+            trainer.current_epoch,
+        )
 
         logger_metrics["val/source_session_count"] = session_count
         if logger_metrics and trainer.logger is not None:
@@ -244,6 +248,8 @@ class SourceSessionMetricsCallback(L.Callback):
     @staticmethod
     def _shorten_session_id(session_id: str) -> str:
         """Keep only subject, session, and acquisition segments."""
-        parts = session_id.split("_")
+        namespace, separator, raw_id = session_id.partition(":")
+        parts = raw_id.split("_") if separator else session_id.split("_")
         keep = [p for p in parts if p.startswith(("sub-", "ses-", "acq-"))]
-        return "_".join(keep) if keep else session_id
+        short = "_".join(keep) if keep else raw_id
+        return f"{namespace}:{short}" if separator else short

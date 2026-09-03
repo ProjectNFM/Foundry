@@ -699,6 +699,50 @@ def _derive_species(datamodule) -> str | None:
     return None
 
 
+def _derive_target_subject(datamodule) -> str:
+    """Return the sole BIDS subject in a downstream transfer datamodule."""
+    if getattr(datamodule, "dataset", None) is None:
+        datamodule.setup("fit")
+    recording_ids = list(getattr(datamodule.dataset, "recording_ids", []))
+    subjects = {
+        f"sub-{subject}"
+        for recording_id in recording_ids
+        if (subject := _parse_bids_components(str(recording_id)).get("sub"))
+        is not None
+    }
+    if len(subjects) != 1:
+        raise ValueError(
+            "Manifest-based NeuroSoft transfer requires exactly one target "
+            f"subject, got recording IDs {recording_ids!r}"
+        )
+    return next(iter(subjects))
+
+
+def _validate_manifest_target(manifest: dict, datamodule) -> None:
+    """Require a transfer manifest to exclude this exact downstream target."""
+    trained_on = manifest.get("trained_on")
+    excluded = trained_on.get("excluded_target") if isinstance(trained_on, dict) else None
+    if not isinstance(excluded, dict):
+        raise ValueError(
+            "Checkpoint manifest is missing trained_on.excluded_target"
+        )
+    manifest_species = excluded.get("species")
+    manifest_subject = excluded.get("subject")
+    species = _derive_species(datamodule)
+    subject = _derive_target_subject(datamodule)
+    if not isinstance(manifest_species, str) or not isinstance(manifest_subject, str):
+        raise ValueError(
+            "Checkpoint manifest excluded_target must contain string species "
+            "and subject fields"
+        )
+    if species != manifest_species or subject != manifest_subject:
+        raise ValueError(
+            "Checkpoint manifest target does not match the downstream target: "
+            f"manifest={manifest_species}/{manifest_subject}, "
+            f"downstream={species}/{subject}"
+        )
+
+
 def _prepare_fraction_provenance(
     cfg: DictConfig,
     datamodule,
@@ -990,6 +1034,23 @@ def _write_snapshot_task_provenance(output_dir: str) -> None:
 # -- Entry point ------------------------------------------------------------
 
 
+def _resolve_manifest_path(path: str | os.PathLike[str]) -> Path:
+    """Resolve a configured manifest from Hydra's transient run directory."""
+    candidate = Path(path)
+    if candidate.is_file():
+        return candidate.resolve()
+    if not candidate.is_absolute():
+        try:
+            from hydra.utils import get_original_cwd
+
+            candidate = Path(get_original_cwd()) / candidate
+        except ValueError:
+            pass
+    if candidate.is_file():
+        return candidate.resolve()
+    raise FileNotFoundError(f"Checkpoint manifest not found: {path}")
+
+
 def _load_and_validate_checkpoint_manifest(
     cfg: DictConfig,
     datamodule,
@@ -1014,25 +1075,19 @@ def _load_and_validate_checkpoint_manifest(
             "are mutually exclusive."
         )
 
-    manifest = load_checkpoint_manifest(manifest_path)
+    resolved_manifest_path = _resolve_manifest_path(manifest_path)
+    manifest = load_checkpoint_manifest(resolved_manifest_path)
 
     checkpoint_root = os.environ.get("FOUNDRY_CHECKPOINT_ROOT")
     if checkpoint_root:
         verify_checkpoint_integrity(manifest, checkpoint_root)
     else:
-        manifest_dir = str(Path(manifest_path).parent.parent)
+        manifest_dir = str(resolved_manifest_path.parent.parent)
         verify_checkpoint_integrity(manifest, manifest_dir)
 
-    trained_on = manifest.get("trained_on", {})
-    excluded = trained_on.get("excluded_target", {})
-    species = _derive_species(datamodule) if hasattr(datamodule, "dataset_class") else None
-    if species and excluded.get("species") != species:
-        logger.warning(
-            "Checkpoint manifest was trained excluding species=%r but "
-            "downstream uses species=%r",
-            excluded.get("species"),
-            species,
-        )
+    _validate_manifest_target(manifest, datamodule)
+    trained_on = manifest["trained_on"]
+    excluded = trained_on["excluded_target"]
 
     logger.info(
         "Loaded checkpoint manifest: kind=%s monitor=%s score=%.4f "
@@ -1066,7 +1121,10 @@ def _apply_manifest_transfer(
     if checkpoint_root:
         ckpt_path = Path(checkpoint_root) / rel_path
     else:
-        ckpt_path = Path(cfg.run.pretrained_checkpoint_manifest).parent.parent / rel_path
+        manifest_path = _resolve_manifest_path(
+            OmegaConf.select(cfg, "run.pretrained_checkpoint_manifest")
+        )
+        ckpt_path = manifest_path.parent.parent / rel_path
 
     if not ckpt_path.exists():
         raise FileNotFoundError(

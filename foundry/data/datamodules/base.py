@@ -917,12 +917,50 @@ class NeuralDataModule(LightningDataModule):
 
     def _load_source_manifest(self) -> None:
         """Load and validate the configured source selection manifest."""
-        from foundry.data.source_manifest import SourceSelectionManifest
+        from foundry.data.source_manifest import (
+            SourcePoolManifest,
+            SourceSelectionManifest,
+            canonical_recording_id,
+            source_interval_identity,
+        )
 
-        manifest = SourceSelectionManifest.load(self._resolve_manifest_path())
+        manifest_path = self._resolve_manifest_path()
+        manifest = SourceSelectionManifest.load(manifest_path)
         manifest.validate_no_leakage()
         manifest.validate_test_policy()
         manifest.validate_summary_consistency()
+
+        # A selection is meaningful only with its hash-verified parent pool.
+        # Resolve the parent relative to the selection, never relative to the
+        # transient Hydra run directory.
+        pool_path = os.path.normpath(
+            os.path.join(os.path.dirname(manifest_path), manifest.source_pool_manifest)
+        )
+        pool = SourcePoolManifest.load(pool_path)
+        pool.validate_no_leakage()
+        if pool.manifest_hash != manifest.source_pool_hash:
+            raise RuntimeError(
+                "Source selection parent-pool hash does not match: "
+                f"selection={manifest.source_pool_hash}, "
+                f"pool={pool.manifest_hash}"
+            )
+        if (
+            pool.target_species != manifest.target_species
+            or pool.target_subject != manifest.target_subject
+            or pool.phase0_audit_sha256 != manifest.phase0_audit_sha256
+        ):
+            raise RuntimeError(
+                "Source selection and parent pool disagree on target identity "
+                "or Phase 0 audit hash"
+            )
+
+        expected_species = self.audit_species
+        if expected_species is not None and manifest.target_species != expected_species:
+            raise RuntimeError(
+                "Source manifest target species does not match the configured "
+                f"data species: manifest={manifest.target_species!r}, "
+                f"data={expected_species!r}"
+            )
 
         if self.audit_json:
             from foundry.config_resolvers import _load_neurosoft_audit
@@ -934,12 +972,50 @@ class NeuralDataModule(LightningDataModule):
                 )
 
         dataset_rids = set(self.dataset.recording_ids)
+        composition = manifest.condition.source_composition
+        if composition == "same_species":
+            composition = (
+                "minipigs_only"
+                if manifest.target_species == "minipigs"
+                else "monkeys_only"
+            )
+        selected_pool = pool.pools.get(composition)
+        if selected_pool is None:
+            raise RuntimeError(
+                "Source manifest condition references an absent parent-pool "
+                f"composition: {manifest.condition.source_composition!r}"
+            )
+        pool_recordings = set(selected_pool.source_recordings)
         for rec in manifest.recordings:
             if rec.recording_id not in dataset_rids:
                 raise RuntimeError(
                     f"Recording {rec.recording_id!r} from source manifest "
                     f"not found in dataset"
                 )
+            if rec.canonical_recording_id != canonical_recording_id(
+                rec.species, rec.recording_id
+            ):
+                raise RuntimeError(
+                    "Source manifest recording has an invalid canonical ID: "
+                    f"{rec.canonical_recording_id!r}"
+                )
+            if rec.canonical_recording_id not in pool_recordings:
+                raise RuntimeError(
+                    "Source manifest recording is not in its declared parent "
+                    "pool composition: "
+                    f"{rec.canonical_recording_id!r}"
+                )
+            # NeuralDataModule currently wraps one concrete dataset class; it
+            # cannot load a mixed-species pool safely.  Reject it explicitly
+            # instead of allowing raw recording IDs to collide or disappear.
+            if expected_species is not None and rec.species != expected_species:
+                raise RuntimeError(
+                    "Source manifest contains a recording from species "
+                    f"{rec.species!r}, but this data config loads only "
+                    f"{expected_species!r}."
+                )
+
+        self._verify_source_manifest_intervals(manifest, source_interval_identity)
 
         self._source_manifest = manifest
 
@@ -953,6 +1029,92 @@ class NeuralDataModule(LightningDataModule):
         )
         self.transform = self._build_transform_list()
         self._rebuild_dataset_transform()
+
+    def _verify_source_manifest_intervals(self, manifest, interval_identity) -> None:
+        """Bind every source selection to the live causal train/valid splits.
+
+        Positional indices are an efficient runtime representation, but are
+        not provenance by themselves.  Verify their corresponding stable IDs
+        and complete source hashes before any normalization fitting or loader
+        construction.  This makes split drift and malformed indices fatal.
+        """
+        from foundry.data.fraction_manifest import _canonical_hash
+
+        split_intervals = {
+            split: self.dataset.get_sampling_intervals(split=split)
+            for split in ("train", "valid")
+        }
+        for rec in manifest.recordings:
+            for split, expected_hash, expected_ids in (
+                (
+                    "train",
+                    rec.train_source_intervals_hash,
+                    rec.train_selected_interval_ids,
+                ),
+                (
+                    "valid",
+                    rec.valid_source_intervals_hash,
+                    rec.valid_interval_ids,
+                ),
+            ):
+                intervals = split_intervals[split].get(rec.recording_id)
+                if intervals is None:
+                    raise RuntimeError(
+                        f"Source {split} split lacks recording {rec.recording_id!r}"
+                    )
+                if not hasattr(intervals, "start") or not hasattr(intervals, "end"):
+                    raise RuntimeError(
+                        f"Source {split} intervals for {rec.recording_id!r} "
+                        "lack start/end timestamps"
+                    )
+                labels = (
+                    np.asarray(intervals.behavior_labels)
+                    if hasattr(intervals, "behavior_labels")
+                    else np.repeat("", len(intervals))
+                )
+                starts = np.asarray(intervals.start)
+                ends = np.asarray(intervals.end)
+                if not (len(starts) == len(ends) == len(labels) == len(intervals)):
+                    raise RuntimeError(
+                        f"Malformed source {split} intervals for "
+                        f"{rec.recording_id!r}"
+                    )
+                actual_ids = [
+                    interval_identity(
+                        rec.canonical_recording_id, index, start, end, label
+                    )
+                    for index, (start, end, label) in enumerate(
+                        zip(starts, ends, labels)
+                    )
+                ]
+                actual_hash = _canonical_hash(actual_ids)
+                if actual_hash != expected_hash:
+                    raise RuntimeError(
+                        f"Source manifest {split} split hash mismatch for "
+                        f"{rec.canonical_recording_id!r}: "
+                        f"manifest={expected_hash}, runtime={actual_hash}"
+                    )
+
+                if split == "train":
+                    indices = rec.train_selected_indices
+                    if len(indices) != len(set(indices)) or any(
+                        index < 0 or index >= len(actual_ids) for index in indices
+                    ):
+                        raise RuntimeError(
+                            "Source manifest has duplicate or out-of-range train "
+                            f"indices for {rec.canonical_recording_id!r}"
+                        )
+                    selected_ids = [actual_ids[index] for index in indices]
+                    if selected_ids != expected_ids:
+                        raise RuntimeError(
+                            "Source manifest train interval IDs do not match "
+                            f"runtime intervals for {rec.canonical_recording_id!r}"
+                        )
+                elif actual_ids != expected_ids:
+                    raise RuntimeError(
+                        "Source manifest validation interval IDs do not match "
+                        f"runtime intervals for {rec.canonical_recording_id!r}"
+                    )
 
     @property
     def source_manifest(self) -> "SourceSelectionManifest | None":
@@ -1014,8 +1176,15 @@ class NeuralDataModule(LightningDataModule):
                 n = len(intervals)
                 mask = np.zeros(n, dtype=bool)
                 for idx in rec.train_selected_indices:
-                    if idx < n:
-                        mask[idx] = True
+                    # _verify_source_manifest_intervals has already made this
+                    # invariant explicit.  Keep this defensive guard for
+                    # callers that invoke selection in isolation.
+                    if idx < 0 or idx >= n:
+                        raise RuntimeError(
+                            "Source manifest train index is out of range for "
+                            f"recording {rid!r}: {idx} not in [0, {n})"
+                        )
+                    mask[idx] = True
                 result[rid] = intervals.select_by_mask(mask)
             else:
                 result[rid] = intervals

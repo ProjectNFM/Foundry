@@ -15,12 +15,16 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import torch
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from foundry.config_resolvers import _load_neurosoft_audit
 from foundry.data.fraction_manifest import _canonical_hash
+from foundry.data.datasets import NeurosoftMinipigs2026, NeurosoftMonkeys2026
+from foundry.data.samplers import FastRandomFixedWindowSampler
+from foundry.data.utils import resolve_neural_signal
 from foundry.data.source_manifest import (
     MANIFEST_VERSION,
     SOURCE_POOL_SCHEMA,
@@ -34,11 +38,27 @@ from foundry.data.source_manifest import (
     canonical_recording_id,
     source_interval_identity,
 )
+from foundry.tasks.classification_mapping import ClassificationMapping
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WINDOW_SECONDS = 0.5
 DEFAULT_FRACTIONS = (0.10, 0.25, 0.50, 1.00)
 DEFAULT_SEEDS = (42, 43, 44)
+DEFAULT_BATCH_SIZE = 16
+SAMPLER_IMPLEMENTATION = (
+    "foundry.data.samplers.FastRandomFixedWindowSampler/"
+    "fixed-window-accounting-v1"
+)
+DATASET_SPECS = {
+    "minipigs": (
+        NeurosoftMinipigs2026,
+        REPO_ROOT / "configs/data/neurosoft_minipigs/multisess_raw.yaml",
+    ),
+    "monkeys": (
+        NeurosoftMonkeys2026,
+        REPO_ROOT / "configs/data/neurosoft_monkeys/multisess_raw.yaml",
+    ),
+}
 
 PHASE3_SMOKE = {
     ("minipigs", "sub-06"): [
@@ -58,10 +78,15 @@ COMPOSITIONS = (
 )
 
 
-def _load_class_names(task_path: Path) -> tuple[str, ...]:
+def _load_class_mapping(task_path: Path) -> ClassificationMapping:
     with task_path.open(encoding="utf-8") as handle:
         config = yaml.safe_load(handle)
-    return tuple(config["class_mapping"]["order"])
+    return ClassificationMapping.from_dict(config["class_mapping"])
+
+
+def _recording_ids(config_path: Path) -> list[str]:
+    with config_path.open(encoding="utf-8") as handle:
+        return list(yaml.safe_load(handle)["dataset_kwargs"]["recording_ids"])
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
@@ -145,40 +170,73 @@ def _rank_subjects(subjects: list[str], seed: int) -> list[str]:
     return [ordered[index] for index in permutation]
 
 
-class _SyntheticSplit:
-    """Deterministic interval layout derived from audit per-class counts."""
+def _audit_interval_hash(recording_id: str, intervals) -> str:
+    """Return the Phase 0 raw-recording split hash for live intervals."""
+    labels = (
+        np.asarray(intervals.behavior_labels)
+        if hasattr(intervals, "behavior_labels")
+        else np.repeat("", len(intervals))
+    )
+    return _canonical_hash(
+        [
+            {
+                "recording_id": recording_id,
+                "index": index,
+                "start": float(start).hex(),
+                "end": float(end).hex(),
+                "label": str(label),
+            }
+            for index, (start, end, label) in enumerate(
+                zip(np.asarray(intervals.start), np.asarray(intervals.end), labels)
+            )
+        ]
+    )
+
+
+class _LiveSplit:
+    """Causal split materialized from the processed recording, never audit counts."""
 
     def __init__(
         self,
         canonical_id: str,
-        per_class_counts: dict[str, int],
-        class_names: tuple[str, ...],
-        split_hashes: dict[str, str],
-        split: str,
+        recording_id: str,
+        intervals,
+        class_mapping: ClassificationMapping,
+        *,
+        window_seconds: float,
     ) -> None:
+        if not hasattr(intervals, "start") or not hasattr(intervals, "end"):
+            raise ValueError(f"Intervals for {canonical_id!r} lack start/end timestamps")
         self.canonical_id = canonical_id
-        self.split = split
-        self.split_hash = split_hashes[split]
-        self.class_indices: dict[str, list[int]] = {}
-        self.interval_ids: dict[int, str] = {}
-        offset = 0
-        for class_name in class_names:
-            count = int(per_class_counts.get(class_name, 0))
-            indices = list(range(offset, offset + count))
-            self.class_indices[class_name] = indices
-            for index in indices:
-                self.interval_ids[index] = source_interval_identity(
-                    canonical_id,
-                    index,
-                    index * WINDOW_SECONDS,
-                    (index + 1) * WINDOW_SECONDS,
-                    class_name,
-                )
-            offset += count
-        self.total = offset
-        self.intervals_hash = _canonical_hash(
-            [self.interval_ids[index] for index in sorted(self.interval_ids)]
+        self.recording_id = recording_id
+        self.intervals = intervals
+        self.window_seconds = window_seconds
+        self.starts = np.asarray(intervals.start)
+        self.ends = np.asarray(intervals.end)
+        self.labels = (
+            np.asarray(intervals.behavior_labels)
+            if hasattr(intervals, "behavior_labels")
+            else np.repeat("", len(intervals))
         )
+        if not (len(self.starts) == len(self.ends) == len(self.labels) == len(intervals)):
+            raise ValueError(f"Malformed intervals for {canonical_id!r}")
+        self.interval_ids = [
+            source_interval_identity(canonical_id, index, start, end, label)
+            for index, (start, end, label) in enumerate(
+                zip(self.starts, self.ends, self.labels)
+            )
+        ]
+        self.intervals_hash = _canonical_hash(self.interval_ids)
+        self.class_indices = {
+            class_name: np.flatnonzero(
+                class_mapping.map_to_class_ids(self.labels) == class_id
+            ).astype(int).tolist()
+            for class_id, class_name in enumerate(class_mapping.class_names)
+        }
+
+    @property
+    def total(self) -> int:
+        return len(self.interval_ids)
 
     def permuted_class_indices(
         self, class_name: str, class_id: int, seed: int
@@ -194,24 +252,49 @@ class _SyntheticSplit:
     def select_class_count(
         self, class_name: str, class_id: int, seed: int, count: int
     ) -> list[int]:
-        permuted = self.permuted_class_indices(class_name, class_id, seed)
-        if count <= 0:
-            return []
-        selected = permuted[: min(count, len(permuted))]
-        selected.sort()
-        return selected
-
-    def all_indices(self) -> list[int]:
-        return list(range(self.total))
+        selected = self.permuted_class_indices(class_name, class_id, seed)[:count]
+        return sorted(selected)
 
     def ids_for_indices(self, indices: list[int]) -> list[str]:
         return [self.interval_ids[index] for index in indices]
 
+    def window_count(self, indices: list[int], *, seed: int = 0) -> int:
+        """Count windows by invoking the exact fixed-window sampler used in training."""
+        mask = np.zeros(self.total, dtype=bool)
+        mask[indices] = True
+        selected = self.intervals.select_by_mask(mask)
+        generator = torch.Generator().manual_seed(seed)
+        sampler = FastRandomFixedWindowSampler(
+            sampling_intervals={self.recording_id: selected},
+            window_length=self.window_seconds,
+            drop_short=True,
+            generator=generator,
+        )
+        declared = len(sampler)
+        # Account from the real iterator too: this detects a future mismatch
+        # between the sampler's __len__ contract and emitted window stream.
+        actual = len(list(sampler))
+        if declared != actual:
+            raise RuntimeError(
+                "Fixed-window sampler length disagrees with its emitted windows "
+                f"for {self.canonical_id!r}: len={declared}, emitted={actual}"
+            )
+        return actual
+
 
 class _AuditIndex:
-    def __init__(self, audit: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        audit: dict[str, Any],
+        *,
+        data_root: Path,
+        class_mapping: ClassificationMapping,
+        window_seconds: float,
+    ) -> None:
         self.audit = audit
         self.audit_sha256 = audit["artifact_sha256"]
+        self.class_mapping = class_mapping
+        self.window_seconds = window_seconds
         self.recordings_by_canonical: dict[str, dict[str, Any]] = {}
         self.recordings_by_species_subject: dict[tuple[str, str], list[str]] = (
             defaultdict(list)
@@ -227,6 +310,89 @@ class _AuditIndex:
 
         for subject_recordings in self.recordings_by_species_subject.values():
             subject_recordings.sort()
+
+        self.splits: dict[str, dict[str, _LiveSplit]] = {
+            "train": {}, "valid": {}, "test": {}
+        }
+        self.channel_counts: dict[str, tuple[int, int]] = {}
+        self._load_and_verify_live_data(data_root)
+
+    def _load_and_verify_live_data(self, data_root: Path) -> None:
+        """Load both training datasets and bind every Phase 0 hash to live data."""
+        seen: set[str] = set()
+        for species, (dataset_class, config_path) in DATASET_SPECS.items():
+            recording_ids = _recording_ids(config_path)
+            dataset = dataset_class(
+                root=str(data_root),
+                recording_ids=recording_ids,
+                task_type="acoustic_stim",
+                split_type="intrasession-causal",
+            )
+            partitions = {
+                split: dataset.get_sampling_intervals(split=split)
+                for split in ("train", "valid", "test")
+            }
+            for recording_id in recording_ids:
+                canonical_id = canonical_recording_id(species, recording_id)
+                audit_recording = self.recordings_by_canonical.get(canonical_id)
+                if audit_recording is None:
+                    raise ValueError(
+                        f"Live {canonical_id!r} is absent from the Phase 0 audit"
+                    )
+                seen.add(canonical_id)
+                for split, intervals_by_recording in partitions.items():
+                    intervals = intervals_by_recording.get(recording_id)
+                    if intervals is None:
+                        raise ValueError(f"Live {split} split lacks {canonical_id!r}")
+                    actual_audit_hash = _audit_interval_hash(recording_id, intervals)
+                    expected_audit_hash = audit_recording["split_hashes"].get(split)
+                    if actual_audit_hash != expected_audit_hash:
+                        raise ValueError(
+                            "Phase 0 split hash mismatch for "
+                            f"{canonical_id!r} {split}: "
+                            f"audit={expected_audit_hash}, live={actual_audit_hash}"
+                        )
+                    self.splits[split][canonical_id] = _LiveSplit(
+                        canonical_id,
+                        recording_id,
+                        intervals,
+                        self.class_mapping,
+                        window_seconds=self.window_seconds,
+                    )
+                recording = dataset.get_recording(recording_id)
+                _field, _signal, supported, _names = resolve_neural_signal(recording)
+                self.channel_counts[canonical_id] = (
+                    len(recording.channels.id), int(supported.sum())
+                )
+
+        audited = set(self.recordings_by_canonical)
+        if seen != audited:
+            raise ValueError(
+                "Phase 0 audit and configured live recordings differ: "
+                f"missing_live={sorted(audited - seen)}, extra_live={sorted(seen - audited)}"
+            )
+        self._verify_one_example_one_window()
+
+    def _verify_one_example_one_window(self) -> None:
+        """Enforce the Phase 3 equal-example/equal-window prerequisite."""
+        failures: list[str] = []
+        for canonical_id, recording in sorted(self.recordings_by_canonical.items()):
+            if not recording.get("eligible", False):
+                continue
+            for split in ("train", "valid"):
+                live_split = self.split(canonical_id, split)
+                windows = live_split.window_count(list(range(live_split.total)))
+                if windows != live_split.total:
+                    failures.append(
+                        f"{canonical_id} {split}: intervals={live_split.total}, "
+                        f"windows={windows}"
+                    )
+        if failures:
+            raise RuntimeError(
+                "Phase 3 one-example/one-window prerequisite failed for the "
+                "live fixed-window sampler. Do not freeze manifests until the "
+                "allocation rule is amended.\n" + "\n".join(failures)
+            )
 
     def recording(self, canonical_id: str) -> dict[str, Any]:
         if canonical_id not in self.recordings_by_canonical:
@@ -252,7 +418,16 @@ class _AuditIndex:
         )
 
     def supported_channel_count(self, recording: dict[str, Any]) -> int:
-        return int(recording.get("n_channels") or 0)
+        canonical_id = canonical_recording_id(
+            recording["species"], recording["recording_id"]
+        )
+        return self.channel_counts[canonical_id][1]
+
+    def raw_channel_count(self, canonical_id: str) -> int:
+        return self.channel_counts[canonical_id][0]
+
+    def split(self, canonical_id: str, split: str) -> _LiveSplit:
+        return self.splits[split][canonical_id]
 
 
 def _build_source_pool_manifest(
@@ -269,6 +444,10 @@ def _build_source_pool_manifest(
             source_recording_count=int(pool["source_recording_count"]),
             class_counts=dict(pool["per_class_train_examples"]),
             target_leakage=list(pool["target_leakage"]),
+            source_train_split_hashes={
+                canonical_id: audit_index.split(canonical_id, "train").intervals_hash
+                for canonical_id in pool["source_recordings"]
+            },
         )
         for name, pool in plan["source_pools"].items()
     }
@@ -301,20 +480,8 @@ def _recording_selection_full(
 ) -> SourceRecordingSelection:
     recording = audit_index.recording(canonical_id)
     species, recording_id, subject = _parse_canonical_id(canonical_id)
-    train_split = _SyntheticSplit(
-        canonical_id,
-        recording["per_class_counts"]["train"],
-        class_names,
-        recording["split_hashes"],
-        "train",
-    )
-    valid_split = _SyntheticSplit(
-        canonical_id,
-        recording["per_class_counts"]["valid"],
-        class_names,
-        recording["split_hashes"],
-        "valid",
-    )
+    train_split = audit_index.split(canonical_id, "train")
+    valid_split = audit_index.split(canonical_id, "valid")
 
     selected_indices: list[int] = []
     train_counts_by_class: dict[str, int] = {}
@@ -328,28 +495,31 @@ def _recording_selection_full(
         selected_indices.extend(class_selected)
     selected_indices.sort()
 
-    valid_indices = valid_split.all_indices()
+    valid_indices = list(range(valid_split.total))
     return SourceRecordingSelection(
         species=species,
         subject=subject,
         recording_id=recording_id,
         canonical_recording_id=canonical_id,
-        raw_channel_count=int(recording.get("n_channels") or 0),
+        raw_channel_count=audit_index.raw_channel_count(canonical_id),
         supported_channel_count=audit_index.supported_channel_count(recording),
         train_source_intervals_hash=train_split.intervals_hash,
         train_selected_indices=selected_indices,
         train_selected_interval_ids=train_split.ids_for_indices(selected_indices),
         train_counts_by_class=train_counts_by_class,
-        available_train_windows=train_split.total,
+        available_train_windows=train_split.window_count(selected_indices),
         valid_source_intervals_hash=valid_split.intervals_hash,
         valid_interval_ids=valid_split.ids_for_indices(valid_indices),
-        available_validation_windows=valid_split.total,
+        available_validation_windows=valid_split.window_count(valid_indices),
     )
 
 
 def _summary_from_recordings(
     recordings: list[SourceRecordingSelection],
     requested_fraction: float | None,
+    *,
+    batch_size: int,
+    window_seconds: float,
 ) -> SelectionSummary:
     selected_train_examples = sum(
         len(recording.train_selected_indices) for recording in recordings
@@ -383,19 +553,25 @@ def _summary_from_recordings(
         if available_train_windows
         else None
     )
+    realized_train_windows = (
+        available_train_windows // batch_size * batch_size
+    )
     return SelectionSummary(
         source_subject_count=len(subjects),
         source_recording_count=len(recordings),
         selected_train_examples=selected_train_examples,
         available_train_windows=available_train_windows,
-        realized_train_windows_per_epoch=selected_train_examples,
-        selected_signal_seconds=selected_train_examples * WINDOW_SECONDS,
+        realized_train_windows_per_epoch=realized_train_windows,
+        selected_signal_seconds=available_train_windows * window_seconds,
         validation_examples=validation_examples,
         available_validation_windows=available_validation_windows,
         represented_class_union=sorted(class_union),
         represented_class_intersection=sorted(class_intersection),
         requested_fraction=requested_fraction,
         realized_fraction=realized_fraction,
+        sampler_implementation=SAMPLER_IMPLEMENTATION,
+        window_seconds=window_seconds,
+        batch_size=batch_size,
     )
 
 
@@ -411,9 +587,13 @@ def _finalize_selection_manifest(
     condition: SelectionCondition,
     recordings: list[SourceRecordingSelection],
     target_leakage: list[str],
+    batch_size: int,
 ) -> SourceSelectionManifest:
     summary = _summary_from_recordings(
-        recordings, condition.requested_fraction
+        recordings,
+        condition.requested_fraction,
+        batch_size=batch_size,
+        window_seconds=audit_index.window_seconds,
     )
     subjects = sorted(
         {f"{recording.species}:{recording.subject}" for recording in recordings}
@@ -481,6 +661,7 @@ def generate_phase3_smoke(
     output_dir: Path,
     pool_paths: dict[tuple[str, str], tuple[Path, SourcePoolManifest]],
     class_names: tuple[str, ...],
+    batch_size: int,
 ) -> list[Path]:
     written: list[Path] = []
     for (target_species, target_subject), canonical_ids in PHASE3_SMOKE.items():
@@ -515,6 +696,7 @@ def generate_phase3_smoke(
             ),
             recordings=recordings,
             target_leakage=[],
+            batch_size=batch_size,
         )
         path = (
             output_dir
@@ -545,6 +727,7 @@ def generate_volume_manifests(
     class_names: tuple[str, ...],
     fractions: tuple[float, ...],
     seeds: tuple[int, ...],
+    batch_size: int,
 ) -> list[Path]:
     written: list[Path] = []
     nesting_cache: dict[tuple[str, str, int, str], dict[str, list[str]]] = {}
@@ -599,6 +782,7 @@ def generate_volume_manifests(
                     ),
                     recordings=recordings,
                     target_leakage=[],
+                    batch_size=batch_size,
                 )
                 path = (
                     output_dir
@@ -770,6 +954,7 @@ def generate_diversity_manifests(
     pool_paths: dict[tuple[str, str], tuple[Path, SourcePoolManifest]],
     class_names: tuple[str, ...],
     seeds: tuple[int, ...],
+    batch_size: int,
 ) -> list[Path]:
     written: list[Path] = []
     for target_key, plan in sorted(audit_index.audit["source_plans"].items()):
@@ -831,6 +1016,7 @@ def generate_diversity_manifests(
                     ),
                     recordings=recordings,
                     target_leakage=[],
+                    batch_size=batch_size,
                 )
                 path = (
                     output_dir
@@ -860,6 +1046,7 @@ def generate_eight_class_anchor_manifests(
     pool_paths: dict[tuple[str, str], tuple[Path, SourcePoolManifest]],
     class_names: tuple[str, ...],
     seeds: tuple[int, ...],
+    batch_size: int,
 ) -> list[Path]:
     written: list[Path] = []
     for target_key, plan in sorted(audit_index.audit["source_plans"].items()):
@@ -933,6 +1120,7 @@ def generate_eight_class_anchor_manifests(
                     ),
                     recordings=recordings,
                     target_leakage=[],
+                    batch_size=batch_size,
                 )
                 path = (
                     output_dir
@@ -1134,6 +1322,7 @@ def generate_composition_manifests(
     pool_paths: dict[tuple[str, str], tuple[Path, SourcePoolManifest]],
     class_names: tuple[str, ...],
     seeds: tuple[int, ...],
+    batch_size: int,
 ) -> list[Path]:
     written: list[Path] = []
     for target_key, plan in sorted(audit_index.audit["source_plans"].items()):
@@ -1224,6 +1413,7 @@ def generate_composition_manifests(
                     ),
                     recordings=recordings,
                     target_leakage=[],
+                    batch_size=batch_size,
                 )
                 summaries[composition_name] = manifest.summary.selected_train_examples
                 path = (
@@ -1317,7 +1507,7 @@ def generate_readme(output_dir: Path, index: dict[str, Any]) -> None:
         "# NeuroSoft supervised source manifests",
         "",
         "Generated by `tools/generate_neurosoft_source_manifests.py`.",
-        "Counts are derived from the Phase 0 audit and deterministic selection rules.",
+        "Counts are derived from live processed data, audited causal splits, and deterministic selection rules.",
         "",
         f"- Manifest count: {index['manifest_count']}",
         "",
@@ -1391,6 +1581,123 @@ def validate_manifests(output_dir: Path) -> None:
             _manifest_entry(path, output_dir, manifest_type)
 
 
+def validate_manifests_data_backed(
+    output_dir: Path,
+    *,
+    data_root: Path,
+    audit_path: Path,
+    task_path: Path,
+    batch_size: int,
+    window_seconds: float,
+) -> None:
+    """Independently validate committed selections against processed data.
+
+    This intentionally reloads both data sets and rechecks every Phase 0 split
+    before inspecting manifests.  Static JSON/hash validation alone cannot
+    establish that positional interval selections still denote live data.
+    """
+    validate_manifests(output_dir)
+    audit = _load_neurosoft_audit(str(audit_path))
+    class_mapping = _load_class_mapping(task_path)
+    live = _AuditIndex(
+        audit,
+        data_root=data_root,
+        class_mapping=class_mapping,
+        window_seconds=window_seconds,
+    )
+    pools: dict[Path, SourcePoolManifest] = {}
+    for path in sorted((output_dir / "source_pools").rglob("*.json")):
+        pool = SourcePoolManifest.load(path)
+        key = path.resolve()
+        pools[key] = pool
+        plan = audit["source_plans"][
+            f"{pool.target_species}:{pool.target_subject}"
+        ]
+        if pool.eligible_target_recordings != plan["eligible_target_recordings"]:
+            raise ValueError(f"Pool target recording drift: {path}")
+        for name, source_pool in pool.pools.items():
+            expected = plan["source_pools"].get(name)
+            if expected is None:
+                raise ValueError(f"Pool {path} contains unknown composition {name!r}")
+            if source_pool.source_recordings != expected["source_recordings"]:
+                raise ValueError(f"Pool source recording drift: {path} {name}")
+            actual_hashes = {
+                canonical_id: live.split(canonical_id, "train").intervals_hash
+                for canonical_id in source_pool.source_recordings
+            }
+            if source_pool.source_train_split_hashes != actual_hashes:
+                raise ValueError(f"Pool live train split hash mismatch: {path} {name}")
+
+    for path in sorted(output_dir.rglob("*.json")):
+        if "source_pools" in path.parts or path.name == "index.json":
+            continue
+        manifest = SourceSelectionManifest.load(path)
+        pool_path = (path.parent / manifest.source_pool_manifest).resolve()
+        pool = pools.get(pool_path)
+        if pool is None:
+            raise ValueError(f"Selection parent pool is missing: {path}")
+        if pool.manifest_hash != manifest.source_pool_hash:
+            raise ValueError(f"Selection parent pool hash mismatch: {path}")
+        if (
+            manifest.summary.sampler_implementation != SAMPLER_IMPLEMENTATION
+            or manifest.summary.window_seconds != window_seconds
+            or manifest.summary.batch_size != batch_size
+        ):
+            raise ValueError(f"Selection sampler-accounting metadata mismatch: {path}")
+
+        selected_window_total = 0
+        validation_window_total = 0
+        selected_examples = 0
+        for rec in manifest.recordings:
+            canonical_id = canonical_recording_id(rec.species, rec.recording_id)
+            if canonical_id != rec.canonical_recording_id:
+                raise ValueError(f"Bad canonical recording ID in {path}: {canonical_id}")
+            train = live.split(canonical_id, "train")
+            valid = live.split(canonical_id, "valid")
+            if rec.train_source_intervals_hash != train.intervals_hash:
+                raise ValueError(f"Live train interval hash mismatch: {path} {canonical_id}")
+            if rec.valid_source_intervals_hash != valid.intervals_hash:
+                raise ValueError(f"Live validation interval hash mismatch: {path} {canonical_id}")
+            if rec.train_selected_interval_ids != train.ids_for_indices(
+                rec.train_selected_indices
+            ):
+                raise ValueError(f"Live selected interval ID mismatch: {path} {canonical_id}")
+            if rec.valid_interval_ids != valid.ids_for_indices(list(range(valid.total))):
+                raise ValueError(f"Live validation interval ID mismatch: {path} {canonical_id}")
+            class_counts = {
+                name: sum(index in train.class_indices[name] for index in rec.train_selected_indices)
+                for name in class_mapping.class_names
+            }
+            if rec.train_counts_by_class != class_counts:
+                raise ValueError(f"Live class-count mismatch: {path} {canonical_id}")
+            raw_channels, supported_channels = live.channel_counts[canonical_id]
+            if (rec.raw_channel_count, rec.supported_channel_count) != (
+                raw_channels,
+                supported_channels,
+            ):
+                raise ValueError(f"Live channel-count mismatch: {path} {canonical_id}")
+            train_windows = train.window_count(rec.train_selected_indices)
+            valid_windows = valid.window_count(list(range(valid.total)))
+            if rec.available_train_windows != train_windows:
+                raise ValueError(f"Live train window-count mismatch: {path} {canonical_id}")
+            if rec.available_validation_windows != valid_windows:
+                raise ValueError(f"Live valid window-count mismatch: {path} {canonical_id}")
+            selected_examples += len(rec.train_selected_indices)
+            selected_window_total += train_windows
+            validation_window_total += valid_windows
+
+        summary = manifest.summary
+        if (
+            summary.selected_train_examples != selected_examples
+            or summary.available_train_windows != selected_window_total
+            or summary.available_validation_windows != validation_window_total
+            or summary.realized_train_windows_per_epoch
+            != selected_window_total // batch_size * batch_size
+            or summary.selected_signal_seconds != selected_window_total * window_seconds
+        ):
+            raise ValueError(f"Live aggregate accounting mismatch: {path}")
+
+
 def _parse_fractions(values: list[str]) -> tuple[float, ...]:
     fractions = tuple(float(value) for value in values)
     if not fractions:
@@ -1411,8 +1718,8 @@ def main() -> None:
     parser.add_argument(
         "--data-root",
         type=Path,
-        default=None,
-        help="Processed NeuroSoft data root (reserved for future validation).",
+        required=True,
+        help="Processed NeuroSoft data root used to load and verify live recordings.",
     )
     parser.add_argument(
         "--audit",
@@ -1446,21 +1753,53 @@ def main() -> None:
         help="Deterministic source-selection seeds.",
     )
     parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_BATCH_SIZE,
+        help="Training batch size used for drop-last window accounting.",
+    )
+    parser.add_argument(
+        "--window-seconds",
+        type=float,
+        default=WINDOW_SECONDS,
+        help="Fixed training-window duration in seconds.",
+    )
+    parser.add_argument(
         "--validate-only",
         action="store_true",
         help="Validate existing manifests without regenerating them.",
     )
     args = parser.parse_args()
 
+    if not args.data_root.is_dir():
+        raise FileNotFoundError(f"Data root not found: {args.data_root}")
+    if args.batch_size <= 0:
+        raise ValueError("batch-size must be positive")
+    if not math.isfinite(args.window_seconds) or args.window_seconds <= 0:
+        raise ValueError("window-seconds must be finite and positive")
+
     output_dir = args.output.resolve()
     if args.validate_only:
-        validate_manifests(output_dir)
+        validate_manifests_data_backed(
+            output_dir,
+            data_root=args.data_root,
+            audit_path=args.audit,
+            task_path=args.task,
+            batch_size=args.batch_size,
+            window_seconds=args.window_seconds,
+        )
         print(f"Validated manifests under {output_dir}")
         return
 
     audit = _load_neurosoft_audit(str(args.audit))
-    audit_index = _AuditIndex(audit)
-    class_names = _load_class_names(args.task.resolve())
+    class_mapping = _load_class_mapping(args.task.resolve())
+    audit_index = _AuditIndex(
+        audit,
+        data_root=args.data_root,
+        class_mapping=class_mapping,
+        window_seconds=args.window_seconds,
+    )
+    class_names = tuple(class_mapping.class_names)
     fractions = _parse_fractions(args.fractions)
     seeds = tuple(int(seed) for seed in args.selection_seeds)
     if not seeds:
@@ -1468,25 +1807,37 @@ def main() -> None:
 
     output_dir.mkdir(parents=True, exist_ok=True)
     pool_paths = generate_source_pools(audit_index, output_dir)
-    generate_phase3_smoke(audit_index, output_dir, pool_paths, class_names)
+    generate_phase3_smoke(
+        audit_index, output_dir, pool_paths, class_names, args.batch_size
+    )
     generate_volume_manifests(
-        audit_index, output_dir, pool_paths, class_names, fractions, seeds
+        audit_index,
+        output_dir,
+        pool_paths,
+        class_names,
+        fractions,
+        seeds,
+        args.batch_size,
     )
     generate_diversity_manifests(
-        audit_index, output_dir, pool_paths, class_names, seeds
+        audit_index, output_dir, pool_paths, class_names, seeds, args.batch_size
     )
     generate_eight_class_anchor_manifests(
-        audit_index, output_dir, pool_paths, class_names, seeds
+        audit_index, output_dir, pool_paths, class_names, seeds, args.batch_size
     )
     generate_composition_manifests(
-        audit_index, output_dir, pool_paths, class_names, seeds
+        audit_index, output_dir, pool_paths, class_names, seeds, args.batch_size
     )
     index = generate_index(output_dir)
     generate_readme(output_dir, index)
-    validate_manifests(output_dir)
-
-    if args.data_root is not None and not args.data_root.is_dir():
-        raise FileNotFoundError(f"Data root not found: {args.data_root}")
+    validate_manifests_data_backed(
+        output_dir,
+        data_root=args.data_root,
+        audit_path=args.audit,
+        task_path=args.task,
+        batch_size=args.batch_size,
+        window_seconds=args.window_seconds,
+    )
 
     print(f"Generated {index['manifest_count']} manifests under {output_dir}")
 

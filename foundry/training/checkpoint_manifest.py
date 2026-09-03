@@ -359,7 +359,14 @@ def verify_checkpoint_integrity(
     if not isinstance(expected_hash, str) or not expected_hash:
         raise CheckpointManifestError("Manifest checkpoint.sha256 must be a string")
 
-    checkpoint_path = Path(checkpoint_root) / rel_path
+    relative_path = Path(rel_path)
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise CheckpointManifestError(
+            "Manifest checkpoint.path must be a relative path contained in "
+            "checkpoint_root"
+        )
+
+    checkpoint_path = Path(checkpoint_root) / relative_path
     if not checkpoint_path.is_file():
         raise CheckpointManifestError(
             f"Checkpoint file not found: {checkpoint_path}"

@@ -468,6 +468,13 @@ def _source_manifest_sweep(
     return ",".join("'" + p.replace("'", "\\'") + "'" for p in paths)
 
 
+def _path_stem(path: str) -> str:
+    """Return a filesystem path's stem for concise, stable run names."""
+    if not isinstance(path, str) or not path:
+        raise ValueError("path_stem requires a non-empty path string")
+    return os.path.splitext(os.path.basename(path))[0]
+
+
 def register_resolvers() -> None:
     """Register all custom OmegaConf resolvers (idempotent)."""
     _resolvers = {
@@ -487,6 +494,7 @@ def register_resolvers() -> None:
         "phase1_cell_fraction": _phase1_cell_fraction,
         "source_manifest_by_id": _source_manifest_by_id,
         "source_manifest_sweep": _source_manifest_sweep,
+        "path_stem": _path_stem,
     }
     for name, fn in _resolvers.items():
         if not OmegaConf.has_resolver(name):

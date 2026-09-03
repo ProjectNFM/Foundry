@@ -28,7 +28,9 @@ class_weights:
 
 run:
   project: neurosoft_supervised_pretraining
-  name: src_mk_${data.target_subject}_${data.source_manifest_family}_s${run.seed}
+  # Selection IDs encode target, family/condition, and selection seed.  Keep
+  # the model seed explicit because it is a distinct source of randomness.
+  name: src_mk_${path_stem:${source_manifest}}_m${run.seed}
   group: NEUROSOFT_SOURCE_PRETRAINING_MONKEYS
   tags: [source-pretraining, monkeys, 8band, phase3]
   seed: ???
@@ -62,6 +64,7 @@ trainer:
       monitor: val/source_session_mean_supported_f1
       mode: max
       patience: 40
+      strict: true
     model_checkpoint:
       monitor: val/source_session_mean_supported_f1
       mode: max

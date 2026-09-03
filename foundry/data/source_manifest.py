@@ -104,6 +104,17 @@ def _require_int_dict(value: object, field_name: str) -> dict[str, int]:
     return result
 
 
+def _require_str_dict(value: object, field_name: str) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be a dict")
+    result: dict[str, str] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise ValueError(f"{field_name} keys must be strings")
+        result[key] = _require_str(item, f"{field_name}[{key}]")
+    return result
+
+
 @dataclass(frozen=True)
 class SourcePool:
     """One composition pool within a source-pool manifest."""
@@ -116,6 +127,7 @@ class SourcePool:
     source_recording_count: int
     class_counts: dict[str, int]
     target_leakage: list[str]
+    source_train_split_hashes: dict[str, str]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -127,6 +139,7 @@ class SourcePool:
             "source_recording_count": self.source_recording_count,
             "class_counts": dict(self.class_counts),
             "target_leakage": list(self.target_leakage),
+            "source_train_split_hashes": dict(self.source_train_split_hashes),
         }
 
     @classmethod
@@ -154,6 +167,13 @@ class SourcePool:
             target_leakage=_require_str_list(
                 data.get("target_leakage"), "target_leakage"
             ),
+            source_train_split_hashes={
+                key: _require_str(value, f"source_train_split_hashes[{key}]")
+                for key, value in _require_str_dict(
+                    data.get("source_train_split_hashes"),
+                    "source_train_split_hashes",
+                ).items()
+            },
         )
 
 
@@ -229,6 +249,9 @@ class SelectionSummary:
     represented_class_intersection: list[str]
     requested_fraction: float | None
     realized_fraction: float | None
+    sampler_implementation: str
+    window_seconds: float
+    batch_size: int
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -246,6 +269,9 @@ class SelectionSummary:
             ),
             "requested_fraction": self.requested_fraction,
             "realized_fraction": self.realized_fraction,
+            "sampler_implementation": self.sampler_implementation,
+            "window_seconds": self.window_seconds,
+            "batch_size": self.batch_size,
         }
 
     @classmethod
@@ -265,6 +291,11 @@ class SelectionSummary:
         selected_signal_seconds = data.get("selected_signal_seconds")
         if not isinstance(selected_signal_seconds, (int, float)):
             raise ValueError("selected_signal_seconds must be a number")
+        window_seconds = data.get("window_seconds")
+        if not isinstance(window_seconds, (int, float)):
+            raise ValueError("window_seconds must be a number")
+        if float(window_seconds) <= 0:
+            raise ValueError("window_seconds must be positive")
         return cls(
             source_subject_count=_require_int(
                 data.get("source_subject_count"), "source_subject_count"
@@ -303,6 +334,11 @@ class SelectionSummary:
             realized_fraction=(
                 None if realized_fraction is None else float(realized_fraction)
             ),
+            sampler_implementation=_require_str(
+                data.get("sampler_implementation"), "sampler_implementation"
+            ),
+            window_seconds=float(window_seconds),
+            batch_size=_require_int(data.get("batch_size"), "batch_size"),
         )
 
 
@@ -504,6 +540,7 @@ class SourcePoolManifest(_HashValidatedManifest):
             "phase0_audit_sha256": payload["phase0_audit_sha256"],
             "target_species": payload["target_species"],
             "target_subject": payload["target_subject"],
+            "eligible_target_recordings": payload["eligible_target_recordings"],
             "pools": {
                 name: payload["pools"][name]
                 for name in sorted(payload["pools"])
@@ -673,6 +710,28 @@ class SourceSelectionManifest(_HashValidatedManifest):
                 "source_subject_count does not match subjects: "
                 f"summary={self.summary.source_subject_count}, "
                 f"subjects={len(self.subjects)}"
+            )
+
+        if self.summary.batch_size <= 0:
+            raise ValueError("summary.batch_size must be positive")
+        expected_realized = (
+            self.summary.available_train_windows // self.summary.batch_size
+            * self.summary.batch_size
+        )
+        if self.summary.realized_train_windows_per_epoch != expected_realized:
+            raise ValueError(
+                "realized_train_windows_per_epoch does not match batch dropping: "
+                f"summary={self.summary.realized_train_windows_per_epoch}, "
+                f"expected={expected_realized}"
+            )
+        expected_signal_seconds = (
+            self.summary.available_train_windows * self.summary.window_seconds
+        )
+        if self.summary.selected_signal_seconds != expected_signal_seconds:
+            raise ValueError(
+                "selected_signal_seconds does not match available windows: "
+                f"summary={self.summary.selected_signal_seconds}, "
+                f"expected={expected_signal_seconds}"
             )
 
     @classmethod
