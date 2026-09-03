@@ -282,3 +282,99 @@ def test_transfer_modes_exclude_source_adapter_and_are_atomic(tmp_path):
         torch.equal(value, mismatched.state_dict()[key])
         for key, value in before.items()
     )
+
+
+# ── WP2: canonical session routing with id_aliases ──────────────────────────
+
+
+class TestResolveSessionId:
+    """resolve_session_id routes raw IDs through the alias map."""
+
+    def test_no_aliases_returns_raw(self):
+        model = _model()
+        assert model.resolve_session_id("minipig") == "minipig"
+
+    def test_namespace_lookup(self):
+        aliases = {
+            "minipigs": {"sub-01_ses-01": "minipigs:sub-01_ses-01"},
+            "monkeys": {"sub-01_ses-01": "monkeys:sub-01_ses-01"},
+        }
+        model = _model(
+            {
+                "minipigs:sub-01_ses-01": 3,
+                "monkeys:sub-01_ses-01": 5,
+            },
+            id_aliases=aliases,
+        )
+        assert (
+            model.resolve_session_id("sub-01_ses-01", namespace="minipigs")
+            == "minipigs:sub-01_ses-01"
+        )
+        assert (
+            model.resolve_session_id("sub-01_ses-01", namespace="monkeys")
+            == "monkeys:sub-01_ses-01"
+        )
+
+    def test_unambiguous_raw_id_resolves_without_namespace(self):
+        aliases = {
+            "minipigs": {"unique-pig": "minipigs:unique-pig"},
+        }
+        model = _model(
+            {"minipigs:unique-pig": 3},
+            id_aliases=aliases,
+        )
+        assert model.resolve_session_id("unique-pig") == "minipigs:unique-pig"
+
+    def test_ambiguous_raw_id_without_namespace_fails(self):
+        aliases = {
+            "minipigs": {"sub-01_ses-01": "minipigs:sub-01_ses-01"},
+            "monkeys": {"sub-01_ses-01": "monkeys:sub-01_ses-01"},
+        }
+        model = _model(
+            {
+                "minipigs:sub-01_ses-01": 3,
+                "monkeys:sub-01_ses-01": 5,
+            },
+            id_aliases=aliases,
+        )
+        with pytest.raises(KeyError, match="ambiguous"):
+            model.resolve_session_id("sub-01_ses-01")
+
+    def test_unknown_raw_id_fails(self):
+        aliases = {"minipigs": {"known": "minipigs:known"}}
+        model = _model({"minipigs:known": 3}, id_aliases=aliases)
+        with pytest.raises(KeyError, match="Unknown"):
+            model.resolve_session_id("nonexistent", namespace="minipigs")
+
+    def test_unknown_namespace_fails(self):
+        aliases = {"minipigs": {"sub-01": "minipigs:sub-01"}}
+        model = _model({"minipigs:sub-01": 3}, id_aliases=aliases)
+        with pytest.raises(KeyError):
+            model.resolve_session_id("sub-01", namespace="horses")
+
+
+class TestTokenizeWithNamespace:
+    """tokenize reads dataset_namespace to select the correct adapter."""
+
+    def test_tokenize_with_dataset_namespace(self):
+        aliases = {
+            "minipigs": {"sub-01_ses-01": "minipigs:sub-01_ses-01"},
+        }
+        model = _model(
+            {"minipigs:sub-01_ses-01": 3},
+            id_aliases=aliases,
+        )
+        data = _data("sub-01_ses-01", 3)
+        data.dataset_namespace = "minipigs"
+        tokens = model.tokenize(data)
+        sid = tokens["input_session_ids"]
+        actual = sid.obj if hasattr(sid, "obj") else sid
+        assert actual == "minipigs:sub-01_ses-01"
+
+    def test_tokenize_without_namespace_uses_raw_id(self):
+        model = _model()
+        data = _data("minipig", 3)
+        tokens = model.tokenize(data)
+        sid = tokens["input_session_ids"]
+        actual = sid.obj if hasattr(sid, "obj") else sid
+        assert actual == "minipig"
