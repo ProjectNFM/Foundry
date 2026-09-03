@@ -124,6 +124,7 @@ class ComputeMilestoneCheckpointCallback(L.Callback):
         info["saved"] = True
         info["not_reached"] = False
         info["path"] = str(destination)
+        info["compute_snapshot"] = self._snapshot_compute_counters(trainer)
         log.info(
             "ComputeMilestoneCheckpointCallback: saved %s at optimizer step %d "
             "(%.2f%% of max_steps=%d)",
@@ -213,6 +214,28 @@ class ComputeMilestoneCheckpointCallback(L.Callback):
                 directory = Path(trainer.default_root_dir) / "checkpoints"
         directory.mkdir(parents=True, exist_ok=True)
         return directory
+
+    def get_saved_milestones(self) -> dict[int, dict[str, Any]]:
+        """Return info dicts for all saved milestones, keyed by optimizer step."""
+        return {
+            step: dict(info)
+            for step, info in self._milestone_steps.items()
+            if info.get("saved")
+        }
+
+    @staticmethod
+    def _snapshot_compute_counters(trainer: Trainer) -> dict[str, Any]:
+        """Capture compute tracking state at the current optimizer step."""
+        from foundry.training.callbacks.compute import ComputeTrackingCallback
+
+        snapshot: dict[str, Any] = {
+            "optimizer_steps": trainer.global_step,
+        }
+        for callback in trainer.callbacks:
+            if isinstance(callback, ComputeTrackingCallback):
+                snapshot = callback.get_compute_snapshot(trainer)
+                break
+        return snapshot
 
     @staticmethod
     def _save_checkpoint_atomically(

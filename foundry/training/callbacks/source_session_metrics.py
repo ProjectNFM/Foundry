@@ -41,6 +41,10 @@ class SourceSessionMetricsCallback(L.Callback):
         self.num_classes = num_classes
         self.metric_key = metric_key
         self._val_session_buffers: dict[str, dict[str, list[torch.Tensor]]] = {}
+        self._latest_session_scores: dict[str, float] = {}
+        self._latest_mean_f1: float | None = None
+        self._best_mean_f1: float | None = None
+        self._best_session_scores: dict[str, float] = {}
 
     def on_fit_start(
         self, trainer: Trainer, pl_module: L.LightningModule
@@ -128,6 +132,7 @@ class SourceSessionMetricsCallback(L.Callback):
             )
 
         session_f1_values: list[float] = []
+        epoch_scores: dict[str, float] = {}
         logger_metrics: dict[str, Any] = {}
 
         for session_id, data in self._val_session_buffers.items():
@@ -164,6 +169,7 @@ class SourceSessionMetricsCallback(L.Callback):
 
             supported_f1, per_class_f1, support, class_mask = session_result
             session_f1_values.append(supported_f1)
+            epoch_scores[session_id] = supported_f1
 
             logger_metrics[f"val/source_session/{short}/supported_f1"] = (
                 supported_f1
@@ -188,6 +194,13 @@ class SourceSessionMetricsCallback(L.Callback):
                 f"{trainer.current_epoch}"
             )
         mean_f1 = sum(session_f1_values) / session_count
+
+        self._latest_session_scores = epoch_scores
+        self._latest_mean_f1 = mean_f1
+        if self._best_mean_f1 is None or mean_f1 > self._best_mean_f1:
+            self._best_mean_f1 = mean_f1
+            self._best_session_scores = dict(epoch_scores)
+
         pl_module.log(
             self.metric_key,
             mean_f1,

@@ -25,7 +25,7 @@ class ComputeTrackingCallback(L.Callback):
     At each real validation epoch logs compute metrics via
     ``pl_module.log_dict``; fit-end metrics are sent directly to the logger,
     because Lightning forbids ``self.log`` in ``on_fit_end``. When
-    ``flops_per_window`` is set, also logs
+    ``flops_per_window`` or ``session_flops`` is set, also logs
     cumulative FLOPs. Tracks the configured ``monitor`` metric and, at fit
     end, logs best-checkpoint compute stats (verifying against
     :class:`~lightning.pytorch.callbacks.ModelCheckpoint` when present).
@@ -36,8 +36,14 @@ class ComputeTrackingCallback(L.Callback):
         mode: ``"min"`` or ``"max"`` for ``monitor`` improvement.
         sequence_length: Window duration in seconds (for signal-seconds accounting).
         flops_per_window: Validated forward+backward FLOPs per training window.
+            Mutually exclusive with ``session_flops``.
         flop_method: Identifier for the FLOP validation method/version.
         require_flops: Refuse to start without both validated FLOP fields.
+        session_flops: Per-canonical-session FLOPs per window for multi-session
+            source pretraining. Maps canonical session ID to FLOPs per window.
+            Mutually exclusive with ``flops_per_window``.
+        realized_train_windows_per_epoch: Number of train windows per nominal
+            epoch (from the source manifest) for effective-epoch computation.
     """
 
     def __init__(
@@ -48,29 +54,46 @@ class ComputeTrackingCallback(L.Callback):
         flops_per_window: int | None = None,
         flop_method: str | None = None,
         require_flops: bool = False,
+        session_flops: dict[str, int] | None = None,
+        realized_train_windows_per_epoch: int | None = None,
     ) -> None:
         super().__init__()
         if mode not in ("min", "max"):
             raise ValueError(f"mode must be 'min' or 'max', got {mode!r}")
+        if flops_per_window is not None and session_flops is not None:
+            raise ValueError(
+                "flops_per_window and session_flops are mutually exclusive"
+            )
         self.monitor = monitor
         self.mode = mode
         self.sequence_length = sequence_length
         self.flops_per_window = flops_per_window
         self.flop_method = flop_method
         self.require_flops = require_flops
+        self.session_flops = dict(session_flops) if session_flops else None
+        self.realized_train_windows_per_epoch = realized_train_windows_per_epoch
         if flops_per_window is not None and flops_per_window <= 0:
             raise ValueError("flops_per_window must be a positive integer")
+        if session_flops is not None:
+            for sid, flops in session_flops.items():
+                if flops <= 0:
+                    raise ValueError(
+                        f"session_flops values must be positive, got {flops} "
+                        f"for session {sid!r}"
+                    )
         if require_flops and (
             flops_per_window is None
+            and session_flops is None
             or not flop_method
             or not flop_method.strip()
         ):
             raise ValueError(
-                "require_flops=True requires validated flops_per_window and "
-                "a non-empty flop_method"
+                "require_flops=True requires validated flops_per_window or "
+                "session_flops and a non-empty flop_method"
             )
 
         self._processed_windows = 0
+        self._per_session_windows: dict[str, int] = {}
         self._restored_wall_time_s = 0.0
         self._fit_start_monotonic: float | None = None
         self._last_batch_size = 0
@@ -81,10 +104,13 @@ class ComputeTrackingCallback(L.Callback):
         self._best_windows = 0
         self._best_flops: int | None = None
         self._best_wall_time_s = 0.0
+        self._best_per_session_windows: dict[str, int] = {}
+        self._best_effective_epochs: float | None = None
 
     def state_dict(self) -> dict[str, Any]:
         return {
             "processed_windows": self._processed_windows,
+            "per_session_windows": dict(self._per_session_windows),
             "elapsed_wall_time_s": self._elapsed_wall_time_s(),
             "best_monitor_value": self._best_monitor_value,
             "best_step": self._best_step,
@@ -92,10 +118,16 @@ class ComputeTrackingCallback(L.Callback):
             "best_windows": self._best_windows,
             "best_flops": self._best_flops,
             "best_wall_time_s": self._best_wall_time_s,
+            "best_per_session_windows": dict(self._best_per_session_windows),
+            "best_effective_epochs": self._best_effective_epochs,
         }
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         self._processed_windows = int(state_dict["processed_windows"])
+        self._per_session_windows = {
+            str(k): int(v)
+            for k, v in state_dict.get("per_session_windows", {}).items()
+        }
         self._restored_wall_time_s = float(state_dict["elapsed_wall_time_s"])
         best_value = state_dict.get("best_monitor_value")
         self._best_monitor_value = (
@@ -107,6 +139,14 @@ class ComputeTrackingCallback(L.Callback):
         best_flops = state_dict.get("best_flops")
         self._best_flops = None if best_flops is None else int(best_flops)
         self._best_wall_time_s = float(state_dict.get("best_wall_time_s", 0.0))
+        self._best_per_session_windows = {
+            str(k): int(v)
+            for k, v in state_dict.get("best_per_session_windows", {}).items()
+        }
+        best_ee = state_dict.get("best_effective_epochs")
+        self._best_effective_epochs = (
+            None if best_ee is None else float(best_ee)
+        )
         self._fit_start_monotonic = None
 
     def on_fit_start(
@@ -129,6 +169,14 @@ class ComputeTrackingCallback(L.Callback):
         batch_windows = self._count_batch_windows(batch)
         self._processed_windows += batch_windows
         self._last_batch_size = batch_windows
+
+        if self.session_flops is not None:
+            session_ids = self._extract_session_ids(batch)
+            if session_ids is not None:
+                for sid in session_ids:
+                    self._per_session_windows[sid] = (
+                        self._per_session_windows.get(sid, 0) + 1
+                    )
 
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: L.LightningModule
@@ -168,9 +216,80 @@ class ComputeTrackingCallback(L.Callback):
         return self._global_windows(trainer)
 
     def _cumulative_flops(self, trainer: Trainer) -> int | None:
-        if self.flops_per_window is None:
+        if self.session_flops is not None:
+            world_size = trainer.world_size
+            total = 0
+            for sid, count in self._per_session_windows.items():
+                flops = self.session_flops.get(sid, 0)
+                total += count * world_size * flops
+            return total if total > 0 else None
+        if self.flops_per_window is not None:
+            return self._global_windows(trainer) * self.flops_per_window
+        return None
+
+    def _effective_epochs(self, trainer: Trainer) -> float | None:
+        if self.realized_train_windows_per_epoch is None:
             return None
-        return self._global_windows(trainer) * self.flops_per_window
+        if self.realized_train_windows_per_epoch <= 0:
+            return None
+        return (
+            self._global_windows(trainer)
+            / self.realized_train_windows_per_epoch
+        )
+
+    @staticmethod
+    def _extract_session_ids(batch: Any) -> list[str] | None:
+        """Extract per-item canonical session IDs from the batch."""
+        if isinstance(batch, dict):
+            sids = batch.get("input_session_ids")
+            if sids is not None:
+                return list(sids)
+        sids = getattr(batch, "input_session_ids", None)
+        if sids is not None:
+            return list(sids)
+        return None
+
+    def get_compute_snapshot(self, trainer: Trainer) -> dict[str, Any]:
+        """Return a snapshot of current compute counters for manifest emission."""
+        return {
+            "processed_windows": self._global_windows(trainer),
+            "processed_examples": self._global_examples(trainer),
+            "signal_seconds": self._global_windows(trainer) * self.sequence_length,
+            "wall_time_seconds": self._elapsed_wall_time_s(),
+            "cumulative_flops": self._cumulative_flops(trainer),
+            "flop_method": self.flop_method,
+            "optimizer_steps": trainer.global_step,
+            "effective_epochs": self._effective_epochs(trainer),
+            "gpu": self._gpu_model_name(),
+            "precision": str(trainer.precision),
+            "per_session_windows": dict(self._per_session_windows),
+        }
+
+    def get_best_compute_snapshot(self) -> dict[str, Any]:
+        """Return compute counters at the best checkpoint step."""
+        effective_epochs = self._best_effective_epochs
+        if (
+            effective_epochs is None
+            and self.realized_train_windows_per_epoch
+            and self.realized_train_windows_per_epoch > 0
+        ):
+            effective_epochs = (
+                self._best_windows / self.realized_train_windows_per_epoch
+            )
+        return {
+            "processed_windows": self._best_windows,
+            "processed_examples": self._best_examples,
+            "signal_seconds": self._best_windows * self.sequence_length,
+            "wall_time_seconds": self._best_wall_time_s,
+            "cumulative_flops": self._best_flops,
+            "flop_method": self.flop_method,
+            "optimizer_steps": self._best_step,
+            "effective_epochs": effective_epochs,
+            "gpu": self._gpu_model_name(),
+            "precision": "unknown",
+            "per_session_windows": dict(self._best_per_session_windows),
+            "monitor_value": self._best_monitor_value,
+        }
 
     def _resolve_model(self, pl_module: L.LightningModule) -> torch.nn.Module:
         return pl_module.model if hasattr(pl_module, "model") else pl_module
@@ -249,7 +368,12 @@ class ComputeTrackingCallback(L.Callback):
         cumulative_flops = self._cumulative_flops(trainer)
         if cumulative_flops is not None:
             metrics["compute/cumulative_flops"] = cumulative_flops
-            metrics["compute/flops_per_window"] = self.flops_per_window
+            if self.flops_per_window is not None:
+                metrics["compute/flops_per_window"] = self.flops_per_window
+
+        effective_epochs = self._effective_epochs(trainer)
+        if effective_epochs is not None:
+            metrics["compute/effective_epochs"] = effective_epochs
 
         return metrics
 
@@ -318,6 +442,8 @@ class ComputeTrackingCallback(L.Callback):
         self._best_windows = self._global_windows(trainer)
         self._best_flops = self._cumulative_flops(trainer)
         self._best_wall_time_s = self._elapsed_wall_time_s()
+        self._best_per_session_windows = dict(self._per_session_windows)
+        self._best_effective_epochs = self._effective_epochs(trainer)
         log.info(
             "ComputeTracking: new best %s=%.6f at step=%d",
             self.monitor,
@@ -370,6 +496,10 @@ class ComputeTrackingCallback(L.Callback):
         }
         if self._best_flops is not None:
             best_metrics["compute/best_flops"] = self._best_flops
+        if self._best_effective_epochs is not None:
+            best_metrics["compute/best_effective_epochs"] = (
+                self._best_effective_epochs
+            )
 
         if trainer.logger is not None:
             trainer.logger.log_metrics(best_metrics, step=trainer.global_step)

@@ -978,7 +978,7 @@ before training.
 Gate: a hand-computed unequal-session-size example matches exactly and differs
 from the intentionally unequal pooled/window-weighted reference.
 
-### WP4 -- Compute milestones and checkpoint manifests
+### WP4 -- Compute milestones and checkpoint manifests ✅ GATE PASSED
 
 - Implement resumable optimizer-step milestone saving.
 - Upgrade FLOP accounting for realized session composition;
@@ -987,6 +987,27 @@ from the intentionally unequal pooled/window-weighted reference.
 
 Gate: a short interrupted/resumed run saves each reached milestone once,
 reports exact counters, and verifies every checkpoint hash.
+
+**Gate verification (2026-09-03):** 54 tests pass (50 unit + 4 gate).
+Implemented deliverables:
+
+1. `ComputeMilestoneCheckpointCallback` saves at 1/3/10/30/100% of
+   `max_steps` with atomic writes, resume state, and compute snapshots.
+2. `ComputeTrackingCallback` upgraded with per-session FLOPs via
+   `session_flops` dict, effective-epoch computation via
+   `realized_train_windows_per_epoch`, and `get_compute_snapshot()` /
+   `get_best_compute_snapshot()` for manifest emission.
+3. `checkpoint_manifest.py` `write_checkpoint_manifest()` wired into
+   `main.py` via `_emit_source_checkpoint_manifests()` -- writes JSON +
+   Markdown for best and every saved milestone after `trainer.fit()`.
+4. `SourceSessionMetricsCallback` tracks `_best_session_scores` for
+   checkpoint manifest per-session score provenance.
+5. Tests: `tests/test_compute_milestone_checkpoint.py` (50 tests) and
+   `tests/test_wp4_gate_verification.py` (4 tests) cover milestone
+   rounding/dedup/naming, resume without duplicate writes, per-session
+   FLOPs hand computation, effective epochs formula, monotonic counters,
+   manifest hash/SHA-256 tamper detection, Markdown regeneration from
+   JSON, and unreached milestone labeling.
 
 ### WP5 -- Strict manifest-based transfer
 

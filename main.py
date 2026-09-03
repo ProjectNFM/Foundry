@@ -1214,6 +1214,281 @@ def _apply_manifest_transfer(
     )
 
 
+def _configure_source_compute_callbacks(
+    trainer, datamodule, cfg: DictConfig
+) -> None:
+    """Set realized_train_windows_per_epoch on the ComputeTrackingCallback.
+
+    Called after the source datamodule is set up so the manifest summary is
+    available. This enables effective-epoch computation in compute tracking.
+    """
+    from foundry.training.callbacks.compute import ComputeTrackingCallback
+
+    manifest = getattr(datamodule, "_source_manifest", None)
+    if manifest is None:
+        return
+
+    realized_windows = getattr(
+        manifest.summary, "realized_train_windows_per_epoch", None
+    )
+    if realized_windows is None:
+        return
+
+    for callback in trainer.callbacks:
+        if isinstance(callback, ComputeTrackingCallback):
+            callback.realized_train_windows_per_epoch = int(realized_windows)
+            logger.info(
+                "Configured ComputeTrackingCallback: "
+                "realized_train_windows_per_epoch=%d",
+                realized_windows,
+            )
+            break
+
+
+def _emit_source_checkpoint_manifests(
+    trainer, cfg: DictConfig, datamodule, output_dir: str,
+    normalization_artifacts: dict | None,
+) -> None:
+    """Write JSON/Markdown checkpoint manifests for best and milestone checkpoints.
+
+    Called after ``trainer.fit()`` in source-pretraining mode. Gathers metadata
+    from callbacks, the source manifest, and run config, then writes manifest
+    files for the best checkpoint and each saved milestone.
+    """
+    from lightning.pytorch.callbacks import ModelCheckpoint
+
+    from foundry.training.callbacks.compute import ComputeTrackingCallback
+    from foundry.training.callbacks.compute_milestone import (
+        ComputeMilestoneCheckpointCallback,
+    )
+    from foundry.training.callbacks.source_session_metrics import (
+        SourceSessionMetricsCallback,
+    )
+    from foundry.training.checkpoint_manifest import write_checkpoint_manifest
+
+    source_manifest = getattr(datamodule, "_source_manifest", None)
+    manifest_dir = os.path.join(output_dir, "manifests")
+
+    compute_cb = None
+    milestone_cb = None
+    session_metrics_cb = None
+    model_ckpt_cb = None
+    for callback in trainer.callbacks:
+        if isinstance(callback, ComputeTrackingCallback):
+            compute_cb = callback
+        elif isinstance(callback, ComputeMilestoneCheckpointCallback):
+            milestone_cb = callback
+        elif isinstance(callback, SourceSessionMetricsCallback):
+            session_metrics_cb = callback
+        elif isinstance(callback, ModelCheckpoint):
+            model_ckpt_cb = callback
+
+    git_sha = os.environ.get("FOUNDRY_SNAPSHOT_GIT_SHA", "unknown")
+    snapshot_bundle = os.environ.get("FOUNDRY_SNAPSHOT_BUNDLE", "unknown")
+
+    from hydra_plugins.foundry_launcher.launch_snapshot import (
+        get_slurm_job_identifiers,
+    )
+
+    slurm_ids = get_slurm_job_identifiers()
+    slurm_job_id = (
+        slurm_ids.get("slurm_job_id", "unknown") if slurm_ids else "unknown"
+    )
+
+    wandb_info = {"project": "unknown", "group": "unknown", "run_id": "unknown"}
+    if trainer.logger is not None:
+        from lightning.pytorch.loggers import WandbLogger
+
+        if isinstance(trainer.logger, WandbLogger):
+            exp = trainer.logger.experiment
+            if exp is not None:
+                wandb_info = {
+                    "project": getattr(exp, "project", "unknown"),
+                    "group": OmegaConf.select(
+                        cfg, "run.group", default="unknown"
+                    ),
+                    "run_id": getattr(exp, "id", "unknown"),
+                }
+
+    norm_hashes: dict[str, str] = {}
+    if normalization_artifacts and isinstance(normalization_artifacts, dict):
+        for key, value in normalization_artifacts.items():
+            if isinstance(value, dict) and "hash" in value:
+                norm_hashes[str(key)] = str(value["hash"])
+            elif isinstance(value, str):
+                norm_hashes[str(key)] = value
+
+    recipe = {
+        "model": OmegaConf.to_container(cfg.model, resolve=True),
+        "hyperparameters": OmegaConf.to_container(
+            cfg.hyperparameters, resolve=True
+        ),
+        "trainer_precision": str(trainer.precision),
+    }
+
+    def _build_trained_on(compute_snap: dict) -> dict:
+        trained_on: dict = {}
+        if source_manifest is not None:
+            trained_on["source_selection_id"] = source_manifest.selection_id
+            trained_on["source_manifest_path"] = str(
+                getattr(datamodule, "selection_manifest_path", "unknown")
+            )
+            trained_on["source_manifest_hash"] = source_manifest.manifest_hash
+            trained_on["excluded_target"] = {
+                "species": source_manifest.target_species,
+                "subject": source_manifest.target_subject,
+            }
+            trained_on["subjects"] = list(source_manifest.subjects)
+            trained_on["recordings"] = [
+                r.canonical_recording_id for r in source_manifest.recordings
+            ]
+            trained_on["selected_train_examples"] = (
+                source_manifest.summary.selected_train_examples
+            )
+            trained_on["available_train_windows"] = (
+                source_manifest.summary.available_train_windows
+            )
+            trained_on["realized_train_windows_per_epoch"] = (
+                source_manifest.summary.realized_train_windows_per_epoch
+            )
+            trained_on["class_union"] = list(
+                source_manifest.summary.represented_class_union
+            )
+            trained_on["class_intersection"] = list(
+                source_manifest.summary.represented_class_intersection
+            )
+        else:
+            trained_on["excluded_target"] = {
+                "species": "unknown",
+                "subject": "unknown",
+            }
+
+        trained_on["processed_windows"] = compute_snap.get(
+            "processed_windows", 0
+        )
+        ee = compute_snap.get("effective_epochs")
+        trained_on["completed_effective_epochs"] = (
+            round(ee, 4) if ee is not None else 0.0
+        )
+        trained_on["optimizer_steps"] = compute_snap.get("optimizer_steps", 0)
+        return trained_on
+
+    def _build_selection(compute_snap: dict) -> dict:
+        selection: dict = {
+            "monitor": (
+                compute_cb.monitor if compute_cb else "unknown"
+            ),
+            "monitor_value": compute_snap.get("monitor_value", 0.0),
+            "source_session_scores": {},
+        }
+        if session_metrics_cb is not None:
+            selection["source_session_scores"] = dict(
+                session_metrics_cb._best_session_scores
+            )
+        return selection
+
+    def _build_compute(compute_snap: dict) -> dict:
+        return {
+            "cumulative_flops": compute_snap.get("cumulative_flops", 0),
+            "flop_method": compute_snap.get("flop_method", "none"),
+            "signal_seconds": compute_snap.get("signal_seconds", 0.0),
+            "wall_time_seconds": compute_snap.get("wall_time_seconds", 0.0),
+            "gpu": compute_snap.get("gpu", "unknown"),
+            "precision": compute_snap.get("precision", "unknown"),
+        }
+
+    written_manifests: list[str] = []
+
+    if model_ckpt_cb is not None and model_ckpt_cb.best_model_path:
+        best_path = model_ckpt_cb.best_model_path
+        if os.path.isfile(best_path):
+            if compute_cb is not None:
+                snap = compute_cb.get_best_compute_snapshot()
+                snap["precision"] = str(trainer.precision)
+            else:
+                snap = {
+                    "processed_windows": 0,
+                    "optimizer_steps": trainer.global_step,
+                    "monitor_value": 0.0,
+                }
+
+            try:
+                json_path, md_path = write_checkpoint_manifest(
+                    best_path,
+                    manifest_dir,
+                    kind="best",
+                    trained_on=_build_trained_on(snap),
+                    selection=_build_selection(snap),
+                    compute=_build_compute(snap),
+                    recipe=recipe,
+                    normalization_artifact_hashes=norm_hashes,
+                    git_sha=git_sha,
+                    snapshot_bundle=snapshot_bundle,
+                    slurm_job_id=slurm_job_id,
+                    wandb_info=wandb_info,
+                )
+                written_manifests.append(str(json_path))
+                logger.info(
+                    "Wrote best checkpoint manifest: %s", json_path
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to write best checkpoint manifest",
+                    exc_info=True,
+                )
+
+    if milestone_cb is not None:
+        for step, info in sorted(milestone_cb.get_saved_milestones().items()):
+            ckpt_path = info.get("path")
+            if not ckpt_path or not os.path.isfile(ckpt_path):
+                continue
+
+            snap = info.get("compute_snapshot", {})
+            snap.setdefault("precision", str(trainer.precision))
+            snap.setdefault("optimizer_steps", step)
+
+            realized_pct = info.get("realized_pct", 0.0)
+            kind = f"milestone-{realized_pct:.0f}pct"
+
+            if session_metrics_cb is not None:
+                snap["monitor_value"] = (
+                    session_metrics_cb._latest_mean_f1 or 0.0
+                )
+
+            try:
+                json_path, md_path = write_checkpoint_manifest(
+                    ckpt_path,
+                    manifest_dir,
+                    kind=kind,
+                    trained_on=_build_trained_on(snap),
+                    selection=_build_selection(snap),
+                    compute=_build_compute(snap),
+                    recipe=recipe,
+                    normalization_artifact_hashes=norm_hashes,
+                    git_sha=git_sha,
+                    snapshot_bundle=snapshot_bundle,
+                    slurm_job_id=slurm_job_id,
+                    wandb_info=wandb_info,
+                )
+                written_manifests.append(str(json_path))
+                logger.info(
+                    "Wrote milestone checkpoint manifest (step %d): %s",
+                    step,
+                    json_path,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to write milestone manifest for step %d",
+                    step,
+                    exc_info=True,
+                )
+
+    logger.info(
+        "Checkpoint manifest emission: %d manifests written", len(written_manifests)
+    )
+    return written_manifests
+
+
 def _build_source_model_and_data(cfg: DictConfig):
     """Build model and datamodule for source pretraining with canonical session IDs.
 
@@ -1417,6 +1692,9 @@ def main(cfg: DictConfig):
     lightning_module.input_normalization_artifacts = normalization_artifacts
     trainer = _build_trainer(cfg)
 
+    if is_source_pretraining:
+        _configure_source_compute_callbacks(trainer, datamodule, cfg)
+
     _log_config_to_wandb(trainer, cfg)
     _log_normalization_artifacts_to_wandb(trainer, normalization_artifacts)
 
@@ -1446,6 +1724,11 @@ def main(cfg: DictConfig):
             ckpt_path=ckpt_path,
             weights_only=False,
         )
+        if is_source_pretraining:
+            _emit_source_checkpoint_manifests(
+                trainer, cfg, datamodule, output_dir,
+                normalization_artifacts,
+            )
         if OmegaConf.select(cfg, "run.evaluate_test", default=False):
             logger.info(
                 "Evaluating the best validation checkpoint on the test split."
