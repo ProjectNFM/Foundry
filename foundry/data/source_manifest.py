@@ -163,7 +163,9 @@ class SourcePool:
             source_recording_count=_require_int(
                 data.get("source_recording_count"), "source_recording_count"
             ),
-            class_counts=_require_int_dict(data.get("class_counts"), "class_counts"),
+            class_counts=_require_int_dict(
+                data.get("class_counts"), "class_counts"
+            ),
             target_leakage=_require_str_list(
                 data.get("target_leakage"), "target_leakage"
             ),
@@ -220,7 +222,9 @@ class SelectionCondition:
                 data.get("source_composition"), "source_composition"
             ),
             requested_fraction=(
-                None if requested_fraction is None else float(requested_fraction)
+                None
+                if requested_fraction is None
+                else float(requested_fraction)
             ),
             subject_count_bin=subject_count_bin,
             source_selection_seed=_require_int(
@@ -249,6 +253,7 @@ class SelectionSummary:
     represented_class_intersection: list[str]
     requested_fraction: float | None
     realized_fraction: float | None
+    selection_implementation: str
     sampler_implementation: str
     window_seconds: float
     batch_size: int
@@ -269,6 +274,7 @@ class SelectionSummary:
             ),
             "requested_fraction": self.requested_fraction,
             "realized_fraction": self.realized_fraction,
+            "selection_implementation": self.selection_implementation,
             "sampler_implementation": self.sampler_implementation,
             "window_seconds": self.window_seconds,
             "batch_size": self.batch_size,
@@ -329,10 +335,15 @@ class SelectionSummary:
                 "represented_class_intersection",
             ),
             requested_fraction=(
-                None if requested_fraction is None else float(requested_fraction)
+                None
+                if requested_fraction is None
+                else float(requested_fraction)
             ),
             realized_fraction=(
                 None if realized_fraction is None else float(realized_fraction)
+            ),
+            selection_implementation=_require_str(
+                data.get("selection_implementation"), "selection_implementation"
             ),
             sampler_implementation=_require_str(
                 data.get("sampler_implementation"), "sampler_implementation"
@@ -353,12 +364,11 @@ class SourceRecordingSelection:
     raw_channel_count: int
     supported_channel_count: int
     train_source_intervals_hash: str
-    train_selected_indices: list[int]
-    train_selected_interval_ids: list[str]
     train_counts_by_class: dict[str, int]
+    train_selected_interval_ids_hash: str
     available_train_windows: int
     valid_source_intervals_hash: str
-    valid_interval_ids: list[str]
+    valid_selected_interval_ids_hash: str
     available_validation_windows: int
 
     def to_dict(self) -> dict[str, Any]:
@@ -370,12 +380,11 @@ class SourceRecordingSelection:
             "raw_channel_count": self.raw_channel_count,
             "supported_channel_count": self.supported_channel_count,
             "train_source_intervals_hash": self.train_source_intervals_hash,
-            "train_selected_indices": list(self.train_selected_indices),
-            "train_selected_interval_ids": list(self.train_selected_interval_ids),
             "train_counts_by_class": dict(self.train_counts_by_class),
+            "train_selected_interval_ids_hash": self.train_selected_interval_ids_hash,
             "available_train_windows": self.available_train_windows,
             "valid_source_intervals_hash": self.valid_source_intervals_hash,
-            "valid_interval_ids": list(self.valid_interval_ids),
+            "valid_selected_interval_ids_hash": self.valid_selected_interval_ids_hash,
             "available_validation_windows": self.available_validation_windows,
         }
 
@@ -383,13 +392,6 @@ class SourceRecordingSelection:
     def from_dict(cls, data: dict[str, Any]) -> SourceRecordingSelection:
         if not isinstance(data, dict):
             raise ValueError("SourceRecordingSelection payload must be a dict")
-        raw_indices = data.get("train_selected_indices")
-        if not isinstance(raw_indices, list):
-            raise ValueError("train_selected_indices must be a list")
-        train_selected_indices = [
-            _require_int(index, f"train_selected_indices[{position}]")
-            for position, index in enumerate(raw_indices)
-        ]
         return cls(
             species=_require_str(data.get("species"), "species"),
             subject=_require_str(data.get("subject"), "subject"),
@@ -407,13 +409,12 @@ class SourceRecordingSelection:
                 data.get("train_source_intervals_hash"),
                 "train_source_intervals_hash",
             ),
-            train_selected_indices=train_selected_indices,
-            train_selected_interval_ids=_require_str_list(
-                data.get("train_selected_interval_ids"),
-                "train_selected_interval_ids",
-            ),
             train_counts_by_class=_require_int_dict(
                 data.get("train_counts_by_class"), "train_counts_by_class"
+            ),
+            train_selected_interval_ids_hash=_require_str(
+                data.get("train_selected_interval_ids_hash"),
+                "train_selected_interval_ids_hash",
             ),
             available_train_windows=_require_int(
                 data.get("available_train_windows"), "available_train_windows"
@@ -422,8 +423,9 @@ class SourceRecordingSelection:
                 data.get("valid_source_intervals_hash"),
                 "valid_source_intervals_hash",
             ),
-            valid_interval_ids=_require_str_list(
-                data.get("valid_interval_ids"), "valid_interval_ids"
+            valid_selected_interval_ids_hash=_require_str(
+                data.get("valid_selected_interval_ids_hash"),
+                "valid_selected_interval_ids_hash",
             ),
             available_validation_windows=_require_int(
                 data.get("available_validation_windows"),
@@ -527,7 +529,8 @@ class SourcePoolManifest(_HashValidatedManifest):
             "target_subject": self.target_subject,
             "eligible_target_recordings": list(self.eligible_target_recordings),
             "pools": {
-                name: pool.to_dict() for name, pool in sorted(self.pools.items())
+                name: pool.to_dict()
+                for name, pool in sorted(self.pools.items())
             },
             "manifest_hash": self.manifest_hash,
         }
@@ -577,15 +580,24 @@ class SourcePoolManifest(_HashValidatedManifest):
             phase0_audit_sha256=_require_str(
                 data.get("phase0_audit_sha256"), "phase0_audit_sha256"
             ),
-            target_species=_require_str(data.get("target_species"), "target_species"),
-            target_subject=_require_str(data.get("target_subject"), "target_subject"),
+            target_species=_require_str(
+                data.get("target_species"), "target_species"
+            ),
+            target_subject=_require_str(
+                data.get("target_subject"), "target_subject"
+            ),
             eligible_target_recordings=_require_str_list(
-                data.get("eligible_target_recordings"), "eligible_target_recordings"
+                data.get("eligible_target_recordings"),
+                "eligible_target_recordings",
             ),
             pools=pools,
-            manifest_hash=_require_str(data.get("manifest_hash"), "manifest_hash"),
+            manifest_hash=_require_str(
+                data.get("manifest_hash"), "manifest_hash"
+            ),
             schema=data.get("schema", SOURCE_POOL_SCHEMA),
-            version=_require_int(data.get("version", MANIFEST_VERSION), "version"),
+            version=_require_int(
+                data.get("version", MANIFEST_VERSION), "version"
+            ),
         )
         manifest.validate_schema_version()
         return manifest
@@ -628,7 +640,9 @@ class SourceSelectionManifest(_HashValidatedManifest):
             "condition": self.condition.to_dict(),
             "summary": self.summary.to_dict(),
             "subjects": list(self.subjects),
-            "recordings": [recording.to_dict() for recording in self.recordings],
+            "recordings": [
+                recording.to_dict() for recording in self.recordings
+            ],
             "source_test_policy": self.source_test_policy,
             "target_leakage": list(self.target_leakage),
             "manifest_hash": self.manifest_hash,
@@ -656,7 +670,8 @@ class SourceSelectionManifest(_HashValidatedManifest):
 
     def validate_summary_consistency(self) -> None:
         selected_train_examples = sum(
-            len(recording.train_selected_indices) for recording in self.recordings
+            sum(recording.train_counts_by_class.values())
+            for recording in self.recordings
         )
         if selected_train_examples != self.summary.selected_train_examples:
             raise ValueError(
@@ -676,7 +691,8 @@ class SourceSelectionManifest(_HashValidatedManifest):
             )
 
         validation_examples = sum(
-            len(recording.valid_interval_ids) for recording in self.recordings
+            recording.available_validation_windows
+            for recording in self.recordings
         )
         if validation_examples != self.summary.validation_examples:
             raise ValueError(
@@ -686,7 +702,8 @@ class SourceSelectionManifest(_HashValidatedManifest):
             )
 
         available_validation_windows = sum(
-            recording.available_validation_windows for recording in self.recordings
+            recording.available_validation_windows
+            for recording in self.recordings
         )
         if (
             available_validation_windows
@@ -715,7 +732,8 @@ class SourceSelectionManifest(_HashValidatedManifest):
         if self.summary.batch_size <= 0:
             raise ValueError("summary.batch_size must be positive")
         expected_realized = (
-            self.summary.available_train_windows // self.summary.batch_size
+            self.summary.available_train_windows
+            // self.summary.batch_size
             * self.summary.batch_size
         )
         if self.summary.realized_train_windows_per_epoch != expected_realized:
@@ -763,8 +781,12 @@ class SourceSelectionManifest(_HashValidatedManifest):
             source_pool_hash=_require_str(
                 data.get("source_pool_hash"), "source_pool_hash"
             ),
-            target_species=_require_str(data.get("target_species"), "target_species"),
-            target_subject=_require_str(data.get("target_subject"), "target_subject"),
+            target_species=_require_str(
+                data.get("target_species"), "target_species"
+            ),
+            target_subject=_require_str(
+                data.get("target_subject"), "target_subject"
+            ),
             condition=SelectionCondition.from_dict(data.get("condition", {})),
             summary=SelectionSummary.from_dict(data.get("summary", {})),
             subjects=_require_str_list(data.get("subjects"), "subjects"),
@@ -772,9 +794,13 @@ class SourceSelectionManifest(_HashValidatedManifest):
             target_leakage=_require_str_list(
                 data.get("target_leakage"), "target_leakage"
             ),
-            manifest_hash=_require_str(data.get("manifest_hash"), "manifest_hash"),
+            manifest_hash=_require_str(
+                data.get("manifest_hash"), "manifest_hash"
+            ),
             schema=data.get("schema", SOURCE_SELECTION_SCHEMA),
-            version=_require_int(data.get("version", MANIFEST_VERSION), "version"),
+            version=_require_int(
+                data.get("version", MANIFEST_VERSION), "version"
+            ),
             source_test_policy=source_test_policy,
         )
         manifest.validate_schema_version()

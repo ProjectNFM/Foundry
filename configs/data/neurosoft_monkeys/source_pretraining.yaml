@@ -8,6 +8,7 @@ num_workers: ${hyperparameters.num_workers}
 pin_memory: false
 sequence_length: ${hyperparameters.sequence_length}
 seed: ${run.seed}
+sampler_class: foundry.data.samplers.NeurosoftFirstFixedWindowSampler
 
 input_normalization:
   mode: recording_train_global_zscore

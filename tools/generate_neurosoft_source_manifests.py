@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import os
@@ -23,7 +22,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from foundry.config_resolvers import _load_neurosoft_audit
 from foundry.data.fraction_manifest import _canonical_hash
 from foundry.data.datasets import NeurosoftMinipigs2026, NeurosoftMonkeys2026
-from foundry.data.samplers import FastRandomFixedWindowSampler
+from foundry.data.samplers import NeurosoftFirstFixedWindowSampler
+from foundry.data.source_selection import (
+    SOURCE_SELECTION_IMPLEMENTATION,
+    select_class_indices,
+)
 from foundry.data.utils import resolve_neural_signal
 from foundry.data.source_manifest import (
     MANIFEST_VERSION,
@@ -46,8 +49,8 @@ DEFAULT_FRACTIONS = (0.10, 0.25, 0.50, 1.00)
 DEFAULT_SEEDS = (42, 43, 44)
 DEFAULT_BATCH_SIZE = 16
 SAMPLER_IMPLEMENTATION = (
-    "foundry.data.samplers.FastRandomFixedWindowSampler/"
-    "fixed-window-accounting-v1"
+    "foundry.data.samplers.NeurosoftFirstFixedWindowSampler/"
+    "onset-anchored-fixed-window-v1"
 )
 DATASET_SPECS = {
     "minipigs": (
@@ -129,19 +132,6 @@ def _fraction_label(fraction: float) -> str:
     return f"{fraction:.2f}"
 
 
-def _selection_rng(
-    canonical_recording_id: str, class_id: int, seed: int
-) -> np.random.Generator:
-    recording_digest = hashlib.sha256(
-        canonical_recording_id.encode("utf-8")
-    ).digest()
-    recording_words = np.frombuffer(recording_digest[:16], dtype="<u4")
-    seed_sequence = np.random.SeedSequence(
-        [seed, class_id, *(int(word) for word in recording_words)]
-    )
-    return np.random.default_rng(seed_sequence)
-
-
 def _largest_remainder(total: int, weights: list[int]) -> list[int]:
     if total <= 0:
         return [0 for _ in weights]
@@ -149,7 +139,10 @@ def _largest_remainder(total: int, weights: list[int]) -> list[int]:
         return []
     if sum(weights) == 0:
         base, remainder = divmod(total, len(weights))
-        return [base + (1 if index < remainder else 0) for index in range(len(weights))]
+        return [
+            base + (1 if index < remainder else 0)
+            for index in range(len(weights))
+        ]
 
     exact = [total * weight / sum(weights) for weight in weights]
     floors = [int(value) for value in exact]
@@ -187,7 +180,11 @@ def _audit_interval_hash(recording_id: str, intervals) -> str:
                 "label": str(label),
             }
             for index, (start, end, label) in enumerate(
-                zip(np.asarray(intervals.start), np.asarray(intervals.end), labels)
+                zip(
+                    np.asarray(intervals.start),
+                    np.asarray(intervals.end),
+                    labels,
+                )
             )
         ]
     )
@@ -206,7 +203,9 @@ class _LiveSplit:
         window_seconds: float,
     ) -> None:
         if not hasattr(intervals, "start") or not hasattr(intervals, "end"):
-            raise ValueError(f"Intervals for {canonical_id!r} lack start/end timestamps")
+            raise ValueError(
+                f"Intervals for {canonical_id!r} lack start/end timestamps"
+            )
         self.canonical_id = canonical_id
         self.recording_id = recording_id
         self.intervals = intervals
@@ -218,7 +217,12 @@ class _LiveSplit:
             if hasattr(intervals, "behavior_labels")
             else np.repeat("", len(intervals))
         )
-        if not (len(self.starts) == len(self.ends) == len(self.labels) == len(intervals)):
+        if not (
+            len(self.starts)
+            == len(self.ends)
+            == len(self.labels)
+            == len(intervals)
+        ):
             raise ValueError(f"Malformed intervals for {canonical_id!r}")
         self.interval_ids = [
             source_interval_identity(canonical_id, index, start, end, label)
@@ -227,10 +231,16 @@ class _LiveSplit:
             )
         ]
         self.intervals_hash = _canonical_hash(self.interval_ids)
+        self.sampleable_mask = NeurosoftFirstFixedWindowSampler.sampleable_mask(
+            self.starts, self.ends, window_seconds
+        )
         self.class_indices = {
             class_name: np.flatnonzero(
-                class_mapping.map_to_class_ids(self.labels) == class_id
-            ).astype(int).tolist()
+                (class_mapping.map_to_class_ids(self.labels) == class_id)
+                & self.sampleable_mask
+            )
+            .astype(int)
+            .tolist()
             for class_id, class_name in enumerate(class_mapping.class_names)
         }
 
@@ -242,18 +252,24 @@ class _LiveSplit:
         self, class_name: str, class_id: int, seed: int
     ) -> list[int]:
         indices = list(self.class_indices.get(class_name, []))
-        if len(indices) <= 1:
-            return indices
-        permutation = _selection_rng(self.canonical_id, class_id, seed).permutation(
-            len(indices)
+        return select_class_indices(
+            indices,
+            canonical_recording_id=self.canonical_id,
+            class_id=class_id,
+            seed=seed,
+            count=len(indices),
         )
-        return [indices[position] for position in permutation]
 
     def select_class_count(
         self, class_name: str, class_id: int, seed: int, count: int
     ) -> list[int]:
-        selected = self.permuted_class_indices(class_name, class_id, seed)[:count]
-        return sorted(selected)
+        return select_class_indices(
+            list(self.class_indices.get(class_name, [])),
+            canonical_recording_id=self.canonical_id,
+            class_id=class_id,
+            seed=seed,
+            count=count,
+        )
 
     def ids_for_indices(self, indices: list[int]) -> list[str]:
         return [self.interval_ids[index] for index in indices]
@@ -264,7 +280,7 @@ class _LiveSplit:
         mask[indices] = True
         selected = self.intervals.select_by_mask(mask)
         generator = torch.Generator().manual_seed(seed)
-        sampler = FastRandomFixedWindowSampler(
+        sampler = NeurosoftFirstFixedWindowSampler(
             sampling_intervals={self.recording_id: selected},
             window_length=self.window_seconds,
             drop_short=True,
@@ -290,11 +306,13 @@ class _AuditIndex:
         data_root: Path,
         class_mapping: ClassificationMapping,
         window_seconds: float,
+        verify_sampler_invariant: bool = True,
     ) -> None:
         self.audit = audit
         self.audit_sha256 = audit["artifact_sha256"]
         self.class_mapping = class_mapping
         self.window_seconds = window_seconds
+        self.verify_sampler_invariant = verify_sampler_invariant
         self.recordings_by_canonical: dict[str, dict[str, Any]] = {}
         self.recordings_by_species_subject: dict[tuple[str, str], list[str]] = (
             defaultdict(list)
@@ -312,7 +330,9 @@ class _AuditIndex:
             subject_recordings.sort()
 
         self.splits: dict[str, dict[str, _LiveSplit]] = {
-            "train": {}, "valid": {}, "test": {}
+            "train": {},
+            "valid": {},
+            "test": {},
         }
         self.channel_counts: dict[str, tuple[int, int]] = {}
         self._load_and_verify_live_data(data_root)
@@ -343,9 +363,15 @@ class _AuditIndex:
                 for split, intervals_by_recording in partitions.items():
                     intervals = intervals_by_recording.get(recording_id)
                     if intervals is None:
-                        raise ValueError(f"Live {split} split lacks {canonical_id!r}")
-                    actual_audit_hash = _audit_interval_hash(recording_id, intervals)
-                    expected_audit_hash = audit_recording["split_hashes"].get(split)
+                        raise ValueError(
+                            f"Live {split} split lacks {canonical_id!r}"
+                        )
+                    actual_audit_hash = _audit_interval_hash(
+                        recording_id, intervals
+                    )
+                    expected_audit_hash = audit_recording["split_hashes"].get(
+                        split
+                    )
                     if actual_audit_hash != expected_audit_hash:
                         raise ValueError(
                             "Phase 0 split hash mismatch for "
@@ -360,9 +386,12 @@ class _AuditIndex:
                         window_seconds=self.window_seconds,
                     )
                 recording = dataset.get_recording(recording_id)
-                _field, _signal, supported, _names = resolve_neural_signal(recording)
+                _field, _signal, supported, _names = resolve_neural_signal(
+                    recording
+                )
                 self.channel_counts[canonical_id] = (
-                    len(recording.channels.id), int(supported.sum())
+                    len(recording.channels.id),
+                    int(supported.sum()),
                 )
 
         audited = set(self.recordings_by_canonical)
@@ -371,20 +400,29 @@ class _AuditIndex:
                 "Phase 0 audit and configured live recordings differ: "
                 f"missing_live={sorted(audited - seen)}, extra_live={sorted(seen - audited)}"
             )
-        self._verify_one_example_one_window()
+        if self.verify_sampler_invariant:
+            self._verify_one_example_one_window()
 
     def _verify_one_example_one_window(self) -> None:
-        """Enforce the Phase 3 equal-example/equal-window prerequisite."""
+        """Enforce one window per sampleable source example."""
         failures: list[str] = []
-        for canonical_id, recording in sorted(self.recordings_by_canonical.items()):
+        for canonical_id, recording in sorted(
+            self.recordings_by_canonical.items()
+        ):
             if not recording.get("eligible", False):
                 continue
             for split in ("train", "valid"):
                 live_split = self.split(canonical_id, split)
-                windows = live_split.window_count(list(range(live_split.total)))
-                if windows != live_split.total:
+                sampleable_indices = (
+                    np.flatnonzero(live_split.sampleable_mask)
+                    .astype(int)
+                    .tolist()
+                )
+                windows = live_split.window_count(sampleable_indices)
+                if windows != len(sampleable_indices):
                     failures.append(
-                        f"{canonical_id} {split}: intervals={live_split.total}, "
+                        f"{canonical_id} {split}: "
+                        f"sampleable_intervals={len(sampleable_indices)}, "
                         f"windows={windows}"
                     )
         if failures:
@@ -400,11 +438,62 @@ class _AuditIndex:
         return self.recordings_by_canonical[canonical_id]
 
     def same_species_pool_name(self, target_species: str) -> str:
-        return "minipigs_only" if target_species == "minipigs" else "monkeys_only"
+        return (
+            "minipigs_only" if target_species == "minipigs" else "monkeys_only"
+        )
 
     def same_species_pool(self, plan: dict[str, Any]) -> dict[str, Any]:
         pool_name = self.same_species_pool_name(plan["target_species"])
-        return plan["source_pools"][pool_name]
+        return self.live_pool(plan["source_pools"][pool_name])
+
+    def live_pool(self, audit_pool: dict[str, Any]) -> dict[str, Any]:
+        """Recalculate source availability after fixed-window eligibility."""
+        pool = dict(audit_pool)
+        class_counts = {name: 0 for name in self.class_mapping.class_names}
+        per_subject: dict[str, dict[str, int]] = {}
+        for canonical_id in pool["source_recordings"]:
+            species, _recording_id, subject = _parse_canonical_id(canonical_id)
+            qualified_subject = f"{species}:{subject}"
+            subject_counts = per_subject.setdefault(
+                qualified_subject,
+                {name: 0 for name in self.class_mapping.class_names},
+            )
+            split = self.split(canonical_id, "train")
+            for class_name, indices in split.class_indices.items():
+                count = len(indices)
+                class_counts[class_name] += count
+                subject_counts[class_name] += count
+        pool["per_class_train_examples"] = class_counts
+        pool["per_subject_class_counts"] = {
+            subject: per_subject[subject] for subject in sorted(per_subject)
+        }
+        pool["source_subjects"] = sorted(per_subject)
+        pool["source_subject_count"] = len(per_subject)
+        pool["source_recording_count"] = len(pool["source_recordings"])
+        return pool
+
+    def live_diversity_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
+        """Recalculate common-class caps from sampleable source intervals."""
+        pool = self.same_species_pool(plan)
+        subjects = list(pool["source_subjects"])
+        common_cap = {
+            class_name: min(
+                pool["per_subject_class_counts"][subject][class_name]
+                for subject in subjects
+            )
+            for class_name in self.class_mapping.class_names
+        }
+        original = plan["phase_5_same_species_diversity"]
+        return {
+            "comparison_feasible": bool(subjects),
+            "candidate_subjects": subjects,
+            "bins": [
+                int(value)
+                for value in original["bins"]
+                if int(value) <= len(subjects)
+            ],
+            "common_per_class_cap": common_cap,
+        }
 
     def subject_recordings(
         self, pool: dict[str, Any], qualified_subject: str
@@ -434,8 +523,10 @@ def _build_source_pool_manifest(
     audit_index: _AuditIndex,
     plan: dict[str, Any],
 ) -> SourcePoolManifest:
-    pools = {
-        name: SourcePool(
+    pools: dict[str, SourcePool] = {}
+    for name, audit_pool in plan["source_pools"].items():
+        pool = audit_index.live_pool(audit_pool)
+        pools[name] = SourcePool(
             composition=name,
             source_species=list(pool["source_species"]),
             source_subjects=list(pool["source_subjects"]),
@@ -445,12 +536,12 @@ def _build_source_pool_manifest(
             class_counts=dict(pool["per_class_train_examples"]),
             target_leakage=list(pool["target_leakage"]),
             source_train_split_hashes={
-                canonical_id: audit_index.split(canonical_id, "train").intervals_hash
+                canonical_id: audit_index.split(
+                    canonical_id, "train"
+                ).intervals_hash
                 for canonical_id in pool["source_recordings"]
             },
         )
-        for name, pool in plan["source_pools"].items()
-    }
     payload = {
         "schema": SOURCE_POOL_SCHEMA,
         "version": MANIFEST_VERSION,
@@ -495,7 +586,9 @@ def _recording_selection_full(
         selected_indices.extend(class_selected)
     selected_indices.sort()
 
-    valid_indices = list(range(valid_split.total))
+    valid_indices = (
+        np.flatnonzero(valid_split.sampleable_mask).astype(int).tolist()
+    )
     return SourceRecordingSelection(
         species=species,
         subject=subject,
@@ -504,14 +597,40 @@ def _recording_selection_full(
         raw_channel_count=audit_index.raw_channel_count(canonical_id),
         supported_channel_count=audit_index.supported_channel_count(recording),
         train_source_intervals_hash=train_split.intervals_hash,
-        train_selected_indices=selected_indices,
-        train_selected_interval_ids=train_split.ids_for_indices(selected_indices),
         train_counts_by_class=train_counts_by_class,
+        train_selected_interval_ids_hash=_canonical_hash(
+            train_split.ids_for_indices(selected_indices)
+        ),
         available_train_windows=train_split.window_count(selected_indices),
         valid_source_intervals_hash=valid_split.intervals_hash,
-        valid_interval_ids=valid_split.ids_for_indices(valid_indices),
+        valid_selected_interval_ids_hash=_canonical_hash(
+            valid_split.ids_for_indices(valid_indices)
+        ),
         available_validation_windows=valid_split.window_count(valid_indices),
     )
+
+
+def _reconstruct_train_indices(
+    audit_index: _AuditIndex,
+    canonical_id: str,
+    train_counts_by_class: dict[str, int],
+    seed: int,
+) -> list[int]:
+    """Rebuild a compact manifest's deterministic class-wise selection."""
+    train_split = audit_index.split(canonical_id, "train")
+    selected: list[int] = []
+    for class_id, class_name in enumerate(
+        audit_index.class_mapping.class_names
+    ):
+        selected.extend(
+            train_split.select_class_count(
+                class_name,
+                class_id,
+                seed,
+                train_counts_by_class.get(class_name, 0),
+            )
+        )
+    return sorted(selected)
 
 
 def _summary_from_recordings(
@@ -522,18 +641,21 @@ def _summary_from_recordings(
     window_seconds: float,
 ) -> SelectionSummary:
     selected_train_examples = sum(
-        len(recording.train_selected_indices) for recording in recordings
+        sum(recording.train_counts_by_class.values())
+        for recording in recordings
     )
     available_train_windows = sum(
         recording.available_train_windows for recording in recordings
     )
     validation_examples = sum(
-        len(recording.valid_interval_ids) for recording in recordings
+        recording.available_validation_windows for recording in recordings
     )
     available_validation_windows = sum(
         recording.available_validation_windows for recording in recordings
     )
-    subjects = sorted({f"{recording.species}:{recording.subject}" for recording in recordings})
+    subjects = sorted(
+        {f"{recording.species}:{recording.subject}" for recording in recordings}
+    )
     class_union: set[str] = set()
     class_sets: list[set[str]] = []
     for recording in recordings:
@@ -545,17 +667,13 @@ def _summary_from_recordings(
         if represented:
             class_sets.append(represented)
             class_union.update(represented)
-    class_intersection = (
-        set.intersection(*class_sets) if class_sets else set()
-    )
+    class_intersection = set.intersection(*class_sets) if class_sets else set()
     realized_fraction = (
         selected_train_examples / available_train_windows
         if available_train_windows
         else None
     )
-    realized_train_windows = (
-        available_train_windows // batch_size * batch_size
-    )
+    realized_train_windows = available_train_windows // batch_size * batch_size
     return SelectionSummary(
         source_subject_count=len(subjects),
         source_recording_count=len(recordings),
@@ -569,6 +687,7 @@ def _summary_from_recordings(
         represented_class_intersection=sorted(class_intersection),
         requested_fraction=requested_fraction,
         realized_fraction=realized_fraction,
+        selection_implementation=SOURCE_SELECTION_IMPLEMENTATION,
         sampler_implementation=SAMPLER_IMPLEMENTATION,
         window_seconds=window_seconds,
         batch_size=batch_size,
@@ -637,7 +756,9 @@ def _save_pool_manifest(path: Path, manifest: SourcePoolManifest) -> None:
     _atomic_write_text(path, manifest.to_json() + "\n")
 
 
-def _save_selection_manifest(path: Path, manifest: SourceSelectionManifest) -> None:
+def _save_selection_manifest(
+    path: Path, manifest: SourceSelectionManifest
+) -> None:
     _atomic_write_text(path, manifest.to_json() + "\n")
 
 
@@ -666,14 +787,24 @@ def generate_phase3_smoke(
     written: list[Path] = []
     for (target_species, target_subject), canonical_ids in PHASE3_SMOKE.items():
         pool_path, pool_manifest = pool_paths[(target_species, target_subject)]
-        rel_pool_path = Path(os.path.relpath(pool_path, output_dir / "phase3_smoke"))
+        # ``source_pool_manifest`` is resolved from the selection manifest's
+        # own directory by both the runtime loader and the data-backed
+        # validator.  Smoke manifests live one directory below the family
+        # root, unlike the other selection families.
+        rel_pool_path = Path(
+            os.path.relpath(
+                pool_path, output_dir / "phase3_smoke" / target_species
+            )
+        )
         recordings = [
             _recording_selection_full(
                 audit_index,
                 canonical_id,
                 class_names,
                 seed=42,
-                class_selector=lambda _class_name, _class_id, available: available,
+                class_selector=lambda _class_name,
+                _class_id,
+                available: available,
             )
             for canonical_id in canonical_ids
         ]
@@ -802,7 +933,16 @@ def generate_volume_manifests(
                         seed,
                         recording.canonical_recording_id,
                     )
-                    selected_ids = list(recording.train_selected_interval_ids)
+                    selected_ids = audit_index.split(
+                        recording.canonical_recording_id, "train"
+                    ).ids_for_indices(
+                        _reconstruct_train_indices(
+                            audit_index,
+                            recording.canonical_recording_id,
+                            recording.train_counts_by_class,
+                            seed,
+                        )
+                    )
                     by_fraction = nesting_cache.setdefault(cache_key, {})
                     by_fraction[_fraction_label(fraction)] = selected_ids
 
@@ -833,7 +973,10 @@ def _allocate_counts_across_items(
     if total <= 0 or not items:
         return {item: 0 for item in items}
     allocations = _largest_remainder(total, weights)
-    capped = [min(allocation, weight) for allocation, weight in zip(allocations, weights)]
+    capped = [
+        min(allocation, weight)
+        for allocation, weight in zip(allocations, weights)
+    ]
     result = dict(zip(items, capped))
     assigned = sum(result.values())
     remaining = total - assigned
@@ -875,9 +1018,7 @@ def _allocate_counts_across_recordings(
 ) -> dict[str, int]:
     recordings = audit_index.subject_recordings(pool, subject)
     weights = [
-        audit_index.recording(canonical_id)["per_class_counts"]["train"].get(
-            class_name, 0
-        )
+        len(audit_index.split(canonical_id, "train").class_indices[class_name])
         for canonical_id in recordings
     ]
     return _allocate_counts_across_items(total, recordings, weights)
@@ -922,7 +1063,9 @@ def _build_diversity_recordings(
         subject = f"{_parse_canonical_id(canonical_id)[0]}:{_parse_canonical_id(canonical_id)[2]}"
         if subject not in selected_subjects:
             continue
-        class_targets_for_recording = per_recording_targets.get(canonical_id, {})
+        class_targets_for_recording = per_recording_targets.get(
+            canonical_id, {}
+        )
         if not class_targets_for_recording:
             # Preserve validation-only adapters only when the recording appears
             # in the selected subject set but received zero train allocation.
@@ -961,12 +1104,14 @@ def generate_diversity_manifests(
         target_species = plan["target_species"]
         target_subject = plan["target_subject"]
         pool = audit_index.same_species_pool(plan)
-        diversity = plan["phase_5_same_species_diversity"]
+        diversity = audit_index.live_diversity_plan(plan)
         if not diversity.get("comparison_feasible", False):
             continue
         pool_path, pool_manifest = pool_paths[(target_species, target_subject)]
         class_targets = {
-            class_name: int(diversity["common_per_class_cap"].get(class_name, 0))
+            class_name: int(
+                diversity["common_per_class_cap"].get(class_name, 0)
+            )
             for class_name in class_names
         }
         candidates = list(diversity["candidate_subjects"])
@@ -1032,10 +1177,14 @@ def generate_diversity_manifests(
     return written
 
 
-def _eight_class_anchors(pool: dict[str, Any], class_names: tuple[str, ...]) -> list[str]:
+def _eight_class_anchors(
+    pool: dict[str, Any], class_names: tuple[str, ...]
+) -> list[str]:
     anchors: list[str] = []
     for subject, counts in pool["per_subject_class_counts"].items():
-        if all(int(counts.get(class_name, 0)) > 0 for class_name in class_names):
+        if all(
+            int(counts.get(class_name, 0)) > 0 for class_name in class_names
+        ):
             anchors.append(subject)
     return sorted(anchors)
 
@@ -1053,7 +1202,7 @@ def generate_eight_class_anchor_manifests(
         target_species = plan["target_species"]
         target_subject = plan["target_subject"]
         pool = audit_index.same_species_pool(plan)
-        diversity = plan["phase_5_same_species_diversity"]
+        diversity = audit_index.live_diversity_plan(plan)
         if not diversity.get("comparison_feasible", False):
             continue
         anchors = _eight_class_anchors(pool, class_names)
@@ -1069,7 +1218,11 @@ def generate_eight_class_anchor_manifests(
                 class_name: int(anchor_counts.get(class_name, 0))
                 for class_name in class_names
             }
-            others = [subject for subject in _rank_subjects(candidates, seed) if subject != anchor]
+            others = [
+                subject
+                for subject in _rank_subjects(candidates, seed)
+                if subject != anchor
+            ]
             ranked_subjects = [anchor] + others
 
             for subject_bin in diversity["bins"]:
@@ -1144,17 +1297,22 @@ def _phase6_class_targets(
 ) -> dict[str, int]:
     per_class_cap = {
         class_name: min(
-            int(pool_caps[pool_name].get(class_name, 0)) for pool_name in pool_caps
+            int(pool_caps[pool_name].get(class_name, 0))
+            for pool_name in pool_caps
         )
         for class_name in class_names
     }
     feasible_total = min(total_examples, sum(per_class_cap.values()))
-    weights = [int(reference_counts.get(class_name, 0)) for class_name in class_names]
+    weights = [
+        int(reference_counts.get(class_name, 0)) for class_name in class_names
+    ]
     targets = dict(
         zip(class_names, _largest_remainder(feasible_total, weights))
     )
     for class_name in class_names:
-        targets[class_name] = min(targets[class_name], per_class_cap[class_name])
+        targets[class_name] = min(
+            targets[class_name], per_class_cap[class_name]
+        )
 
     remaining = feasible_total - sum(targets.values())
     expandable = [
@@ -1198,7 +1356,8 @@ def _build_composition_recordings(
         {
             subject
             for subject in pool["source_subjects"]
-            if species_filter is None or subject.split(":", 1)[0] in species_filter
+            if species_filter is None
+            or subject.split(":", 1)[0] in species_filter
         }
     )
     for class_name, total in filtered_targets.items():
@@ -1229,7 +1388,9 @@ def _build_composition_recordings(
         species = _parse_canonical_id(canonical_id)[0]
         if species_filter is not None and species not in species_filter:
             continue
-        class_targets_for_recording = per_recording_targets.get(canonical_id, {})
+        class_targets_for_recording = per_recording_targets.get(
+            canonical_id, {}
+        )
 
         def selector(
             class_name: str,
@@ -1312,8 +1473,13 @@ def _build_composition_recordings_for_condition(
     )
 
 
-def _composition_selected_total(recordings: list[SourceRecordingSelection]) -> int:
-    return sum(len(recording.train_selected_indices) for recording in recordings)
+def _composition_selected_total(
+    recordings: list[SourceRecordingSelection],
+) -> int:
+    return sum(
+        sum(recording.train_counts_by_class.values())
+        for recording in recordings
+    )
 
 
 def generate_composition_manifests(
@@ -1330,7 +1496,10 @@ def generate_composition_manifests(
         target_subject = plan["target_subject"]
         budget = plan["phase_6_equal_volume_budget"]
         total_examples = int(budget["total_examples_per_condition"])
-        pools = plan["source_pools"]
+        pools = {
+            name: audit_index.live_pool(audit_pool)
+            for name, audit_pool in plan["source_pools"].items()
+        }
         pool_caps = {
             name: pools[name]["per_class_train_examples"] for name in pools
         }
@@ -1344,7 +1513,9 @@ def generate_composition_manifests(
 
         for seed in seeds:
             resolved_targets = dict(class_targets)
-            composition_recordings: dict[str, list[SourceRecordingSelection]] = {}
+            composition_recordings: dict[
+                str, list[SourceRecordingSelection]
+            ] = {}
             for _attempt in range(32):
                 composition_recordings = {
                     composition_name: _build_composition_recordings_for_condition(
@@ -1415,7 +1586,9 @@ def generate_composition_manifests(
                     target_leakage=[],
                     batch_size=batch_size,
                 )
-                summaries[composition_name] = manifest.summary.selected_train_examples
+                summaries[composition_name] = (
+                    manifest.summary.selected_train_examples
+                )
                 path = (
                     output_dir
                     / "species_composition"
@@ -1429,7 +1602,9 @@ def generate_composition_manifests(
     return written
 
 
-def _manifest_entry(path: Path, root: Path, manifest_type: str) -> dict[str, Any]:
+def _manifest_entry(
+    path: Path, root: Path, manifest_type: str
+) -> dict[str, Any]:
     rel_path = path.relative_to(root).as_posix()
     text = path.read_text(encoding="utf-8")
     if manifest_type == "source_pool":
@@ -1477,7 +1652,9 @@ def _manifest_entry(path: Path, root: Path, manifest_type: str) -> dict[str, Any
         "selected_train_examples": manifest.summary.selected_train_examples,
         "available_train_windows": manifest.summary.available_train_windows,
         "realized_fraction": manifest.summary.realized_fraction,
-        "represented_class_count": len(manifest.summary.represented_class_union),
+        "represented_class_count": len(
+            manifest.summary.represented_class_union
+        ),
         "eligible": True,
         "failure_reason": None,
     }
@@ -1489,7 +1666,9 @@ def generate_index(output_dir: Path) -> dict[str, Any]:
         if path.name == "index.json":
             continue
         manifest_type = (
-            "source_pool" if "source_pools" in path.parts else "source_selection"
+            "source_pool"
+            if "source_pools" in path.parts
+            else "source_selection"
         )
         entries.append(_manifest_entry(path, output_dir, manifest_type))
     index = {
@@ -1538,7 +1717,9 @@ def generate_readme(output_dir: Path, index: dict[str, Any]) -> None:
             "| Selection ID | Family | Examples | Recordings | Seed | Path |"
         )
         lines.append("|---|---|---:|---:|---:|---|")
-        for entry in sorted(target_entries, key=lambda item: item["selection_id"]):
+        for entry in sorted(
+            target_entries, key=lambda item: item["selection_id"]
+        ):
             seed = entry.get("source_selection_seed")
             seed_text = "" if seed is None else str(seed)
             lines.append(
@@ -1549,12 +1730,16 @@ def generate_readme(output_dir: Path, index: dict[str, Any]) -> None:
             )
         lines.append("")
 
-    _atomic_write_text(output_dir / "README.md", "\n".join(lines) + "\n")
+    _atomic_write_text(
+        output_dir / "README.md", "\n".join(lines).rstrip() + "\n"
+    )
 
 
 def validate_manifests(output_dir: Path) -> None:
     if not output_dir.is_dir():
-        raise FileNotFoundError(f"Manifest output directory not found: {output_dir}")
+        raise FileNotFoundError(
+            f"Manifest output directory not found: {output_dir}"
+        )
 
     index_path = output_dir / "index.json"
     if index_path.is_file():
@@ -1562,7 +1747,9 @@ def validate_manifests(output_dir: Path) -> None:
         for entry in index["entries"]:
             manifest_path = output_dir / entry["path"]
             if not manifest_path.is_file():
-                raise FileNotFoundError(f"Indexed manifest missing: {manifest_path}")
+                raise FileNotFoundError(
+                    f"Indexed manifest missing: {manifest_path}"
+                )
             refreshed = _manifest_entry(
                 manifest_path,
                 output_dir,
@@ -1576,7 +1763,9 @@ def validate_manifests(output_dir: Path) -> None:
     else:
         for path in sorted(output_dir.rglob("*.json")):
             manifest_type = (
-                "source_pool" if "source_pools" in path.parts else "source_selection"
+                "source_pool"
+                if "source_pools" in path.parts
+                else "source_selection"
             )
             _manifest_entry(path, output_dir, manifest_type)
 
@@ -1589,6 +1778,7 @@ def validate_manifests_data_backed(
     task_path: Path,
     batch_size: int,
     window_seconds: float,
+    families: tuple[str, ...] | None = None,
 ) -> None:
     """Independently validate committed selections against processed data.
 
@@ -1596,7 +1786,6 @@ def validate_manifests_data_backed(
     before inspecting manifests.  Static JSON/hash validation alone cannot
     establish that positional interval selections still denote live data.
     """
-    validate_manifests(output_dir)
     audit = _load_neurosoft_audit(str(audit_path))
     class_mapping = _load_class_mapping(task_path)
     live = _AuditIndex(
@@ -1604,6 +1793,7 @@ def validate_manifests_data_backed(
         data_root=data_root,
         class_mapping=class_mapping,
         window_seconds=window_seconds,
+        verify_sampler_invariant=False,
     )
     pools: dict[Path, SourcePoolManifest] = {}
     for path in sorted((output_dir / "source_pools").rglob("*.json")):
@@ -1613,89 +1803,200 @@ def validate_manifests_data_backed(
         plan = audit["source_plans"][
             f"{pool.target_species}:{pool.target_subject}"
         ]
-        if pool.eligible_target_recordings != plan["eligible_target_recordings"]:
+        if (
+            pool.eligible_target_recordings
+            != plan["eligible_target_recordings"]
+        ):
             raise ValueError(f"Pool target recording drift: {path}")
         for name, source_pool in pool.pools.items():
-            expected = plan["source_pools"].get(name)
-            if expected is None:
-                raise ValueError(f"Pool {path} contains unknown composition {name!r}")
+            audit_pool = plan["source_pools"].get(name)
+            if audit_pool is None:
+                raise ValueError(
+                    f"Pool {path} contains unknown composition {name!r}"
+                )
+            expected = live.live_pool(audit_pool)
             if source_pool.source_recordings != expected["source_recordings"]:
                 raise ValueError(f"Pool source recording drift: {path} {name}")
+            if source_pool.class_counts != expected["per_class_train_examples"]:
+                raise ValueError(
+                    f"Pool live class-count mismatch: {path} {name}"
+                )
             actual_hashes = {
                 canonical_id: live.split(canonical_id, "train").intervals_hash
                 for canonical_id in source_pool.source_recordings
             }
             if source_pool.source_train_split_hashes != actual_hashes:
-                raise ValueError(f"Pool live train split hash mismatch: {path} {name}")
+                raise ValueError(
+                    f"Pool live train split hash mismatch: {path} {name}"
+                )
 
-    for path in sorted(output_dir.rglob("*.json")):
-        if "source_pools" in path.parts or path.name == "index.json":
-            continue
-        manifest = SourceSelectionManifest.load(path)
-        pool_path = (path.parent / manifest.source_pool_manifest).resolve()
-        pool = pools.get(pool_path)
-        if pool is None:
-            raise ValueError(f"Selection parent pool is missing: {path}")
-        if pool.manifest_hash != manifest.source_pool_hash:
-            raise ValueError(f"Selection parent pool hash mismatch: {path}")
-        if (
-            manifest.summary.sampler_implementation != SAMPLER_IMPLEMENTATION
-            or manifest.summary.window_seconds != window_seconds
-            or manifest.summary.batch_size != batch_size
-        ):
-            raise ValueError(f"Selection sampler-accounting metadata mismatch: {path}")
+    family_roots = {
+        "phase3_smoke": (output_dir / "phase3_smoke",),
+        "source_volume": (output_dir / "source_volume",),
+        "subject_diversity": (
+            output_dir / "subject_diversity" / "common_classes",
+        ),
+        "eight_class_anchor": (
+            output_dir / "subject_diversity" / "eight_class_anchor",
+        ),
+        "species_composition": (output_dir / "species_composition",),
+    }
+    if families is not None:
+        unknown = sorted(set(families) - set(family_roots))
+        if unknown:
+            raise ValueError(f"Unknown manifest families: {unknown}")
+        roots = [root for family in families for root in family_roots[family]]
+    else:
+        roots = list(family_roots.values())
+        roots = [root for family_roots in roots for root in family_roots]
 
-        selected_window_total = 0
-        validation_window_total = 0
-        selected_examples = 0
-        for rec in manifest.recordings:
-            canonical_id = canonical_recording_id(rec.species, rec.recording_id)
-            if canonical_id != rec.canonical_recording_id:
-                raise ValueError(f"Bad canonical recording ID in {path}: {canonical_id}")
-            train = live.split(canonical_id, "train")
-            valid = live.split(canonical_id, "valid")
-            if rec.train_source_intervals_hash != train.intervals_hash:
-                raise ValueError(f"Live train interval hash mismatch: {path} {canonical_id}")
-            if rec.valid_source_intervals_hash != valid.intervals_hash:
-                raise ValueError(f"Live validation interval hash mismatch: {path} {canonical_id}")
-            if rec.train_selected_interval_ids != train.ids_for_indices(
-                rec.train_selected_indices
+    train_cache: dict[
+        tuple[str, int, tuple[tuple[str, int], ...]], list[int]
+    ] = {}
+    train_window_cache: dict[
+        tuple[str, int, tuple[tuple[str, int], ...]], int
+    ] = {}
+    valid_cache: dict[str, tuple[list[int], str, int]] = {}
+    for root in roots:
+        for path in sorted(root.rglob("*.json")):
+            manifest = SourceSelectionManifest.load(path)
+            if families is not None and manifest.family not in families:
+                raise ValueError(
+                    f"Unexpected manifest family under {root}: {path}"
+                )
+            pool_path = (path.parent / manifest.source_pool_manifest).resolve()
+            pool = pools.get(pool_path)
+            if pool is None:
+                raise ValueError(f"Selection parent pool is missing: {path}")
+            if pool.manifest_hash != manifest.source_pool_hash:
+                raise ValueError(f"Selection parent pool hash mismatch: {path}")
+            if (
+                manifest.summary.selection_implementation
+                != SOURCE_SELECTION_IMPLEMENTATION
+                or manifest.summary.sampler_implementation
+                != SAMPLER_IMPLEMENTATION
+                or manifest.summary.window_seconds != window_seconds
+                or manifest.summary.batch_size != batch_size
             ):
-                raise ValueError(f"Live selected interval ID mismatch: {path} {canonical_id}")
-            if rec.valid_interval_ids != valid.ids_for_indices(list(range(valid.total))):
-                raise ValueError(f"Live validation interval ID mismatch: {path} {canonical_id}")
-            class_counts = {
-                name: sum(index in train.class_indices[name] for index in rec.train_selected_indices)
-                for name in class_mapping.class_names
-            }
-            if rec.train_counts_by_class != class_counts:
-                raise ValueError(f"Live class-count mismatch: {path} {canonical_id}")
-            raw_channels, supported_channels = live.channel_counts[canonical_id]
-            if (rec.raw_channel_count, rec.supported_channel_count) != (
-                raw_channels,
-                supported_channels,
-            ):
-                raise ValueError(f"Live channel-count mismatch: {path} {canonical_id}")
-            train_windows = train.window_count(rec.train_selected_indices)
-            valid_windows = valid.window_count(list(range(valid.total)))
-            if rec.available_train_windows != train_windows:
-                raise ValueError(f"Live train window-count mismatch: {path} {canonical_id}")
-            if rec.available_validation_windows != valid_windows:
-                raise ValueError(f"Live valid window-count mismatch: {path} {canonical_id}")
-            selected_examples += len(rec.train_selected_indices)
-            selected_window_total += train_windows
-            validation_window_total += valid_windows
+                raise ValueError(
+                    f"Selection sampler-accounting metadata mismatch: {path}"
+                )
 
-        summary = manifest.summary
-        if (
-            summary.selected_train_examples != selected_examples
-            or summary.available_train_windows != selected_window_total
-            or summary.available_validation_windows != validation_window_total
-            or summary.realized_train_windows_per_epoch
-            != selected_window_total // batch_size * batch_size
-            or summary.selected_signal_seconds != selected_window_total * window_seconds
-        ):
-            raise ValueError(f"Live aggregate accounting mismatch: {path}")
+            selected_window_total = 0
+            validation_window_total = 0
+            selected_examples = 0
+            validation_examples = 0
+            for rec in manifest.recordings:
+                canonical_id = canonical_recording_id(
+                    rec.species, rec.recording_id
+                )
+                if canonical_id != rec.canonical_recording_id:
+                    raise ValueError(
+                        f"Bad canonical recording ID in {path}: {canonical_id}"
+                    )
+                train = live.split(canonical_id, "train")
+                valid = live.split(canonical_id, "valid")
+                if rec.train_source_intervals_hash != train.intervals_hash:
+                    raise ValueError(
+                        f"Live train interval hash mismatch: {path} {canonical_id}"
+                    )
+                if rec.valid_source_intervals_hash != valid.intervals_hash:
+                    raise ValueError(
+                        f"Live validation interval hash mismatch: {path} {canonical_id}"
+                    )
+                train_key = (
+                    canonical_id,
+                    manifest.condition.source_selection_seed,
+                    tuple(sorted(rec.train_counts_by_class.items())),
+                )
+                if train_key not in train_cache:
+                    train_cache[train_key] = _reconstruct_train_indices(
+                        live,
+                        canonical_id,
+                        rec.train_counts_by_class,
+                        manifest.condition.source_selection_seed,
+                    )
+                train_indices = train_cache[train_key]
+                if rec.train_selected_interval_ids_hash != _canonical_hash(
+                    train.ids_for_indices(train_indices)
+                ):
+                    raise ValueError(
+                        f"Live selected interval ID mismatch: {path} {canonical_id}"
+                    )
+                if canonical_id not in valid_cache:
+                    valid_indices = (
+                        np.flatnonzero(valid.sampleable_mask)
+                        .astype(int)
+                        .tolist()
+                    )
+                    valid_cache[canonical_id] = (
+                        valid_indices,
+                        _canonical_hash(valid.ids_for_indices(valid_indices)),
+                        valid.window_count(valid_indices),
+                    )
+                valid_indices, valid_ids_hash, valid_windows = valid_cache[
+                    canonical_id
+                ]
+                if rec.valid_selected_interval_ids_hash != valid_ids_hash:
+                    raise ValueError(
+                        f"Live validation interval ID mismatch: {path} {canonical_id}"
+                    )
+                class_index_sets = {
+                    name: set(indices)
+                    for name, indices in train.class_indices.items()
+                }
+                class_counts = {
+                    name: sum(
+                        index in class_index_sets[name]
+                        for index in train_indices
+                    )
+                    for name in class_mapping.class_names
+                }
+                if rec.train_counts_by_class != class_counts:
+                    raise ValueError(
+                        f"Live class-count mismatch: {path} {canonical_id}"
+                    )
+                raw_channels, supported_channels = live.channel_counts[
+                    canonical_id
+                ]
+                if (rec.raw_channel_count, rec.supported_channel_count) != (
+                    raw_channels,
+                    supported_channels,
+                ):
+                    raise ValueError(
+                        f"Live channel-count mismatch: {path} {canonical_id}"
+                    )
+                if train_key not in train_window_cache:
+                    train_window_cache[train_key] = train.window_count(
+                        train_indices
+                    )
+                train_windows = train_window_cache[train_key]
+                if rec.available_train_windows != train_windows:
+                    raise ValueError(
+                        f"Live train window-count mismatch: {path} {canonical_id}"
+                    )
+                if rec.available_validation_windows != valid_windows:
+                    raise ValueError(
+                        f"Live valid window-count mismatch: {path} {canonical_id}"
+                    )
+                selected_examples += len(train_indices)
+                validation_examples += len(valid_indices)
+                selected_window_total += train_windows
+                validation_window_total += valid_windows
+
+            summary = manifest.summary
+            if (
+                summary.selected_train_examples != selected_examples
+                or summary.available_train_windows != selected_window_total
+                or summary.validation_examples != validation_examples
+                or summary.available_validation_windows
+                != validation_window_total
+                or summary.realized_train_windows_per_epoch
+                != selected_window_total // batch_size * batch_size
+                or summary.selected_signal_seconds
+                != selected_window_total * window_seconds
+            ):
+                raise ValueError(f"Live aggregate accounting mismatch: {path}")
 
 
 def _parse_fractions(values: list[str]) -> tuple[float, ...]:

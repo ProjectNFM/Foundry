@@ -10,6 +10,8 @@ import pytest
 from foundry.data.datamodules.base import NeuralDataModule
 from foundry.data.fraction_manifest import _canonical_hash
 from foundry.data.source_manifest import source_interval_identity
+from foundry.data.source_selection import SOURCE_SELECTION_IMPLEMENTATION
+from foundry.tasks.classification_mapping import ClassificationMapping
 from foundry.training.checkpoint_manifest import (
     CheckpointManifestError,
     verify_checkpoint_integrity,
@@ -49,36 +51,63 @@ def _recording(*, selected_indices: list[int] = [0, 1]):
         canonical_recording_id=canonical_id,
         train_source_intervals_hash=_canonical_hash(ids),
         valid_source_intervals_hash=_canonical_hash(ids),
-        train_selected_indices=selected_indices,
-        train_selected_interval_ids=[ids[i] for i in selected_indices if i < len(ids)],
-        valid_interval_ids=ids,
+        train_counts_by_class={"low_bass": 1, "midrange": 1},
+        train_selected_interval_ids_hash=_canonical_hash(
+            [ids[i] for i in selected_indices if i < len(ids)]
+        ),
+        valid_selected_interval_ids_hash=_canonical_hash(ids),
+    )
+
+
+def _source_datamodule():
+    mapping = ClassificationMapping(
+        {"low_bass": "low_bass", "midrange": "midrange"}
+    )
+    return SimpleNamespace(
+        dataset=_Dataset(_Intervals()),
+        sequence_length=0.5,
+        _source_train_selected_indices={},
+        _resolve_fraction_task_config=lambda: SimpleNamespace(
+            class_mapping=mapping
+        ),
+    )
+
+
+def _source_manifest(recording):
+    return SimpleNamespace(
+        recordings=[recording],
+        condition=SimpleNamespace(source_selection_seed=42),
+        summary=SimpleNamespace(
+            window_seconds=0.5,
+            selection_implementation=SOURCE_SELECTION_IMPLEMENTATION,
+        ),
     )
 
 
 def test_source_runtime_verification_accepts_exact_live_intervals():
-    datamodule = SimpleNamespace(dataset=_Dataset(_Intervals()))
-    manifest = SimpleNamespace(recordings=[_recording()])
+    datamodule = _source_datamodule()
+    manifest = _source_manifest(_recording())
 
     NeuralDataModule._verify_source_manifest_intervals(
         datamodule, manifest, source_interval_identity
     )
 
 
-def test_source_runtime_verification_rejects_out_of_range_index():
-    datamodule = SimpleNamespace(dataset=_Dataset(_Intervals()))
-    manifest = SimpleNamespace(recordings=[_recording(selected_indices=[3])])
+def test_source_runtime_verification_rejects_reconstruction_drift():
+    datamodule = _source_datamodule()
+    manifest = _source_manifest(_recording(selected_indices=[0]))
 
-    with pytest.raises(RuntimeError, match="out-of-range"):
+    with pytest.raises(RuntimeError, match="reconstructed train selection"):
         NeuralDataModule._verify_source_manifest_intervals(
             datamodule, manifest, source_interval_identity
         )
 
 
 def test_source_runtime_verification_rejects_split_drift():
-    datamodule = SimpleNamespace(dataset=_Dataset(_Intervals()))
+    datamodule = _source_datamodule()
     recording = _recording()
     recording.train_source_intervals_hash = "tampered"
-    manifest = SimpleNamespace(recordings=[recording])
+    manifest = _source_manifest(recording)
 
     with pytest.raises(RuntimeError, match="split hash mismatch"):
         NeuralDataModule._verify_source_manifest_intervals(

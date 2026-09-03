@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from foundry.data.source_manifest import VALID_FAMILIES
 from generate_neurosoft_source_manifests import (
     DEFAULT_BATCH_SIZE,
     WINDOW_SECONDS,
@@ -29,6 +30,12 @@ def main() -> None:
     )
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--window-seconds", type=float, default=WINDOW_SECONDS)
+    parser.add_argument(
+        "--family",
+        action="append",
+        choices=sorted(VALID_FAMILIES),
+        help="Validate only this family; repeat to validate multiple families.",
+    )
     args = parser.parse_args()
     if not args.data_root.is_dir():
         raise FileNotFoundError(f"Data root not found: {args.data_root}")
@@ -41,6 +48,7 @@ def main() -> None:
         task_path=args.task.resolve(),
         batch_size=args.batch_size,
         window_seconds=args.window_seconds,
+        families=None if args.family is None else tuple(args.family),
     )
     print(f"Data-backed validation passed: {args.manifest_root.resolve()}")
 

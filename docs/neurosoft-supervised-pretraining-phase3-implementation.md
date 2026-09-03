@@ -168,6 +168,18 @@ launch: equal example counts and equal processed-input counts would be
 different experimental controls, and this plan does not authorize choosing
 between them silently.
 
+**Approved NeuroSoft amendment (2026-09-03).** Live source recordings contain
+both genuine 0.1-second alternating stimulus/rest annotations and 0.75-second
+annotations, in addition to the intended 0.5-second trials. For NeuroSoft
+supervised pretraining, an interval is eligible when its duration is at least
+0.5 seconds within a 1 ns timestamp tolerance. Shorter intervals are excluded
+from both source-train and source-validation selections. Every eligible
+interval yields exactly one onset-anchored window `[start, start + 0.5 s)`;
+thus a 0.75-second trial deliberately contributes its first 0.5 seconds. The
+manifest records per-class selection counts and hashes of the reconstructed
+train/validation interval-ID sequences—not repeated raw index arrays. Its
+selection and sampler implementation versions identify this policy.
+
 Runs must record cumulative processed windows, raw samples, signal seconds,
 recurrent steps, optimizer steps, and estimated FLOPs. The human-readable
 `effective_epochs` value is based on what the training loader can actually
@@ -314,7 +326,7 @@ pretraining run.
   "selection_id": "volume_minipigs_target-sub-06_f0.25_sel42",
   "family": "source_volume",
   "phase0_audit_sha256": "...",
-  "source_pool_manifest": "../source_pools/minipigs/target-sub-06.json",
+  "source_pool_manifest": "../../../../source_pools/minipigs/target-sub-06.json",
   "source_pool_hash": "...",
   "target": {"species": "minipigs", "subject": "sub-06"},
   "condition": {
@@ -609,11 +621,11 @@ selection is already active at that point.
 ### Training sampler
 
 Normal source pretraining remains example-proportional: feed the selected
-intervals to the ordinary fixed-window sampler without a session-balanced
-sampler. Recording/session contribution therefore follows the number of
-windows those selected intervals produce. Window locations may be jittered
-between epochs, and incomplete batches follow the existing `drop_last`
-behavior; both facts must be included in the accounting metadata.
+intervals to the NeuroSoft onset-anchored fixed-window sampler without a
+session-balanced sampler. Recording/session contribution therefore follows the
+number of eligible windows. Each eligible interval contributes exactly one
+non-jittered window from its onset, and incomplete batches follow the existing
+`drop_last` behavior; both facts must be included in the accounting metadata.
 
 The Phase 5 generator itself balances its fixed budget across subjects and
 classes. Once that manifest is built, the ordinary example-proportional loader

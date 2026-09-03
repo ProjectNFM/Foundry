@@ -33,7 +33,12 @@ from foundry.data.fraction_manifest import (
 )
 from foundry.data.samplers import (
     FastRandomFixedWindowSampler,
+    NeurosoftFirstFixedWindowSampler,
     VariableLengthBatchSampler,
+)
+from foundry.data.source_selection import (
+    SOURCE_SELECTION_IMPLEMENTATION,
+    select_class_indices,
 )
 from foundry.tasks.class_weights import compute_class_weights_for_tasks
 from foundry.tasks.classification_mapping import (
@@ -255,6 +260,8 @@ class NeuralDataModule(LightningDataModule):
         self.sequence_length = sequence_length
         self.seed = seed
         self.dataset_kwargs = dict(dataset_kwargs or {})
+        if isinstance(sampler_class, str):
+            sampler_class = get_class(sampler_class)
         self.sampler_class: Type[RandomFixedWindowSampler] = (
             sampler_class
             if sampler_class is not None
@@ -323,6 +330,7 @@ class NeuralDataModule(LightningDataModule):
         self._fraction_audit_records: dict[str, dict] = {}
         self._fraction_audit_artifact_sha256: str | None = None
         self._source_manifest: SourceSelectionManifest | None = None
+        self._source_train_selected_indices: dict[str, list[int]] = {}
 
         self._user_transforms: list[Callable] = list(transforms or [])
         self._tokenizer = tokenizer
@@ -934,7 +942,9 @@ class NeuralDataModule(LightningDataModule):
         # Resolve the parent relative to the selection, never relative to the
         # transient Hydra run directory.
         pool_path = os.path.normpath(
-            os.path.join(os.path.dirname(manifest_path), manifest.source_pool_manifest)
+            os.path.join(
+                os.path.dirname(manifest_path), manifest.source_pool_manifest
+            )
         )
         pool = SourcePoolManifest.load(pool_path)
         pool.validate_no_leakage()
@@ -955,7 +965,10 @@ class NeuralDataModule(LightningDataModule):
             )
 
         expected_species = self.audit_species
-        if expected_species is not None and manifest.target_species != expected_species:
+        if (
+            expected_species is not None
+            and manifest.target_species != expected_species
+        ):
             raise RuntimeError(
                 "Source manifest target species does not match the configured "
                 f"data species: manifest={manifest.target_species!r}, "
@@ -1015,13 +1028,14 @@ class NeuralDataModule(LightningDataModule):
                     f"{expected_species!r}."
                 )
 
-        self._verify_source_manifest_intervals(manifest, source_interval_identity)
+        self._verify_source_manifest_intervals(
+            manifest, source_interval_identity
+        )
 
         self._source_manifest = manifest
 
         rid_to_species = {
-            rec.recording_id: rec.species
-            for rec in manifest.recordings
+            rec.recording_id: rec.species for rec in manifest.recordings
         }
         self._namespace_annotator = _DatasetNamespaceAnnotation(rid_to_species)
         self._user_transforms = [self._namespace_annotator] + list(
@@ -1030,39 +1044,46 @@ class NeuralDataModule(LightningDataModule):
         self.transform = self._build_transform_list()
         self._rebuild_dataset_transform()
 
-    def _verify_source_manifest_intervals(self, manifest, interval_identity) -> None:
-        """Bind every source selection to the live causal train/valid splits.
-
-        Positional indices are an efficient runtime representation, but are
-        not provenance by themselves.  Verify their corresponding stable IDs
-        and complete source hashes before any normalization fitting or loader
-        construction.  This makes split drift and malformed indices fatal.
-        """
+    def _verify_source_manifest_intervals(
+        self, manifest, interval_identity
+    ) -> None:
+        """Reconstruct and bind compact selections to live causal splits."""
         from foundry.data.fraction_manifest import _canonical_hash
 
+        if manifest.summary.window_seconds != self.sequence_length:
+            raise RuntimeError(
+                "Source manifest window length does not match the data config: "
+                f"manifest={manifest.summary.window_seconds}, "
+                f"data={self.sequence_length}"
+            )
+        if (
+            manifest.summary.selection_implementation
+            != SOURCE_SELECTION_IMPLEMENTATION
+        ):
+            raise RuntimeError(
+                "Source manifest selection implementation is unsupported: "
+                f"{manifest.summary.selection_implementation!r}"
+            )
+        task_config = self._resolve_fraction_task_config()
+        class_mapping = task_config.class_mapping
         split_intervals = {
             split: self.dataset.get_sampling_intervals(split=split)
             for split in ("train", "valid")
         }
+        resolved_train_indices: dict[str, list[int]] = {}
         for rec in manifest.recordings:
-            for split, expected_hash, expected_ids in (
-                (
-                    "train",
-                    rec.train_source_intervals_hash,
-                    rec.train_selected_interval_ids,
-                ),
-                (
-                    "valid",
-                    rec.valid_source_intervals_hash,
-                    rec.valid_interval_ids,
-                ),
+            for split, expected_hash in (
+                ("train", rec.train_source_intervals_hash),
+                ("valid", rec.valid_source_intervals_hash),
             ):
                 intervals = split_intervals[split].get(rec.recording_id)
                 if intervals is None:
                     raise RuntimeError(
                         f"Source {split} split lacks recording {rec.recording_id!r}"
                     )
-                if not hasattr(intervals, "start") or not hasattr(intervals, "end"):
+                if not hasattr(intervals, "start") or not hasattr(
+                    intervals, "end"
+                ):
                     raise RuntimeError(
                         f"Source {split} intervals for {rec.recording_id!r} "
                         "lack start/end timestamps"
@@ -1074,7 +1095,9 @@ class NeuralDataModule(LightningDataModule):
                 )
                 starts = np.asarray(intervals.start)
                 ends = np.asarray(intervals.end)
-                if not (len(starts) == len(ends) == len(labels) == len(intervals)):
+                if not (
+                    len(starts) == len(ends) == len(labels) == len(intervals)
+                ):
                     raise RuntimeError(
                         f"Malformed source {split} intervals for "
                         f"{rec.recording_id!r}"
@@ -1095,26 +1118,66 @@ class NeuralDataModule(LightningDataModule):
                         f"manifest={expected_hash}, runtime={actual_hash}"
                     )
 
+                sampleable_mask = (
+                    NeurosoftFirstFixedWindowSampler.sampleable_mask(
+                        starts, ends, self.sequence_length
+                    )
+                )
                 if split == "train":
-                    indices = rec.train_selected_indices
-                    if len(indices) != len(set(indices)) or any(
-                        index < 0 or index >= len(actual_ids) for index in indices
+                    class_ids = class_mapping.map_to_class_ids(labels)
+                    indices: list[int] = []
+                    for class_id, class_name in enumerate(
+                        class_mapping.class_names
+                    ):
+                        available = (
+                            np.flatnonzero(
+                                (class_ids == class_id) & sampleable_mask
+                            )
+                            .astype(int)
+                            .tolist()
+                        )
+                        indices.extend(
+                            select_class_indices(
+                                available,
+                                canonical_recording_id=rec.canonical_recording_id,
+                                class_id=class_id,
+                                seed=manifest.condition.source_selection_seed,
+                                count=rec.train_counts_by_class.get(
+                                    class_name, 0
+                                ),
+                            )
+                        )
+                    indices.sort()
+                    selected_ids_hash = _canonical_hash(
+                        [actual_ids[index] for index in indices]
+                    )
+                    if (
+                        selected_ids_hash
+                        != rec.train_selected_interval_ids_hash
                     ):
                         raise RuntimeError(
-                            "Source manifest has duplicate or out-of-range train "
-                            f"indices for {rec.canonical_recording_id!r}"
+                            "Source manifest reconstructed train selection does "
+                            f"not match runtime intervals for {rec.canonical_recording_id!r}"
                         )
-                    selected_ids = [actual_ids[index] for index in indices]
-                    if selected_ids != expected_ids:
-                        raise RuntimeError(
-                            "Source manifest train interval IDs do not match "
-                            f"runtime intervals for {rec.canonical_recording_id!r}"
-                        )
-                elif actual_ids != expected_ids:
-                    raise RuntimeError(
-                        "Source manifest validation interval IDs do not match "
-                        f"runtime intervals for {rec.canonical_recording_id!r}"
+                    resolved_train_indices[rec.recording_id] = indices
+                else:
+                    selected_ids_hash = _canonical_hash(
+                        [
+                            actual_ids[index]
+                            for index in np.flatnonzero(sampleable_mask).astype(
+                                int
+                            )
+                        ]
                     )
+                    if (
+                        selected_ids_hash
+                        != rec.valid_selected_interval_ids_hash
+                    ):
+                        raise RuntimeError(
+                            "Source manifest reconstructed validation selection does "
+                            f"not match runtime intervals for {rec.canonical_recording_id!r}"
+                        )
+        self._source_train_selected_indices = resolved_train_indices
 
     @property
     def source_manifest(self) -> "SourceSelectionManifest | None":
@@ -1134,7 +1197,8 @@ class NeuralDataModule(LightningDataModule):
         if self._source_manifest is None:
             return None
         return [
-            rec.canonical_recording_id for rec in self._source_manifest.recordings
+            rec.canonical_recording_id
+            for rec in self._source_manifest.recordings
         ]
 
     def get_source_session_configs(self) -> dict[str, int] | None:
@@ -1172,22 +1236,31 @@ class NeuralDataModule(LightningDataModule):
             rec = manifest_by_rid.get(rid)
             if rec is None:
                 continue
+            n = len(intervals)
+            mask = np.zeros(n, dtype=bool)
             if split == "train":
-                n = len(intervals)
-                mask = np.zeros(n, dtype=bool)
-                for idx in rec.train_selected_indices:
-                    # _verify_source_manifest_intervals has already made this
-                    # invariant explicit.  Keep this defensive guard for
-                    # callers that invoke selection in isolation.
-                    if idx < 0 or idx >= n:
-                        raise RuntimeError(
-                            "Source manifest train index is out of range for "
-                            f"recording {rid!r}: {idx} not in [0, {n})"
-                        )
-                    mask[idx] = True
-                result[rid] = intervals.select_by_mask(mask)
+                indices = self._source_train_selected_indices[rid]
             else:
-                result[rid] = intervals
+                indices = (
+                    np.flatnonzero(
+                        NeurosoftFirstFixedWindowSampler.sampleable_mask(
+                            intervals.start, intervals.end, self.sequence_length
+                        )
+                    )
+                    .astype(int)
+                    .tolist()
+                )
+            for idx in indices:
+                # _verify_source_manifest_intervals has already made this
+                # invariant explicit.  Keep this defensive guard for callers
+                # that invoke selection in isolation.
+                if idx < 0 or idx >= n:
+                    raise RuntimeError(
+                        "Source manifest selection index is out of range for "
+                        f"recording {rid!r}: {idx} not in [0, {n})"
+                    )
+                mask[idx] = True
+            result[rid] = intervals.select_by_mask(mask)
         return result
 
     def _apply_fraction_selection(

@@ -1,0 +1,81 @@
+{
+  "condition": {
+    "class_coverage_policy": "common_classes",
+    "requested_fraction": null,
+    "sensitivity_only": false,
+    "source_composition": "same_species",
+    "source_selection_seed": 42,
+    "subject_count_bin": 1
+  },
+  "family": "subject_diversity",
+  "manifest_hash": "c57d82bf3c551e23ee0dd250b092bacfc21deb8b62554e8e76bcfc2757a8bf37",
+  "phase0_audit_sha256": "48cd1a57189bb7f0fe63b8fc3cbd6949deb82c215d0c8edd431b94794bc9467a",
+  "recordings": [
+    {
+      "available_train_windows": 438,
+      "available_validation_windows": 296,
+      "canonical_recording_id": "monkeys:sub-04_ses-01_task-AcousStim_acq-RH_desc-raw",
+      "raw_channel_count": 32,
+      "recording_id": "sub-04_ses-01_task-AcousStim_acq-RH_desc-raw",
+      "species": "monkeys",
+      "subject": "sub-04",
+      "supported_channel_count": 29,
+      "train_counts_by_class": {
+        "high_mids": 146,
+        "high_treble": 0,
+        "low_bass": 78,
+        "low_mids": 71,
+        "low_treble": 0,
+        "mid_bass": 0,
+        "mid_treble": 71,
+        "midrange": 72
+      },
+      "train_selected_interval_ids_hash": "415f8c3df11e7e83d6b9da4db95c7034befa104ce2cad8fa4d3b41b74c2ddac4",
+      "train_source_intervals_hash": "c294bdc028de663372c372585e281afc085e85137e62130232a36214ff48dab4",
+      "valid_selected_interval_ids_hash": "c103a68df7d15cdc4c223a8852c0b376e52095fdd31c77c08049de9e9ac3d6b4",
+      "valid_source_intervals_hash": "c103a68df7d15cdc4c223a8852c0b376e52095fdd31c77c08049de9e9ac3d6b4"
+    }
+  ],
+  "schema": "neurosoft-source-selection",
+  "selection_id": "diversity_monkeys_target-sub-05_subjects1_sel42",
+  "source_pool_hash": "b8e65f1fb6a0642aae46415d8a69a925cd6e8e942ef9c0a16a9fcd6d254e724d",
+  "source_pool_manifest": "../../../../../source_pools/monkeys/target-sub-05.json",
+  "source_test_policy": "forbidden",
+  "subjects": [
+    "monkeys:sub-04"
+  ],
+  "summary": {
+    "available_train_windows": 438,
+    "available_validation_windows": 296,
+    "batch_size": 16,
+    "realized_fraction": 1.0,
+    "realized_train_windows_per_epoch": 432,
+    "represented_class_intersection": [
+      "high_mids",
+      "low_bass",
+      "low_mids",
+      "mid_treble",
+      "midrange"
+    ],
+    "represented_class_union": [
+      "high_mids",
+      "low_bass",
+      "low_mids",
+      "mid_treble",
+      "midrange"
+    ],
+    "requested_fraction": null,
+    "sampler_implementation": "foundry.data.samplers.NeurosoftFirstFixedWindowSampler/onset-anchored-fixed-window-v1",
+    "selected_signal_seconds": 219.0,
+    "selected_train_examples": 438,
+    "selection_implementation": "neurosoft-classwise-permutation-v1",
+    "source_recording_count": 1,
+    "source_subject_count": 1,
+    "validation_examples": 296,
+    "window_seconds": 0.5
+  },
+  "target_leakage": [],
+  "target_species": "monkeys",
+  "target_subject": "sub-05",
+  "version": 1
+}
