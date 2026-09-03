@@ -1009,7 +1009,7 @@ Implemented deliverables:
    manifest hash/SHA-256 tamper detection, Markdown regeneration from
    JSON, and unreached milestone labeling.
 
-### WP5 -- Strict manifest-based transfer
+### WP5 -- Strict manifest-based transfer ✅ GATE PASSED
 
 - Add checkpoint-manifest input to `main.py`.
 - Validate all provenance before loading;
@@ -1019,7 +1019,31 @@ Implemented deliverables:
 Gate: source adapters never load, target adapters remain bitwise fresh, and a
 tampered checkpoint/manifest or mismatched target fails atomically.
 
-### WP6 -- Hydra configs and analysis/reporting
+**Gate verification (2026-09-03):** 35 tests pass.
+Implemented deliverables:
+
+1. `run.pretrained_checkpoint_manifest` config field wired in `main.py` with
+   `_load_and_validate_checkpoint_manifest()` performing manifest hash
+   verification, checkpoint SHA-256 verification, and target-species/subject
+   matching before any transfer proceeds.
+2. `_apply_manifest_transfer()` resolves checkpoint path from manifest,
+   applies strict component-scoped transfer via `load_pretrained_weights()`,
+   and writes `transfer-report.json` + `transfer-report.md` to the output
+   directory.
+3. `_validate_manifest_target()` verifies the manifest's excluded target
+   matches the downstream datamodule's species and subject.
+4. `_validate_checkpoint_policy()` enforces mutual exclusion of
+   `pretrained_checkpoint` and `pretrained_checkpoint_manifest`.
+5. Tests: `tests/test_neurosoft_phase3_transfer.py` (35 tests) cover:
+   source adapter exclusion in both regimes, target adapter bitwise
+   freshness, router freshness in frozen_representation, correct
+   trainable/frozen parameter sets, actual weight loading verification,
+   tampered SHA-256 detection, tampered manifest hash detection, wrong
+   species/subject rejection, missing excluded_target rejection, mutual
+   exclusion enforcement, transfer report JSON/Markdown persistence,
+   schema/version validation, and two full end-to-end pipeline tests.
+
+### WP6 -- Hydra configs and analysis/reporting ✅ GATE PASSED
 
 - Add generic pretraining/transfer configs and index resolvers.
 - Add config composition tests for both species, both transfer modes, every
@@ -1029,6 +1053,38 @@ tampered checkpoint/manifest or mismatched target fails atomically.
 
 Gate: all planned Phase 3 commands compose without hardcoded recording lists
 and resolve to the intended manifest/checkpoint policies.
+
+**Gate verification (2026-09-03):** 27 tests pass.
+Implemented deliverables:
+
+1. Source pretraining configs:
+   `configs/experiment/pretraining/neurosoft_conv_bigru_supervised_{minipigs,monkeys}.yaml`
+   compose for both species with source manifests, use step-based budgets,
+   monitor `val/source_session_mean_supported_f1`, and include
+   `SourceSessionMetricsCallback`, `ComputeTrackingCallback`, and
+   `ComputeMilestoneCheckpointCallback`.
+2. Transfer configs:
+   `configs/experiment/auditory_decoding/neurosoft_conv_bigru_transfer_{minipigs,monkeys}.yaml`
+   compose for both species with `full_finetuning` and
+   `frozen_representation`, use epoch-based budgets, and monitor
+   `val/neurosoft_acoustic_stim_8band_supported_f1`.
+3. Index resolvers: `source_manifest_by_id`, `source_manifest_sweep`, and
+   `path_stem` resolve smoke, volume, diversity, and composition manifests
+   from `manifests/neurosoft_supervised/v1/index.json` (524 entries).
+4. Phase 3 experiment record:
+   `experiments/inbox/20260903-MS-neurosoft-supervised-pretraining-pipeline.md`
+   with the full ten-job matrix, launch commands, and gate criteria.
+5. W&B API-backed analysis script:
+   `analysis/20260903-MS-neurosoft-supervised-pretraining-pipeline_analysis.py`
+   fetches source/transfer groups, reports completeness, metrics,
+   provenance, and compute, and exports tables to `analysis/csv/`.
+6. Tests: `tests/test_neurosoft_phase3_configs.py` (27 tests) cover:
+   source config composition for both species, correct monitors and
+   callbacks, step-based budgets, no hardcoded recordings, transfer config
+   composition for both species and both regimes, epoch budgets, recipe
+   consistency between source and target, seed defaults, index resolver
+   lookups and sweeps, index completeness (family counts, no duplicates,
+   all eligible), and recipe/hyperparameter consistency across configs.
 
 ### WP7 -- Execute the ten-job matrix
 
