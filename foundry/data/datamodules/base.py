@@ -511,7 +511,10 @@ class NeuralDataModule(LightningDataModule):
             stats_by_recording[rid] = stats
 
         all_rids: set[str] = set()
-        for split in ("train", "valid", "test"):
+        splits = ("train", "valid")
+        if self.source_test_policy != "forbidden":
+            splits = (*splits, "test")
+        for split in splits:
             ivls = self._effective_sampling_intervals(split)
             for rid, intervals in ivls.items():
                 if len(intervals) > 0:
