@@ -69,7 +69,18 @@ def _fetch_runs(api, group_name: str) -> list:
 def _run_to_dict(run) -> dict:
     """Extract key fields from a WandB run."""
     config = run.config or {}
-    summary = run.summary._json_dict if hasattr(run.summary, "_json_dict") else dict(run.summary)
+    summary = (
+        run.summary._json_dict
+        if hasattr(run.summary, "_json_dict")
+        else dict(run.summary)
+    )
+
+    def metric(key: str, aggregate: str = "max"):
+        """Read a metric whether W&B retained it raw or with an aggregate suffix."""
+        value = summary.get(key)
+        if value is not None:
+            return value
+        return summary.get(f"{key}.{aggregate}")
 
     return {
         "run_id": run.id,
@@ -78,17 +89,19 @@ def _run_to_dict(run) -> dict:
         "group": config.get("run", {}).get("group", run.group),
         "species": config.get("data", {}).get("audit_species"),
         "role": config.get("data", {}).get("role"),
-        "transfer_regime": config.get("run", {}).get("pretrained_transfer_regime"),
+        "transfer_regime": config.get("run", {}).get(
+            "pretrained_transfer_regime"
+        ),
         "model_seed": config.get("run", {}).get("seed"),
         "max_steps": config.get("trainer", {}).get("max_steps"),
         "max_epochs": config.get("trainer", {}).get("max_epochs"),
         "source_session_mean_f1": summary.get(
             "val/source_session_mean_supported_f1"
         ),
-        "val_supported_f1": summary.get(
+        "val_supported_f1": metric(
             "val/neurosoft_acoustic_stim_8band_supported_f1"
         ),
-        "test_supported_f1": summary.get(
+        "test_supported_f1": metric(
             "test/neurosoft_acoustic_stim_8band_supported_f1"
         ),
         "optimizer_steps": summary.get("compute/optimizer_steps"),
@@ -133,7 +146,9 @@ def report_completeness(df: pd.DataFrame) -> None:
         print("  No runs found. Have the Phase 3 jobs been submitted?")
         return
 
-    status_counts = df.groupby(["category", "state"]).size().unstack(fill_value=0)
+    status_counts = (
+        df.groupby(["category", "state"]).size().unstack(fill_value=0)
+    )
     print(status_counts.to_string())
 
     finished = df[df["state"] == "finished"]
