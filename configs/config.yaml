@@ -63,6 +63,9 @@ run:
   # this to a Lightning pretraining checkpoint.
   pretrained_checkpoint: null
   pretrained_transfer_mode: strict
+  # Optional model-declared transfer regime (for example,
+  # ``frozen_representation``). Null uses transferable_components().
+  pretrained_transfer_regime: null
   # Freeze the pretrained weights during training.
   freeze_pretrained: false
   # Freeze backbone (transferable components) even without a pretrained checkpoint.
@@ -77,3 +80,6 @@ run:
   # Adds ~60s compilation overhead on first step.
   # Options: false, "default", "reduce-overhead", "max-autotune"
   compile: false
+  # Checkpoint manifest for Phase 3+ manifest-based transfer.
+  # Mutually exclusive with pretrained_checkpoint.
+  pretrained_checkpoint_manifest: null

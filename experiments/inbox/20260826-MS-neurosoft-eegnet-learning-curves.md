@@ -3,7 +3,7 @@
 **Status:** In Progress
 **Date started:** 2026-08-26
 **Parent experiment:** [NeuroSoft Supervised-Pretraining Protocol and Data Audit](20260826-neurosoft-supervised-pretraining-protocol.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Phase 2 -- Convolution--BiGRU Scratch Pilot](20260828-MS-neurosoft-conv-bigru-pilot.md)
 **Tags:** neurosoft, phase1, eegnet, learning-curves, 8band, intrasession-causal, supervised-pretraining
 
 ## Background

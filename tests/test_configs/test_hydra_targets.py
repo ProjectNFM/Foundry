@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from hydra import compose, initialize_config_dir
 import pytest
 import torch
 from hydra.utils import instantiate
@@ -28,6 +29,8 @@ _SKIP_TARGET_PATHS = {
     ("trainer/default.yaml", ""),
     ("data/neurosoft_minipigs/singlesubject.yaml", ""),
     ("data/neurosoft_monkeys/singlesubject.yaml", ""),
+    ("data/neurosoft_minipigs/source_pretraining.yaml", ""),
+    ("data/neurosoft_monkeys/source_pretraining.yaml", ""),
 }
 
 
@@ -178,6 +181,23 @@ def test_tokenizer_config_root_instantiates(config_name: str):
     tokenizer = instantiate(load_resolved_config(yaml_path))
     assert tokenizer is not None
     assert hasattr(tokenizer, "temporal_embedding")
+
+
+def test_phase3_source_config_resolves_its_run_name_from_manifest_path():
+    """A source recipe needs only the documented manifest and budget inputs."""
+    with initialize_config_dir(version_base=None, config_dir=str(CONFIGS_ROOT)):
+        cfg = compose(
+            config_name="config",
+            overrides=[
+                "experiment=pretraining/neurosoft_conv_bigru_supervised_minipigs",
+                "source_manifest=/shared/manifests/smoke_minipigs_target-sub-06.json",
+                "run.seed=42",
+                "trainer.max_steps=500",
+                "trainer.val_check_interval=100",
+            ],
+        )
+
+    assert cfg.run.name == "src_mp_smoke_minipigs_target-sub-06_m42"
 
 
 @pytest.mark.parametrize(

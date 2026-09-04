@@ -1,0 +1,19 @@
+# W&B settings for large local/Slurm pools that start many runs at once.
+#
+# Console capture creates additional per-run file-stream requests.  Those
+# requests are not useful for the audited NeuroSoft sweep and can overwhelm
+# the project-wide W&B quota when hundreds of workers are active together.
+_target_: lightning.pytorch.loggers.WandbLogger
+name: ${run.name}
+project: ${run.project}
+save_dir: ${oc.env:SCRATCH,./outputs}
+offline: false
+log_model: false
+group: ${run.group}
+tags: ${run.tags}
+resume: allow
+id: null
+settings:
+  # Quote ``off``: YAML otherwise parses it as the boolean false, while W&B
+  # expects the literal console mode.
+  console: "off"

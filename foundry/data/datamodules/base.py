@@ -7,12 +7,20 @@ model-specific preprocessing.
 
 from __future__ import annotations
 
+from __future__ import annotations
+
 import gc
+import hashlib
+import json
 import logging
 import math
+import os
+from contextlib import contextmanager
 from copy import deepcopy
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal, Optional, Type
 
+import numpy as np
 import numpy as np
 import torch
 from hydra.utils import get_class
@@ -28,9 +36,19 @@ from foundry.data.fraction_manifest import (
     FractionManifestBuilder,
     _canonical_hash,
 )
+from foundry.data.fraction_manifest import (
+    FractionManifest,
+    FractionManifestBuilder,
+    _canonical_hash,
+)
 from foundry.data.samplers import (
     FastRandomFixedWindowSampler,
+    NeurosoftFirstFixedWindowSampler,
     VariableLengthBatchSampler,
+)
+from foundry.data.source_selection import (
+    SOURCE_SELECTION_IMPLEMENTATION,
+    select_class_indices,
 )
 from foundry.tasks.class_weights import compute_class_weights_for_tasks
 from foundry.tasks.classification_mapping import (
@@ -39,12 +57,33 @@ from foundry.tasks.classification_mapping import (
 )
 
 if TYPE_CHECKING:
+    from foundry.data.normalization import RecordingChannelStats
+    from foundry.data.source_manifest import SourceSelectionManifest
     from foundry.tasks.config import TaskConfig
 
 logger = logging.getLogger(__name__)
 
 
 _INTERPOLATION_ONLY_KEYS = ("subject", "held_out_subject")
+
+
+class _DatasetNamespaceAnnotation:
+    """Transform that annotates data objects with their species namespace.
+
+    Used in source pretraining to enable species-qualified session routing.
+    The model's ``tokenize()`` reads ``data.dataset_namespace`` to resolve
+    ambiguous raw recording IDs through the alias map.
+    """
+
+    def __init__(self, rid_to_species: dict[str, str]) -> None:
+        self._rid_to_species = dict(rid_to_species)
+
+    def __call__(self, data):
+        session_id = str(data.session.id)
+        species = self._rid_to_species.get(session_id)
+        if species is not None:
+            data.dataset_namespace = species
+        return data
 
 
 def _disable_gc_in_worker(worker_id: int) -> None:
@@ -154,6 +193,10 @@ class NeuralDataModule(LightningDataModule):
         training_fraction_min_present_classes: int = 6,
         audit_json: str | None = None,
         audit_species: str | None = None,
+        input_normalization: Optional[dict] = None,
+        role: str | None = None,
+        selection_manifest: str | None = None,
+        source_test_policy: str | None = None,
     ):
         """Initialize the data module.
 
@@ -203,6 +246,18 @@ class NeuralDataModule(LightningDataModule):
                 fraction manifests are accepted.
             audit_species: Species key used to disambiguate duplicated BIDS
                 recording IDs in the Phase 0 audit.
+            input_normalization: Optional normalization configuration dict.
+                When ``mode`` is ``"recording_train_channel_zscore"`` or
+                ``"recording_train_global_zscore"``, frozen train-only
+                statistics are fitted per recording and applied to all splits.
+                Keys: ``mode``, ``supported_modalities``,
+                ``scale_floor``, ``accumulator_dtype``.
+            role: Optional datamodule role, e.g. ``"source_pretraining"``.
+            selection_manifest: Path to a :class:`SourceSelectionManifest` JSON
+                file for multi-recording source pretraining.
+            source_test_policy: Test access policy for source pretraining.
+                Defaults to ``"forbidden"`` when ``role`` is
+                ``"source_pretraining"``.
         """
         super().__init__()
         if isinstance(dataset_class, str):
@@ -215,6 +270,8 @@ class NeuralDataModule(LightningDataModule):
         self.sequence_length = sequence_length
         self.seed = seed
         self.dataset_kwargs = dict(dataset_kwargs or {})
+        if isinstance(sampler_class, str):
+            sampler_class = get_class(sampler_class)
         self.sampler_class: Type[RandomFixedWindowSampler] = (
             sampler_class
             if sampler_class is not None
@@ -245,6 +302,24 @@ class NeuralDataModule(LightningDataModule):
                     )
                 self._session_pct[split_name] = pct
 
+        if selection_manifest is not None and training_fraction is not None:
+            raise ValueError(
+                "selection_manifest and training_fraction are mutually exclusive"
+            )
+        if role == "source_pretraining" and selection_manifest is None:
+            raise ValueError(
+                "selection_manifest is required when role='source_pretraining'"
+            )
+
+        self.role = role
+        self.selection_manifest_path = selection_manifest
+        if source_test_policy == "forbidden":
+            self.source_test_policy = "forbidden"
+        elif role == "source_pretraining":
+            self.source_test_policy = "forbidden"
+        else:
+            self.source_test_policy = source_test_policy
+
         self.training_fraction = training_fraction
         self.training_fraction_seed = training_fraction_seed
         self.training_fraction_task = training_fraction_task
@@ -264,25 +339,44 @@ class NeuralDataModule(LightningDataModule):
         ] = {}
         self._fraction_audit_records: dict[str, dict] = {}
         self._fraction_audit_artifact_sha256: str | None = None
+        self._source_manifest: SourceSelectionManifest | None = None
+        self._source_train_selected_indices: dict[str, list[int]] = {}
 
+        self._user_transforms: list[Callable] = list(transforms or [])
         self._tokenizer = tokenizer
+        self._standardizer: Optional[Callable] = None
+        self._input_normalization_cfg = input_normalization
+        self._normalization_stats: Optional[
+            dict[str, "RecordingChannelStats"]
+        ] = None
+        self._normalization_cache_key: str | None = None
+        self._normalization_cache_status: str | None = None
+        self._normalization_cache_identity: dict | None = None
+        self._normalization_fit_count = 0
 
-        transform_list = transforms or []
-        if tokenizer is not None:
-            transform_list = list(transform_list) + [tokenizer]
-
-        self.transform = transform_list if transform_list else None
+        self.transform = self._build_transform_list()
         self.dataset = None
 
-    def setup(self, stage: Optional[str] = None):
-        """Setup the DataModule.
+    # -- Transform pipeline management -----------------------------------------
 
-        Args:
-            stage: Stage to setup the DataModule for ('fit', 'test', 'validate').
+    def _build_transform_list(self) -> list[Callable] | None:
+        """Assemble the non-required transform pipeline from components.
+
+        Order: ``user_transforms -> [standardizer] -> [tokenizer]``.
+        Required dataset transforms are prepended separately in
+        :meth:`setup` / :meth:`_rebuild_dataset_transform`.
         """
-        if self.dataset is not None:
-            return
+        parts = list(self._user_transforms)
+        if self._standardizer is not None:
+            parts.append(self._standardizer)
+        if self._tokenizer is not None:
+            parts.append(self._tokenizer)
+        return parts if parts else None
 
+    def _rebuild_dataset_transform(self) -> None:
+        """Rebuild the dataset's composed transform from current components."""
+        if self.dataset is None:
+            return
         transform_list = list(self.transform) if self.transform else []
         if self.task_type is not None and hasattr(
             self.dataset_class, "get_required_transforms"
@@ -291,33 +385,25 @@ class NeuralDataModule(LightningDataModule):
                 self.task_type
             )
             transform_list = list(required) + transform_list
-
-        transform = Compose(transform_list) if transform_list else None
-
-        self.dataset = self.dataset_class(
-            root=self.root,
-            transform=transform,
-            **self.dataset_kwargs,
+        self.dataset.transform = (
+            Compose(transform_list) if transform_list else None
         )
 
-        if self._task_configs:
-            validate_task_mappings(self._task_configs, self.dataset)
+    def setup(
+        self,
+        stage: Optional[str] = None,
+        *,
+        fit_normalization: bool = True,
+    ):
+        """Setup the DataModule.
 
-    def set_tokenizer(self, tokenizer: Optional[Callable]) -> None:
-        """Replace the tokenizer in the transform pipeline.
-
-        Can be called before or after :meth:`setup`.  When the dataset
-        already exists, its transform is rebuilt in-place.
+        Args:
+            stage: Stage to setup the DataModule for ('fit', 'test', 'validate').
+            fit_normalization: Whether to fit/load configured normalization.
+                Metadata discovery passes ``False`` on its temporary source
+                datamodule; normal Lightning setup always uses the default.
         """
-        old = self._tokenizer
-        self._tokenizer = tokenizer
-
-        base = [t for t in (self.transform or []) if t is not old]
-        if tokenizer is not None:
-            base = list(base) + [tokenizer]
-        self.transform = base if base else None
-
-        if self.dataset is not None:
+        if self.dataset is None:
             transform_list = list(self.transform) if self.transform else []
             if self.task_type is not None and hasattr(
                 self.dataset_class, "get_required_transforms"
@@ -326,9 +412,539 @@ class NeuralDataModule(LightningDataModule):
                     self.task_type
                 )
                 transform_list = list(required) + transform_list
-            self.dataset.transform = (
-                Compose(transform_list) if transform_list else None
+
+            transform = Compose(transform_list) if transform_list else None
+
+            self.dataset = self.dataset_class(
+                root=self.root,
+                transform=transform,
+                **self.dataset_kwargs,
             )
+
+            if (
+                self.selection_manifest_path is not None
+                and self._source_manifest is None
+            ):
+                self._load_source_manifest()
+
+            if self._task_configs:
+                validate_task_mappings(self._task_configs, self.dataset)
+
+        if fit_normalization:
+            self._maybe_fit_normalization()
+
+    def set_tokenizer(self, tokenizer: Optional[Callable]) -> None:
+        """Replace the tokenizer in the transform pipeline.
+
+        Can be called before or after :meth:`setup`.  When the dataset
+        already exists, its transform is rebuilt in-place.
+        """
+        self._tokenizer = tokenizer
+        self.transform = self._build_transform_list()
+        self._rebuild_dataset_transform()
+
+    # -- Input normalization ---------------------------------------------------
+
+    def _maybe_fit_normalization(self) -> None:
+        """Fit train-only recording statistics if normalization is configured."""
+        if self._input_normalization_cfg is None:
+            return
+        mode = self._input_normalization_cfg.get("mode", "disabled")
+        if mode == "disabled":
+            return
+        if mode not in {
+            "recording_train_channel_zscore",
+            "recording_train_global_zscore",
+        }:
+            raise ValueError(
+                f"Unsupported input_normalization.mode={mode!r}; "
+                "expected 'disabled', 'recording_train_channel_zscore', or "
+                "'recording_train_global_zscore'"
+            )
+        if self._standardizer is not None:
+            return
+        # Hyperparameter discovery creates a temporary datamodule before task
+        # configs are attached.  A fraction manifest cannot be resolved there,
+        # so fitting at that point would use the wrong train population.
+        if self.training_fraction is not None and not self._task_configs:
+            logger.debug(
+                "Deferring normalization until training-fraction task configs "
+                "are attached"
+            )
+            return
+        self.prepare_training_fraction_manifests()
+        self._fit_and_insert_normalization()
+
+    def _fit_and_insert_normalization(self) -> None:
+        """Load or fit configured recording statistics and insert standardizer."""
+        from foundry.data.normalization import (
+            fit_recording_global_stats,
+            fit_recording_stats,
+            load_normalization_stats,
+            save_normalization_stats,
+        )
+
+        cfg = self._input_normalization_cfg
+        mode = cfg["mode"]
+        supported_modalities = frozenset(
+            str(modality).lower()
+            for modality in cfg.get(
+                "supported_modalities", ["eeg", "ecog", "seeg", "ieeg"]
+            )
+        )
+        from foundry.data.utils import NEURAL_MODALITIES
+
+        if (
+            not supported_modalities
+            or not supported_modalities <= NEURAL_MODALITIES
+        ):
+            raise ValueError(
+                "input_normalization.supported_modalities must be a non-empty "
+                f"subset of {sorted(NEURAL_MODALITIES)}"
+            )
+        scale_floor = float(cfg.get("scale_floor", 1e-8))
+        if not np.isfinite(scale_floor) or scale_floor <= 0:
+            raise ValueError(
+                "input_normalization.scale_floor must be a finite positive value"
+            )
+        accumulator_dtype_name = str(cfg.get("accumulator_dtype", "float64"))
+        if accumulator_dtype_name != "float64":
+            raise ValueError(
+                "input_normalization.accumulator_dtype must be 'float64'"
+            )
+
+        train_intervals = self._effective_sampling_intervals("train")
+
+        cache_identity = self._build_normalization_cache_identity(
+            train_intervals,
+            mode=mode,
+            supported_modalities=supported_modalities,
+            scale_floor=scale_floor,
+            accumulator_dtype=accumulator_dtype_name,
+        )
+        cache_key = _canonical_hash(cache_identity)
+        self._normalization_cache_identity = cache_identity
+        self._normalization_cache_key = cache_key
+
+        cache_cfg = cfg.get("cache", {}) or {}
+        cache_enabled = bool(cache_cfg.get("enabled", False))
+        configured_cache_dir = cache_cfg.get("directory")
+        cache_root = Path(
+            configured_cache_dir
+            or os.environ.get("FOUNDRY_NORMALIZATION_CACHE", "")
+            or Path(self.root) / ".foundry_normalization_cache"
+        )
+
+        if cache_enabled:
+            try:
+                cache_root.mkdir(parents=True, exist_ok=True)
+                with self._normalization_cache_lock(cache_root, cache_key):
+                    entry_dir = cache_root / cache_key
+                    npz_path = entry_dir / "input_normalization_stats.npz"
+                    manifest_path = (
+                        entry_dir / "input_normalization_manifest.json"
+                    )
+                    try:
+                        stats_by_recording = load_normalization_stats(
+                            npz_path, manifest_path
+                        )
+                        manifest = json.loads(
+                            manifest_path.read_text(encoding="utf-8")
+                        )
+                        provenance = manifest.get("provenance")
+                        if not isinstance(provenance, dict):
+                            raise ValueError(
+                                "Normalization cache provenance is missing"
+                            )
+                        cached_identity = provenance.get("cache_identity")
+                        if cached_identity != cache_identity:
+                            raise ValueError(
+                                "Normalization cache identity mismatch"
+                            )
+                        manifest_policy = {
+                            "mode": manifest.get("mode"),
+                            "supported_modalities": manifest.get(
+                                "supported_modalities"
+                            ),
+                            "scale_floor": manifest.get("scale_floor"),
+                            "accumulator_dtype": manifest.get(
+                                "accumulator_dtype"
+                            ),
+                        }
+                        expected_policy = {
+                            key: cache_identity[key] for key in manifest_policy
+                        }
+                        if manifest_policy != expected_policy:
+                            raise ValueError(
+                                "Normalization cache policy mismatch"
+                            )
+                        expected_recordings = {
+                            rid
+                            for rid, intervals in train_intervals.items()
+                            if len(intervals) > 0
+                        }
+                        if set(stats_by_recording) != expected_recordings:
+                            raise ValueError(
+                                "Normalization cache recording set mismatch"
+                            )
+                    except (
+                        AttributeError,
+                        FileNotFoundError,
+                        KeyError,
+                        TypeError,
+                        ValueError,
+                        OSError,
+                    ) as exc:
+                        if npz_path.exists() or manifest_path.exists():
+                            logger.warning(
+                                "Rejecting invalid normalization cache entry "
+                                "%s: %s; recomputing",
+                                entry_dir,
+                                exc,
+                            )
+                        stats_by_recording = self._fit_normalization_stats(
+                            train_intervals,
+                            mode=mode,
+                            supported_modalities=supported_modalities,
+                            scale_floor=scale_floor,
+                            fit_recording_stats=fit_recording_stats,
+                            fit_recording_global_stats=fit_recording_global_stats,
+                        )
+                        entry_dir.mkdir(parents=True, exist_ok=True)
+                        save_normalization_stats(
+                            stats_by_recording,
+                            entry_dir,
+                            cfg,
+                            provenance={
+                                "cache_key": cache_key,
+                                "cache_identity": cache_identity,
+                            },
+                        )
+                        self._normalization_cache_status = "miss"
+                        logger.info(
+                            "Normalization cache miss key=%s path=%s",
+                            cache_key,
+                            entry_dir,
+                        )
+                    else:
+                        self._normalization_cache_status = "hit"
+                        logger.info(
+                            "Normalization cache hit key=%s path=%s",
+                            cache_key,
+                            entry_dir,
+                        )
+            except OSError as exc:
+                logger.warning(
+                    "Normalization cache unavailable at %s (%s); fitting "
+                    "without cache",
+                    cache_root,
+                    exc,
+                )
+                stats_by_recording = self._fit_normalization_stats(
+                    train_intervals,
+                    mode=mode,
+                    supported_modalities=supported_modalities,
+                    scale_floor=scale_floor,
+                    fit_recording_stats=fit_recording_stats,
+                    fit_recording_global_stats=fit_recording_global_stats,
+                )
+                self._normalization_cache_status = "unavailable"
+        else:
+            stats_by_recording = self._fit_normalization_stats(
+                train_intervals,
+                mode=mode,
+                supported_modalities=supported_modalities,
+                scale_floor=scale_floor,
+                fit_recording_stats=fit_recording_stats,
+                fit_recording_global_stats=fit_recording_global_stats,
+            )
+            self._normalization_cache_status = "disabled"
+
+        self._install_normalization_stats(
+            stats_by_recording,
+            supported_modalities=supported_modalities,
+            scale_floor=scale_floor,
+        )
+
+        logger.info(
+            "Prepared input normalization for %d recording(s) "
+            "(mode=%s, scale_floor=%.1e, cache=%s)",
+            len(stats_by_recording),
+            mode,
+            scale_floor,
+            self._normalization_cache_status,
+        )
+
+    def _fit_normalization_stats(
+        self,
+        train_intervals,
+        *,
+        mode: str,
+        supported_modalities: frozenset[str],
+        scale_floor: float,
+        fit_recording_stats,
+        fit_recording_global_stats,
+    ) -> dict[str, "RecordingChannelStats"]:
+        """Fit every non-empty recording once for a cache miss."""
+        self._normalization_fit_count += 1
+
+        stats_by_recording: dict[str, RecordingChannelStats] = {}
+        for rid, intervals in train_intervals.items():
+            if len(intervals) == 0:
+                continue
+            fit_stats = (
+                fit_recording_global_stats
+                if mode == "recording_train_global_zscore"
+                else fit_recording_stats
+            )
+            stats = fit_stats(
+                self.dataset,
+                rid,
+                intervals,
+                supported_modalities=supported_modalities,
+                scale_floor=scale_floor,
+                accumulator_dtype=np.float64,
+            )
+            stats_by_recording[rid] = stats
+
+        return stats_by_recording
+
+    def _install_normalization_stats(
+        self,
+        stats_by_recording: dict[str, "RecordingChannelStats"],
+        *,
+        supported_modalities: frozenset[str],
+        scale_floor: float,
+    ) -> None:
+        """Validate coverage and put frozen statistics into the pipeline."""
+        from foundry.data.transforms import RecordingChannelStandardize
+
+        all_rids: set[str] = set()
+        splits = ("train", "valid")
+        if self.source_test_policy != "forbidden":
+            splits = (*splits, "test")
+        for split in splits:
+            ivls = self._effective_sampling_intervals(split)
+            for rid, intervals in ivls.items():
+                if len(intervals) > 0:
+                    all_rids.add(rid)
+
+        missing = all_rids - set(stats_by_recording)
+        if missing:
+            raise RuntimeError(
+                f"Recording(s) {sorted(missing)} appear in validation/test "
+                f"splits but have no train intervals. Within-recording "
+                f"normalization requires train-derived statistics for every "
+                f"recording."
+            )
+
+        if not stats_by_recording:
+            raise RuntimeError(
+                "No recordings with non-empty train intervals found; "
+                "cannot fit normalization statistics"
+            )
+
+        self._standardizer = RecordingChannelStandardize(
+            stats_by_recording=stats_by_recording,
+            supported_modalities=supported_modalities,
+            scale_floor=scale_floor,
+        )
+        self._normalization_stats = stats_by_recording
+
+        self.transform = self._build_transform_list()
+        self._rebuild_dataset_transform()
+
+    @staticmethod
+    @contextmanager
+    def _normalization_cache_lock(cache_root: Path, cache_key: str):
+        """Serialize readers/writers for one cache key using an advisory lock."""
+        import fcntl
+
+        lock_path = cache_root / f".{cache_key}.lock"
+        with lock_path.open("a+") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    @staticmethod
+    def _normalization_train_interval_hash(train_intervals) -> str:
+        interval_payload = [
+            {
+                "recording_id": recording_id,
+                "start": float(start).hex(),
+                "end": float(end).hex(),
+            }
+            for recording_id, intervals in sorted(train_intervals.items())
+            for start, end in zip(intervals.start, intervals.end)
+        ]
+        return _canonical_hash(interval_payload)
+
+    def _build_normalization_cache_identity(
+        self,
+        train_intervals,
+        *,
+        mode: str,
+        supported_modalities: frozenset[str],
+        scale_floor: float,
+        accumulator_dtype: str,
+    ) -> dict:
+        """Build a scientific and data-version identity for normalization."""
+        from foundry.data.normalization import (
+            _raw_signal_array,
+            _sampling_rate_from_signal_source,
+        )
+        from foundry.data.utils import resolve_neural_signal
+
+        recording_metadata = {}
+        active_recording_ids = sorted(
+            recording_id
+            for recording_id, intervals in train_intervals.items()
+            if len(intervals) > 0
+        )
+        for recording_id in active_recording_ids:
+            data = self.dataset.get_recording(recording_id)
+            field, source, keep, channel_names = resolve_neural_signal(
+                data, supported_modalities
+            )
+            signal = _raw_signal_array(source)
+            file_path = None
+            file_obj = getattr(signal, "file", None)
+            if file_obj is not None:
+                file_path = getattr(file_obj, "filename", None)
+            artifact_identity: dict[str, object]
+            if file_path:
+                resolved = Path(file_path).resolve()
+                stat = resolved.stat()
+                artifact_identity = {
+                    "path": str(resolved),
+                    "size": stat.st_size,
+                    "mtime_ns": stat.st_mtime_ns,
+                    "ctime_ns": stat.st_ctime_ns,
+                }
+            else:
+                array = np.asarray(signal)
+                artifact_identity = {
+                    "in_memory_sha256": hashlib.sha256(
+                        array.tobytes(order="C")
+                    ).hexdigest()
+                }
+            source_domain = getattr(source, "domain", data.domain)
+            recording_metadata[recording_id] = {
+                "signal_field": field,
+                "signal_shape": list(signal.shape),
+                "signal_dtype": str(signal.dtype),
+                "channel_names": [str(name) for name in channel_names],
+                "supported_channel_indices": np.flatnonzero(keep).tolist(),
+                "sampling_rate": _sampling_rate_from_signal_source(source),
+                "domain_start": [
+                    float(value).hex() for value in source_domain.start
+                ],
+                "domain_end": [
+                    float(value).hex() for value in source_domain.end
+                ],
+                "data_artifact": artifact_identity,
+            }
+
+        source_manifest_hash = (
+            self._source_manifest.manifest_hash
+            if self._source_manifest is not None
+            else None
+        )
+        return {
+            "schema_version": 1,
+            "dataset_class": (
+                f"{self.dataset_class.__module__}."
+                f"{self.dataset_class.__qualname__}"
+            ),
+            "source_manifest_hash": source_manifest_hash,
+            "train_interval_hash": self._normalization_train_interval_hash(
+                train_intervals
+            ),
+            "fraction_manifest_hashes": {
+                recording_id: manifest.manifest_hash
+                for recording_id, manifest in sorted(
+                    self._fraction_manifests.items()
+                )
+            },
+            "mode": mode,
+            "supported_modalities": sorted(supported_modalities),
+            "scale_floor": scale_floor,
+            "accumulator_dtype": accumulator_dtype,
+            "recording_ids": active_recording_ids,
+            "recordings": recording_metadata,
+        }
+
+    @property
+    def normalization_stats(
+        self,
+    ) -> Optional[dict[str, "RecordingChannelStats"]]:
+        """Read-only view of fitted normalization statistics, if any."""
+        return (
+            dict(self._normalization_stats)
+            if self._normalization_stats
+            else None
+        )
+
+    @property
+    def input_normalization_config(self) -> Optional[dict]:
+        """Read-only view of the input normalization configuration."""
+        if self._input_normalization_cfg is None:
+            return None
+        return dict(self._input_normalization_cfg)
+
+    def write_normalization_artifacts(
+        self, output_dir: str, *, git_sha: str | None = None
+    ) -> dict[str, str] | None:
+        """Write frozen normalization stats and return their artifact metadata."""
+        if not self._normalization_stats:
+            return None
+        from foundry.data.normalization import save_normalization_stats
+
+        train_intervals = self._effective_sampling_intervals("train")
+        train_interval_hash = self._normalization_train_interval_hash(
+            train_intervals
+        )
+        provenance = {
+            "git_sha": git_sha,
+            "train_interval_hash": train_interval_hash,
+            "fraction_manifest_hashes": {
+                recording_id: manifest.manifest_hash
+                for recording_id, manifest in self._fraction_manifests.items()
+            },
+            "phase0_audit_artifact_sha256": self._fraction_audit_artifact_sha256,
+            "source_manifest_hash": (
+                self._source_manifest.manifest_hash
+                if self._source_manifest is not None
+                else None
+            ),
+            "cache_key": self._normalization_cache_key,
+            "cache_status": self._normalization_cache_status,
+            "cache_identity": self._normalization_cache_identity,
+        }
+        stats_path, manifest_path = save_normalization_stats(
+            self._normalization_stats,
+            output_dir,
+            self._input_normalization_cfg or {},
+            provenance=provenance,
+        )
+        metadata = {
+            "stats_path": str(stats_path),
+            "manifest_path": str(manifest_path),
+            "stats_sha256": hashlib.sha256(stats_path.read_bytes()).hexdigest(),
+            "train_interval_hash": train_interval_hash,
+            "cache_key": self._normalization_cache_key or "disabled",
+            "cache_status": self._normalization_cache_status or "disabled",
+        }
+        logger.info(
+            "Wrote input-normalization artifacts to %s (sha256=%s…)",
+            stats_path.parent,
+            metadata["stats_sha256"][:16],
+        )
+        return metadata
+
+    # -- Class weights ---------------------------------------------------------
 
     def compute_class_weights(
         self, smoothing: float = 1.0
@@ -619,6 +1235,361 @@ class NeuralDataModule(LightningDataModule):
         """SHA-256 of the verified Phase 0 artifact, if auditing is enabled."""
         return self._fraction_audit_artifact_sha256
 
+    def _resolve_manifest_path(self) -> str:
+        """Resolve the source selection manifest path."""
+        path = self.selection_manifest_path
+        if os.path.isfile(path):
+            return path
+        try:
+            from hydra.utils import get_original_cwd
+
+            resolved = os.path.join(get_original_cwd(), path)
+            if os.path.isfile(resolved):
+                return resolved
+        except (ImportError, ValueError):
+            pass
+        raise FileNotFoundError(f"Source selection manifest not found: {path}")
+
+    def _load_source_manifest(self) -> None:
+        """Load and validate the configured source selection manifest."""
+        from foundry.data.source_manifest import (
+            SourcePoolManifest,
+            SourceSelectionManifest,
+            canonical_recording_id,
+            source_interval_identity,
+        )
+
+        manifest_path = self._resolve_manifest_path()
+        manifest = SourceSelectionManifest.load(manifest_path)
+        manifest.validate_no_leakage()
+        manifest.validate_test_policy()
+        manifest.validate_summary_consistency()
+
+        # A selection is meaningful only with its hash-verified parent pool.
+        # Resolve the parent relative to the selection, never relative to the
+        # transient Hydra run directory.
+        pool_path = os.path.normpath(
+            os.path.join(
+                os.path.dirname(manifest_path), manifest.source_pool_manifest
+            )
+        )
+        pool = SourcePoolManifest.load(pool_path)
+        pool.validate_no_leakage()
+        if pool.manifest_hash != manifest.source_pool_hash:
+            raise RuntimeError(
+                "Source selection parent-pool hash does not match: "
+                f"selection={manifest.source_pool_hash}, "
+                f"pool={pool.manifest_hash}"
+            )
+        if (
+            pool.target_species != manifest.target_species
+            or pool.target_subject != manifest.target_subject
+            or pool.phase0_audit_sha256 != manifest.phase0_audit_sha256
+        ):
+            raise RuntimeError(
+                "Source selection and parent pool disagree on target identity "
+                "or Phase 0 audit hash"
+            )
+
+        expected_species = self.audit_species
+        if (
+            expected_species is not None
+            and manifest.target_species != expected_species
+        ):
+            raise RuntimeError(
+                "Source manifest target species does not match the configured "
+                f"data species: manifest={manifest.target_species!r}, "
+                f"data={expected_species!r}"
+            )
+
+        if self.audit_json:
+            from foundry.config_resolvers import _load_neurosoft_audit
+
+            audit = _load_neurosoft_audit(self.audit_json)
+            if audit["artifact_sha256"] != manifest.phase0_audit_sha256:
+                raise RuntimeError(
+                    "Source manifest audit hash does not match loaded audit"
+                )
+
+        dataset_rids = set(self.dataset.recording_ids)
+        composition = manifest.condition.source_composition
+        if composition == "same_species":
+            composition = (
+                "minipigs_only"
+                if manifest.target_species == "minipigs"
+                else "monkeys_only"
+            )
+        selected_pool = pool.pools.get(composition)
+        if selected_pool is None:
+            raise RuntimeError(
+                "Source manifest condition references an absent parent-pool "
+                f"composition: {manifest.condition.source_composition!r}"
+            )
+        pool_recordings = set(selected_pool.source_recordings)
+        for rec in manifest.recordings:
+            if rec.recording_id not in dataset_rids:
+                raise RuntimeError(
+                    f"Recording {rec.recording_id!r} from source manifest "
+                    f"not found in dataset"
+                )
+            if rec.canonical_recording_id != canonical_recording_id(
+                rec.species, rec.recording_id
+            ):
+                raise RuntimeError(
+                    "Source manifest recording has an invalid canonical ID: "
+                    f"{rec.canonical_recording_id!r}"
+                )
+            if rec.canonical_recording_id not in pool_recordings:
+                raise RuntimeError(
+                    "Source manifest recording is not in its declared parent "
+                    "pool composition: "
+                    f"{rec.canonical_recording_id!r}"
+                )
+            # NeuralDataModule currently wraps one concrete dataset class; it
+            # cannot load a mixed-species pool safely.  Reject it explicitly
+            # instead of allowing raw recording IDs to collide or disappear.
+            if expected_species is not None and rec.species != expected_species:
+                raise RuntimeError(
+                    "Source manifest contains a recording from species "
+                    f"{rec.species!r}, but this data config loads only "
+                    f"{expected_species!r}."
+                )
+
+        self._verify_source_manifest_intervals(
+            manifest, source_interval_identity
+        )
+
+        self._source_manifest = manifest
+
+        rid_to_species = {
+            rec.recording_id: rec.species for rec in manifest.recordings
+        }
+        self._namespace_annotator = _DatasetNamespaceAnnotation(rid_to_species)
+        self._user_transforms = [self._namespace_annotator] + list(
+            self._user_transforms
+        )
+        self.transform = self._build_transform_list()
+        self._rebuild_dataset_transform()
+
+    def _verify_source_manifest_intervals(
+        self, manifest, interval_identity
+    ) -> None:
+        """Reconstruct and bind compact selections to live causal splits."""
+        from foundry.data.fraction_manifest import _canonical_hash
+
+        if manifest.summary.window_seconds != self.sequence_length:
+            raise RuntimeError(
+                "Source manifest window length does not match the data config: "
+                f"manifest={manifest.summary.window_seconds}, "
+                f"data={self.sequence_length}"
+            )
+        if (
+            manifest.summary.selection_implementation
+            != SOURCE_SELECTION_IMPLEMENTATION
+        ):
+            raise RuntimeError(
+                "Source manifest selection implementation is unsupported: "
+                f"{manifest.summary.selection_implementation!r}"
+            )
+        task_config = self._resolve_fraction_task_config()
+        class_mapping = task_config.class_mapping
+        split_intervals = {
+            split: self.dataset.get_sampling_intervals(split=split)
+            for split in ("train", "valid")
+        }
+        resolved_train_indices: dict[str, list[int]] = {}
+        for rec in manifest.recordings:
+            for split, expected_hash in (
+                ("train", rec.train_source_intervals_hash),
+                ("valid", rec.valid_source_intervals_hash),
+            ):
+                intervals = split_intervals[split].get(rec.recording_id)
+                if intervals is None:
+                    raise RuntimeError(
+                        f"Source {split} split lacks recording {rec.recording_id!r}"
+                    )
+                if not hasattr(intervals, "start") or not hasattr(
+                    intervals, "end"
+                ):
+                    raise RuntimeError(
+                        f"Source {split} intervals for {rec.recording_id!r} "
+                        "lack start/end timestamps"
+                    )
+                labels = (
+                    np.asarray(intervals.behavior_labels)
+                    if hasattr(intervals, "behavior_labels")
+                    else np.repeat("", len(intervals))
+                )
+                starts = np.asarray(intervals.start)
+                ends = np.asarray(intervals.end)
+                if not (
+                    len(starts) == len(ends) == len(labels) == len(intervals)
+                ):
+                    raise RuntimeError(
+                        f"Malformed source {split} intervals for "
+                        f"{rec.recording_id!r}"
+                    )
+                actual_ids = [
+                    interval_identity(
+                        rec.canonical_recording_id, index, start, end, label
+                    )
+                    for index, (start, end, label) in enumerate(
+                        zip(starts, ends, labels)
+                    )
+                ]
+                actual_hash = _canonical_hash(actual_ids)
+                if actual_hash != expected_hash:
+                    raise RuntimeError(
+                        f"Source manifest {split} split hash mismatch for "
+                        f"{rec.canonical_recording_id!r}: "
+                        f"manifest={expected_hash}, runtime={actual_hash}"
+                    )
+
+                sampleable_mask = (
+                    NeurosoftFirstFixedWindowSampler.sampleable_mask(
+                        starts, ends, self.sequence_length
+                    )
+                )
+                if split == "train":
+                    class_ids = class_mapping.map_to_class_ids(labels)
+                    indices: list[int] = []
+                    for class_id, class_name in enumerate(
+                        class_mapping.class_names
+                    ):
+                        available = (
+                            np.flatnonzero(
+                                (class_ids == class_id) & sampleable_mask
+                            )
+                            .astype(int)
+                            .tolist()
+                        )
+                        indices.extend(
+                            select_class_indices(
+                                available,
+                                canonical_recording_id=rec.canonical_recording_id,
+                                class_id=class_id,
+                                seed=manifest.condition.source_selection_seed,
+                                count=rec.train_counts_by_class.get(
+                                    class_name, 0
+                                ),
+                            )
+                        )
+                    indices.sort()
+                    selected_ids_hash = _canonical_hash(
+                        [actual_ids[index] for index in indices]
+                    )
+                    if (
+                        selected_ids_hash
+                        != rec.train_selected_interval_ids_hash
+                    ):
+                        raise RuntimeError(
+                            "Source manifest reconstructed train selection does "
+                            f"not match runtime intervals for {rec.canonical_recording_id!r}"
+                        )
+                    resolved_train_indices[rec.recording_id] = indices
+                else:
+                    selected_ids_hash = _canonical_hash(
+                        [
+                            actual_ids[index]
+                            for index in np.flatnonzero(sampleable_mask).astype(
+                                int
+                            )
+                        ]
+                    )
+                    if (
+                        selected_ids_hash
+                        != rec.valid_selected_interval_ids_hash
+                    ):
+                        raise RuntimeError(
+                            "Source manifest reconstructed validation selection does "
+                            f"not match runtime intervals for {rec.canonical_recording_id!r}"
+                        )
+        self._source_train_selected_indices = resolved_train_indices
+
+    @property
+    def source_manifest(self) -> "SourceSelectionManifest | None":
+        """Read-only view of the loaded source selection manifest, if any."""
+        return self._source_manifest
+
+    @property
+    def source_recording_ids(self) -> list[str] | None:
+        """Raw recording IDs from the source manifest, if loaded."""
+        if self._source_manifest is None:
+            return None
+        return [rec.recording_id for rec in self._source_manifest.recordings]
+
+    @property
+    def source_canonical_recording_ids(self) -> list[str] | None:
+        """Canonical recording IDs from the source manifest, if loaded."""
+        if self._source_manifest is None:
+            return None
+        return [
+            rec.canonical_recording_id
+            for rec in self._source_manifest.recordings
+        ]
+
+    def get_source_session_configs(self) -> dict[str, int] | None:
+        """Return canonical recording ID to supported channel count mapping."""
+        if self._source_manifest is None:
+            return None
+        return {
+            rec.canonical_recording_id: rec.supported_channel_count
+            for rec in self._source_manifest.recordings
+        }
+
+    def get_source_id_aliases(self) -> dict[str, dict[str, str]] | None:
+        """Return species namespace alias map for source pretraining."""
+        if self._source_manifest is None:
+            return None
+        aliases: dict[str, dict[str, str]] = {}
+        for rec in self._source_manifest.recordings:
+            ns = rec.species
+            if ns not in aliases:
+                aliases[ns] = {}
+            aliases[ns][rec.recording_id] = rec.canonical_recording_id
+        return aliases
+
+    def _apply_source_manifest_selection(
+        self,
+        sampling_intervals: dict,
+        split: Literal["train", "valid"],
+    ) -> dict:
+        """Select manifest-specified intervals for source pretraining."""
+        manifest_by_rid = {
+            rec.recording_id: rec for rec in self._source_manifest.recordings
+        }
+        result = {}
+        for rid, intervals in sampling_intervals.items():
+            rec = manifest_by_rid.get(rid)
+            if rec is None:
+                continue
+            n = len(intervals)
+            mask = np.zeros(n, dtype=bool)
+            if split == "train":
+                indices = self._source_train_selected_indices[rid]
+            else:
+                indices = (
+                    np.flatnonzero(
+                        NeurosoftFirstFixedWindowSampler.sampleable_mask(
+                            intervals.start, intervals.end, self.sequence_length
+                        )
+                    )
+                    .astype(int)
+                    .tolist()
+                )
+            for idx in indices:
+                # _verify_source_manifest_intervals has already made this
+                # invariant explicit.  Keep this defensive guard for callers
+                # that invoke selection in isolation.
+                if idx < 0 or idx >= n:
+                    raise RuntimeError(
+                        "Source manifest selection index is out of range for "
+                        f"recording {rid!r}: {idx} not in [0, {n})"
+                    )
+                mask[idx] = True
+            result[rid] = intervals.select_by_mask(mask)
+        return result
+
     def _apply_fraction_selection(
         self,
         sampling_intervals: dict,
@@ -705,6 +1676,33 @@ class NeuralDataModule(LightningDataModule):
             rid: ivl for rid, ivl in sampling_intervals.items() if rid in keep
         }
 
+    def _effective_sampling_intervals(
+        self,
+        split: Literal["train", "valid", "test"],
+    ) -> dict:
+        """Return exactly the intervals that the split's loader will sample."""
+        if split == "test" and self.source_test_policy == "forbidden":
+            raise RuntimeError(
+                "Source test access is forbidden in source_pretraining mode"
+            )
+
+        sampling_intervals = self.dataset.get_sampling_intervals(split=split)
+        if self._source_manifest is not None:
+            if split in ("train", "valid"):
+                sampling_intervals = self._apply_source_manifest_selection(
+                    sampling_intervals, split
+                )
+        elif split == "train" and self._fraction_manifests:
+            sampling_intervals = self._apply_fraction_selection(
+                sampling_intervals
+            )
+        sampling_intervals = self._filter_intervals(sampling_intervals)
+        if self._session_pct:
+            sampling_intervals = self._subsample_sessions(
+                sampling_intervals, split
+            )
+        return sampling_intervals
+
     def _create_dataloader(
         self, split: Literal["train", "valid", "test"]
     ) -> DataLoader:
@@ -716,16 +1714,7 @@ class NeuralDataModule(LightningDataModule):
         Returns:
             DataLoader for the split.
         """
-        sampling_intervals = self.dataset.get_sampling_intervals(split=split)
-        if split == "train" and self._fraction_manifests:
-            sampling_intervals = self._apply_fraction_selection(
-                sampling_intervals
-            )
-        sampling_intervals = self._filter_intervals(sampling_intervals)
-        if self._session_pct:
-            sampling_intervals = self._subsample_sessions(
-                sampling_intervals, split
-            )
+        sampling_intervals = self._effective_sampling_intervals(split)
 
         split_seed = self.seed + self._SPLIT_SEED_OFFSETS[split]
         gen = torch.Generator().manual_seed(split_seed)
@@ -783,4 +1772,11 @@ class NeuralDataModule(LightningDataModule):
 
     def test_dataloader(self) -> DataLoader:
         """Create test DataLoader."""
+        if (
+            self.role == "source_pretraining"
+            and self.source_test_policy == "forbidden"
+        ):
+            raise RuntimeError(
+                "Source test access is forbidden in source_pretraining mode"
+            )
         return self._create_dataloader("test")

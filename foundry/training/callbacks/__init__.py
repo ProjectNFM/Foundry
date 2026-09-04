@@ -10,6 +10,7 @@ from __future__ import annotations
 from lightning import Trainer
 
 from foundry.training.callbacks.compute import ComputeTrackingCallback
+from foundry.training.callbacks.compute import ComputeTrackingCallback
 from foundry.training.callbacks.diagnostics import ParameterWatcherCallback
 from foundry.training.callbacks.embedding_viz import (
     EmbeddingVisualizationCallback,
@@ -21,6 +22,15 @@ from foundry.training.callbacks.lifecycle import (
 from foundry.training.callbacks.metrics import (
     ConfusionMatrixCallback,
     SessionMetricsCallback,
+)
+from foundry.training.callbacks.performance import (
+    StepPerformanceBenchmarkCallback,
+)
+from foundry.training.callbacks.source_session_metrics import (
+    SourceSessionMetricsCallback,
+)
+from foundry.training.callbacks.compute_milestone import (
+    ComputeMilestoneCheckpointCallback,
 )
 from foundry.training.callbacks.tuning import EffectiveBatchSizeCallback
 from foundry.training.callbacks.visualization import (
@@ -38,6 +48,7 @@ def get_wandb_experiment(trainer: Trainer):
 
 
 __all__ = [
+    "ComputeMilestoneCheckpointCallback",
     "ComputeTrackingCallback",
     "ConfusionMatrixCallback",
     "DeterministicSamplerCallback",
@@ -46,6 +57,8 @@ __all__ = [
     "ParameterWatcherCallback",
     "ReconstructionVisualizationCallback",
     "SessionMetricsCallback",
+    "SourceSessionMetricsCallback",
+    "StepPerformanceBenchmarkCallback",
     "VocabInitializerCallback",
     "get_wandb_experiment",
 ]

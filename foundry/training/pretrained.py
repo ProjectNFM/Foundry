@@ -224,6 +224,7 @@ def load_pretrained_weights(
     checkpoint_path: str | Path,
     freeze: bool = False,
     mode: TransferMode = TransferMode.STRICT,
+    components: tuple[str, ...] | None = None,
 ) -> TransferReport:
     """Load pretrained weights with validated, atomic transfer.
 
@@ -245,6 +246,10 @@ def load_pretrained_weights(
         freeze: If ``True``, set ``requires_grad = False`` on all
             successfully transferred parameters.
         mode: Transfer strictness.  Defaults to ``STRICT``.
+        components: Explicit top-level component names to transfer. When
+            omitted, use ``model.transferable_components()``. This supports
+            documented regimes such as a frozen representation that excludes
+            a task router.
 
     Returns:
         :class:`TransferReport` with complete transfer details.
@@ -282,7 +287,15 @@ def load_pretrained_weights(
             f"to transfer."
         )
 
-    component_names = model.transferable_components()
+    component_names = model.transferable_components() if components is None else components
+    if components is not None and not component_names:
+        raise PretrainedTransferError("No pretrained components were selected")
+    missing_components = [name for name in component_names if not hasattr(model, name)]
+    if missing_components:
+        raise PretrainedTransferError(
+            f"Selected transferable components do not exist on {type(model).__name__}: "
+            f"{missing_components}"
+        )
     target_state = _collect_target_state(model, component_names)
 
     validated_mapping, report = _validate_transfer(
