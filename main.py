@@ -615,6 +615,189 @@ def _log_config_to_wandb(trainer, cfg: DictConfig):
     )
 
 
+def _parse_bids_components(recording_id: str) -> dict[str, str]:
+    """Extract BIDS components (sub, ses, acq, etc.) from a recording ID."""
+    components = {}
+    for part in recording_id.split("_"):
+        if "-" in part:
+            key, _, val = part.partition("-")
+            components[key] = val
+    return components
+
+
+def _derive_species(datamodule) -> str | None:
+    """Derive species from the dataset class name."""
+    class_name = datamodule.dataset_class.__name__.lower()
+    if "minipig" in class_name:
+        return "minipigs"
+    if "monkey" in class_name:
+        return "monkeys"
+    return None
+
+
+def _prepare_fraction_provenance(
+    cfg: DictConfig,
+    datamodule,
+    output_dir: str,
+) -> dict | None:
+    """Build and write fraction provenance JSON if manifests are available.
+
+    Returns the provenance dict for WandB logging, or None.
+    """
+    import json
+
+    manifests = datamodule.fraction_manifests
+    if not manifests:
+        return None
+
+    split_hashes = datamodule.fraction_split_hashes
+    split_class_counts = datamodule.fraction_split_class_counts
+    audit_records = datamodule.fraction_audit_records
+    species = _derive_species(datamodule)
+
+    recording_ids = list(manifests.keys())
+    if len(recording_ids) != 1:
+        logger.warning(
+            "Fraction provenance expects single-session; got %d recordings",
+            len(recording_ids),
+        )
+
+    rid = recording_ids[0]
+    manifest = manifests[rid]
+    bids = _parse_bids_components(rid)
+
+    from hydra_plugins.foundry_launcher.launch_snapshot import (
+        get_snapshot_provenance_for_wandb,
+    )
+
+    snapshot_prov = get_snapshot_provenance_for_wandb() or {}
+
+    audit_record = audit_records.get(rid, {})
+    audit_hash = datamodule.fraction_audit_artifact_sha256
+
+    provenance = {
+        "species": species,
+        "subject": bids.get("sub"),
+        "session": bids.get("ses"),
+        "recording_id": rid,
+        "dataset_class": datamodule.dataset_class.__name__,
+        "split_type": datamodule.dataset_kwargs.get("split_type"),
+        "model_seed": int(cfg.run.seed),
+        "fraction_seed": int(
+            datamodule.training_fraction_seed
+            if datamodule.training_fraction_seed is not None
+            else datamodule.seed
+        ),
+        "training_fraction_requested": manifest.requested_fraction,
+        "training_fraction_realized": manifest.realized_fraction,
+        "fraction_manifest": manifest.to_dict(),
+        "split_hashes": {
+            "actual": split_hashes.get(rid, {}),
+            "expected": audit_record.get("split_hashes", {}),
+        },
+        "split_class_counts": {
+            "actual": split_class_counts.get(rid, {}),
+            "expected": audit_record.get("per_class_counts", {}),
+        },
+        "split_present_classes": {
+            "actual": {
+                split: [
+                    class_name
+                    for class_name, count in counts.items()
+                    if count > 0
+                ]
+                for split, counts in split_class_counts.get(rid, {}).items()
+            },
+            "expected": {
+                split: [
+                    class_name
+                    for class_name, count in counts.items()
+                    if count > 0
+                ]
+                for split, counts in audit_record.get(
+                    "per_class_counts", {}
+                ).items()
+            },
+        },
+        "train_present_classes": manifest.present_classes,
+        "train_absent_classes": manifest.absent_classes,
+        "train_per_class_counts": manifest.per_class_counts,
+        "num_present_classes": len(manifest.present_classes),
+        "manifest_hash": manifest.manifest_hash,
+        "source_intervals_hash": manifest.source_intervals_hash,
+        "audit_artifact_sha256": audit_hash,
+        "snapshot_provenance": snapshot_prov,
+    }
+
+    provenance_path = os.path.join(output_dir, "neurosoft_provenance.json")
+    with open(provenance_path, "w") as f:
+        json.dump(provenance, f, indent=2, ensure_ascii=True)
+    logger.info("Wrote fraction provenance to %s", provenance_path)
+
+    return provenance
+
+
+def _log_neurosoft_provenance_to_wandb(
+    trainer, provenance: dict, output_dir: str
+) -> None:
+    """Upload provenance as WandB artifact and add queryable config fields."""
+    if not isinstance(trainer.logger, WandbLogger):
+        return
+
+    import wandb
+
+    queryable = {
+        "neurosoft/species": provenance.get("species"),
+        "neurosoft/subject": provenance.get("subject"),
+        "neurosoft/session": provenance.get("session"),
+        "neurosoft/recording_id": provenance.get("recording_id"),
+        "neurosoft/training_fraction_requested": provenance.get(
+            "training_fraction_requested"
+        ),
+        "neurosoft/training_fraction_realized": provenance.get(
+            "training_fraction_realized"
+        ),
+        "neurosoft/model_seed": provenance.get("model_seed"),
+        "neurosoft/fraction_seed": provenance.get("fraction_seed"),
+        "neurosoft/split_type": provenance.get("split_type"),
+        "neurosoft/present_classes": provenance.get("train_present_classes"),
+        "neurosoft/absent_classes": provenance.get("train_absent_classes"),
+        "neurosoft/num_present_classes": provenance.get("num_present_classes"),
+        "neurosoft/per_class_counts": provenance.get("train_per_class_counts"),
+        "neurosoft/manifest_hash": provenance.get("manifest_hash"),
+        "neurosoft/source_intervals_hash": provenance.get(
+            "source_intervals_hash"
+        ),
+        "neurosoft/runtime_split_hashes": provenance.get(
+            "split_hashes", {}
+        ).get("actual"),
+        "neurosoft/audit_expected_split_hashes": provenance.get(
+            "split_hashes", {}
+        ).get("expected"),
+        "neurosoft/runtime_split_class_counts": provenance.get(
+            "split_class_counts", {}
+        ).get("actual"),
+        "neurosoft/audit_expected_split_class_counts": provenance.get(
+            "split_class_counts", {}
+        ).get("expected"),
+        "neurosoft/audit_artifact_sha256": provenance.get(
+            "audit_artifact_sha256"
+        ),
+        "neurosoft/eligible": True,
+    }
+    trainer.logger.experiment.config.update(queryable, allow_val_change=True)
+
+    provenance_path = os.path.join(output_dir, "neurosoft_provenance.json")
+    if os.path.isfile(provenance_path):
+        artifact = wandb.Artifact(
+            name=f"neurosoft-provenance-{provenance.get('recording_id', 'unknown')}",
+            type="provenance",
+        )
+        artifact.add_file(provenance_path)
+        trainer.logger.experiment.log_artifact(artifact)
+        logger.info("Uploaded neurosoft provenance artifact to WandB")
+
+
 def _is_sweep_mode() -> bool:
     """Check if running under WandB sweep."""
     return "WANDB_SWEEP_ID" in os.environ
@@ -804,6 +987,15 @@ def main(cfg: DictConfig):
 
     model, datamodule = _build_model_and_data(cfg)
 
+    # Prepare fraction manifests before WandB logging and training.
+    if (
+        hasattr(datamodule, "training_fraction")
+        and datamodule.training_fraction is not None
+    ):
+        if datamodule.dataset is None:
+            datamodule.setup("fit")
+        datamodule.prepare_training_fraction_manifests()
+
     pretrained_ckpt = OmegaConf.select(
         cfg, "run.pretrained_checkpoint", default=None
     )
@@ -840,6 +1032,15 @@ def main(cfg: DictConfig):
     trainer = _build_trainer(cfg)
 
     _log_config_to_wandb(trainer, cfg)
+
+    # Log fraction provenance to WandB if manifests were prepared.
+    neurosoft_provenance = _prepare_fraction_provenance(
+        cfg, datamodule, output_dir
+    )
+    if neurosoft_provenance is not None:
+        _log_neurosoft_provenance_to_wandb(
+            trainer, neurosoft_provenance, output_dir
+        )
 
     ckpt_path = _get_resume_checkpoint_path(
         cfg, checkpoint_dir, slurm_restart_count

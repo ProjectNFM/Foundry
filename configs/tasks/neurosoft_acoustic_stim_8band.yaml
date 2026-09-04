@@ -41,10 +41,16 @@ loss:
   _target_: foundry.tasks.losses.CrossEntropyTaskLoss
 
 metrics:
-  _target_: foundry.tasks.metrics.classification_metrics
+  _target_: foundry.tasks.metrics.supported_classification_metrics
 
 metric_summary_modes:
   acc: max
   f1: max
   auroc: max
   loss: min
+  supported_f1: max
+  supported_auroc: max
+  supported_precision: max
+  supported_recall: max
+  supported_balanced_acc: max
+  num_present_classes: max

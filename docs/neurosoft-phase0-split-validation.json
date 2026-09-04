@@ -1,0 +1,163 @@
+{
+  "status": "passed",
+  "species": {
+    "minipigs": {
+      "configured_recordings": 41,
+      "intrasession_block": [
+        {
+          "fold": 0,
+          "interval_counts": {
+            "train": 31550,
+            "valid": 7904,
+            "test": 19748
+          }
+        },
+        {
+          "fold": 1,
+          "interval_counts": {
+            "train": 31558,
+            "valid": 7910,
+            "test": 19734
+          }
+        },
+        {
+          "fold": 2,
+          "interval_counts": {
+            "train": 31568,
+            "valid": 7914,
+            "test": 19720
+          }
+        }
+      ],
+      "intrasession_causal": {
+        "recordings": 41,
+        "domain_segments_checked": 486,
+        "interval_counts": {
+          "train": 35339,
+          "valid": 5683,
+          "test": 18180
+        }
+      },
+      "loso": [
+        {
+          "held_out_subject": "sub-01",
+          "train_recordings": 39,
+          "valid_recordings": 2,
+          "target_leakage": []
+        },
+        {
+          "held_out_subject": "sub-02",
+          "train_recordings": 37,
+          "valid_recordings": 4,
+          "target_leakage": []
+        },
+        {
+          "held_out_subject": "sub-03",
+          "train_recordings": 30,
+          "valid_recordings": 11,
+          "target_leakage": []
+        },
+        {
+          "held_out_subject": "sub-04",
+          "train_recordings": 33,
+          "valid_recordings": 8,
+          "target_leakage": []
+        },
+        {
+          "held_out_subject": "sub-05",
+          "train_recordings": 37,
+          "valid_recordings": 4,
+          "target_leakage": []
+        },
+        {
+          "held_out_subject": "sub-06",
+          "train_recordings": 39,
+          "valid_recordings": 2,
+          "target_leakage": []
+        },
+        {
+          "held_out_subject": "sub-07",
+          "train_recordings": 31,
+          "valid_recordings": 10,
+          "target_leakage": []
+        }
+      ]
+    },
+    "monkeys": {
+      "configured_recordings": 27,
+      "intrasession_block": [
+        {
+          "fold": 0,
+          "interval_counts": {
+            "train": 21408,
+            "valid": 5367,
+            "test": 13401
+          }
+        },
+        {
+          "fold": 1,
+          "interval_counts": {
+            "train": 21417,
+            "valid": 5367,
+            "test": 13392
+          }
+        },
+        {
+          "fold": 2,
+          "interval_counts": {
+            "train": 21425,
+            "valid": 5368,
+            "test": 13383
+          }
+        }
+      ],
+      "intrasession_causal": {
+        "recordings": 27,
+        "domain_segments_checked": 326,
+        "interval_counts": {
+          "train": 23991,
+          "valid": 3887,
+          "test": 12298
+        }
+      },
+      "loso": [
+        {
+          "held_out_subject": "sub-01",
+          "train_recordings": 11,
+          "valid_recordings": 16,
+          "target_leakage": []
+        },
+        {
+          "held_out_subject": "sub-02",
+          "train_recordings": 22,
+          "valid_recordings": 5,
+          "target_leakage": []
+        },
+        {
+          "held_out_subject": "sub-03",
+          "train_recordings": 26,
+          "valid_recordings": 1,
+          "target_leakage": []
+        },
+        {
+          "held_out_subject": "sub-04",
+          "train_recordings": 25,
+          "valid_recordings": 2,
+          "target_leakage": []
+        },
+        {
+          "held_out_subject": "sub-05",
+          "train_recordings": 25,
+          "valid_recordings": 2,
+          "target_leakage": []
+        },
+        {
+          "held_out_subject": "sub-06",
+          "train_recordings": 26,
+          "valid_recordings": 1,
+          "target_leakage": []
+        }
+      ]
+    }
+  }
+}

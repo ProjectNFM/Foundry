@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-08-05
 **Parent experiment:** [Intrasession Optimal-HP Training Paradigm Baselines](20260727-LS-intrasession-opt-baselines.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [NeuroSoft Supervised-Pretraining Protocol and Data Audit](../inbox/20260826-neurosoft-supervised-pretraining-protocol.md)
 **Tags:** sweep, minipigs, monkeys, neurosoft, 8band, intrasession, multisubject, causal, split_type, auditory_decoding
 
 ## Background

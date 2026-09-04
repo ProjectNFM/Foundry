@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from lightning import Trainer
 
+from foundry.training.callbacks.compute import ComputeTrackingCallback
 from foundry.training.callbacks.diagnostics import ParameterWatcherCallback
 from foundry.training.callbacks.embedding_viz import (
     EmbeddingVisualizationCallback,
@@ -37,6 +38,7 @@ def get_wandb_experiment(trainer: Trainer):
 
 
 __all__ = [
+    "ComputeTrackingCallback",
     "ConfusionMatrixCallback",
     "DeterministicSamplerCallback",
     "EffectiveBatchSizeCallback",

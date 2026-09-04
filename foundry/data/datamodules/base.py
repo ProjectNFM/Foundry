@@ -5,11 +5,15 @@ and optional tokenization/vocab initialization. It decouples data loading from
 model-specific preprocessing.
 """
 
+from __future__ import annotations
+
 import gc
 import logging
 import math
+from copy import deepcopy
 from typing import TYPE_CHECKING, Callable, Literal, Optional, Type
 
+import numpy as np
 import torch
 from hydra.utils import get_class
 from omegaconf import DictConfig, OmegaConf, open_dict
@@ -19,6 +23,11 @@ from torch_brain.samplers import RandomFixedWindowSampler
 from lightning import LightningDataModule
 from torch_brain.transforms import Compose
 
+from foundry.data.fraction_manifest import (
+    FractionManifest,
+    FractionManifestBuilder,
+    _canonical_hash,
+)
 from foundry.data.samplers import (
     FastRandomFixedWindowSampler,
     VariableLengthBatchSampler,
@@ -138,6 +147,13 @@ class NeuralDataModule(LightningDataModule):
         sampler_class: Optional[Type[RandomFixedWindowSampler]] = None,
         session_pct: Optional[dict[str, float]] = None,
         window_lengths: Optional[list[float]] = None,
+        training_fraction: float | None = None,
+        training_fraction_seed: int | None = None,
+        training_fraction_task: str | None = None,
+        training_fraction_min_class_support: int = 3,
+        training_fraction_min_present_classes: int = 6,
+        audit_json: str | None = None,
+        audit_species: str | None = None,
     ):
         """Initialize the data module.
 
@@ -171,6 +187,22 @@ class NeuralDataModule(LightningDataModule):
                 :class:`VariableLengthBatchSampler` is used instead of the
                 regular sampler.  Each batch randomly selects one length so
                 all samples within a batch share the same duration.
+            training_fraction: If set, select this fraction of training
+                intervals using class-aware nested sampling.
+            training_fraction_seed: Seed for fraction permutations.
+                Defaults to ``self.seed``.
+            training_fraction_task: Task name whose class mapping drives
+                the fraction selection.  Required when multiple tasks have
+                class mappings.
+            training_fraction_min_class_support: Minimum per-class support
+                for a fraction to be available.
+            training_fraction_min_present_classes: Minimum number of present
+                classes for a fraction to be available.
+            audit_json: Optional verified Phase 0 audit artifact. When set,
+                runtime split hashes must match its recording entry before
+                fraction manifests are accepted.
+            audit_species: Species key used to disambiguate duplicated BIDS
+                recording IDs in the Phase 0 audit.
         """
         super().__init__()
         if isinstance(dataset_class, str):
@@ -212,6 +244,26 @@ class NeuralDataModule(LightningDataModule):
                         f"session_pct.{split_name} must be in (0, 1], got {pct}"
                     )
                 self._session_pct[split_name] = pct
+
+        self.training_fraction = training_fraction
+        self.training_fraction_seed = training_fraction_seed
+        self.training_fraction_task = training_fraction_task
+        self.training_fraction_min_class_support = (
+            training_fraction_min_class_support
+        )
+        self.training_fraction_min_present_classes = (
+            training_fraction_min_present_classes
+        )
+        self.audit_json = audit_json
+        self.audit_species = audit_species
+
+        self._fraction_manifests: dict[str, FractionManifest] = {}
+        self._fraction_split_hashes: dict[str, dict[str, str]] = {}
+        self._fraction_split_class_counts: dict[
+            str, dict[str, dict[str, int]]
+        ] = {}
+        self._fraction_audit_records: dict[str, dict] = {}
+        self._fraction_audit_artifact_sha256: str | None = None
 
         self._tokenizer = tokenizer
 
@@ -312,6 +364,283 @@ class NeuralDataModule(LightningDataModule):
         """Return sorted list of unique channel IDs across the dataset."""
         return sorted(set(self.dataset.get_channel_ids()))
 
+    # -- Training fraction manifests -------------------------------------------
+
+    def _resolve_fraction_task_config(self) -> "TaskConfig":
+        """Resolve the single task config used for fraction selection."""
+        if not self._task_configs:
+            raise ValueError(
+                "task_configs must be provided for training_fraction"
+            )
+        candidates = {
+            name: cfg
+            for name, cfg in self._task_configs.items()
+            if cfg.class_mapping is not None
+        }
+        if not candidates:
+            raise ValueError(
+                "No task config with a class_mapping found for "
+                "training_fraction"
+            )
+        if self.training_fraction_task:
+            if self.training_fraction_task not in candidates:
+                raise ValueError(
+                    f"training_fraction_task={self.training_fraction_task!r} "
+                    f"not found among tasks with class mappings: "
+                    f"{sorted(candidates)}"
+                )
+            return candidates[self.training_fraction_task]
+        if len(candidates) == 1:
+            return next(iter(candidates.values()))
+        raise ValueError(
+            f"Multiple tasks have class mappings ({sorted(candidates)}); "
+            f"set training_fraction_task to disambiguate"
+        )
+
+    @staticmethod
+    def _compute_split_hash(recording_id: str, intervals) -> str:
+        """Compute the Phase 0 canonical hash for one split's intervals.
+
+        This deliberately hashes the raw interval dictionaries, matching
+        :func:`tools.audit_neurosoft_sessions._interval_hash`.  Hashing the
+        derived interval-identity digests would create a different algorithm
+        and cannot verify the frozen audit artifact.
+        """
+        if len(intervals) == 0:
+            return _canonical_hash([])
+        starts = np.asarray(intervals.start)
+        ends = np.asarray(intervals.end)
+        labels = (
+            np.asarray(intervals.behavior_labels)
+            if hasattr(intervals, "behavior_labels")
+            else np.array([""] * len(intervals))
+        )
+        payload = [
+            {
+                "recording_id": recording_id,
+                "index": index,
+                "start": float(start).hex(),
+                "end": float(end).hex(),
+                "label": str(label),
+            }
+            for index, (start, end, label) in enumerate(
+                zip(starts, ends, labels)
+            )
+        ]
+        return _canonical_hash(payload)
+
+    @staticmethod
+    def _split_class_counts(
+        intervals, task_config: "TaskConfig"
+    ) -> dict[str, int]:
+        """Count mapped target classes in one split using the task mapping."""
+        class_names = task_config.class_mapping.class_names
+        counts = {name: 0 for name in class_names}
+        if not hasattr(intervals, "behavior_labels") or not len(intervals):
+            return counts
+        mapped, _ = task_config.class_mapping.filter_and_remap(
+            np.asarray(intervals.behavior_labels)
+        )
+        for class_id, class_name in enumerate(class_names):
+            counts[class_name] = int((mapped == class_id).sum())
+        return counts
+
+    def _load_fraction_audit(self) -> dict | None:
+        """Load the configured Phase 0 audit through its hash-verifying loader."""
+        if self.audit_json is None:
+            return None
+        if not self.audit_species:
+            raise ValueError(
+                "audit_species is required when audit_json is configured to "
+                "disambiguate recording IDs across species"
+            )
+        from foundry.config_resolvers import _load_neurosoft_audit
+
+        audit = _load_neurosoft_audit(self.audit_json)
+        self._fraction_audit_artifact_sha256 = audit["artifact_sha256"]
+        return audit
+
+    def _audit_recording(self, audit: dict, recording_id: str) -> dict:
+        """Return the unique audited recording for this species and ID."""
+        matches = [
+            record
+            for record in audit["recordings"]
+            if record.get("recording_id") == recording_id
+            and record.get("species") == self.audit_species
+        ]
+        if len(matches) != 1:
+            raise RuntimeError(
+                "Phase 0 audit must contain exactly one recording for "
+                f"species={self.audit_species!r}, recording_id={recording_id!r}; "
+                f"found {len(matches)}"
+            )
+        return matches[0]
+
+    @staticmethod
+    def _verify_audit_split_hashes(
+        recording_id: str,
+        actual: dict[str, str],
+        audit_record: dict,
+    ) -> None:
+        """Fail before training when runtime split identities drift from Phase 0."""
+        expected = audit_record.get("split_hashes")
+        if not isinstance(expected, dict):
+            raise RuntimeError(
+                f"Phase 0 audit recording {recording_id!r} lacks split_hashes"
+            )
+        mismatches = {
+            split: {
+                "expected": expected.get(split),
+                "actual": actual.get(split),
+            }
+            for split in ("train", "valid", "test")
+            if expected.get(split) != actual.get(split)
+        }
+        if mismatches:
+            raise RuntimeError(
+                "Runtime split hashes differ from the verified Phase 0 audit "
+                f"for recording {recording_id!r}: {mismatches}"
+            )
+
+    def prepare_training_fraction_manifests(self) -> None:
+        """Build and cache fraction manifests for each recording.
+
+        Must be called after :meth:`setup` and task config attachment.
+        Fails loudly if any requested cell is unavailable.
+
+        Idempotent: repeated calls reuse cached manifests.
+        """
+        if self.training_fraction is None:
+            return
+        if self.dataset is None:
+            raise RuntimeError(
+                "Call setup() before prepare_training_fraction_manifests()"
+            )
+        if self._fraction_manifests:
+            return
+
+        fraction_seed = (
+            self.training_fraction_seed
+            if self.training_fraction_seed is not None
+            else self.seed
+        )
+        task_cfg = self._resolve_fraction_task_config()
+        audit = self._load_fraction_audit()
+
+        train_intervals = self.dataset.get_sampling_intervals(split="train")
+        valid_intervals = self.dataset.get_sampling_intervals(split="valid")
+        test_intervals = self.dataset.get_sampling_intervals(split="test")
+
+        for rid, intervals in train_intervals.items():
+            value_field = task_cfg.target_extractor["value_key"].split(".")[-1]
+            if not hasattr(intervals, value_field):
+                raise ValueError(
+                    f"Training intervals for {rid} lack attribute "
+                    f"{value_field!r}; cannot build fraction manifest"
+                )
+
+            builder = FractionManifestBuilder(
+                recording_id=rid,
+                train_intervals=intervals,
+                class_mapping=task_cfg.class_mapping,
+                seed=fraction_seed,
+                min_class_support=self.training_fraction_min_class_support,
+                min_present_classes=self.training_fraction_min_present_classes,
+            )
+            manifest = builder.build_fraction(self.training_fraction)
+
+            if not manifest.available:
+                raise RuntimeError(
+                    f"Fraction {self.training_fraction} is unavailable for "
+                    f"recording {rid}: {manifest.failure_reason}. "
+                    f"This cell should not be in the sweep."
+                )
+
+            actual_split_hashes = {
+                "train": self._compute_split_hash(rid, intervals),
+                "valid": self._compute_split_hash(
+                    rid, valid_intervals.get(rid, [])
+                ),
+                "test": self._compute_split_hash(
+                    rid, test_intervals.get(rid, [])
+                ),
+            }
+            self._fraction_split_hashes[rid] = actual_split_hashes
+            self._fraction_split_class_counts[rid] = {
+                "train": self._split_class_counts(intervals, task_cfg),
+                "valid": self._split_class_counts(
+                    valid_intervals.get(rid, []), task_cfg
+                ),
+                "test": self._split_class_counts(
+                    test_intervals.get(rid, []), task_cfg
+                ),
+            }
+            if audit is not None:
+                audit_record = self._audit_recording(audit, rid)
+                self._verify_audit_split_hashes(
+                    rid, actual_split_hashes, audit_record
+                )
+                self._fraction_audit_records[rid] = deepcopy(audit_record)
+
+            self._fraction_manifests[rid] = manifest
+
+        logger.info(
+            "Prepared fraction manifests for %d recordings "
+            "(fraction=%.2f, seed=%d)",
+            len(self._fraction_manifests),
+            self.training_fraction,
+            fraction_seed,
+        )
+
+    @property
+    def fraction_manifests(self) -> dict[str, FractionManifest]:
+        """Read-only view of cached fraction manifests by recording ID."""
+        return dict(self._fraction_manifests)
+
+    @property
+    def fraction_split_hashes(self) -> dict[str, dict[str, str]]:
+        """Read-only view of computed train/valid/test split hashes."""
+        return dict(self._fraction_split_hashes)
+
+    @property
+    def fraction_split_class_counts(
+        self,
+    ) -> dict[str, dict[str, dict[str, int]]]:
+        """Read-only view of mapped runtime class counts for every split."""
+        return deepcopy(self._fraction_split_class_counts)
+
+    @property
+    def fraction_audit_records(self) -> dict[str, dict]:
+        """Read-only view of the verified Phase 0 recording entries."""
+        return deepcopy(self._fraction_audit_records)
+
+    @property
+    def fraction_audit_artifact_sha256(self) -> str | None:
+        """SHA-256 of the verified Phase 0 artifact, if auditing is enabled."""
+        return self._fraction_audit_artifact_sha256
+
+    def _apply_fraction_selection(
+        self,
+        sampling_intervals: dict,
+    ) -> dict:
+        """Select only cached fraction indices from raw training intervals."""
+        if not self._fraction_manifests:
+            return sampling_intervals
+
+        result = {}
+        for rid, intervals in sampling_intervals.items():
+            manifest = self._fraction_manifests.get(rid)
+            if manifest is None:
+                result[rid] = intervals
+                continue
+            n = len(intervals)
+            mask = np.zeros(n, dtype=bool)
+            for idx in manifest.selected_indices:
+                if idx < n:
+                    mask[idx] = True
+            result[rid] = intervals.select_by_mask(mask)
+        return result
+
     def _filter_intervals(self, sampling_intervals):
         """Remove intervals whose labels are excluded by task class mappings.
 
@@ -388,6 +717,10 @@ class NeuralDataModule(LightningDataModule):
             DataLoader for the split.
         """
         sampling_intervals = self.dataset.get_sampling_intervals(split=split)
+        if split == "train" and self._fraction_manifests:
+            sampling_intervals = self._apply_fraction_selection(
+                sampling_intervals
+            )
         sampling_intervals = self._filter_intervals(sampling_intervals)
         if self._session_pct:
             sampling_intervals = self._subsample_sessions(
