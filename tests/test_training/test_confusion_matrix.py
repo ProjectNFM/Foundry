@@ -141,6 +141,29 @@ class TestConfusionMatrixTracker:
             commit=False,
         )
 
+    def test_log_wandb_uses_requested_stage(self):
+        tracker = ConfusionMatrixTracker(num_classes=2)
+        tracker.update(torch.tensor([0, 1]), torch.tensor([0, 1]))
+        counts, normalized = tracker.compute()
+
+        experiment = MagicMock()
+        mock_wandb = MagicMock()
+        mock_wandb.Image.return_value = "img"
+        with patch.dict("sys.modules", {"wandb": mock_wandb}):
+            tracker.log_wandb(
+                experiment,
+                "task",
+                epoch=3,
+                counts=counts,
+                normalized=normalized,
+                stage="test",
+            )
+
+        experiment.log.assert_called_once_with(
+            {"test/task_confusion_matrix": "img"},
+            commit=False,
+        )
+
     def test_render_confusion_figure_returns_matplotlib_figure(self):
         from matplotlib.figure import Figure
 
@@ -216,6 +239,66 @@ class TestConfusionMatrixCallback:
 
         counts, _ = tracker.compute()
         assert counts.sum() == 0, "tracker should be reset after logging"
+
+    def test_callback_does_not_log_media_by_default(self):
+        module, cfg = self._make_module_with_mapping()
+        tracker = module._val_confusion_trackers[cfg.name]
+        tracker.update(torch.tensor([0, 1, 2]), torch.tensor([0, 1, 2]))
+
+        trainer = MagicMock()
+        trainer.logger = MagicMock()
+        trainer.current_epoch = 0
+
+        callback = ConfusionMatrixCallback()
+        with patch.object(tracker, "log_wandb") as log_wandb:
+            callback.on_validation_epoch_end(trainer, module)
+
+        log_wandb.assert_not_called()
+
+    def test_callback_logs_media_on_test_when_enabled(self):
+        module, cfg = self._make_module_with_mapping()
+        tracker = module._test_confusion_trackers[cfg.name]
+        tracker.update(torch.tensor([0, 1, 2]), torch.tensor([0, 1, 2]))
+
+        trainer = MagicMock()
+        trainer.logger = MagicMock()
+        trainer.current_epoch = 0
+        experiment = MagicMock()
+
+        callback = ConfusionMatrixCallback(log_media=True)
+        with patch(
+            "foundry.training.callbacks.get_wandb_experiment",
+            return_value=experiment,
+        ), patch.object(tracker, "log_wandb") as log_wandb:
+            callback.on_test_epoch_end(trainer, module)
+
+        log_wandb.assert_called_once()
+        args, kwargs = log_wandb.call_args
+        assert args[:3] == (experiment, cfg.name, 0)
+        assert torch.equal(
+            args[3], torch.tensor([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        )
+        assert torch.equal(args[4], torch.eye(3))
+        assert kwargs == {"stage": "test"}
+
+    def test_callback_does_not_log_test_media_during_validation(self):
+        module, cfg = self._make_module_with_mapping()
+        tracker = module._val_confusion_trackers[cfg.name]
+        tracker.update(torch.tensor([0, 1, 2]), torch.tensor([0, 1, 2]))
+
+        trainer = MagicMock()
+        trainer.logger = MagicMock()
+        trainer.current_epoch = 0
+        experiment = MagicMock()
+
+        callback = ConfusionMatrixCallback(log_media=True)
+        with patch(
+            "foundry.training.callbacks.get_wandb_experiment",
+            return_value=experiment,
+        ), patch.object(tracker, "log_wandb") as log_wandb:
+            callback.on_validation_epoch_end(trainer, module)
+
+        log_wandb.assert_not_called()
 
     def test_callback_skips_empty_trackers(self):
         module, cfg = self._make_module_with_mapping()

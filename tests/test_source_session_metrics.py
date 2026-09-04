@@ -277,7 +277,8 @@ class TestMetricVisibility:
         logger_call = trainer.logger.log_metrics.call_args
         assert logger_call is not None
         logged_keys = logger_call[0][0]
-        assert any("source_session/" in k for k in logged_keys)
+        assert any("val_session/source_session/" in k for k in logged_keys)
+        assert not any("val/source_session/" in k for k in logged_keys)
         assert any("supported_f1" in k for k in logged_keys)
 
 

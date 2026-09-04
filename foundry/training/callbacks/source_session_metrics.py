@@ -171,18 +171,18 @@ class SourceSessionMetricsCallback(L.Callback):
             session_f1_values.append(supported_f1)
             epoch_scores[session_id] = supported_f1
 
-            logger_metrics[f"val/source_session/{short}/supported_f1"] = (
+            logger_metrics[f"val_session/source_session/{short}/supported_f1"] = (
                 supported_f1
             )
-            logger_metrics[f"val/source_session/{short}/class_mask"] = (
+            logger_metrics[f"val_session/source_session/{short}/class_mask"] = (
                 class_mask.tolist()
             )
-            logger_metrics[f"val/source_session/{short}/support"] = (
+            logger_metrics[f"val_session/source_session/{short}/support"] = (
                 support.tolist()
             )
             for class_idx, value in enumerate(per_class_f1.tolist()):
                 logger_metrics[
-                    f"val/source_session/{short}/f1_class_{class_idx}"
+                    f"val_session/source_session/{short}/f1_class_{class_idx}"
                 ] = value
 
         session_count = len(session_f1_values)
