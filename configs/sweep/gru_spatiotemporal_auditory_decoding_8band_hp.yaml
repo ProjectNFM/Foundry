@@ -1,0 +1,58 @@
+# WandB grid for GRU + spatiotemporal (EEGNet block-1) CNN on NeuroSoft
+# 8-band auditory decoding.
+#
+# Spatiotemporal uses a temporal kernel (1, L) then a depthwise spatial
+# kernel (K, 1). Both conv_kernel and conv_depth_multiplier (D) apply.
+# GRU input_size after the frontend is F1 × D when use_input_proj=false.
+#
+# Grid: 2 split × 2 use_input_proj × 2 conv_filters × 3 conv_kernel × 2 D × 2 num_sources = 96
+#
+#   wandb sweep configs/sweep/gru_spatiotemporal_auditory_decoding_8band_hp.yaml
+#   WANDB_SWEEP_EXPERIMENT=auditory_decoding/gru_neurosoft_8band_intrasession_multisubj \
+#       uv run python -m foundry.wandb_sweep_agent_worker <entity>/<project>/<sweep-id>
+
+defaults:
+  - default
+
+method: grid
+metric:
+  name: val/neurosoft_acoustic_stim_8band_f1
+  goal: maximize
+parameters:
+  model.conv:
+    value: spatiotemporal
+  data.split_type:
+    values:
+      - intrasession-causal
+  hyperparameters.batch_size:
+    values:
+      - 128
+  hyperparameters.learning_rate:
+    values:
+      - 2.5e-4
+  hyperparameters.weight_decay:
+    values:
+      - 0.01
+  hyperparameters.num_sources:
+    values:
+      - 32
+      - 64
+      - 128
+  model.use_input_proj:
+    values:
+      - true
+      - false
+  model.conv_filters:
+    values:
+      - 8
+      - 16
+      - 32
+  model.conv_kernel:
+    values:
+      - 64
+      - 128
+      - 256
+  model.conv_depth_multiplier:
+    values:
+      - 2
+      - 4

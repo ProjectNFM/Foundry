@@ -10,3 +10,8 @@ hidden_size: 128
 num_layers: 2
 bidirectional: true
 dropout_rate: 0.3
+conv: null                  # null | spatial | temporal | spatiotemporal
+use_input_proj: true        # false = replace input_proj; ignored when conv is null
+conv_filters: 8             # F (spatial/temporal) or F1 (spatiotemporal)
+conv_kernel: 64             # temporal kernel L; unused for spatial
+conv_depth_multiplier: 2    # D; spatiotemporal only

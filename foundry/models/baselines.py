@@ -437,9 +437,10 @@ class GRU(BaselineEEGModel):
     """
     A GRU-based baseline for EEG classification.
 
-    This model projects per-timestep channel values into a latent feature space,
-    processes the sequence with a (bi)directional GRU, and applies global temporal
-    averaging before a multitask readout.
+    This model optionally applies a convolutional frontend (spatial, temporal, or
+    spatiotemporal) after the channel strategy, then projects per-timestep channel
+    values into a latent feature space, processes the sequence with a (bi)directional
+    GRU, and applies global temporal averaging before a multitask readout.
     """
 
     def __init__(
@@ -453,6 +454,11 @@ class GRU(BaselineEEGModel):
         bidirectional: bool = True,
         dropout_rate: float = 0.3,
         channel_strategy: Optional[ChannelStrategy] = None,
+        conv: str | None = None,
+        use_input_proj: bool = True,
+        conv_filters: int = 8,
+        conv_kernel: int = 64,
+        conv_depth_multiplier: int = 2,
     ):
         """
         Args:
@@ -465,6 +471,12 @@ class GRU(BaselineEEGModel):
             bidirectional (bool, optional): Whether to use bidirectional GRU. Default: True.
             dropout_rate (float, optional): Dropout rate between stacked GRU layers. Default: 0.3.
             channel_strategy: Optional channel strategy for heterogeneous electrode counts.
+            conv (str | None, optional): Conv type: None, 'spatial', 'temporal', or 'spatiotemporal'. Default: None.
+            use_input_proj (bool, optional): If conv is set and True, keep input_proj after conv.
+                If False, conv output goes directly to GRU. Ignored when conv is None. Default: True.
+            conv_filters (int, optional): Number of filters for spatial/temporal conv, or F1 for spatiotemporal. Default: 8.
+            conv_kernel (int, optional): Temporal kernel size; ignored for spatial conv. Default: 64.
+            conv_depth_multiplier (int, optional): Depth multiplier D for spatiotemporal conv. Default: 2.
         """
         super().__init__(
             num_channels=num_channels,
@@ -473,10 +485,41 @@ class GRU(BaselineEEGModel):
             channel_strategy=channel_strategy,
         )
 
-        self.input_norm = nn.LayerNorm(self.num_channels)
-        self.input_proj = nn.Linear(self.num_channels, input_proj_dim)
+        if conv is not None and conv not in {
+            "spatial",
+            "temporal",
+            "spatiotemporal",
+        }:
+            raise ValueError(
+                f"conv must be None, 'spatial', 'temporal', or 'spatiotemporal', got {conv}"
+            )
+
+        self.conv_type = conv
+        self.use_input_proj = use_input_proj or (conv is None)
+        self.input_norm = None
+        self.conv = None
+        self.input_proj = None
+
+        if conv is None:
+            self.input_norm = nn.LayerNorm(self.num_channels)
+            self.input_proj = nn.Linear(self.num_channels, input_proj_dim)
+            gru_in = input_proj_dim
+        else:
+            self.conv = self._build_conv(
+                conv, conv_filters, conv_kernel, conv_depth_multiplier
+            )
+            conv_feat_dim = self._get_conv_out_channels(
+                conv, conv_filters, conv_depth_multiplier
+            )
+
+            if use_input_proj:
+                self.input_proj = nn.Linear(conv_feat_dim, input_proj_dim)
+                gru_in = input_proj_dim
+            else:
+                gru_in = conv_feat_dim
+
         self.gru = nn.GRU(
-            input_size=input_proj_dim,
+            input_size=gru_in,
             hidden_size=hidden_size,
             num_layers=num_layers,
             dropout=dropout_rate if num_layers > 1 else 0.0,
@@ -486,6 +529,75 @@ class GRU(BaselineEEGModel):
 
         out_dim = hidden_size * (2 if bidirectional else 1)
         self.router = self._build_router(out_dim)
+
+    def _build_conv(
+        self,
+        conv_type: str,
+        conv_filters: int,
+        conv_kernel: int,
+        conv_depth_multiplier: int,
+    ) -> nn.Module:
+        """Build convolutional frontend (spatial, temporal, or spatiotemporal)."""
+        K = self.num_channels
+
+        if conv_type == "spatial":
+            # No padding: kernel (K, 1) mixes all electrodes into one spatial
+            # position, matching EEGNet / the spatiotemporal spatial layer.
+            return nn.Sequential(
+                nn.Conv2d(1, conv_filters, kernel_size=(K, 1), bias=False),
+                nn.BatchNorm2d(conv_filters),
+                nn.ELU(),
+            )
+
+        elif conv_type == "temporal":
+            return nn.Sequential(
+                nn.Conv2d(
+                    1,
+                    conv_filters,
+                    kernel_size=(1, conv_kernel),
+                    padding="same",
+                    bias=False,
+                ),
+                nn.BatchNorm2d(conv_filters),
+                nn.ELU(),
+            )
+
+        elif conv_type == "spatiotemporal":
+            F1 = conv_filters
+            D = conv_depth_multiplier
+            return nn.Sequential(
+                nn.Conv2d(
+                    1,
+                    F1,
+                    kernel_size=(1, conv_kernel),
+                    padding="same",
+                    bias=False,
+                ),
+                nn.BatchNorm2d(F1),
+                nn.Conv2d(
+                    F1, F1 * D, kernel_size=(K, 1), groups=F1, bias=False
+                ),
+                nn.BatchNorm2d(F1 * D),
+                nn.ELU(),
+            )
+
+        else:
+            raise ValueError(f"Unknown conv_type: {conv_type}")
+
+    def _get_conv_out_channels(
+        self, conv_type: str, conv_filters: int, conv_depth_multiplier: int
+    ) -> int:
+        """Compute output channels from conv (flattened to 1D per timestep)."""
+        K = self.num_channels
+
+        if conv_type == "spatial":
+            return conv_filters
+        elif conv_type == "temporal":
+            return conv_filters * K
+        elif conv_type == "spatiotemporal":
+            return conv_filters * conv_depth_multiplier
+        else:
+            raise ValueError(f"Unknown conv_type: {conv_type}")
 
     def forward(
         self,
@@ -511,13 +623,24 @@ class GRU(BaselineEEGModel):
                 f"Expected input with {self.num_samples} time samples, got {x.shape[-1]}"
             )
 
-        # Convert from (B, C, T) to (B, T, C) for sequence modeling over time.
-        x = x.transpose(1, 2)
-        x = self.input_norm(x)
-        x = self.input_proj(x)
+        if self.conv is None:
+            x = x.transpose(1, 2)
+            x = self.input_norm(x)
+            x = self.input_proj(x)
+        else:
+            B, K, T = x.shape
+            x = x.unsqueeze(1)
+            x = self.conv(x)
+
+            B_out, F_out, K_out, T_out = x.shape
+            x = x.permute(0, 3, 1, 2)
+            x = x.reshape(B_out, T_out, -1)
+
+            if self.input_proj is not None:
+                x = self.input_proj(x)
+
         x, _ = self.gru(x)
 
-        # Global average pooling across the temporal dimension.
         x = x.mean(dim=1)
 
         batch_size = x.shape[0]
