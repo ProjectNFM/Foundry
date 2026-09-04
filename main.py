@@ -59,6 +59,56 @@ def _get_slurm_restart_count() -> int:
         return 0
 
 
+def _resolve_precision_for_hardware(cfg: DictConfig) -> None:
+    """Resolve an explicitly configured BF16 fallback and record hardware."""
+    requested = str(OmegaConf.select(cfg, "trainer.precision"))
+    gpu_name = "cpu"
+    capability = None
+    effective = requested
+
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name()
+        major, minor = torch.cuda.get_device_capability()
+        capability = f"{major}.{minor}"
+        if requested == "bf16-mixed" and not torch.cuda.is_bf16_supported():
+            fallback = OmegaConf.select(
+                cfg, "run.unsupported_bf16_fallback", default=None
+            )
+            if fallback not in {"16-mixed", "32-true"}:
+                raise RuntimeError(
+                    f"GPU {gpu_name!r} (compute capability {capability}) does "
+                    "not support the requested trainer.precision='bf16-mixed'. "
+                    "Set run.unsupported_bf16_fallback=16-mixed for normal "
+                    "RTX 8000 training or 32-true for a correctness diagnostic."
+                )
+            effective = str(fallback)
+            OmegaConf.update(cfg, "trainer.precision", effective)
+            logger.warning(
+                "Precision fallback: requested=%s effective=%s gpu=%s "
+                "compute_capability=%s",
+                requested,
+                effective,
+                gpu_name,
+                capability,
+            )
+
+    for key, value in {
+        "run.requested_precision": requested,
+        "run.effective_precision": effective,
+        "run.gpu_name": gpu_name,
+        "run.gpu_compute_capability": capability,
+    }.items():
+        OmegaConf.update(cfg, key, value, force_add=True)
+    logger.info(
+        "Compute precision: requested=%s effective=%s gpu=%s "
+        "compute_capability=%s",
+        requested,
+        effective,
+        gpu_name,
+        capability or "n/a",
+    )
+
+
 # -- Config patching -------------------------------------------------------
 
 
@@ -247,7 +297,19 @@ def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
         normalize_data_config(cfg.data)
         dm = instantiate(cfg.data, tokenizer=None)
     dm._task_configs = task_configs
-    dm.setup("fit")
+    is_source_discovery = (
+        OmegaConf.select(cfg, "data.role", default=None) == "source_pretraining"
+    )
+    if is_source_discovery:
+        # Source setup must still load and validate the selection manifest so
+        # metadata reflects the selected pool, but this temporary datamodule
+        # must never scan training signals for normalization statistics.
+        dm.setup("fit", fit_normalization=False)
+        logger.info(
+            "Source metadata discovery completed without fitting normalization"
+        )
+    else:
+        dm.setup("fit")
 
     if session_configs is None:
         if hasattr(dm, "get_session_configs"):
@@ -1339,7 +1401,13 @@ def _emit_source_checkpoint_manifests(
         "hyperparameters": OmegaConf.to_container(
             cfg.hyperparameters, resolve=True
         ),
+        "requested_precision": OmegaConf.select(
+            cfg, "run.requested_precision", default=str(trainer.precision)
+        ),
         "trainer_precision": str(trainer.precision),
+        "gpu_compute_capability": OmegaConf.select(
+            cfg, "run.gpu_compute_capability", default=None
+        ),
     }
 
     def _build_trained_on(compute_snap: dict) -> dict:
@@ -1408,6 +1476,12 @@ def _emit_source_checkpoint_manifests(
             "signal_seconds": compute_snap.get("signal_seconds", 0.0),
             "wall_time_seconds": compute_snap.get("wall_time_seconds", 0.0),
             "gpu": compute_snap.get("gpu", "unknown"),
+            "gpu_compute_capability": compute_snap.get(
+                "gpu_compute_capability",
+                OmegaConf.select(
+                    cfg, "run.gpu_compute_capability", default="unknown"
+                ),
+            ),
             "precision": compute_snap.get("precision", "unknown"),
         }
 
@@ -1578,6 +1652,7 @@ def main(cfg: DictConfig):
     evaluation.
     """
     setup_logging(cfg.run.log_level)
+    _resolve_precision_for_hardware(cfg)
     torch.set_float32_matmul_precision(
         str(
             OmegaConf.select(

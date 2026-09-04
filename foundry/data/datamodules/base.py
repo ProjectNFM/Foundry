@@ -13,7 +13,9 @@ import json
 import logging
 import math
 import os
+from contextlib import contextmanager
 from copy import deepcopy
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal, Optional, Type
 
 import numpy as np
@@ -339,6 +341,10 @@ class NeuralDataModule(LightningDataModule):
         self._normalization_stats: Optional[
             dict[str, "RecordingChannelStats"]
         ] = None
+        self._normalization_cache_key: str | None = None
+        self._normalization_cache_status: str | None = None
+        self._normalization_cache_identity: dict | None = None
+        self._normalization_fit_count = 0
 
         self.transform = self._build_transform_list()
         self.dataset = None
@@ -375,11 +381,19 @@ class NeuralDataModule(LightningDataModule):
             Compose(transform_list) if transform_list else None
         )
 
-    def setup(self, stage: Optional[str] = None):
+    def setup(
+        self,
+        stage: Optional[str] = None,
+        *,
+        fit_normalization: bool = True,
+    ):
         """Setup the DataModule.
 
         Args:
             stage: Stage to setup the DataModule for ('fit', 'test', 'validate').
+            fit_normalization: Whether to fit/load configured normalization.
+                Metadata discovery passes ``False`` on its temporary source
+                datamodule; normal Lightning setup always uses the default.
         """
         if self.dataset is None:
             transform_list = list(self.transform) if self.transform else []
@@ -408,7 +422,8 @@ class NeuralDataModule(LightningDataModule):
             if self._task_configs:
                 validate_task_mappings(self._task_configs, self.dataset)
 
-        self._maybe_fit_normalization()
+        if fit_normalization:
+            self._maybe_fit_normalization()
 
     def set_tokenizer(self, tokenizer: Optional[Callable]) -> None:
         """Replace the tokenizer in the transform pipeline.
@@ -453,12 +468,13 @@ class NeuralDataModule(LightningDataModule):
         self._fit_and_insert_normalization()
 
     def _fit_and_insert_normalization(self) -> None:
-        """Fit configured recording statistics and insert standardizer."""
+        """Load or fit configured recording statistics and insert standardizer."""
         from foundry.data.normalization import (
             fit_recording_global_stats,
             fit_recording_stats,
+            load_normalization_stats,
+            save_normalization_stats,
         )
-        from foundry.data.transforms import RecordingChannelStandardize
 
         cfg = self._input_normalization_cfg
         mode = cfg["mode"]
@@ -491,6 +507,179 @@ class NeuralDataModule(LightningDataModule):
 
         train_intervals = self._effective_sampling_intervals("train")
 
+        cache_identity = self._build_normalization_cache_identity(
+            train_intervals,
+            mode=mode,
+            supported_modalities=supported_modalities,
+            scale_floor=scale_floor,
+            accumulator_dtype=accumulator_dtype_name,
+        )
+        cache_key = _canonical_hash(cache_identity)
+        self._normalization_cache_identity = cache_identity
+        self._normalization_cache_key = cache_key
+
+        cache_cfg = cfg.get("cache", {}) or {}
+        cache_enabled = bool(cache_cfg.get("enabled", False))
+        configured_cache_dir = cache_cfg.get("directory")
+        cache_root = Path(
+            configured_cache_dir
+            or os.environ.get("FOUNDRY_NORMALIZATION_CACHE", "")
+            or Path(self.root) / ".foundry_normalization_cache"
+        )
+
+        if cache_enabled:
+            try:
+                cache_root.mkdir(parents=True, exist_ok=True)
+                with self._normalization_cache_lock(cache_root, cache_key):
+                    entry_dir = cache_root / cache_key
+                    npz_path = entry_dir / "input_normalization_stats.npz"
+                    manifest_path = (
+                        entry_dir / "input_normalization_manifest.json"
+                    )
+                    try:
+                        stats_by_recording = load_normalization_stats(
+                            npz_path, manifest_path
+                        )
+                        manifest = json.loads(
+                            manifest_path.read_text(encoding="utf-8")
+                        )
+                        provenance = manifest.get("provenance")
+                        if not isinstance(provenance, dict):
+                            raise ValueError(
+                                "Normalization cache provenance is missing"
+                            )
+                        cached_identity = provenance.get("cache_identity")
+                        if cached_identity != cache_identity:
+                            raise ValueError(
+                                "Normalization cache identity mismatch"
+                            )
+                        manifest_policy = {
+                            "mode": manifest.get("mode"),
+                            "supported_modalities": manifest.get(
+                                "supported_modalities"
+                            ),
+                            "scale_floor": manifest.get("scale_floor"),
+                            "accumulator_dtype": manifest.get(
+                                "accumulator_dtype"
+                            ),
+                        }
+                        expected_policy = {
+                            key: cache_identity[key] for key in manifest_policy
+                        }
+                        if manifest_policy != expected_policy:
+                            raise ValueError(
+                                "Normalization cache policy mismatch"
+                            )
+                        expected_recordings = {
+                            rid
+                            for rid, intervals in train_intervals.items()
+                            if len(intervals) > 0
+                        }
+                        if set(stats_by_recording) != expected_recordings:
+                            raise ValueError(
+                                "Normalization cache recording set mismatch"
+                            )
+                    except (
+                        AttributeError,
+                        FileNotFoundError,
+                        KeyError,
+                        TypeError,
+                        ValueError,
+                        OSError,
+                    ) as exc:
+                        if npz_path.exists() or manifest_path.exists():
+                            logger.warning(
+                                "Rejecting invalid normalization cache entry "
+                                "%s: %s; recomputing",
+                                entry_dir,
+                                exc,
+                            )
+                        stats_by_recording = self._fit_normalization_stats(
+                            train_intervals,
+                            mode=mode,
+                            supported_modalities=supported_modalities,
+                            scale_floor=scale_floor,
+                            fit_recording_stats=fit_recording_stats,
+                            fit_recording_global_stats=fit_recording_global_stats,
+                        )
+                        entry_dir.mkdir(parents=True, exist_ok=True)
+                        save_normalization_stats(
+                            stats_by_recording,
+                            entry_dir,
+                            cfg,
+                            provenance={
+                                "cache_key": cache_key,
+                                "cache_identity": cache_identity,
+                            },
+                        )
+                        self._normalization_cache_status = "miss"
+                        logger.info(
+                            "Normalization cache miss key=%s path=%s",
+                            cache_key,
+                            entry_dir,
+                        )
+                    else:
+                        self._normalization_cache_status = "hit"
+                        logger.info(
+                            "Normalization cache hit key=%s path=%s",
+                            cache_key,
+                            entry_dir,
+                        )
+            except OSError as exc:
+                logger.warning(
+                    "Normalization cache unavailable at %s (%s); fitting "
+                    "without cache",
+                    cache_root,
+                    exc,
+                )
+                stats_by_recording = self._fit_normalization_stats(
+                    train_intervals,
+                    mode=mode,
+                    supported_modalities=supported_modalities,
+                    scale_floor=scale_floor,
+                    fit_recording_stats=fit_recording_stats,
+                    fit_recording_global_stats=fit_recording_global_stats,
+                )
+                self._normalization_cache_status = "unavailable"
+        else:
+            stats_by_recording = self._fit_normalization_stats(
+                train_intervals,
+                mode=mode,
+                supported_modalities=supported_modalities,
+                scale_floor=scale_floor,
+                fit_recording_stats=fit_recording_stats,
+                fit_recording_global_stats=fit_recording_global_stats,
+            )
+            self._normalization_cache_status = "disabled"
+
+        self._install_normalization_stats(
+            stats_by_recording,
+            supported_modalities=supported_modalities,
+            scale_floor=scale_floor,
+        )
+
+        logger.info(
+            "Prepared input normalization for %d recording(s) "
+            "(mode=%s, scale_floor=%.1e, cache=%s)",
+            len(stats_by_recording),
+            mode,
+            scale_floor,
+            self._normalization_cache_status,
+        )
+
+    def _fit_normalization_stats(
+        self,
+        train_intervals,
+        *,
+        mode: str,
+        supported_modalities: frozenset[str],
+        scale_floor: float,
+        fit_recording_stats,
+        fit_recording_global_stats,
+    ) -> dict[str, "RecordingChannelStats"]:
+        """Fit every non-empty recording once for a cache miss."""
+        self._normalization_fit_count += 1
+
         stats_by_recording: dict[str, RecordingChannelStats] = {}
         for rid, intervals in train_intervals.items():
             if len(intervals) == 0:
@@ -509,6 +698,18 @@ class NeuralDataModule(LightningDataModule):
                 accumulator_dtype=np.float64,
             )
             stats_by_recording[rid] = stats
+
+        return stats_by_recording
+
+    def _install_normalization_stats(
+        self,
+        stats_by_recording: dict[str, "RecordingChannelStats"],
+        *,
+        supported_modalities: frozenset[str],
+        scale_floor: float,
+    ) -> None:
+        """Validate coverage and put frozen statistics into the pipeline."""
+        from foundry.data.transforms import RecordingChannelStandardize
 
         all_rids: set[str] = set()
         splits = ("train", "valid")
@@ -545,13 +746,127 @@ class NeuralDataModule(LightningDataModule):
         self.transform = self._build_transform_list()
         self._rebuild_dataset_transform()
 
-        logger.info(
-            "Fitted input normalization for %d recording(s) "
-            "(mode=%s, scale_floor=%.1e)",
-            len(stats_by_recording),
-            mode,
-            scale_floor,
+    @staticmethod
+    @contextmanager
+    def _normalization_cache_lock(cache_root: Path, cache_key: str):
+        """Serialize readers/writers for one cache key using an advisory lock."""
+        import fcntl
+
+        lock_path = cache_root / f".{cache_key}.lock"
+        with lock_path.open("a+") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    @staticmethod
+    def _normalization_train_interval_hash(train_intervals) -> str:
+        interval_payload = [
+            {
+                "recording_id": recording_id,
+                "start": float(start).hex(),
+                "end": float(end).hex(),
+            }
+            for recording_id, intervals in sorted(train_intervals.items())
+            for start, end in zip(intervals.start, intervals.end)
+        ]
+        return _canonical_hash(interval_payload)
+
+    def _build_normalization_cache_identity(
+        self,
+        train_intervals,
+        *,
+        mode: str,
+        supported_modalities: frozenset[str],
+        scale_floor: float,
+        accumulator_dtype: str,
+    ) -> dict:
+        """Build a scientific and data-version identity for normalization."""
+        from foundry.data.normalization import (
+            _raw_signal_array,
+            _sampling_rate_from_signal_source,
         )
+        from foundry.data.utils import resolve_neural_signal
+
+        recording_metadata = {}
+        active_recording_ids = sorted(
+            recording_id
+            for recording_id, intervals in train_intervals.items()
+            if len(intervals) > 0
+        )
+        for recording_id in active_recording_ids:
+            data = self.dataset.get_recording(recording_id)
+            field, source, keep, channel_names = resolve_neural_signal(
+                data, supported_modalities
+            )
+            signal = _raw_signal_array(source)
+            file_path = None
+            file_obj = getattr(signal, "file", None)
+            if file_obj is not None:
+                file_path = getattr(file_obj, "filename", None)
+            artifact_identity: dict[str, object]
+            if file_path:
+                resolved = Path(file_path).resolve()
+                stat = resolved.stat()
+                artifact_identity = {
+                    "path": str(resolved),
+                    "size": stat.st_size,
+                    "mtime_ns": stat.st_mtime_ns,
+                    "ctime_ns": stat.st_ctime_ns,
+                }
+            else:
+                array = np.asarray(signal)
+                artifact_identity = {
+                    "in_memory_sha256": hashlib.sha256(
+                        array.tobytes(order="C")
+                    ).hexdigest()
+                }
+            source_domain = getattr(source, "domain", data.domain)
+            recording_metadata[recording_id] = {
+                "signal_field": field,
+                "signal_shape": list(signal.shape),
+                "signal_dtype": str(signal.dtype),
+                "channel_names": [str(name) for name in channel_names],
+                "supported_channel_indices": np.flatnonzero(keep).tolist(),
+                "sampling_rate": _sampling_rate_from_signal_source(source),
+                "domain_start": [
+                    float(value).hex() for value in source_domain.start
+                ],
+                "domain_end": [
+                    float(value).hex() for value in source_domain.end
+                ],
+                "data_artifact": artifact_identity,
+            }
+
+        source_manifest_hash = (
+            self._source_manifest.manifest_hash
+            if self._source_manifest is not None
+            else None
+        )
+        return {
+            "schema_version": 1,
+            "dataset_class": (
+                f"{self.dataset_class.__module__}."
+                f"{self.dataset_class.__qualname__}"
+            ),
+            "source_manifest_hash": source_manifest_hash,
+            "train_interval_hash": self._normalization_train_interval_hash(
+                train_intervals
+            ),
+            "fraction_manifest_hashes": {
+                recording_id: manifest.manifest_hash
+                for recording_id, manifest in sorted(
+                    self._fraction_manifests.items()
+                )
+            },
+            "mode": mode,
+            "supported_modalities": sorted(supported_modalities),
+            "scale_floor": scale_floor,
+            "accumulator_dtype": accumulator_dtype,
+            "recording_ids": active_recording_ids,
+            "recordings": recording_metadata,
+        }
 
     @property
     def normalization_stats(
@@ -580,18 +895,9 @@ class NeuralDataModule(LightningDataModule):
         from foundry.data.normalization import save_normalization_stats
 
         train_intervals = self._effective_sampling_intervals("train")
-        interval_payload = [
-            {
-                "recording_id": recording_id,
-                "start": float(start).hex(),
-                "end": float(end).hex(),
-            }
-            for recording_id, intervals in sorted(train_intervals.items())
-            for start, end in zip(intervals.start, intervals.end)
-        ]
-        train_interval_hash = hashlib.sha256(
-            json.dumps(interval_payload, separators=(",", ":")).encode()
-        ).hexdigest()
+        train_interval_hash = self._normalization_train_interval_hash(
+            train_intervals
+        )
         provenance = {
             "git_sha": git_sha,
             "train_interval_hash": train_interval_hash,
@@ -600,6 +906,14 @@ class NeuralDataModule(LightningDataModule):
                 for recording_id, manifest in self._fraction_manifests.items()
             },
             "phase0_audit_artifact_sha256": self._fraction_audit_artifact_sha256,
+            "source_manifest_hash": (
+                self._source_manifest.manifest_hash
+                if self._source_manifest is not None
+                else None
+            ),
+            "cache_key": self._normalization_cache_key,
+            "cache_status": self._normalization_cache_status,
+            "cache_identity": self._normalization_cache_identity,
         }
         stats_path, manifest_path = save_normalization_stats(
             self._normalization_stats,
@@ -612,6 +926,8 @@ class NeuralDataModule(LightningDataModule):
             "manifest_path": str(manifest_path),
             "stats_sha256": hashlib.sha256(stats_path.read_bytes()).hexdigest(),
             "train_interval_hash": train_interval_hash,
+            "cache_key": self._normalization_cache_key or "disabled",
+            "cache_status": self._normalization_cache_status or "disabled",
         }
         logger.info(
             "Wrote input-normalization artifacts to %s (sha256=%s…)",

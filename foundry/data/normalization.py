@@ -14,6 +14,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import os
+import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -21,6 +25,8 @@ from typing import Any, Mapping
 import numpy as np
 
 from foundry.data.utils import NEURAL_MODALITIES, resolve_neural_signal
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -150,8 +156,10 @@ def _sampling_rate_from_signal_source(signal_source: object) -> float:
     """
     sampling_rate = getattr(signal_source, "sampling_rate", None)
     if sampling_rate is None:
-        timestamps = np.asarray(getattr(signal_source, "timestamps"))
-        if timestamps.ndim != 1 or len(timestamps) < 2:
+        timestamps = getattr(signal_source, "__dict__", {}).get("timestamps")
+        if timestamps is None:
+            timestamps = getattr(signal_source, "timestamps")
+        if getattr(timestamps, "ndim", None) != 1 or len(timestamps) < 2:
             raise ValueError(
                 "Signal source must provide a positive sampling_rate or at "
                 "least two one-dimensional timestamps"
@@ -186,6 +194,50 @@ def _interval_sample_bounds_from_timestamps(
     )
 
 
+def _validate_streaming_timestamps(timestamps, chunk_samples: int) -> None:
+    """Validate timestamp order without materializing an HDF5 dataset."""
+    if getattr(timestamps, "ndim", None) != 1 or len(timestamps) < 1:
+        raise ValueError(
+            "Signal timestamps must be a non-empty one-dimensional array"
+        )
+    previous = None
+    for start in range(0, len(timestamps), chunk_samples):
+        chunk = np.asarray(timestamps[start : start + chunk_samples])
+        if not np.all(np.isfinite(chunk)):
+            raise ValueError(
+                "Signal timestamps must be finite and strictly increasing"
+            )
+        if previous is not None and chunk[0] <= previous:
+            raise ValueError(
+                "Signal timestamps must be finite and strictly increasing"
+            )
+        if len(chunk) > 1 and np.any(np.diff(chunk) <= 0):
+            raise ValueError(
+                "Signal timestamps must be finite and strictly increasing"
+            )
+        previous = chunk[-1]
+
+
+def _searchsorted_streaming(timestamps, value: float) -> int:
+    """Equivalent to ``searchsorted(..., side='left')`` for lazy datasets."""
+    left, right = 0, len(timestamps)
+    while left < right:
+        middle = (left + right) // 2
+        if float(timestamps[middle]) < value:
+            left = middle + 1
+        else:
+            right = middle
+    return left
+
+
+def _raw_signal_array(signal_source: object):
+    """Return a lazy backing array without triggering torch_brain loading."""
+    raw = getattr(signal_source, "__dict__", {}).get("signal")
+    if raw is None:
+        raw = getattr(signal_source, "signal")
+    return raw
+
+
 def _validate_fit_parameters(
     scale_floor: float, accumulator_dtype: np.dtype
 ) -> np.dtype:
@@ -209,6 +261,7 @@ def _collect_recording_moments(
     chunk_samples: int = 1_000_000,
 ) -> tuple[str, tuple[str, ...], float, np.ndarray, np.ndarray, int]:
     """Accumulate per-channel train-split moments for one recording."""
+    started = time.perf_counter()
     accumulator_dtype = _validate_fit_parameters(scale_floor, accumulator_dtype)
     if chunk_samples <= 0:
         raise ValueError("chunk_samples must be positive")
@@ -218,7 +271,14 @@ def _collect_recording_moments(
         data, supported_modalities
     )
 
-    signal = np.asarray(signal_source.signal)
+    signal = _raw_signal_array(signal_source)
+    lazy_slice = getattr(signal_source, "_lazy_ops", {}).get("slice")
+    signal_offset = int(lazy_slice[0]) if lazy_slice is not None else 0
+    n_samples = (
+        int(lazy_slice[1] - lazy_slice[0])
+        if lazy_slice is not None
+        else int(signal.shape[0])
+    )
     if signal.ndim != 2 or signal.shape[1] != len(keep_mask):
         raise ValueError(
             f"Recording {recording_id!r} has signal shape {signal.shape}; "
@@ -241,27 +301,41 @@ def _collect_recording_moments(
     count_accum = 0
 
     sampling_rate = _sampling_rate_from_signal_source(signal_source)
-    timestamps = np.asarray(
-        getattr(signal_source, "timestamps", ()), dtype=np.float64
-    )
-    has_sample_timestamps = (
-        timestamps.ndim == 1 and len(timestamps) == signal.shape[0]
-    )
+    # RegularTimeSeries exposes sampling_rate and its timestamps are derived.
+    # Use arithmetic bounds there so no O(recording length) timestamp array is
+    # created. LazyIrregularTimeSeries keeps timestamps in __dict__; validate
+    # that dataset in bounded chunks and binary-search it directly.
+    is_regular = getattr(signal_source, "sampling_rate", None) is not None
+    timestamps = None
+    if not is_regular:
+        timestamps = getattr(signal_source, "__dict__", {}).get("timestamps")
+        if timestamps is None:
+            timestamps = getattr(signal_source, "timestamps", None)
+        if timestamps is not None and len(timestamps) == n_samples:
+            _validate_streaming_timestamps(timestamps, chunk_samples)
+        else:
+            timestamps = None
+    has_sample_timestamps = timestamps is not None
     if not has_sample_timestamps:
-        domain_starts = np.asarray(data.domain.start, dtype=np.float64).reshape(
-            -1
-        )
-        if len(domain_starts) != 1:
+        signal_domain = getattr(signal_source, "domain", data.domain)
+        domain_starts = np.asarray(
+            signal_domain.start, dtype=np.float64
+        ).reshape(-1)
+        if len(domain_starts) < 1:
             raise ValueError(
-                f"Recording {recording_id!r} has {len(domain_starts)} domains "
-                "but its signal source provides no timestamp per sample"
+                f"Recording {recording_id!r} has no signal domain origin"
             )
         domain_start = float(domain_starts[0])
 
+    interval_reads = 0
+    samples_read = 0
+    bytes_read = 0
+    channel_indices = np.flatnonzero(keep_mask)
     for iv_start, iv_end in zip(merged_starts, merged_ends):
         if has_sample_timestamps:
-            idx_start, idx_end = _interval_sample_bounds_from_timestamps(
-                iv_start, iv_end, timestamps
+            idx_start, idx_end = (
+                _searchsorted_streaming(timestamps, float(iv_start)),
+                _searchsorted_streaming(timestamps, float(iv_end)),
             )
         else:
             idx_start, idx_end = _interval_sample_bounds(
@@ -269,15 +343,25 @@ def _collect_recording_moments(
                 iv_end,
                 domain_start=domain_start,
                 sampling_rate=sampling_rate,
-                n_samples=signal.shape[0],
+                n_samples=n_samples,
             )
         if idx_start >= idx_end:
             continue
         for chunk_start in range(idx_start, idx_end, chunk_samples):
             chunk_end = min(chunk_start + chunk_samples, idx_end)
-            chunk = signal[chunk_start:chunk_end, keep_mask].astype(
-                accumulator_dtype, copy=False
+            source_slice = slice(
+                signal_offset + chunk_start, signal_offset + chunk_end
             )
+            if len(channel_indices) == signal.shape[1]:
+                chunk = np.asarray(signal[source_slice])
+                read_channels = signal.shape[1]
+            else:
+                chunk = np.asarray(signal[source_slice, channel_indices])
+                read_channels = len(channel_indices)
+            interval_reads += 1
+            samples_read += chunk.shape[0]
+            bytes_read += chunk.shape[0] * read_channels * signal.dtype.itemsize
+            chunk = chunk.astype(accumulator_dtype, copy=False)
             if not np.all(np.isfinite(chunk)):
                 bad = np.where(~np.isfinite(chunk).all(axis=0))[0]
                 raise ValueError(
@@ -287,6 +371,16 @@ def _collect_recording_moments(
             sum_accum += chunk.sum(axis=0)
             sq_sum_accum += np.square(chunk).sum(axis=0)
             count_accum += chunk.shape[0]
+
+    logger.info(
+        "Normalization scan recording=%s selected_samples=%d "
+        "interval_reads=%d bytes_read=%d elapsed_s=%.3f",
+        recording_id,
+        samples_read,
+        interval_reads,
+        bytes_read,
+        time.perf_counter() - started,
+    )
 
     if count_accum == 0:
         raise RuntimeError(
@@ -480,7 +574,16 @@ def save_normalization_stats(
             for recording_id, recording_stats in stats.items()
         }
     )
-    np.savez(npz_path, **npz_data)
+    fd, temporary_npz_name = tempfile.mkstemp(
+        prefix=".input_normalization_stats.", suffix=".npz", dir=output_dir
+    )
+    os.close(fd)
+    temporary_npz = Path(temporary_npz_name)
+    try:
+        np.savez(temporary_npz, **npz_data)
+        os.replace(temporary_npz, npz_path)
+    finally:
+        temporary_npz.unlink(missing_ok=True)
 
     manifest: dict[str, Any] = {
         "mode": normalization_config.get("mode"),
@@ -509,9 +612,18 @@ def save_normalization_stats(
         manifest["provenance"] = dict(provenance)
 
     manifest_path = output_dir / "input_normalization_manifest.json"
-    with manifest_path.open("w", encoding="utf-8") as output:
-        json.dump(manifest, output, indent=2, sort_keys=True)
-        output.write("\n")
+    fd, temporary_manifest_name = tempfile.mkstemp(
+        prefix=".input_normalization_manifest.", suffix=".json", dir=output_dir
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            json.dump(manifest, output, indent=2, sort_keys=True)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary_manifest_name, manifest_path)
+    finally:
+        Path(temporary_manifest_name).unlink(missing_ok=True)
     return npz_path, manifest_path
 
 

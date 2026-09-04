@@ -22,6 +22,9 @@ from foundry.training.callbacks.metrics import (
     ConfusionMatrixCallback,
     SessionMetricsCallback,
 )
+from foundry.training.callbacks.performance import (
+    StepPerformanceBenchmarkCallback,
+)
 from foundry.training.callbacks.source_session_metrics import (
     SourceSessionMetricsCallback,
 )
@@ -54,6 +57,7 @@ __all__ = [
     "ReconstructionVisualizationCallback",
     "SessionMetricsCallback",
     "SourceSessionMetricsCallback",
+    "StepPerformanceBenchmarkCallback",
     "VocabInitializerCallback",
     "get_wandb_experiment",
 ]

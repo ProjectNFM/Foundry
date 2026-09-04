@@ -71,6 +71,27 @@ def _hydra_context():
 
 
 class TestSourcePretrainingConfigs:
+    def test_rtx8000_local_benchmark_config_composes(self, _hydra_context):
+        cfg = compose(
+            config_name="config",
+            overrides=[
+                "experiment=pretraining/"
+                "neurosoft_conv_bigru_supervised_minipigs_rtx8000_benchmark",
+                f"source_manifest={SMOKE_MANIFEST_MINIPIGS}",
+                "run.seed=42",
+                "trainer.precision=16-mixed",
+            ],
+        )
+
+        assert cfg.trainer.max_steps == 250
+        assert cfg.trainer.precision == "16-mixed"
+        assert cfg.run.unsupported_bf16_fallback == "16-mixed"
+        assert cfg.data.input_normalization.cache.enabled is True
+        assert (
+            cfg.trainer.callbacks.step_performance_benchmark._target_
+            == "foundry.training.callbacks.StepPerformanceBenchmarkCallback"
+        )
+
     @pytest.mark.skipif(
         not os.path.isfile(SMOKE_MANIFEST_MINIPIGS),
         reason="Manifests not generated",

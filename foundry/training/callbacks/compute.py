@@ -254,13 +254,15 @@ class ComputeTrackingCallback(L.Callback):
         return {
             "processed_windows": self._global_windows(trainer),
             "processed_examples": self._global_examples(trainer),
-            "signal_seconds": self._global_windows(trainer) * self.sequence_length,
+            "signal_seconds": self._global_windows(trainer)
+            * self.sequence_length,
             "wall_time_seconds": self._elapsed_wall_time_s(),
             "cumulative_flops": self._cumulative_flops(trainer),
             "flop_method": self.flop_method,
             "optimizer_steps": trainer.global_step,
             "effective_epochs": self._effective_epochs(trainer),
             "gpu": self._gpu_model_name(),
+            "gpu_compute_capability": self._gpu_compute_capability(),
             "precision": str(trainer.precision),
             "per_session_windows": dict(self._per_session_windows),
         }
@@ -286,6 +288,7 @@ class ComputeTrackingCallback(L.Callback):
             "optimizer_steps": self._best_step,
             "effective_epochs": effective_epochs,
             "gpu": self._gpu_model_name(),
+            "gpu_compute_capability": self._gpu_compute_capability(),
             "precision": "unknown",
             "per_session_windows": dict(self._best_per_session_windows),
             "monitor_value": self._best_monitor_value,
@@ -318,6 +321,13 @@ class ComputeTrackingCallback(L.Callback):
         return "cpu"
 
     @staticmethod
+    def _gpu_compute_capability() -> str:
+        if torch.cuda.is_available():
+            major, minor = torch.cuda.get_device_capability()
+            return f"{major}.{minor}"
+        return "n/a"
+
+    @staticmethod
     def _peak_memory_gb() -> tuple[float, float]:
         if not torch.cuda.is_available():
             return 0.0, 0.0
@@ -330,6 +340,7 @@ class ComputeTrackingCallback(L.Callback):
         """Return non-scalar compute metadata for logger hyperparameters."""
         metadata = {
             "compute/gpu_model": self._gpu_model_name(),
+            "compute/gpu_compute_capability": self._gpu_compute_capability(),
             "compute/precision": str(trainer.precision),
         }
         if self.flop_method is not None:

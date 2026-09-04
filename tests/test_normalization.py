@@ -15,11 +15,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal, Optional
 
+import h5py
 import numpy as np
 import pytest
 from torch_brain.data import Data, Interval, RegularTimeSeries
 from torch_brain.data.arraydict import ArrayDict
 
+from foundry.data.fraction_manifest import _canonical_hash
 from foundry.data.normalization import (
     RecordingChannelStats,
     _sampling_rate_from_signal_source,
@@ -453,6 +455,117 @@ class TestFitRecordingStats:
         expected = np.concatenate([signal[:50], signal[100:150]]).mean()
         np.testing.assert_allclose(stats.mean, [expected])
 
+    def test_hdf5_signal_reads_only_selected_slices(self, tmp_path):
+        """Lazy HDF5 fitting must never request the complete signal array."""
+        signal = np.arange(400, dtype=np.float32).reshape(200, 2)
+        h5_path = tmp_path / "recording.h5"
+        with h5py.File(h5_path, "w") as handle:
+            signal_ds = handle.create_dataset("signal", data=signal)
+
+            class _TrackedH5Dataset:
+                def __init__(self, dataset):
+                    self.dataset = dataset
+                    self.reads = []
+                    self.shape = dataset.shape
+                    self.dtype = dataset.dtype
+                    self.ndim = dataset.ndim
+                    self.file = dataset.file
+
+                def __getitem__(self, key):
+                    self.reads.append(key)
+                    if key == slice(None):
+                        raise AssertionError("full signal read")
+                    return self.dataset[key]
+
+            tracked = _TrackedH5Dataset(signal_ds)
+
+            class _RegularSource:
+                sampling_rate = 100.0
+                domain = Interval(0.0, 2.0)
+
+                def __init__(self):
+                    self.__dict__["signal"] = tracked
+
+            recording = Data(domain=Interval(0.0, 2.0))
+            recording.ecog = _RegularSource()
+            recording.channels = ArrayDict(
+                id=np.array(["ch0", "ch1"]),
+                type=np.array(["ECOG", "ECOG"]),
+            )
+            train_iv = _make_intervals([0.10, 1.00], [0.20, 1.10])
+            dataset = _MockDataset(
+                {"sess1": recording}, {"train": {"sess1": train_iv}}
+            )
+
+            stats = fit_recording_stats(
+                dataset, "sess1", train_iv, chunk_samples=4
+            )
+
+            selected = np.concatenate([signal[10:20], signal[100:110]])
+            np.testing.assert_allclose(stats.mean, selected.mean(axis=0))
+            np.testing.assert_allclose(stats.scale, selected.std(axis=0))
+            assert tracked.reads
+            assert all(read != slice(None) for read in tracked.reads)
+            assert all(
+                read.start >= 10 and read.stop <= 110 for read in tracked.reads
+            )
+            assert not any(
+                read.start < 10 or 20 < read.stop <= 100
+                for read in tracked.reads
+            )
+
+    def test_timestamped_hdf5_stream_matches_eager_and_rejects_nonfinite(
+        self, tmp_path
+    ):
+        """Timestamp and signal datasets remain lazy while preserving results."""
+        signal = np.arange(300, dtype=np.float32).reshape(150, 2)
+        timestamps = np.concatenate(
+            [np.arange(75) / 100.0, 2.0 + np.arange(75) / 100.0]
+        )
+        h5_path = tmp_path / "timestamped.h5"
+        with h5py.File(h5_path, "w") as handle:
+            signal_ds = handle.create_dataset("signal", data=signal)
+            timestamp_ds = handle.create_dataset("timestamps", data=timestamps)
+
+            class _TimestampedSource:
+                def __init__(self):
+                    self.__dict__["signal"] = signal_ds
+                    self.__dict__["timestamps"] = timestamp_ds
+                    self.domain = Interval([0.0, 2.0], [0.75, 2.75])
+
+            data = Data(domain=Interval([0.0, 2.0], [0.75, 2.75]))
+            data.ecog = _TimestampedSource()
+            data.channels = ArrayDict(
+                id=np.array(["ch0", "ch1"]),
+                type=np.array(["ECOG", "ECOG"]),
+            )
+            dataset = _MockDataset(
+                {"sess1": data},
+                {"train": {"sess1": _make_intervals([0.1, 2.1], [0.2, 2.2])}},
+            )
+            intervals = dataset.get_sampling_intervals("train")["sess1"]
+            stats = fit_recording_global_stats(
+                dataset, "sess1", intervals, chunk_samples=7
+            )
+
+            selected = np.concatenate([signal[10:20], signal[85:95]])
+            np.testing.assert_allclose(stats.mean, selected.mean(), rtol=1e-6)
+            np.testing.assert_allclose(stats.scale, selected.std(), rtol=1e-6)
+
+            timestamp_ds[90] = np.nan
+            with pytest.raises(ValueError, match="timestamps must be finite"):
+                fit_recording_stats(
+                    dataset, "sess1", intervals, chunk_samples=7
+                )
+
+    def test_rejects_malformed_interval_before_signal_read(self):
+        signal = np.arange(100, dtype=np.float32).reshape(50, 2)
+        dataset, _ = self._make_dataset(
+            signal, [0.0], [0.1], sampling_rate=100.0
+        )
+        with pytest.raises(ValueError, match="end must be greater"):
+            fit_recording_stats(dataset, "sess1", _make_intervals([0.2], [0.1]))
+
 
 # ─── save_normalization_stats ─────────────────────────────────────────────────
 
@@ -873,6 +986,23 @@ class TestDataModuleNormalization:
         assert stats.sample_count > 0
         assert len(stats.channel_names) == 3
 
+    def test_metadata_only_setup_defers_normalization_until_final_setup(self):
+        dm = self._make_dm(
+            normalization_cfg={
+                "mode": "recording_train_channel_zscore",
+                "scale_floor": 1e-8,
+            }
+        )
+        dm.setup("fit", fit_normalization=False)
+        assert dm.dataset is not None
+        assert dm.normalization_stats is None
+        assert dm._normalization_fit_count == 0
+
+        dm.setup("fit")
+        dm.setup("fit")
+        assert dm.normalization_stats is not None
+        assert dm._normalization_fit_count == 1
+
     def test_global_mode_fits_broadcast_statistics(self):
         dm = self._make_dm(
             normalization_cfg={
@@ -983,6 +1113,188 @@ class TestDataModuleNormalization:
         first_stats = dm.normalization_stats
         dm.setup("fit")
         assert dm.normalization_stats == first_stats
+
+    @staticmethod
+    def _cached_cfg(cache_dir: Path, mode="recording_train_channel_zscore"):
+        return {
+            "mode": mode,
+            "scale_floor": 1e-8,
+            "accumulator_dtype": "float64",
+            "cache": {"enabled": True, "directory": str(cache_dir)},
+        }
+
+    def test_cache_miss_then_hit_skips_fit(self, tmp_path):
+        cfg = self._cached_cfg(tmp_path / "cache")
+        first = self._make_dm(normalization_cfg=cfg)
+        first.setup("fit")
+        assert first._normalization_cache_status == "miss"
+        assert first._normalization_fit_count == 1
+
+        second = self._make_dm(normalization_cfg=cfg)
+        second.setup("fit")
+        assert second._normalization_cache_status == "hit"
+        assert second._normalization_fit_count == 0
+        for recording_id in first.normalization_stats:
+            np.testing.assert_array_equal(
+                first.normalization_stats[recording_id].mean,
+                second.normalization_stats[recording_id].mean,
+            )
+
+    def test_cache_key_changes_with_normalization_config(self, tmp_path):
+        channel_dm = self._make_dm(
+            normalization_cfg=self._cached_cfg(tmp_path / "cache")
+        )
+        channel_dm.setup("fit")
+        global_dm = self._make_dm(
+            normalization_cfg=self._cached_cfg(
+                tmp_path / "cache", mode="recording_train_global_zscore"
+            )
+        )
+        global_dm.setup("fit")
+        assert (
+            channel_dm._normalization_cache_key
+            != global_dm._normalization_cache_key
+        )
+        assert global_dm._normalization_cache_status == "miss"
+
+    def test_cache_key_changes_with_intervals_and_source_manifest(
+        self, tmp_path
+    ):
+        from foundry.data.datamodules import NeuralDataModule
+
+        cfg = self._cached_cfg(tmp_path / "cache")
+        first = self._make_dm(normalization_cfg=cfg)
+        first.setup("fit")
+
+        def changed_intervals_dataset(**kwargs):
+            dataset = _build_split_mock_dataset(**kwargs)
+            dataset._splits["train"]["rec1"] = _make_intervals([0.0], [5.0])
+            return dataset
+
+        changed = NeuralDataModule(
+            dataset_class=changed_intervals_dataset,
+            root="./data",
+            batch_size=4,
+            sequence_length=1.0,
+            input_normalization=cfg,
+        )
+        changed.setup("fit")
+        assert (
+            first._normalization_cache_key != changed._normalization_cache_key
+        )
+        assert changed._normalization_cache_status == "miss"
+
+        intervals = first._effective_sampling_intervals("train")
+        identity_args = {
+            "mode": "recording_train_channel_zscore",
+            "supported_modalities": frozenset({"eeg", "ecog", "seeg", "ieeg"}),
+            "scale_floor": 1e-8,
+            "accumulator_dtype": "float64",
+        }
+        first._source_manifest = SimpleNamespace(manifest_hash="manifest-a")
+        manifest_a = first._build_normalization_cache_identity(
+            intervals, **identity_args
+        )
+        first._source_manifest = SimpleNamespace(manifest_hash="manifest-b")
+        manifest_b = first._build_normalization_cache_identity(
+            intervals, **identity_args
+        )
+        assert _canonical_hash(manifest_a) != _canonical_hash(manifest_b)
+
+        first._source_manifest = None
+        first._fraction_manifests = {
+            "rec1": SimpleNamespace(manifest_hash="fraction-seed-1")
+        }
+        fraction_a = first._build_normalization_cache_identity(
+            intervals, **identity_args
+        )
+        first._fraction_manifests = {
+            "rec1": SimpleNamespace(manifest_hash="fraction-seed-2")
+        }
+        fraction_b = first._build_normalization_cache_identity(
+            intervals, **identity_args
+        )
+        assert _canonical_hash(fraction_a) != _canonical_hash(fraction_b)
+
+    def test_changed_in_memory_data_invalidates_cache(self, tmp_path):
+        from foundry.data.datamodules import NeuralDataModule
+
+        cfg = self._cached_cfg(tmp_path / "cache")
+
+        def shifted_dataset(signal_mean=100.0, **kwargs):
+            return _build_split_mock_dataset(signal_mean=signal_mean, **kwargs)
+
+        first = NeuralDataModule(
+            dataset_class=shifted_dataset,
+            dataset_kwargs={"signal_mean": 100.0},
+            root="./data",
+            batch_size=4,
+            sequence_length=1.0,
+            input_normalization=cfg,
+        )
+        changed = NeuralDataModule(
+            dataset_class=shifted_dataset,
+            dataset_kwargs={"signal_mean": 101.0},
+            root="./data",
+            batch_size=4,
+            sequence_length=1.0,
+            input_normalization=cfg,
+        )
+        first.setup("fit")
+        changed.setup("fit")
+
+        assert (
+            first._normalization_cache_key != changed._normalization_cache_key
+        )
+        assert changed._normalization_cache_status == "miss"
+
+    @pytest.mark.parametrize("corrupt", ["npz", "manifest", "identity"])
+    def test_corrupt_cache_is_rejected_and_recomputed(self, tmp_path, corrupt):
+        cfg = self._cached_cfg(tmp_path / "cache")
+        first = self._make_dm(normalization_cfg=cfg)
+        first.setup("fit")
+        entry = tmp_path / "cache" / first._normalization_cache_key
+        npz_path = entry / "input_normalization_stats.npz"
+        manifest_path = entry / "input_normalization_manifest.json"
+        if corrupt == "npz":
+            npz_path.write_bytes(b"interrupted")
+        elif corrupt == "manifest":
+            manifest_path.write_text("{not-json", encoding="utf-8")
+        else:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["provenance"]["cache_identity"]["mode"] = "wrong"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        second = self._make_dm(normalization_cfg=cfg)
+        second.setup("fit")
+        assert second._normalization_cache_status == "miss"
+        assert second._normalization_fit_count == 1
+        load_normalization_stats(npz_path, manifest_path)
+
+    def test_run_artifact_preserves_cache_and_interval_provenance(
+        self, tmp_path
+    ):
+        cfg = self._cached_cfg(tmp_path / "cache")
+        first = self._make_dm(normalization_cfg=cfg)
+        first.setup("fit")
+        hit = self._make_dm(normalization_cfg=cfg)
+        hit.setup("fit")
+
+        metadata = hit.write_normalization_artifacts(tmp_path / "run")
+        manifest = json.loads(
+            Path(metadata["manifest_path"]).read_text(encoding="utf-8")
+        )
+        provenance = manifest["provenance"]
+        assert provenance["cache_status"] == "hit"
+        assert provenance["cache_key"] == hit._normalization_cache_key
+        assert (
+            provenance["train_interval_hash"] == metadata["train_interval_hash"]
+        )
+        assert (
+            provenance["cache_identity"]["train_interval_hash"]
+            == metadata["train_interval_hash"]
+        )
+        assert not list((tmp_path / "run").glob(".*input_normalization*"))
 
 
 # ─── End-to-end fitting and normalization ─────────────────────────────────────

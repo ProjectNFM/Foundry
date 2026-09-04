@@ -63,7 +63,9 @@ class CheckpointManifestWriter:
         return load_checkpoint_manifest(manifest_path)
 
     @staticmethod
-    def verify_integrity(manifest: dict[str, Any], checkpoint_root: str) -> None:
+    def verify_integrity(
+        manifest: dict[str, Any], checkpoint_root: str
+    ) -> None:
         verify_checkpoint_integrity(manifest, checkpoint_root)
 
 
@@ -123,7 +125,9 @@ def write_checkpoint_manifest(
     """
     checkpoint = Path(checkpoint_path)
     if not checkpoint.is_file():
-        raise CheckpointManifestError(f"Checkpoint file not found: {checkpoint}")
+        raise CheckpointManifestError(
+            f"Checkpoint file not found: {checkpoint}"
+        )
 
     destination_dir = Path(manifest_dir)
     destination_dir.mkdir(parents=True, exist_ok=True)
@@ -246,6 +250,8 @@ def generate_checkpoint_markdown(manifest: dict[str, Any]) -> str:
             f"- **FLOP method:** {compute.get('flop_method', 'n/a')}",
             f"- **Wall time (seconds):** {compute.get('wall_time_seconds', 'n/a')}",
             f"- **GPU:** {compute.get('gpu', 'n/a')}",
+            f"- **GPU compute capability:** "
+            f"{compute.get('gpu_compute_capability', 'n/a')}",
             f"- **Precision:** {compute.get('precision', 'n/a')}",
             "",
             "## Source Validation Scores",
@@ -355,9 +361,13 @@ def verify_checkpoint_integrity(
     rel_path = checkpoint_info.get("path")
     expected_hash = checkpoint_info.get("sha256")
     if not isinstance(rel_path, str) or not rel_path:
-        raise CheckpointManifestError("Manifest checkpoint.path must be a string")
+        raise CheckpointManifestError(
+            "Manifest checkpoint.path must be a string"
+        )
     if not isinstance(expected_hash, str) or not expected_hash:
-        raise CheckpointManifestError("Manifest checkpoint.sha256 must be a string")
+        raise CheckpointManifestError(
+            "Manifest checkpoint.sha256 must be a string"
+        )
 
     relative_path = Path(rel_path)
     if relative_path.is_absolute() or ".." in relative_path.parts:

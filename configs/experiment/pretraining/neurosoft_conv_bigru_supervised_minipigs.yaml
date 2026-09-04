@@ -22,6 +22,11 @@ data:
     supported_modalities: [eeg, ecog, seeg, ieeg]
     scale_floor: 1.0e-8
     accumulator_dtype: float64
+    cache:
+      enabled: true
+      # Null uses FOUNDRY_NORMALIZATION_CACHE, then
+      # <data.root>/.foundry_normalization_cache.
+      directory: null
 
 class_weights:
   mode: none
@@ -36,6 +41,8 @@ run:
   seed: ???
   log_level: INFO
   evaluate_test: false
+  # Explicit and recorded: Turing/RTX 8000 uses FP16; A100 keeps BF16.
+  unsupported_bf16_fallback: 16-mixed
 
 hyperparameters:
   batch_size: 16
