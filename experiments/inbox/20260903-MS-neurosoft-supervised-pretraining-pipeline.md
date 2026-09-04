@@ -1,6 +1,6 @@
 # NeuroSoft Supervised Pretraining Pipeline
 
-**Status:** Pre-launch
+**Status:** In Progress
 **Date started:** 2026-09-03
 **Parent experiment:** None (infrastructure validation)
 **Follow-up experiments:** Phase 4 volume, Phase 5 diversity, Phase 6 composition
@@ -152,7 +152,34 @@ python main.py \
   run.pretrained_checkpoint_manifest=<path-to-job2-best-manifest.json> \
   run.pretrained_transfer_regime=frozen_representation \
   run.evaluate_test=true -m
+
+# Stage B -- source pretraining (full same-species pools)
+# These overrides apply to source pretraining only. Downstream transfer keeps
+# the established finetuning recipe below.
+python main.py \
+  experiment=pretraining/neurosoft_conv_bigru_supervised_minipigs \
+  source_manifest=manifests/neurosoft_supervised/v1/source_pools/minipigs/target-sub-06.json \
+  run.seed=42 trainer.max_steps=5000 trainer.val_check_interval=500 \
+  hyperparameters.batch_size=128 \
+  hyperparameters.learning_rate=0.00025 \
+  hyperparameters.weight_decay=0.01 \
+  hydra/launcher=slurm_default hydra.launcher.partition=long -m
+
+python main.py \
+  experiment=pretraining/neurosoft_conv_bigru_supervised_monkeys \
+  source_manifest=manifests/neurosoft_supervised/v1/source_pools/monkeys/target-sub-01.json \
+  run.seed=42 trainer.max_steps=5000 trainer.val_check_interval=500 \
+  hyperparameters.batch_size=128 \
+  hyperparameters.learning_rate=0.00025 \
+  hyperparameters.weight_decay=0.01 \
+  hydra/launcher=slurm_default hydra.launcher.partition=long -m
 ```
+
+### Key config overrides
+
+Stage B source pretraining uses `batch_size=128`, `learning_rate=0.00025`, and
+`weight_decay=0.01`. These are not downstream fine-tuning overrides; jobs 9 and
+10 retain the established downstream recipe.
 
 ### Submission log
 
