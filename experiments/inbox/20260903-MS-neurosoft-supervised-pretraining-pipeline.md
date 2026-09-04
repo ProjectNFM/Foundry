@@ -153,26 +153,35 @@ python main.py \
   run.pretrained_transfer_regime=frozen_representation \
   run.evaluate_test=true -m
 
-# Stage B -- source pretraining (full same-species pools)
+# Stage B -- source pretraining (full same-species pools, local GPU)
+# `source_pools/` contains pool catalogs, not runnable selection manifests.
 # These overrides apply to source pretraining only. Downstream transfer keeps
 # the established finetuning recipe below.
+export CUDA_VISIBLE_DEVICES=0
+export FOUNDRY_DATA_ROOT=/network/scratch/s/sobralm/brainsets/processed
+
+# Run this first; run the monkey command after it completes when using one GPU.
 python main.py \
   experiment=pretraining/neurosoft_conv_bigru_supervised_minipigs \
-  source_manifest=manifests/neurosoft_supervised/v1/source_pools/minipigs/target-sub-06.json \
+  source_manifest=manifests/neurosoft_supervised/v1/source_volume/minipigs/target-sub-06/fraction-1.00/selection-42.json \
+  run.name=stageb_src_mp_fullpool_b128_m42_retry1 \
   run.seed=42 trainer.max_steps=5000 trainer.val_check_interval=500 \
+  +trainer.check_val_every_n_epoch=null \
   hyperparameters.batch_size=128 \
   hyperparameters.learning_rate=0.00025 \
   hyperparameters.weight_decay=0.01 \
-  hydra/launcher=slurm_default hydra.launcher.partition=long -m
+  data.root=${FOUNDRY_DATA_ROOT}
 
 python main.py \
   experiment=pretraining/neurosoft_conv_bigru_supervised_monkeys \
-  source_manifest=manifests/neurosoft_supervised/v1/source_pools/monkeys/target-sub-01.json \
+  source_manifest=manifests/neurosoft_supervised/v1/source_volume/monkeys/target-sub-01/fraction-1.00/selection-42.json \
+  run.name=stageb_src_mk_fullpool_b128_m42_retry1 \
   run.seed=42 trainer.max_steps=5000 trainer.val_check_interval=500 \
+  +trainer.check_val_every_n_epoch=null \
   hyperparameters.batch_size=128 \
   hyperparameters.learning_rate=0.00025 \
   hyperparameters.weight_decay=0.01 \
-  hydra/launcher=slurm_default hydra.launcher.partition=long -m
+  data.root=${FOUNDRY_DATA_ROOT}
 ```
 
 ### Key config overrides
@@ -181,17 +190,31 @@ Stage B source pretraining uses `batch_size=128`, `learning_rate=0.00025`, and
 `weight_decay=0.01`. These are not downstream fine-tuning overrides; jobs 9 and
 10 retain the established downstream recipe.
 
-### Submission log
+### Execution log
 
-| # | Slurm Job | Snapshot | Git SHA | Status |
-|--:|-----------|----------|---------|--------|
-| 7 | `10654257` | `/network/scratch/s/sobralm/foundry-launches/20260904T181358_NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS_74069bf5_91b14432` | `74069bf52e0292bc11ef84f45b92c09097e2ce9d` | Submitted; awaiting source best manifest |
-| 8 | `10654259` | `/network/scratch/s/sobralm/foundry-launches/20260904T181436_NEUROSOFT_SOURCE_PRETRAINING_MONKEYS_74069bf5_fb644db8` | `74069bf52e0292bc11ef84f45b92c09097e2ce9d` | Submitted; awaiting source best manifest |
-| 9--10 | Pending | Pending | Pending | Blocked on jobs 7--8 best manifests |
+| # | Execution | Output | Status |
+|--:|-----------|--------|--------|
+| 7 | Slurm `10654257` | snapshot `20260904T181358_NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS_74069bf5_91b14432` | Failed before training: snapshot-relative `data.root` had no recordings. |
+| 8 | Slurm `10654259` | snapshot `20260904T181436_NEUROSOFT_SOURCE_PRETRAINING_MONKEYS_74069bf5_fb644db8` | Failed before training: snapshot-relative `data.root` had no recordings. |
+| 7--8 retry | Slurm `10654323`, `10654325` | fresh snapshots | Cancelled before execution; local execution was requested. |
+| 7--8 local attempt | GPU 0 | `stageb_src_{mp,mk}_fullpool_b128_m42` | Failed at trainer setup: the 500-step validation interval exceeded a single epoch (226 minipig; 51 monkey batches). |
+| 7 | Local GPU 0; W&B `stageb_src_mp_fullpool_b128_m42_retry1` (`348shpfe`) | `/network/scratch/s/sobralm/runs/NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS/stageb_src_mp_fullpool_b128_m42_retry1` | Interrupted externally after 2,500 optimizer steps (not a model exception). Its validation-selected checkpoint, `best-epoch011-1.6531.ckpt` (source F1 0.304606), was preserved in the hash-verified recovery manifest `manifests/best-epoch011-1.6531.json`. |
+| 8 | Not run | — | Intentionally omitted when Stage B was cut short; the user requested minipigs-only downstream validation. |
+| 9 | Local GPU 0; W&B `stageb_tgt_mp_from_interrupted_step2500_full_finetuning_m42` (`ea1iftnv`) | `/network/scratch/s/sobralm/runs/NEUROSOFT_TRANSFER_MINIPIGS/stageb_tgt_mp_from_interrupted_step2500_full_finetuning_m42` | Finished. Full fine-tuning from the recovered job-7 checkpoint selected `best-epoch026-2.1096.ckpt` (validation supported F1 0.241902) and evaluated the held-out target test split once (supported F1 0.225325). |
+| 10 | Not run | — | Intentionally omitted with the monkey source run. |
 
 ## Results
 
-(Pending execution.)
+### Partial Stage B downstream result
+
+The requested minipig-only downstream check completed locally from the
+interrupted source run's verified best checkpoint. Transfer loaded the 26
+shared temporal-frontend/GRU/router tensors in strict mode and deliberately
+excluded 188 session-adapter tensors, including the target adapter. Full
+fine-tuning selected its checkpoint on validation at optimizer step 1,809 and
+ran the held-out test split exactly once. The run is finite: validation
+supported F1 was 0.241902 and test supported F1 was 0.225325. The remaining
+Stage B monkey runs were deliberately not launched.
 
 ## Analysis
 
