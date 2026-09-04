@@ -235,11 +235,18 @@ def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
     if session_configs is not None and num_channels is not None:
         return
 
+    # Manifest-backed and training-fraction datamodules validate their
+    # intervals against task mappings during setup.  Attach those mappings
+    # before the discovery setup rather than waiting for the later model/data
+    # construction path to do so.
+    task_configs = _load_task_configs(cfg)
+
     if _is_neuralbench_data(cfg):
         dm = instantiate(cfg.data, tokenizer=None)
     else:
         normalize_data_config(cfg.data)
         dm = instantiate(cfg.data, tokenizer=None)
+    dm._task_configs = task_configs
     dm.setup("fit")
 
     if session_configs is None:
@@ -721,7 +728,11 @@ def _derive_target_subject(datamodule) -> str:
 def _validate_manifest_target(manifest: dict, datamodule) -> None:
     """Require a transfer manifest to exclude this exact downstream target."""
     trained_on = manifest.get("trained_on")
-    excluded = trained_on.get("excluded_target") if isinstance(trained_on, dict) else None
+    excluded = (
+        trained_on.get("excluded_target")
+        if isinstance(trained_on, dict)
+        else None
+    )
     if not isinstance(excluded, dict):
         raise ValueError(
             "Checkpoint manifest is missing trained_on.excluded_target"
@@ -730,7 +741,9 @@ def _validate_manifest_target(manifest: dict, datamodule) -> None:
     manifest_subject = excluded.get("subject")
     species = _derive_species(datamodule)
     subject = _derive_target_subject(datamodule)
-    if not isinstance(manifest_species, str) or not isinstance(manifest_subject, str):
+    if not isinstance(manifest_species, str) or not isinstance(
+        manifest_subject, str
+    ):
         raise ValueError(
             "Checkpoint manifest excluded_target must contain string species "
             "and subject fields"
@@ -1246,7 +1259,10 @@ def _configure_source_compute_callbacks(
 
 
 def _emit_source_checkpoint_manifests(
-    trainer, cfg: DictConfig, datamodule, output_dir: str,
+    trainer,
+    cfg: DictConfig,
+    datamodule,
+    output_dir: str,
     normalization_artifacts: dict | None,
 ) -> None:
     """Write JSON/Markdown checkpoint manifests for best and milestone checkpoints.
@@ -1375,9 +1391,7 @@ def _emit_source_checkpoint_manifests(
 
     def _build_selection(compute_snap: dict) -> dict:
         selection: dict = {
-            "monitor": (
-                compute_cb.monitor if compute_cb else "unknown"
-            ),
+            "monitor": (compute_cb.monitor if compute_cb else "unknown"),
             "monitor_value": compute_snap.get("monitor_value", 0.0),
             "source_session_scores": {},
         }
@@ -1428,9 +1442,7 @@ def _emit_source_checkpoint_manifests(
                     wandb_info=wandb_info,
                 )
                 written_manifests.append(str(json_path))
-                logger.info(
-                    "Wrote best checkpoint manifest: %s", json_path
-                )
+                logger.info("Wrote best checkpoint manifest: %s", json_path)
             except Exception:
                 logger.warning(
                     "Failed to write best checkpoint manifest",
@@ -1484,7 +1496,8 @@ def _emit_source_checkpoint_manifests(
                 )
 
     logger.info(
-        "Checkpoint manifest emission: %d manifests written", len(written_manifests)
+        "Checkpoint manifest emission: %d manifests written",
+        len(written_manifests),
     )
     return written_manifests
 
@@ -1650,7 +1663,9 @@ def main(cfg: DictConfig):
     pretrained_ckpt = OmegaConf.select(
         cfg, "run.pretrained_checkpoint", default=None
     )
-    checkpoint_manifest = _load_and_validate_checkpoint_manifest(cfg, datamodule)
+    checkpoint_manifest = _load_and_validate_checkpoint_manifest(
+        cfg, datamodule
+    )
 
     if checkpoint_manifest is not None:
         _apply_manifest_transfer(model, checkpoint_manifest, cfg, output_dir)
@@ -1712,7 +1727,9 @@ def main(cfg: DictConfig):
     )
 
     effective_pretrained = pretrained_ckpt or (
-        OmegaConf.select(cfg, "run.pretrained_checkpoint_manifest", default=None)
+        OmegaConf.select(
+            cfg, "run.pretrained_checkpoint_manifest", default=None
+        )
     )
     _validate_checkpoint_policy(ckpt_path, effective_pretrained)
 
@@ -1726,7 +1743,10 @@ def main(cfg: DictConfig):
         )
         if is_source_pretraining:
             _emit_source_checkpoint_manifests(
-                trainer, cfg, datamodule, output_dir,
+                trainer,
+                cfg,
+                datamodule,
+                output_dir,
                 normalization_artifacts,
             )
         if OmegaConf.select(cfg, "run.evaluate_test", default=False):
