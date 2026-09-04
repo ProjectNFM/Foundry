@@ -220,12 +220,14 @@ class TestTransferConfigs:
                 "run.pretrained_transfer_regime=full_finetuning",
             ],
         )
-        assert OmegaConf.select(
-            cfg, "run.pretrained_transfer_regime"
-        ) == "full_finetuning"
-        assert OmegaConf.select(
-            cfg, "run.pretrained_checkpoint_manifest"
-        ) == "/fake/manifest.json"
+        assert (
+            OmegaConf.select(cfg, "run.pretrained_transfer_regime")
+            == "full_finetuning"
+        )
+        assert (
+            OmegaConf.select(cfg, "run.pretrained_checkpoint_manifest")
+            == "/fake/manifest.json"
+        )
         assert OmegaConf.select(cfg, "run.pretrained_checkpoint") is None
 
     def test_minipigs_transfer_composes_frozen_representation(
@@ -240,9 +242,10 @@ class TestTransferConfigs:
                 "run.pretrained_transfer_regime=frozen_representation",
             ],
         )
-        assert OmegaConf.select(
-            cfg, "run.pretrained_transfer_regime"
-        ) == "frozen_representation"
+        assert (
+            OmegaConf.select(cfg, "run.pretrained_transfer_regime")
+            == "frozen_representation"
+        )
 
     def test_monkeys_transfer_composes_full_finetuning(self, _hydra_context):
         cfg = compose(
@@ -254,9 +257,10 @@ class TestTransferConfigs:
                 "run.pretrained_transfer_regime=full_finetuning",
             ],
         )
-        assert OmegaConf.select(
-            cfg, "run.pretrained_transfer_regime"
-        ) == "full_finetuning"
+        assert (
+            OmegaConf.select(cfg, "run.pretrained_transfer_regime")
+            == "full_finetuning"
+        )
 
     def test_monkeys_transfer_composes_frozen_representation(
         self, _hydra_context
@@ -270,9 +274,10 @@ class TestTransferConfigs:
                 "run.pretrained_transfer_regime=frozen_representation",
             ],
         )
-        assert OmegaConf.select(
-            cfg, "run.pretrained_transfer_regime"
-        ) == "frozen_representation"
+        assert (
+            OmegaConf.select(cfg, "run.pretrained_transfer_regime")
+            == "frozen_representation"
+        )
 
     def test_transfer_config_monitors_target_validation(self, _hydra_context):
         cfg = compose(
@@ -316,7 +321,7 @@ class TestTransferConfigs:
         assert cfg.model.adapter_dim == 64
         assert cfg.model.temporal_channels == 128
         assert cfg.model.gru_hidden_size == 128
-        assert cfg.hyperparameters.learning_rate == 0.0015
+        assert cfg.hyperparameters.learning_rate == 0.00025
         assert cfg.hyperparameters.batch_size == 16
 
     def test_transfer_config_seeds(self, _hydra_context):
@@ -358,9 +363,7 @@ class TestIndexResolvers:
     def test_smoke_manifest_by_id_monkeys(self):
         from foundry.config_resolvers import _source_manifest_by_id
 
-        path = _source_manifest_by_id(
-            INDEX_PATH, "smoke_monkeys_target-sub-01"
-        )
+        path = _source_manifest_by_id(INDEX_PATH, "smoke_monkeys_target-sub-01")
         assert os.path.isfile(path)
         assert "phase3_smoke" in path
         assert "monkeys" in path
@@ -502,9 +505,7 @@ class TestRecipeConsistency:
         )
 
         GlobalHydra.instance().clear()
-        with initialize_config_dir(
-            config_dir=CONFIGS_DIR, version_base=None
-        ):
+        with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
             tgt_cfg = compose(
                 config_name="config",
                 overrides=[
@@ -533,9 +534,7 @@ class TestRecipeConsistency:
                 f"model.{key} mismatch: source={src_val}, target={tgt_val}"
             )
 
-    def test_source_and_transfer_use_same_hyperparameters(
-        self, _hydra_context
-    ):
+    def test_source_and_transfer_use_same_hyperparameters(self, _hydra_context):
         """Source and transfer use the same optimizer hyperparameters."""
         src_cfg = compose(
             config_name="config",
@@ -549,9 +548,7 @@ class TestRecipeConsistency:
         )
 
         GlobalHydra.instance().clear()
-        with initialize_config_dir(
-            config_dir=CONFIGS_DIR, version_base=None
-        ):
+        with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
             tgt_cfg = compose(
                 config_name="config",
                 overrides=[

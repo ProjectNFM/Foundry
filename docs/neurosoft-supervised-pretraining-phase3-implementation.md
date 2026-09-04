@@ -908,7 +908,7 @@ class_weights:
 
 hyperparameters:
   batch_size: 16
-  learning_rate: 0.0015
+  learning_rate: 0.00025
   weight_decay: 0.018
 
 trainer:

@@ -52,7 +52,7 @@ hyperparameters:
   num_workers: 1
   num_channels: null
   session_configs: null
-  learning_rate: 0.0015
+  learning_rate: 0.00025
   weight_decay: 0.018
 
 stage:
