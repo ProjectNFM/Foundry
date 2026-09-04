@@ -10,6 +10,7 @@ from __future__ import annotations
 from lightning import Trainer
 
 from foundry.training.callbacks.compute import ComputeTrackingCallback
+from foundry.training.callbacks.compute import ComputeTrackingCallback
 from foundry.training.callbacks.diagnostics import ParameterWatcherCallback
 from foundry.training.callbacks.embedding_viz import (
     EmbeddingVisualizationCallback,

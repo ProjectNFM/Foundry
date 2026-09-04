@@ -7,6 +7,8 @@ model-specific preprocessing.
 
 from __future__ import annotations
 
+from __future__ import annotations
+
 import gc
 import hashlib
 import json
@@ -19,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal, Optional, Type
 
 import numpy as np
+import numpy as np
 import torch
 from hydra.utils import get_class
 from omegaconf import DictConfig, OmegaConf, open_dict
@@ -28,6 +31,11 @@ from torch_brain.samplers import RandomFixedWindowSampler
 from lightning import LightningDataModule
 from torch_brain.transforms import Compose
 
+from foundry.data.fraction_manifest import (
+    FractionManifest,
+    FractionManifestBuilder,
+    _canonical_hash,
+)
 from foundry.data.fraction_manifest import (
     FractionManifest,
     FractionManifestBuilder,

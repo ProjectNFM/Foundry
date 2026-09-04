@@ -1,0 +1,53 @@
+# WandB grid for EEGNet on NeuroSoft 8-band auditory decoding.
+#
+# Architectural knobs match the GRU spatiotemporal sweep, using EEGNet names:
+#   F1                  ↔ conv_filters (temporal filter count)
+#   kernel_length       ↔ conv_kernel  (samples; ~2 kHz: 64/128/256 → 32/64/128 ms)
+#   D                   ↔ conv_depth_multiplier (spatial filters per F1)
+#   num_sources         ↔ session-projected channel axis the spatial conv sees
+# F2 stays at the model default (16). use_input_proj does not apply.
+#
+# Grid: 1 split × 2 F1 × 3 kernel_length × 2 D × 2 num_sources = 24
+#
+#   wandb sweep configs/sweep/eegnet_auditory_decoding_8band_hp.yaml
+#   WANDB_SWEEP_EXPERIMENT=auditory_decoding/eegnet_neurosoft_8band_intrasession_multisubj \
+#       uv run python -m foundry.wandb_sweep_agent_worker <entity>/<project>/<sweep-id>
+
+defaults:
+  - default
+
+method: grid
+metric:
+  name: val/neurosoft_acoustic_stim_8band_f1
+  goal: maximize
+parameters:
+  data.split_type:
+    values:
+      - intrasession-causal
+  hyperparameters.batch_size:
+    values:
+      - 128
+  hyperparameters.learning_rate:
+    values:
+      - 2.5e-4
+  hyperparameters.weight_decay:
+    values:
+      - 0.01
+  hyperparameters.num_sources:
+    values:
+      - 32
+      - 64
+  model.F1:
+    values:
+      - 8
+      - 16
+      - 32
+  model.kernel_length:
+    values:
+      - 64
+      - 128
+      - 256
+  model.D:
+    values:
+      - 2
+      - 4

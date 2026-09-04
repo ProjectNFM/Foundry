@@ -25,8 +25,8 @@ data:
   task_type: acoustic_stim
 
 run:
-  project: auditory_decoding
-  name: ${hydra:runtime.choices.model}_neurosoft_8band_${data.dataset_kwargs.recording_ids.0}
+  project: suarez_auditory_decoding
+  name: ${hydra:runtime.choices.model}_neurosoft_8band_${model.conv}_proj${model.use_input_proj}_F${model.conv_filters}_k${model.conv_kernel}_D${model.conv_depth_multiplier}_ns${hyperparameters.num_sources}
   group: HYPER-PARAM-SEARCH
   tags:
     - baselines
@@ -34,6 +34,7 @@ run:
     - training
     - 8band
     - minipigs
+    - intrasession-multisubject
   seed: 42
   log_level: INFO
 

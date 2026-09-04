@@ -59,11 +59,14 @@ def run_trial() -> None:
     overrides = [
         f"experiment={experiment}",
         "cluster=cscs",
+        # Packed agents share a node; never let Lightning DDP across all GPUs.
+        "trainer.devices=1",
     ]
     for key, value in _load_sweep_params().items():
         overrides.append(_format_override(key, value))
 
-    cmd = ["uv", "run", "python", "main.py", *overrides]
+    # Reuse this interpreter so concurrent agents do not race `uv run` syncs.
+    cmd = [sys.executable, "main.py", *overrides]
     logger.info("Running trial: %s", " ".join(cmd))
     subprocess.run(cmd, cwd=project_dir, check=True)
 

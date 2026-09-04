@@ -351,6 +351,109 @@ def _phase1_cell_fraction(cell: str) -> float:
     return float(parts[1])
 
 
+# -- NeuroSoft Phase 1 audit-backed paired-cell sweep resolvers ----------------
+
+
+def _resolve_audit_path(audit_path: str) -> str:
+    """Resolve *audit_path* against the original Hydra CWD if relative."""
+    if os.path.isabs(audit_path) or os.path.isfile(audit_path):
+        return audit_path
+    try:
+        from hydra.utils import get_original_cwd
+
+        resolved = os.path.join(get_original_cwd(), audit_path)
+    except (ImportError, ValueError):
+        resolved = audit_path
+    if not os.path.isfile(resolved):
+        raise FileNotFoundError(f"Audit file not found: {audit_path}")
+    return resolved
+
+
+_audit_cache: dict[str, dict] = {}
+
+
+def _load_neurosoft_audit(audit_path: str) -> dict:
+    """Load and verify the Phase 0 audit JSON, caching the result."""
+    import hashlib as _hl
+    import json
+
+    resolved = _resolve_audit_path(audit_path)
+    if resolved in _audit_cache:
+        return _audit_cache[resolved]
+
+    with open(resolved) as f:
+        audit = json.load(f)
+
+    expected_hash = audit.get("artifact_sha256")
+    if not expected_hash:
+        raise ValueError(f"Audit file {audit_path} is missing artifact_sha256")
+    payload = {k: v for k, v in audit.items() if k != "artifact_sha256"}
+    canonical = json.dumps(
+        payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True
+    ).encode("utf-8")
+    actual_hash = _hl.sha256(canonical).hexdigest()
+    if actual_hash != expected_hash:
+        raise ValueError(
+            f"Audit artifact hash mismatch: expected {expected_hash[:16]}..., "
+            f"got {actual_hash[:16]}... — the audit file may have been modified"
+        )
+
+    _audit_cache[resolved] = audit
+    return audit
+
+
+def _neurosoft_supported_cell_sweep_choices(
+    audit_path: str, species: str
+) -> str:
+    """Return a Hydra-compatible comma-separated choice string of supported cells.
+
+    Each cell is encoded as ``recording_id|fraction`` and safely quoted for
+    Hydra's basic sweeper.  Only recordings with ``eligible == true`` and
+    fractions with ``available == true`` for the given *species* are included.
+    """
+    audit = _load_neurosoft_audit(audit_path)
+
+    cells: list[str] = []
+    for rec in audit["recordings"]:
+        if rec.get("species") != species or not rec.get("eligible", False):
+            continue
+        rid = rec["recording_id"]
+        for frac_str in sorted(
+            rec.get("fraction_availability", {}),
+            key=lambda s: float(s),
+        ):
+            frac_info = rec["fraction_availability"][frac_str]
+            if frac_info.get("available", False):
+                cells.append(f"{rid}|{frac_str}")
+
+    if not cells:
+        raise ValueError(
+            f"No supported cells found for species={species!r} in {audit_path}"
+        )
+
+    return ",".join("'" + cell.replace("'", "\\'") + "'" for cell in cells)
+
+
+def _phase1_cell_recording(cell: str) -> str:
+    """Extract the recording ID from a ``recording_id|fraction`` cell string."""
+    parts = str(cell).rsplit("|", 1)
+    if len(parts) != 2:
+        raise ValueError(
+            f"Expected 'recording_id|fraction' format, got: {cell!r}"
+        )
+    return parts[0]
+
+
+def _phase1_cell_fraction(cell: str) -> float:
+    """Extract the fraction from a ``recording_id|fraction`` cell string."""
+    parts = str(cell).rsplit("|", 1)
+    if len(parts) != 2:
+        raise ValueError(
+            f"Expected 'recording_id|fraction' format, got: {cell!r}"
+        )
+    return float(parts[1])
+
+
 def hydra_main_wrapper(func):
     """Decorator that ensures exceptions are printed and streams flushed.
 
@@ -395,7 +498,9 @@ def _load_source_manifest_index(index_path: str) -> dict:
         return _source_manifest_index_cache[resolved]
 
     if not os.path.isfile(resolved):
-        raise FileNotFoundError(f"Source manifest index not found: {index_path}")
+        raise FileNotFoundError(
+            f"Source manifest index not found: {index_path}"
+        )
 
     with open(resolved) as f:
         index = json.load(f)
@@ -404,9 +509,7 @@ def _load_source_manifest_index(index_path: str) -> dict:
     return index
 
 
-def _source_manifest_by_id(
-    index_path: str, selection_id: str
-) -> str:
+def _source_manifest_by_id(index_path: str, selection_id: str) -> str:
     """Return the relative file path for a manifest selection ID."""
     index = _load_source_manifest_index(index_path)
     entries = index.get("entries", [])
@@ -422,9 +525,7 @@ def _source_manifest_by_id(
                     pass
             index_dir = os.path.dirname(resolved)
             return os.path.join(index_dir, entry["path"])
-    raise ValueError(
-        f"Selection ID {selection_id!r} not found in {index_path}"
-    )
+    raise ValueError(f"Selection ID {selection_id!r} not found in {index_path}")
 
 
 def _source_manifest_sweep(
