@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-08-18
 **Parent experiment:** [Intrasession Optimal-HP Training Paradigm Baselines](20260727-LS-intrasession-opt-baselines.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Multi-subject EEGNet / GRU-CNN HP search](../inbox/20260831-LS-eegnet-gru-multisubj-hp.md)
 **Tags:** neurosoft, 8band, intrasession, singlesession, baseline, eegnet, gru, poyo, auditory_decoding, minipigs, monkeys
 
 ## Background
