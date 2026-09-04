@@ -185,7 +185,9 @@ Stage B source pretraining uses `batch_size=128`, `learning_rate=0.00025`, and
 
 | # | Slurm Job | Snapshot | Git SHA | Status |
 |--:|-----------|----------|---------|--------|
-| | | | | (not yet submitted) |
+| 7 | `10654257` | `/network/scratch/s/sobralm/foundry-launches/20260904T181358_NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS_74069bf5_91b14432` | `74069bf52e0292bc11ef84f45b92c09097e2ce9d` | Submitted; awaiting source best manifest |
+| 8 | `10654259` | `/network/scratch/s/sobralm/foundry-launches/20260904T181436_NEUROSOFT_SOURCE_PRETRAINING_MONKEYS_74069bf5_fb644db8` | `74069bf52e0292bc11ef84f45b92c09097e2ce9d` | Submitted; awaiting source best manifest |
+| 9--10 | Pending | Pending | Pending | Blocked on jobs 7--8 best manifests |
 
 ## Results
 
