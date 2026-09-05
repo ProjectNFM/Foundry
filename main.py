@@ -1294,8 +1294,8 @@ def _configure_source_compute_callbacks(
 ) -> None:
     """Set realized_train_windows_per_epoch on the ComputeTrackingCallback.
 
-    Called after the source datamodule is set up so the manifest summary is
-    available. This enables effective-epoch computation in compute tracking.
+    Use the actual training loader: immutable selection manifests may have
+    been generated with a different batch size and drop-last window count.
     """
     from foundry.training.callbacks.compute import ComputeTrackingCallback
 
@@ -1303,11 +1303,10 @@ def _configure_source_compute_callbacks(
     if manifest is None:
         return
 
-    realized_windows = getattr(
-        manifest.summary, "realized_train_windows_per_epoch", None
-    )
-    if realized_windows is None:
-        return
+    train_loader = datamodule.train_dataloader()
+    if train_loader.batch_size is None or not train_loader.drop_last:
+        raise ValueError("Source compute accounting requires fixed, full batches")
+    realized_windows = len(train_loader) * train_loader.batch_size
 
     for callback in trainer.callbacks:
         if isinstance(callback, ComputeTrackingCallback):
@@ -1433,7 +1432,9 @@ def _emit_source_checkpoint_manifests(
                 source_manifest.summary.available_train_windows
             )
             trained_on["realized_train_windows_per_epoch"] = (
-                source_manifest.summary.realized_train_windows_per_epoch
+                compute_cb.realized_train_windows_per_epoch
+                if compute_cb is not None
+                else None
             )
             trained_on["class_union"] = list(
                 source_manifest.summary.represented_class_union
