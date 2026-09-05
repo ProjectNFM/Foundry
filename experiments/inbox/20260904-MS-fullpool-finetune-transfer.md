@@ -185,6 +185,17 @@ matrix irreproducible.
   `source_volume/.../fraction-1.00/selection-<seed>.json` files.
 - `run.seed`: source seed in Stage A; independent target finetuning seed in
   Stage B.
+- Source production runs use `trainer.max_steps=50000`,
+  `trainer.val_check_interval=500`, `trainer.log_every_n_steps=500`,
+  `hyperparameters.batch_size=128`, `hyperparameters.learning_rate=0.00025`,
+  and `hyperparameters.weight_decay=0.01`.
+- Source production runs set `trainer.enable_progress_bar=false` and disable
+  early stopping and the
+  `rich_progress_bar`, `session_metrics`, `confusion_matrix`,
+  `reconstruction_visualization`, `parameter_watcher`, and
+  `embedding_visualization` callbacks.  The source-session checkpoint metric,
+  model checkpoint, compute tracking, milestone checkpoint, vocabulary
+  initialization, and epoch-level learning-rate monitor remain enabled.
 - `data.training_fraction=1.0` and `training_fraction_seed=${run.seed}` for
   all target cells.
 - `run.pretrained_checkpoint_manifest`: the verified best manifest produced
