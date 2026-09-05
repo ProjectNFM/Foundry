@@ -3,7 +3,7 @@
 **Status:** In Progress
 **Date started:** 2026-09-03
 **Parent experiment:** None (infrastructure validation)
-**Follow-up experiments:** Phase 4 volume, Phase 5 diversity, Phase 6 composition
+**Follow-up experiments:** [Phase 4A -- Full-Pool Pretraining Full-Finetuning Transfer Gate](20260904-MS-fullpool-finetune-transfer.md), Phase 4 volume, Phase 5 diversity, Phase 6 composition
 **Tags:** neurosoft, supervised-pretraining, transfer, infrastructure, phase3, 8band, intrasession-causal
 
 ## Background
