@@ -36,6 +36,7 @@ run:
   # Selection IDs encode target, family/condition, and selection seed.  Keep
   # the model seed explicit because it is a distinct source of randomness.
   name: ${source_run_name:src_mp,${source_manifest},${run.seed}}
+  source_target_subject: null
   group: NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS
   tags: [source-pretraining, minipigs, 8band, phase3]
   seed: ???

@@ -7,6 +7,7 @@ monkey-patching of the plugin system is needed.
 """
 
 import logging
+import json
 import os
 import sys
 from pathlib import Path
@@ -25,6 +26,86 @@ log = logging.getLogger(__name__)
 
 def _batch(items: list, batch_size: int) -> list[list]:
     return [items[i : i + batch_size] for i in range(0, len(items), batch_size)]
+
+
+def _override_key(override: str) -> str:
+    """Return the key portion of a Hydra override."""
+    return override.split("=", 1)[0].lstrip("+")
+
+
+def _load_cell_list(path: str | os.PathLike[str]) -> list[list[str]]:
+    """Load exact coupled override vectors from a JSONL cell-list file.
+
+    Each non-empty JSONL record must contain an ``overrides`` list.  The
+    launcher expands the records before snapshot creation, so the immutable
+    snapshot records one task configuration per coupled cell.
+    """
+    cell_path = Path(path).expanduser().resolve()
+    if not cell_path.is_file():
+        raise FileNotFoundError(f"Cell-list file not found: {cell_path}")
+
+    vectors: list[list[str]] = []
+    for line_number, raw_line in enumerate(
+        cell_path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"Invalid JSON on {cell_path}:{line_number}"
+            ) from exc
+        overrides = (
+            record.get("overrides") if isinstance(record, dict) else None
+        )
+        if (
+            not isinstance(overrides, list)
+            or not overrides
+            or not all(
+                isinstance(item, str) and "=" in item for item in overrides
+            )
+        ):
+            raise ValueError(
+                f"{cell_path}:{line_number} must contain a non-empty "
+                "overrides list of Hydra key=value strings"
+            )
+        vectors.append([str(item) for item in overrides])
+
+    if not vectors:
+        raise ValueError(
+            f"Cell-list file contains no override vectors: {cell_path}"
+        )
+    return vectors
+
+
+def _expand_cell_list(
+    job_overrides: Sequence[Sequence[str]], cell_list: str | os.PathLike[str]
+) -> list[list[str]]:
+    """Replace one template job with exact, coupled cell override vectors."""
+    if len(job_overrides) != 1:
+        raise ValueError(
+            "cell_list requires exactly one base multirun job; do not combine "
+            "it with independent Hydra comma-separated sweeps"
+        )
+
+    base = list(job_overrides[0])
+    vectors = _load_cell_list(cell_list)
+    vector_keys = {_override_key(item) for item in vectors[0]}
+    if any(
+        {_override_key(item) for item in vector} != vector_keys
+        for vector in vectors
+    ):
+        raise ValueError(
+            "All coupled cell vectors must contain the same override keys"
+        )
+
+    # The command uses one representative manifest/seed so Hydra can validate
+    # the template before launch.  Replace those keys with the exact values in
+    # each vector instead of leaving duplicate overrides in the task config.
+    fixed = [item for item in base if _override_key(item) not in vector_keys]
+    return [fixed + vector for vector in vectors]
 
 
 class PackedSubmititLauncher(BaseSubmititLauncher):
@@ -123,10 +204,19 @@ class PackedSubmititLauncher(BaseSubmititLauncher):
         import submitit
 
         assert self.config is not None
+        params = self.params
+
+        cell_list = params.get("cell_list")
+        if cell_list not in (None, "", "null"):
+            job_overrides = _expand_cell_list(job_overrides, str(cell_list))
+            log.info(
+                "Expanded coupled cell list %s into %d exact job vectors",
+                cell_list,
+                len(job_overrides),
+            )
 
         num_jobs = len(job_overrides)
         assert num_jobs > 0
-        params = self.params
 
         snap_cfg = self._get_snapshot_config()
         snapshot_enabled = snap_cfg.get("enabled", False)
@@ -206,7 +296,7 @@ class PackedSubmititLauncher(BaseSubmititLauncher):
         executor = submitit.AutoExecutor(cluster=self._EXECUTOR, **init_params)
 
         baseparams = set(OmegaConf.structured(BaseQueueConf).keys())
-        excluded_keys = init_keys | {"snapshot"}
+        excluded_keys = init_keys | {"snapshot", "cell_list"}
         filtered_params = {
             x if x in baseparams else f"{self._EXECUTOR}_{x}": y
             for x, y in params.items()
@@ -303,7 +393,9 @@ class PackedSubmititLauncher(BaseSubmititLauncher):
                 )
             )
 
-        tasks_per_node = params.get("tasks_per_node", 1)
+        tasks_per_node = int(params.get("tasks_per_node", 1))
+        if tasks_per_node < 1:
+            raise ValueError("tasks_per_node must be >= 1")
         jobs = executor.map_array(
             self.launch_batch,
             *list(_batch(jps, tasks_per_node) for jps in zip(*job_params)),
@@ -332,6 +424,7 @@ class PackedSubmititLauncher(BaseSubmititLauncher):
                         "slurm_job_ids": [str(jid) for jid in job_ids],
                         "num_tasks": num_jobs,
                         "tasks_per_node": tasks_per_node,
+                        "cell_list": str(cell_list) if cell_list else None,
                     },
                     indent=2,
                 )

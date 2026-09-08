@@ -23,6 +23,10 @@ class FoundrySlurmQueueConf(SlurmQueueConf):
     """Submitit Slurm schema extended with Foundry snapshot settings."""
 
     snapshot: SnapshotConf = field(default_factory=SnapshotConf)
+    # Optional JSONL file of exact coupled override vectors.  The packed
+    # launcher expands it before creating the immutable snapshot.
+    cell_list: Optional[str] = None
+    srun_args: Optional[list[str]] = None
 
 
 @dataclass

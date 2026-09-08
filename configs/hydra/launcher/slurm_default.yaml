@@ -13,6 +13,11 @@ nodes: 1
 mem_gb: 32
 gres: gpu:1
 array_parallelism: 256
+cell_list: null
+srun_args:
+  # Packed source workers intentionally share the one allocated GPU.  Do not
+  # let Slurm bind one task to an exclusive GPU slot.
+  - "--gpu-bind=none"
 additional_parameters:
   requeue: true
 setup:

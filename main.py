@@ -1,7 +1,9 @@
 import hashlib
 import logging
 import os
+import shutil
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
@@ -107,6 +109,37 @@ def _resolve_precision_for_hardware(cfg: DictConfig) -> None:
         gpu_name,
         capability or "n/a",
     )
+
+
+def _log_worker_hardware_diagnostics() -> None:
+    """Log the CUDA/Slurm view of every packed worker without assuming GPU 0."""
+    cuda_available = bool(torch.cuda.is_available())
+    device_count = int(torch.cuda.device_count()) if cuda_available else 0
+    visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "<unset>")
+    logger.info(
+        "Worker hardware: torch.cuda.is_available=%s "
+        "torch.cuda.device_count=%d CUDA_VISIBLE_DEVICES=%s "
+        "SLURM_JOB_ID=%s SLURM_ARRAY_TASK_ID=%s SLURM_PROCID=%s "
+        "SLURM_NTASKS_PER_NODE=%s",
+        cuda_available,
+        device_count,
+        visible_devices,
+        os.environ.get("SLURM_JOB_ID", "n/a"),
+        os.environ.get("SLURM_ARRAY_TASK_ID", "n/a"),
+        os.environ.get("SLURM_PROCID", "n/a"),
+        os.environ.get("SLURM_NTASKS_PER_NODE", "n/a"),
+    )
+    if not cuda_available:
+        return
+    for device_index in range(device_count):
+        major, minor = torch.cuda.get_device_capability(device_index)
+        logger.info(
+            "Worker GPU device=%d name=%s compute_capability=%d.%d",
+            device_index,
+            torch.cuda.get_device_name(device_index),
+            major,
+            minor,
+        )
 
 
 # -- Config patching -------------------------------------------------------
@@ -1106,6 +1139,22 @@ def _write_snapshot_task_provenance(output_dir: str) -> None:
     write_task_provenance(snapshot, task_index, task_overrides, output_dir)
 
 
+def _verify_source_target_subject(cfg: DictConfig, datamodule) -> None:
+    """Verify the coupled target-subject override against the manifest."""
+    declared = OmegaConf.select(cfg, "run.source_target_subject", default=None)
+    source_manifest = getattr(datamodule, "_source_manifest", None)
+    if declared is None or source_manifest is None:
+        return
+    actual = str(source_manifest.target_subject)
+    if str(declared) != actual:
+        raise ValueError(
+            "Coupled source cell target mismatch: "
+            f"run.source_target_subject={declared!r}, "
+            f"source_manifest target_subject={actual!r}"
+        )
+    logger.info("Source target subject verified: %s", actual)
+
+
 # -- Entry point ------------------------------------------------------------
 
 
@@ -1305,7 +1354,9 @@ def _configure_source_compute_callbacks(
 
     train_loader = datamodule.train_dataloader()
     if train_loader.batch_size is None or not train_loader.drop_last:
-        raise ValueError("Source compute accounting requires fixed, full batches")
+        raise ValueError(
+            "Source compute accounting requires fixed, full batches"
+        )
     realized_windows = len(train_loader) * train_loader.batch_size
 
     for callback in trainer.callbacks:
@@ -1327,6 +1378,39 @@ def _snapshot_bundle_for_checkpoint_manifest() -> str:
         or os.environ.get("FOUNDRY_SNAPSHOT_BUNDLE_ID")
         or "unknown"
     )
+
+
+def _publish_source_checkpoint(
+    checkpoint_path: str, cfg: DictConfig
+) -> str | None:
+    """Publish a source checkpoint under a unique shared-root relative path."""
+    checkpoint_root = os.environ.get("FOUNDRY_CHECKPOINT_ROOT")
+    if not checkpoint_root:
+        return None
+
+    group = str(OmegaConf.select(cfg, "run.group", default="source"))
+    run_name = str(OmegaConf.select(cfg, "run.name", default="run"))
+    relative = (
+        Path("source")
+        / group
+        / run_name
+        / "checkpoints"
+        / Path(checkpoint_path).name
+    )
+    destination = Path(checkpoint_root) / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", dir=destination.parent
+    )
+    os.close(fd)
+    temporary = Path(temporary_name)
+    try:
+        shutil.copy2(checkpoint_path, temporary)
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+    logger.info("Published source checkpoint: %s", destination)
+    return relative.as_posix()
 
 
 def _emit_source_checkpoint_manifests(
@@ -1512,6 +1596,9 @@ def _emit_source_checkpoint_manifests(
                 }
 
             try:
+                checkpoint_relative_path = _publish_source_checkpoint(
+                    best_path, cfg
+                )
                 json_path, md_path = write_checkpoint_manifest(
                     best_path,
                     manifest_dir,
@@ -1525,6 +1612,7 @@ def _emit_source_checkpoint_manifests(
                     snapshot_bundle=snapshot_bundle,
                     slurm_job_id=slurm_job_id,
                     wandb_info=wandb_info,
+                    checkpoint_relative_path=checkpoint_relative_path,
                 )
                 written_manifests.append(str(json_path))
                 logger.info("Wrote best checkpoint manifest: %s", json_path)
@@ -1553,6 +1641,9 @@ def _emit_source_checkpoint_manifests(
                 )
 
             try:
+                checkpoint_relative_path = _publish_source_checkpoint(
+                    ckpt_path, cfg
+                )
                 json_path, md_path = write_checkpoint_manifest(
                     ckpt_path,
                     manifest_dir,
@@ -1566,6 +1657,7 @@ def _emit_source_checkpoint_manifests(
                     snapshot_bundle=snapshot_bundle,
                     slurm_job_id=slurm_job_id,
                     wandb_info=wandb_info,
+                    checkpoint_relative_path=checkpoint_relative_path,
                 )
                 written_manifests.append(str(json_path))
                 logger.info(
@@ -1663,6 +1755,7 @@ def main(cfg: DictConfig):
     evaluation.
     """
     setup_logging(cfg.run.log_level)
+    _log_worker_hardware_diagnostics()
     _resolve_precision_for_hardware(cfg)
     torch.set_float32_matmul_precision(
         str(
@@ -1720,6 +1813,7 @@ def main(cfg: DictConfig):
     )
     if is_source_pretraining:
         model, datamodule = _build_source_model_and_data(cfg)
+        _verify_source_target_subject(cfg, datamodule)
     else:
         model, datamodule = _build_model_and_data(cfg)
 

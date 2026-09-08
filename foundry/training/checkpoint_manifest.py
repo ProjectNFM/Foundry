@@ -117,6 +117,7 @@ def write_checkpoint_manifest(
     snapshot_bundle: str,
     slurm_job_id: str,
     wandb_info: dict[str, str],
+    checkpoint_relative_path: str | None = None,
 ) -> tuple[Path, Path]:
     """Write JSON and Markdown checkpoint manifests atomically.
 
@@ -135,7 +136,15 @@ def write_checkpoint_manifest(
     sha256 = _sha256_file(checkpoint)
     size_bytes = checkpoint.stat().st_size
     stem = checkpoint.stem
-    if checkpoint.is_absolute():
+    if checkpoint_relative_path is not None:
+        relative_path = Path(checkpoint_relative_path)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise CheckpointManifestError(
+                "checkpoint_relative_path must remain relative to the "
+                "shared checkpoint root"
+            )
+        manifest_checkpoint_path = relative_path.as_posix()
+    elif checkpoint.is_absolute():
         manifest_checkpoint_path = f"checkpoints/{checkpoint.name}"
     else:
         manifest_checkpoint_path = checkpoint.as_posix()
