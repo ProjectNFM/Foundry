@@ -136,6 +136,7 @@ report are committed and `git status --short` is empty.
 # Clariden production environment; paths are mounted and visible to workers.
 export CSCS_ACCOUNT=<project-account>
 export PROJECT=/capstor/store/cscs/swissai/a0091
+export SCRATCH=/capstor/scratch/cscs/${USER}
 export FOUNDRY_DATA_ROOT=${PROJECT}/processed
 export FOUNDRY_SNAPSHOT_ROOT=<shared-capstor-path>/foundry-launches
 export FOUNDRY_CHECKPOINT_ROOT=<shared-capstor-path>/foundry-checkpoints
@@ -150,6 +151,7 @@ git status --short  # must print nothing before every production submission
 # every target subject of the indicated species.  Repeat for seed 42, 43, 44.
 python main.py \
   experiment=pretraining/neurosoft_conv_bigru_supervised_minipigs \
+  cluster=cscs \
   hydra/launcher=slurm_clariden \
   source_manifest=<generated-minipig-manifest-list-for-seed-42> \
   run.seed=42 \
@@ -162,6 +164,7 @@ python main.py \
 # recording, source seed, and target seed; it performs exactly one test pass.
 python main.py \
   experiment=auditory_decoding/neurosoft_conv_bigru_transfer_minipigs \
+  cluster=cscs \
   hydra/launcher=slurm_clariden \
   data.dataset_kwargs.recording_ids=[<target-recording>] \
   data.training_fraction=1.0 \
