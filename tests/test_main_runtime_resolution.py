@@ -131,3 +131,29 @@ def test_cpu_records_requested_precision_without_gpu_rewrite():
     assert cfg.run.effective_precision == "32-true"
     assert cfg.run.gpu_name == "cpu"
     assert cfg.run.gpu_compute_capability is None
+
+
+def test_checkpoint_manifest_snapshot_uses_launcher_bundle_directory(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv(
+        "FOUNDRY_SNAPSHOT_BUNDLE_DIR",
+        "/capstor/scratch/cscs/milosobral/foundry-launches/bundle",
+    )
+    monkeypatch.setenv("FOUNDRY_SNAPSHOT_BUNDLE", "legacy-value")
+    monkeypatch.setenv("FOUNDRY_SNAPSHOT_BUNDLE_ID", "bundle-id")
+
+    assert (
+        main._snapshot_bundle_for_checkpoint_manifest()
+        == "/capstor/scratch/cscs/milosobral/foundry-launches/bundle"
+    )
+
+
+def test_checkpoint_manifest_snapshot_keeps_legacy_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.delenv("FOUNDRY_SNAPSHOT_BUNDLE_DIR", raising=False)
+    monkeypatch.setenv("FOUNDRY_SNAPSHOT_BUNDLE", "legacy-value")
+    monkeypatch.delenv("FOUNDRY_SNAPSHOT_BUNDLE_ID", raising=False)
+
+    assert main._snapshot_bundle_for_checkpoint_manifest() == "legacy-value"

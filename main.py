@@ -1319,6 +1319,16 @@ def _configure_source_compute_callbacks(
             break
 
 
+def _snapshot_bundle_for_checkpoint_manifest() -> str:
+    """Return the launcher snapshot path, with legacy environment fallbacks."""
+    return (
+        os.environ.get("FOUNDRY_SNAPSHOT_BUNDLE_DIR")
+        or os.environ.get("FOUNDRY_SNAPSHOT_BUNDLE")
+        or os.environ.get("FOUNDRY_SNAPSHOT_BUNDLE_ID")
+        or "unknown"
+    )
+
+
 def _emit_source_checkpoint_manifests(
     trainer,
     cfg: DictConfig,
@@ -1361,7 +1371,7 @@ def _emit_source_checkpoint_manifests(
             model_ckpt_cb = callback
 
     git_sha = os.environ.get("FOUNDRY_SNAPSHOT_GIT_SHA", "unknown")
-    snapshot_bundle = os.environ.get("FOUNDRY_SNAPSHOT_BUNDLE", "unknown")
+    snapshot_bundle = _snapshot_bundle_for_checkpoint_manifest()
 
     from hydra_plugins.foundry_launcher.launch_snapshot import (
         get_slurm_job_identifiers,

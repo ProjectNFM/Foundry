@@ -111,6 +111,7 @@ class TestSourcePretrainingConfigs:
         assert OmegaConf.select(cfg, "data.role") == "source_pretraining"
         assert OmegaConf.select(cfg, "data.source_test_policy") == "forbidden"
         assert OmegaConf.select(cfg, "run.evaluate_test") is False
+        assert cfg.run.name == "src_mp_sub-06_s42_m42"
 
     @pytest.mark.skipif(
         not os.path.isfile(SMOKE_MANIFEST_MONKEYS),
@@ -130,6 +131,7 @@ class TestSourcePretrainingConfigs:
 
         assert OmegaConf.select(cfg, "data.role") == "source_pretraining"
         assert OmegaConf.select(cfg, "data.source_test_policy") == "forbidden"
+        assert cfg.run.name == "src_mk_sub-01_s42_m42"
 
     def test_source_config_monitors_source_session_mean(self, _hydra_context):
         """Source configs must monitor source_session_mean_supported_f1."""
@@ -450,6 +452,34 @@ class TestIndexResolvers:
             "manifests/neurosoft_supervised/v1/phase3_smoke/minipigs/target-sub-06.json"
         )
         assert stem == "target-sub-06"
+
+    def test_source_run_names_are_unique_across_target_subjects(self):
+        """Same selection seeds remain distinct for every target subject."""
+        from foundry.config_resolvers import _source_run_name
+
+        manifest_root = REPO_ROOT / "manifests" / "neurosoft_supervised" / "v1"
+        paths = sorted(
+            path
+            for species in ("minipigs", "monkeys")
+            for path in (manifest_root / "source_volume" / species).glob(
+                "target-*/fraction-0.10/selection-*.json"
+            )
+        )
+
+        names = [
+            _source_run_name(
+                "src_mp" if "/minipigs/" in str(path) else "src_mk",
+                str(path),
+                42,
+            )
+            for path in paths
+        ]
+
+        assert paths
+        assert len(names) == len(set(names))
+        assert "src_mp_sub-01_s42_m42" in names
+        assert "src_mp_sub-01_s43_m42" in names
+        assert "src_mk_sub-01_s42_m42" in names
 
 
 # ---------------------------------------------------------------------------

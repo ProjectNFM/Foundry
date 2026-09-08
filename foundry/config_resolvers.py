@@ -576,6 +576,67 @@ def _path_stem(path: str) -> str:
     return os.path.splitext(os.path.basename(path))[0]
 
 
+def _source_run_name(prefix: str, manifest_path: str, model_seed: object) -> str:
+    """Build a deterministic, unambiguous W&B name from a source manifest.
+
+    The target subject and selection seed are structured manifest fields.  In
+    particular, the selection seed cannot be inferred from ``path_stem``
+    because manifests for different target subjects share filenames such as
+    ``selection-42.json``.
+    """
+    import json
+
+    if not isinstance(prefix, str) or not prefix:
+        raise ValueError("source_run_name requires a non-empty prefix")
+    if not isinstance(manifest_path, str) or not manifest_path:
+        raise ValueError(
+            "source_run_name requires a non-empty manifest path"
+        )
+
+    resolved_manifest_path = manifest_path
+    if not os.path.isabs(resolved_manifest_path) and not os.path.isfile(
+        resolved_manifest_path
+    ):
+        try:
+            from hydra.utils import get_original_cwd
+
+            resolved_manifest_path = os.path.join(
+                get_original_cwd(), resolved_manifest_path
+            )
+        except (ImportError, ValueError):
+            pass
+
+    try:
+        with open(resolved_manifest_path, encoding="utf-8") as handle:
+            manifest = json.load(handle)
+    except OSError as exc:
+        raise FileNotFoundError(
+            f"Source manifest not found: {manifest_path}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Source manifest is not valid JSON: {manifest_path}"
+        ) from exc
+
+    try:
+        target_subject = manifest["target_subject"]
+        selection_seed = manifest["condition"]["source_selection_seed"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError(
+            "Source manifest must contain target_subject and "
+            "condition.source_selection_seed"
+        ) from exc
+
+    if not isinstance(target_subject, str) or not target_subject:
+        raise ValueError("Source manifest target_subject must be non-empty")
+    if isinstance(selection_seed, bool) or not isinstance(selection_seed, int):
+        raise ValueError(
+            "Source manifest condition.source_selection_seed must be an integer"
+        )
+
+    return f"{prefix}_{target_subject}_s{selection_seed}_m{model_seed}"
+
+
 def register_resolvers() -> None:
     """Register all custom OmegaConf resolvers (idempotent)."""
     _resolvers = {
@@ -596,6 +657,7 @@ def register_resolvers() -> None:
         "source_manifest_by_id": _source_manifest_by_id,
         "source_manifest_sweep": _source_manifest_sweep,
         "path_stem": _path_stem,
+        "source_run_name": _source_run_name,
     }
     for name, fn in _resolvers.items():
         if not OmegaConf.has_resolver(name):
