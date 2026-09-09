@@ -59,13 +59,16 @@ class TestDatasetNamespaceAnnotation:
 
 class _StubDataset:
     """Minimal dataset class for DataModule construction."""
+
     pass
 
 
 class TestSourcePretrainingRoleValidation:
     """Verify mutual exclusion and test-policy rules at the DataModule constructor level."""
 
-    def test_selection_manifest_and_training_fraction_are_mutually_exclusive(self):
+    def test_selection_manifest_and_training_fraction_are_mutually_exclusive(
+        self,
+    ):
         with pytest.raises(ValueError, match="mutually exclusive"):
             NeuralDataModule(
                 dataset_class=_StubDataset,

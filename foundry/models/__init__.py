@@ -57,7 +57,10 @@ from foundry.models.baselines import (
     ShallowConvNet,
     EEGNetEncoder,
 )
-from foundry.models.neurosoft_conv_bigru import NeurosoftConvBiGRU, SessionInputAdapter
+from foundry.models.neurosoft_conv_bigru import (
+    NeurosoftConvBiGRU,
+    SessionInputAdapter,
+)
 
 __all__ = [
     "POYOEEGModel",

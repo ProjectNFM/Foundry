@@ -44,7 +44,9 @@ class ComputeMilestoneCheckpointCallback(L.Callback):
             else list(milestone_fractions)
         )
         if not fractions:
-            raise ValueError("milestone_fractions must contain at least one value")
+            raise ValueError(
+                "milestone_fractions must contain at least one value"
+            )
         for fraction in fractions:
             if not 0.0 < fraction <= 1.0:
                 raise ValueError(
@@ -86,10 +88,7 @@ class ComputeMilestoneCheckpointCallback(L.Callback):
             return
 
         schedule = self._build_milestone_schedule(int(max_steps))
-        if (
-            self._max_steps_at_init == int(max_steps)
-            and self._milestone_steps
-        ):
+        if self._max_steps_at_init == int(max_steps) and self._milestone_steps:
             for step, info in schedule.items():
                 prior = self._milestone_steps.get(step)
                 if prior is not None and prior.get("saved"):
@@ -164,7 +163,9 @@ class ComputeMilestoneCheckpointCallback(L.Callback):
         for line in not_reached:
             log.info("  not_reached: %s", line)
 
-    def _build_milestone_schedule(self, max_steps: int) -> dict[int, dict[str, Any]]:
+    def _build_milestone_schedule(
+        self, max_steps: int
+    ) -> dict[int, dict[str, Any]]:
         schedule: dict[int, dict[str, Any]] = {}
         seen_steps: set[int] = set()
         for fraction in self.milestone_fractions:

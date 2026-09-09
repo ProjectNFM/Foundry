@@ -131,7 +131,9 @@ def test_numa_affinity_selects_gpu_domain_from_physical_numa_indexes(
 ) -> None:
     commands: list[list[str]] = []
 
-    def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(
+        command: list[str], **_: object
+    ) -> subprocess.CompletedProcess[str]:
         commands.append(command)
         stdout = (
             "0x1000\n"
@@ -158,7 +160,9 @@ def test_numa_affinity_selects_gpu_domain_from_physical_numa_indexes(
 def test_numa_affinity_rejects_multiple_gpu_domains(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(
+        command: list[str], **_: object
+    ) -> subprocess.CompletedProcess[str]:
         stdout = "0x3\n" if command[0] == "hwloc-bind" else "1,2,21\n"
         return subprocess.CompletedProcess(command, 0, stdout=stdout)
 

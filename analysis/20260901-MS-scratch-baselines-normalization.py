@@ -31,7 +31,12 @@ import numpy as np
 import pandas as pd
 import wandb
 
-from _wandb_utils import csv_dir, default_entity, figures_dir, unwrap_summary_value
+from _wandb_utils import (
+    csv_dir,
+    default_entity,
+    figures_dir,
+    unwrap_summary_value,
+)
 
 
 PREFIX = "20260901-MS-scratch-baselines-normalization"
@@ -97,7 +102,10 @@ def recording_id(config: dict[str, Any], run_name: str) -> str | None:
     ids = nested_or_flat(config, "data", "dataset_kwargs", "recording_ids")
     if isinstance(ids, list) and ids:
         return str(ids[0])
-    match = re.search(r"(sub-\d+_ses-\d+_task-AcousStim_acq-[A-Za-z]+(?:anest)?_desc-raw)", run_name)
+    match = re.search(
+        r"(sub-\d+_ses-\d+_task-AcousStim_acq-[A-Za-z]+(?:anest)?_desc-raw)",
+        run_name,
+    )
     return match.group(1) if match else None
 
 
@@ -195,69 +203,147 @@ def collect_runs(entity: str | None) -> pd.DataFrame:
                         "run_name": name,
                         "state": run.state,
                         "created_at": getattr(run, "created_at", None),
-                        "is_retry": "retry" in set(getattr(run, "tags", []) or []),
+                        "is_retry": "retry"
+                        in set(getattr(run, "tags", []) or []),
                         "test_supported_macro_f1": f1,
                     }
                 )
     table = pd.DataFrame(rows)
     if table.empty:
-        raise RuntimeError("No planned runs were resolved from the declared W&B groups.")
-    return table.sort_values(["condition", "species", "recording_id", "fraction", "seed", "created_at"])
+        raise RuntimeError(
+            "No planned runs were resolved from the declared W&B groups."
+        )
+    return table.sort_values(
+        [
+            "condition",
+            "species",
+            "recording_id",
+            "fraction",
+            "seed",
+            "created_at",
+        ]
+    )
 
 
 def canonical_test_runs(raw: pd.DataFrame) -> pd.DataFrame:
     """Prefer a completed primary run over a retry for each planned cell."""
-    complete = raw[(raw.state == "finished") & raw.test_supported_macro_f1.notna()].copy()
+    complete = raw[
+        (raw.state == "finished") & raw.test_supported_macro_f1.notna()
+    ].copy()
     if complete.empty:
-        raise RuntimeError("No completed runs with test supported macro-F1 were found.")
+        raise RuntimeError(
+            "No completed runs with test supported macro-F1 were found."
+        )
     complete["is_retry"] = complete.is_retry.fillna(False).astype(bool)
     return (
         complete.sort_values(
-            ["condition", "species", "recording_id", "fraction", "seed", "is_retry", "created_at", "run_id"]
+            [
+                "condition",
+                "species",
+                "recording_id",
+                "fraction",
+                "seed",
+                "is_retry",
+                "created_at",
+                "run_id",
+            ]
         )
-        .drop_duplicates(["condition", "species", "recording_id", "fraction", "seed"], keep="first")
+        .drop_duplicates(
+            ["condition", "species", "recording_id", "fraction", "seed"],
+            keep="first",
+        )
         .reset_index(drop=True)
     )
 
 
 def subject_balanced_summary(runs: pd.DataFrame) -> pd.DataFrame:
     """Average seed → recording → subject → species at every condition/fraction."""
-    session = (
-        runs.groupby(["condition", "condition_label", "species", "subject", "recording_id", "fraction"], as_index=False)
-        .test_supported_macro_f1.mean()
-    )
-    subject = (
-        session.groupby(["condition", "condition_label", "species", "subject", "fraction"], as_index=False)
-        .test_supported_macro_f1.mean()
-    )
+    session = runs.groupby(
+        [
+            "condition",
+            "condition_label",
+            "species",
+            "subject",
+            "recording_id",
+            "fraction",
+        ],
+        as_index=False,
+    ).test_supported_macro_f1.mean()
+    subject = session.groupby(
+        ["condition", "condition_label", "species", "subject", "fraction"],
+        as_index=False,
+    ).test_supported_macro_f1.mean()
     return (
-        subject.groupby(["condition", "condition_label", "species", "fraction"], as_index=False)
-        .agg(n_subjects=("subject", "nunique"), mean_test_f1=("test_supported_macro_f1", "mean"), sd_test_f1=("test_supported_macro_f1", "std"))
+        subject.groupby(
+            ["condition", "condition_label", "species", "fraction"],
+            as_index=False,
+        )
+        .agg(
+            n_subjects=("subject", "nunique"),
+            mean_test_f1=("test_supported_macro_f1", "mean"),
+            sd_test_f1=("test_supported_macro_f1", "std"),
+        )
         .sort_values(["species", "fraction", "condition"])
     )
 
 
 def cumulative_to_80(runs: pd.DataFrame) -> pd.DataFrame:
     """Compute condition-specific 80%-of-own-full-data target attainment."""
-    session = (
-        runs.groupby(["condition", "condition_label", "species", "recording_id", "fraction"], as_index=False)
-        .test_supported_macro_f1.mean()
-    )
+    session = runs.groupby(
+        ["condition", "condition_label", "species", "recording_id", "fraction"],
+        as_index=False,
+    ).test_supported_macro_f1.mean()
     rows: list[dict[str, Any]] = []
-    for (condition, label, species, rec), data in session.groupby(["condition", "condition_label", "species", "recording_id"]):
+    for (condition, label, species, rec), data in session.groupby(
+        ["condition", "condition_label", "species", "recording_id"]
+    ):
         full = data[np.isclose(data.fraction, 1.0)]
         if full.empty:
             continue
         target = 0.8 * float(full.test_supported_macro_f1.iloc[0])
-        reached = next((f for f in FRACTIONS if not data[np.isclose(data.fraction, f)].empty and float(data[np.isclose(data.fraction, f)].test_supported_macro_f1.iloc[0]) >= target), None)
-        rows.append({"condition": condition, "condition_label": label, "species": species, "recording_id": rec, "target_f1": target, "reached_fraction": reached})
+        reached = next(
+            (
+                f
+                for f in FRACTIONS
+                if not data[np.isclose(data.fraction, f)].empty
+                and float(
+                    data[
+                        np.isclose(data.fraction, f)
+                    ].test_supported_macro_f1.iloc[0]
+                )
+                >= target
+            ),
+            None,
+        )
+        rows.append(
+            {
+                "condition": condition,
+                "condition_label": label,
+                "species": species,
+                "recording_id": rec,
+                "target_f1": target,
+                "reached_fraction": reached,
+            }
+        )
     targets = pd.DataFrame(rows)
     summary_rows: list[dict[str, Any]] = []
-    for (condition, label, species), data in targets.groupby(["condition", "condition_label", "species"]):
+    for (condition, label, species), data in targets.groupby(
+        ["condition", "condition_label", "species"]
+    ):
         for fraction in FRACTIONS:
             n = len(data)
             reached = int(data.reached_fraction.le(fraction).sum())
-            summary_rows.append({"condition": condition, "condition_label": label, "species": species, "fraction": fraction, "n_sessions": n, "n_reached_80pct": reached, "share_reached_80pct": reached / n})
+            summary_rows.append(
+                {
+                    "condition": condition,
+                    "condition_label": label,
+                    "species": species,
+                    "fraction": fraction,
+                    "n_sessions": n,
+                    "n_reached_80pct": reached,
+                    "share_reached_80pct": reached / n,
+                }
+            )
     return targets, pd.DataFrame(summary_rows)
 
 
@@ -272,20 +358,19 @@ def performance_qualified_cumulative(
     a condition-specific denominator that could itself induce an apparent
     data-efficiency advantage.
     """
-    session = (
-        runs.groupby(
-            ["condition", "species", "recording_id", "fraction"],
-            as_index=False,
-        )
-        .test_supported_macro_f1.mean()
-    )
+    session = runs.groupby(
+        ["condition", "species", "recording_id", "fraction"],
+        as_index=False,
+    ).test_supported_macro_f1.mean()
     full = session[np.isclose(session.fraction, 1.0)].pivot(
         index=["species", "recording_id"],
         columns="condition",
         values="test_supported_macro_f1",
     )
     if full.empty or not set(GROUPS).issubset(full.columns):
-        raise RuntimeError("Missing full-data results needed for performance qualification.")
+        raise RuntimeError(
+            "Missing full-data results needed for performance qualification."
+        )
     full = full[list(GROUPS)].copy()
     full["pooled_full_data_f1"] = full.mean(axis=1)
     full["species_median_pooled_full_data_f1"] = full.groupby(level="species")[
@@ -306,11 +391,20 @@ def performance_qualified_cumulative(
 def paired_contrasts(runs: pd.DataFrame) -> pd.DataFrame:
     """Pair contrasts by species, recording, fraction, and initialization seed."""
     index = ["species", "recording_id", "subject", "fraction", "seed"]
-    wide = runs.pivot_table(index=index, columns="condition", values="test_supported_macro_f1", aggfunc="first").reset_index()
+    wide = runs.pivot_table(
+        index=index,
+        columns="condition",
+        values="test_supported_macro_f1",
+        aggfunc="first",
+    ).reset_index()
     rows: list[pd.DataFrame] = []
     for comparison, lhs, rhs in (
         ("global EEGNet − raw EEGNet", "global_eegnet", "raw_eegnet"),
-        ("global Conv--BiGRU − global EEGNet", "global_conv_bigru", "global_eegnet"),
+        (
+            "global Conv--BiGRU − global EEGNet",
+            "global_conv_bigru",
+            "global_eegnet",
+        ),
     ):
         if lhs not in wide or rhs not in wide:
             continue
@@ -319,7 +413,9 @@ def paired_contrasts(runs: pd.DataFrame) -> pd.DataFrame:
         part["lhs_f1"] = part[lhs]
         part["rhs_f1"] = part[rhs]
         part["delta_f1"] = part[lhs] - part[rhs]
-        rows.append(part[index + ["comparison", "lhs_f1", "rhs_f1", "delta_f1"]])
+        rows.append(
+            part[index + ["comparison", "lhs_f1", "rhs_f1", "delta_f1"]]
+        )
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
 
@@ -328,7 +424,11 @@ def paired_summary(contrasts: pd.DataFrame) -> pd.DataFrame:
         return contrasts
     return (
         contrasts.groupby(["comparison", "species", "fraction"], as_index=False)
-        .agg(n_paired_cells=("delta_f1", "count"), mean_delta_f1=("delta_f1", "mean"), sd_delta_f1=("delta_f1", "std"))
+        .agg(
+            n_paired_cells=("delta_f1", "count"),
+            mean_delta_f1=("delta_f1", "mean"),
+            sd_delta_f1=("delta_f1", "std"),
+        )
         .sort_values(["comparison", "species", "fraction"])
     )
 
@@ -336,10 +436,24 @@ def paired_summary(contrasts: pd.DataFrame) -> pd.DataFrame:
 def plot_learning_curves(summary: pd.DataFrame, output: Path) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), sharey=False)
     for axis, species in zip(axes, ("minipigs", "monkeys"), strict=True):
-        for condition, data in summary[summary.species.eq(species)].groupby("condition"):
+        for condition, data in summary[summary.species.eq(species)].groupby(
+            "condition"
+        ):
             data = data.sort_values("fraction")
-            axis.errorbar(data.fraction * 100, data.mean_test_f1, yerr=data.sd_test_f1.fillna(0), marker="o", capsize=3, color=COLORS[condition], label=data.condition_label.iloc[0])
-        axis.set(title=species.title(), xlabel="Training data (%)", ylabel="Subject-balanced test supported macro-F1")
+            axis.errorbar(
+                data.fraction * 100,
+                data.mean_test_f1,
+                yerr=data.sd_test_f1.fillna(0),
+                marker="o",
+                capsize=3,
+                color=COLORS[condition],
+                label=data.condition_label.iloc[0],
+            )
+        axis.set(
+            title=species.title(),
+            xlabel="Training data (%)",
+            ylabel="Subject-balanced test supported macro-F1",
+        )
         axis.set_xticks(np.array(FRACTIONS) * 100)
         axis.grid(alpha=0.25)
     axes[1].legend(loc="best", fontsize=8)
@@ -357,7 +471,9 @@ def plot_data_efficiency(
 ) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), sharey=True)
     for axis, species in zip(axes, ("minipigs", "monkeys"), strict=True):
-        for condition, data in cumulative[cumulative.species.eq(species)].groupby("condition"):
+        for condition, data in cumulative[
+            cumulative.species.eq(species)
+        ].groupby("condition"):
             data = data.sort_values("fraction")
             axis.plot(
                 data.fraction * 100,
@@ -366,7 +482,12 @@ def plot_data_efficiency(
                 color=COLORS[condition],
                 label=data.condition_label.iloc[0],
             )
-        axis.set(title=species.title(), xlabel="Training data (%)", ylabel="Sessions reaching 80% of own full-data F1 (%)", ylim=(-2, 102))
+        axis.set(
+            title=species.title(),
+            xlabel="Training data (%)",
+            ylabel="Sessions reaching 80% of own full-data F1 (%)",
+            ylim=(-2, 102),
+        )
         axis.set_xticks(np.array(FRACTIONS) * 100)
         axis.grid(alpha=0.25)
     axes[1].legend(loc="best", fontsize=8)
@@ -379,15 +500,30 @@ def plot_data_efficiency(
 def plot_paired_contrasts(summary: pd.DataFrame, output: Path) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), sharey=True)
     for axis, species in zip(axes, ("minipigs", "monkeys"), strict=True):
-        for comparison, data in summary[summary.species.eq(species)].groupby("comparison"):
+        for comparison, data in summary[summary.species.eq(species)].groupby(
+            "comparison"
+        ):
             data = data.sort_values("fraction")
-            axis.errorbar(data.fraction * 100, data.mean_delta_f1, yerr=data.sd_delta_f1.fillna(0), marker="o", capsize=3, label=comparison)
+            axis.errorbar(
+                data.fraction * 100,
+                data.mean_delta_f1,
+                yerr=data.sd_delta_f1.fillna(0),
+                marker="o",
+                capsize=3,
+                label=comparison,
+            )
         axis.axhline(0, color="black", linewidth=0.8)
-        axis.set(title=species.title(), xlabel="Training data (%)", ylabel="Paired test supported macro-F1 difference")
+        axis.set(
+            title=species.title(),
+            xlabel="Training data (%)",
+            ylabel="Paired test supported macro-F1 difference",
+        )
         axis.set_xticks(np.array(FRACTIONS) * 100)
         axis.grid(alpha=0.25)
     axes[1].legend(loc="best", fontsize=8)
-    fig.suptitle("Paired contrasts: positive values favor the named left condition")
+    fig.suptitle(
+        "Paired contrasts: positive values favor the named left condition"
+    )
     fig.tight_layout()
     fig.savefig(output, dpi=180, bbox_inches="tight")
     plt.close(fig)
@@ -406,10 +542,19 @@ def main() -> None:
     csv_root, figure_root = csv_dir(__file__), figures_dir(__file__)
     outputs = {
         "raw W&B records": (raw, csv_root / f"{PREFIX}_raw_runs.csv"),
-        "canonical test results": (canonical, csv_root / f"{PREFIX}_canonical_test_results.csv"),
-        "subject-balanced summary": (balanced, csv_root / f"{PREFIX}_subject_balanced.csv"),
+        "canonical test results": (
+            canonical,
+            csv_root / f"{PREFIX}_canonical_test_results.csv",
+        ),
+        "subject-balanced summary": (
+            balanced,
+            csv_root / f"{PREFIX}_subject_balanced.csv",
+        ),
         "80% targets": (targets, csv_root / f"{PREFIX}_data_to_80_targets.csv"),
-        "80% cumulative summary": (cumulative, csv_root / f"{PREFIX}_cumulative_data_to_80.csv"),
+        "80% cumulative summary": (
+            cumulative,
+            csv_root / f"{PREFIX}_cumulative_data_to_80.csv",
+        ),
         "performance-qualification table": (
             qualification,
             csv_root / f"{PREFIX}_performance_qualification.csv",
@@ -422,8 +567,14 @@ def main() -> None:
             qualified_cumulative,
             csv_root / f"{PREFIX}_qualified_cumulative_data_to_80.csv",
         ),
-        "paired cells": (contrasts, csv_root / f"{PREFIX}_paired_contrasts.csv"),
-        "paired summary": (contrast_summary, csv_root / f"{PREFIX}_paired_summary.csv"),
+        "paired cells": (
+            contrasts,
+            csv_root / f"{PREFIX}_paired_contrasts.csv",
+        ),
+        "paired summary": (
+            contrast_summary,
+            csv_root / f"{PREFIX}_paired_summary.csv",
+        ),
     }
     for label, (table, path) in outputs.items():
         table.to_csv(path, index=False)
@@ -447,12 +598,24 @@ def main() -> None:
         print(f"Wrote {suffix} figure: {path}")
     print("\nSubject-balanced test supported macro-F1:")
     print(balanced.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
-    print("\nCumulative sessions reaching 80% of condition-specific full-data F1:")
+    print(
+        "\nCumulative sessions reaching 80% of condition-specific full-data F1:"
+    )
     print(cumulative.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
-    print("\nPerformance-qualified cumulative attainment (shared recording set):")
-    print(qualified_cumulative.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
+    print(
+        "\nPerformance-qualified cumulative attainment (shared recording set):"
+    )
+    print(
+        qualified_cumulative.to_string(
+            index=False, float_format=lambda x: f"{x:.4f}"
+        )
+    )
     print("\nPaired test supported macro-F1 contrasts:")
-    print(contrast_summary.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
+    print(
+        contrast_summary.to_string(
+            index=False, float_format=lambda x: f"{x:.4f}"
+        )
+    )
 
 
 if __name__ == "__main__":

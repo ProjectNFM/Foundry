@@ -339,9 +339,7 @@ class NeurosoftConvBiGRU(nn.Module):
         ):
             return self._raw_to_canonical[raw_id]
         namespaces_with_id = [
-            ns
-            for ns, mapping in self._id_aliases.items()
-            if raw_id in mapping
+            ns for ns, mapping in self._id_aliases.items() if raw_id in mapping
         ]
         if len(namespaces_with_id) > 1:
             raise KeyError(

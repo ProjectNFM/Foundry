@@ -51,12 +51,12 @@ def _mock_trainer(*, sanity=False):
     return trainer
 
 
-def _feed_validation_batch(cb, module, session_ids, preds_by_session, targets_by_session):
+def _feed_validation_batch(
+    cb, module, session_ids, preds_by_session, targets_by_session
+):
     """Send one validation batch through the callback's public lifecycle hook."""
     counts = [targets.numel() for targets in targets_by_session]
-    task_index = torch.zeros(
-        (len(session_ids), max(counts)), dtype=torch.long
-    )
+    task_index = torch.zeros((len(session_ids), max(counts)), dtype=torch.long)
     for row, count in enumerate(counts):
         task_index[row, :count] = 1
 
@@ -85,11 +85,13 @@ class TestComputeSupportedF1:
 
     def test_perfect_predictions(self):
         cb = _callback(num_classes=4)
-        preds = torch.tensor([
-            [10.0, -10, -10, -10],
-            [-10, 10.0, -10, -10],
-            [-10, -10, 10.0, -10],
-        ])
+        preds = torch.tensor(
+            [
+                [10.0, -10, -10, -10],
+                [-10, 10.0, -10, -10],
+                [-10, -10, 10.0, -10],
+            ]
+        )
         targets = torch.tensor([0, 1, 2])
         preds_soft = torch.softmax(preds, dim=-1)
 
@@ -102,10 +104,12 @@ class TestComputeSupportedF1:
     def test_absent_positive_class_excluded_from_denominator(self):
         """Classes with zero support do not contribute to the macro mean."""
         cb = _callback(num_classes=4)
-        preds = torch.tensor([
-            [10.0, -10, -10, -10],
-            [10.0, -10, -10, -10],
-        ])
+        preds = torch.tensor(
+            [
+                [10.0, -10, -10, -10],
+                [10.0, -10, -10, -10],
+            ]
+        )
         targets = torch.tensor([0, 0])
         preds_soft = torch.softmax(preds, dim=-1)
 
@@ -126,12 +130,14 @@ class TestComputeSupportedF1:
     def test_matches_hand_computed_reference(self):
         """Two classes, imperfect predictions: F1 per class then mean."""
         cb = _callback(num_classes=3)
-        preds_soft = torch.tensor([
-            [0.9, 0.05, 0.05],
-            [0.9, 0.05, 0.05],
-            [0.1, 0.8, 0.1],
-            [0.8, 0.1, 0.1],
-        ])
+        preds_soft = torch.tensor(
+            [
+                [0.9, 0.05, 0.05],
+                [0.9, 0.05, 0.05],
+                [0.1, 0.8, 0.1],
+                [0.8, 0.1, 0.1],
+            ]
+        )
         targets = torch.tensor([0, 0, 1, 1])
 
         f1_metric = F1Score(task="multiclass", num_classes=3, average=None)
@@ -175,7 +181,8 @@ class TestUnweightedSessionMean:
 
         logged_calls = module.log.call_args_list
         metric_call = next(
-            c for c in logged_calls
+            c
+            for c in logged_calls
             if c[0][0] == "val/source_session_mean_supported_f1"
         )
         mean_f1 = metric_call[0][1]
@@ -209,22 +216,27 @@ class TestUnweightedSessionMean:
         cb.on_validation_epoch_end(trainer, module)
 
         metric_call = next(
-            c for c in module.log.call_args_list
+            c
+            for c in module.log.call_args_list
             if c[0][0] == "val/source_session_mean_supported_f1"
         )
         unweighted_mean = metric_call[0][1]
 
         all_preds = torch.softmax(
-            torch.cat([
-                torch.tensor([[10.0, -10]] * 100),
-                torch.tensor([[-10, 10.0]] * 3),
-            ]),
+            torch.cat(
+                [
+                    torch.tensor([[10.0, -10]] * 100),
+                    torch.tensor([[-10, 10.0]] * 3),
+                ]
+            ),
             dim=-1,
         )
-        all_targets = torch.cat([
-            torch.zeros(100, dtype=torch.long),
-            torch.zeros(3, dtype=torch.long),
-        ])
+        all_targets = torch.cat(
+            [
+                torch.zeros(100, dtype=torch.long),
+                torch.zeros(3, dtype=torch.long),
+            ]
+        )
         pooled_f1 = F1Score(task="multiclass", num_classes=2, average="macro")(
             all_preds, all_targets
         ).item()

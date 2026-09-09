@@ -287,10 +287,14 @@ def load_pretrained_weights(
             f"to transfer."
         )
 
-    component_names = model.transferable_components() if components is None else components
+    component_names = (
+        model.transferable_components() if components is None else components
+    )
     if components is not None and not component_names:
         raise PretrainedTransferError("No pretrained components were selected")
-    missing_components = [name for name in component_names if not hasattr(model, name)]
+    missing_components = [
+        name for name in component_names if not hasattr(model, name)
+    ]
     if missing_components:
         raise PretrainedTransferError(
             f"Selected transferable components do not exist on {type(model).__name__}: "
