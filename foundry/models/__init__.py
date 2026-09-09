@@ -57,7 +57,7 @@ from foundry.models.baselines import (
     ShallowConvNet,
     EEGNetEncoder,
 )
-from foundry.models.neurosoft_conv_bigru import (
+from foundry.models.neurosoft_models import (
     NeurosoftConvBiGRU,
     SessionInputAdapter,
 )

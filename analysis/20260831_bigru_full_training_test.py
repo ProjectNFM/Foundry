@@ -22,7 +22,7 @@ from foundry.data.datasets.neurosoft import NeurosoftMinipigs2026
 from foundry.data.samplers import FastRandomFixedWindowSampler
 from foundry.tasks.config import TaskConfig
 from foundry.tasks.classification_mapping import filter_intervals_by_mapping
-from foundry.models.neurosoft_conv_bigru import NeurosoftConvBiGRU
+from foundry.models.neurosoft_models import NeurosoftConvBiGRU
 from foundry.seed import set_seed
 
 DATA_ROOT = "./data/processed/"
