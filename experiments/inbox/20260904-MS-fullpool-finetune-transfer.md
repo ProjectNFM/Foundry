@@ -1,6 +1,6 @@
 # Phase 4A -- Full-Pool Pretraining Full-Finetuning Transfer Gate
 
-**Status:** Draft
+**Status:** In Progress
 **Date started:** 2026-09-04
 **Parent experiment:** [NeuroSoft Supervised Pretraining Pipeline](20260903-MS-neurosoft-supervised-pretraining-pipeline.md)
 **Follow-up experiments:** Frozen-representation transfer gate (TBD); Phase 4 source-volume study (TBD)
@@ -70,11 +70,28 @@ independent expected benefit.
   target checkpoint by
   `val/neurosoft_acoustic_stim_8band_supported_f1`, then evaluate target test
   exactly once.
-- **WandB:** project `neurosoft_supervised_pretraining`; use four dedicated
-  immutable groups: `PHASE4A_FULLPOOL_SOURCE_MINIPIGS`,
-  `PHASE4A_FULLPOOL_SOURCE_MONKEYS`,
-  `PHASE4A_FULL_FINETUNE_MINIPIGS`, and
+- **WandB:** `poyo-eeg/neurosoft_supervised_pretraining`. On 2026-09-09,
+  the user selected the completed **Mila** source runs in
+  `NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS` and
+  `NEUROSOFT_SOURCE_PRETRAINING_MONKEYS` for downstream transfer; exact run
+  identities are recorded below. Exclude earlier pilots in those groups and
+  the separate Clariden `PHASE4A_FULLPOOL_SOURCE_*` runs. Planned downstream
+  groups remain `PHASE4A_FULL_FINETUNE_MINIPIGS` and
   `PHASE4A_FULL_FINETUNE_MONKEYS`.
+- **Actual source execution:** Mila Slurm arrays `10711898` (minipigs,
+  tasks 0–5) and `10711900` (monkeys, tasks 0–3), Git
+  `979b1c859fa848fa8f988a1e54e5bcd6862bb79a`, Quadro RTX 8000,
+  `16-mixed` precision. Snapshot bundles:
+  `/network/scratch/s/sobralm/foundry-launches/20260908T183529_NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS_979b1c85_6bd6a06b`
+  and
+  `/network/scratch/s/sobralm/foundry-launches/20260908T183607_NEUROSOFT_SOURCE_PRETRAINING_MONKEYS_979b1c85_655c02cf`.
+- **Source artifacts:** Best manifests are under
+  `/network/scratch/s/sobralm/runs/<source-group>/<run-name>/manifests/best-*.json`;
+  checkpoint paths in these manifests resolve relative to
+  `/network/scratch/s/sobralm/foundry-checkpoints`. Each run's
+  `provenance.json` and `.hydra/config.yaml` preserve the submitted overrides
+  and model seed. These are the selected source artifacts even if downstream
+  execution later uses another cluster.
 
 ### Run matrix
 
@@ -125,6 +142,28 @@ before treating the session/target-seed pair as an inferential replicate.
    checkpoint roots must be visible both at submission and on workers.
 
 ### Launch command
+
+The reusable Mila fan-out implementation is documented in
+[`docs/downstream-checkpoint-fanout.md`](../../docs/downstream-checkpoint-fanout.md).
+Its selected checkpoint registry is
+`launch/checkpoint_sets/phase4a-mila-best.jsonl`; the Phase 4A recipe is
+`configs/downstream_recipes/phase4a_full_finetuning.yaml`; and its compiled
+cell lists contain 360 minipig and 117 monkey cells under `launch/phase4a/`.
+These artifacts use the existing packed Submitit cell-list launcher. No
+downstream jobs were submitted while creating or validating them.
+
+For a later Mila launch, use one normal Hydra multirun per species with
+`hydra/launcher=slurm_default`, the corresponding compiled `cell_list`, and
+the legacy `long` partition. `tasks_per_node` runs independent cell processes
+concurrently on one GPU; it does not share an in-process checkpoint/model.
+Benchmark one, then two and optionally four concurrent cells before selecting
+the production packing value. A later manual retry requires an explicitly
+filtered cell list because a static packed array is not a durable completion
+queue.
+
+The Clariden commands below describe the original plan, not the completed
+Mila source submission. Use the actual source provenance above when preparing
+downstream cells. No downstream jobs were launched during the 2026-09-09 check.
 
 The job graph has a true dependency, so this is two normal Hydra multiruns,
 not one static sweep.  A committed cell-list generator should emit exact
@@ -188,11 +227,13 @@ matrix irreproducible.
   `source_volume/.../fraction-1.00/selection-<seed>.json` files.
 - `run.seed`: source seed in Stage A; independent target finetuning seed in
   Stage B.
-- Source production runs use `trainer.max_steps=50000`,
+- The completed Mila source runs used `trainer.max_steps=50000`,
   `trainer.val_check_interval=500`, `trainer.log_every_n_steps=500`,
   `hyperparameters.batch_size=128`, `hyperparameters.learning_rate=0.00025`,
   and `hyperparameters.weight_decay=0.01`.
-- Source production runs set `trainer.enable_progress_bar=false` and disable
+- The original source plan set `trainer.enable_progress_bar=false`; actual
+  Mila configs retained `true` but removed the rich progress callback.
+  The completed source runs disabled
   early stopping and the
   `rich_progress_bar`, `session_metrics`, `confusion_matrix`,
   `reconstruction_visualization`, `parameter_watcher`, and
@@ -212,28 +253,146 @@ matrix irreproducible.
 
 ### Summary
 
-TBD
+**Pretraining complete; downstream transfer pending (checked 2026-09-09).**
+The selected Mila batch covers all 36 planned full-pool source cells: seven
+minipig and five monkey excluded target subjects, each with paired
+source-selection/model seeds 42, 43, and 44. All 36 W&B runs are `finished`.
+All 36 best checkpoint manifests and all 36 final 50,000-step milestone
+manifests passed manifest-hash and checkpoint SHA-256 verification against
+the files on shared Mila storage. Source-manifest hashes matched the referenced
+local source manifests, whose recording lists matched the checkpoint manifests;
+all use fraction 1.00 and exclude the target subject within the same species.
+Saved Hydra configs confirm the paired model seeds and `run.evaluate_test=false`.
+All selected source-validation scores are finite and positive.
+
+One logging exception: `src_mp_sub-07_s44_m44` (`9gv2glg2`) has only 99
+validation records, ends its W&B compute summary at 49,500 steps, and lacks
+the `compute/best_*` summary fields. Its best manifest records F1 0.457977
+at step 48,500, consistent with the available history. Its hash-verified
+`milestone-100pct-step50000.json` and checkpoint, plus the local W&B
+`output.log` reporting final checkpoint publication and six emitted manifests,
+confirm completion at 50,000 steps. This is an incomplete W&B record, not
+evidence that the source training must be rerun.
+
+The original dedicated Clariden groups are not the selected transfer source.
+At inspection they contained 20 minipig and 15 monkey runs, with model seed
+42 throughout, including selection-seed 43/44 cells. Do not merge these with
+the Mila replicates or select runs solely by the originally planned group names.
 
 ### Metrics
 
-TBD
+Descriptive source-run summaries; F1 is
+`val/source_session_mean_supported_f1` on a 0–1 scale. Best-checkpoint
+metrics come from the verified manifests; loss and within-budget comparisons
+come from W&B validation histories.
+
+| Pretraining check / metric | Minipigs | Monkeys |
+|---|---:|---:|
+| Planned cells / finished selected runs | 21 / 21 | 15 / 15 |
+| Verified best / final-50K checkpoints | 21 / 21 | 15 / 15 |
+| W&B runs with all 100 validation records | 20 / 21 | 15 / 15 |
+| Best source F1, mean | 0.492576 | 0.559896 |
+| Best source F1, range | 0.441784–0.525322 | 0.523000–0.604386 |
+| Selected best step, median (range) | 45,000 (23,000–50,000) | 35,500 (5,500–48,500) |
+| Validation-loss minimum step, range | 4,500–9,500 | 1,500–4,500 |
+| Runs with validation-loss minimum by 10K | 21 / 21 | 15 / 15 |
+| Mean validation loss at 10K → last logged validation | 1.577811 → 2.981983 | 2.162789 → 3.650650 |
+| Mean best-F1 gain after 10K, percentage points | +5.60 | +2.49 |
+| Runs whose selected best F1 occurs after 10K | 21 / 21 | 14 / 15 |
+
+The last logged validation for `9gv2glg2` is at 49,500 steps; the other
+35 runs end at 50,000. Validation history uses `trainer/global_step + 1`
+to recover the completed optimizer-step count at validation. The F1 gain
+compares the maximum over all available validations with the maximum through
+10,000 steps, separately for each run, then averages within species.
+
+Exact selected W&B runs are below. Human-readable names follow
+`src_mp_<subject>_s<seed>_m<seed>` for minipigs and
+`src_mk_<subject>_s<seed>_m<seed>` for monkeys; each column supplies the
+paired selection/model seed. Links identify the machine-readable run IDs.
+
+| Species / excluded target | Seed 42 | Seed 43 | Seed 44 |
+|---|---|---|---|
+| Minipigs / sub-01 | [r0gtf121](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/r0gtf121) | [lkiyj2k0](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/lkiyj2k0) | [yxta4xzm](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/yxta4xzm) |
+| Minipigs / sub-02 | [3mza7zam](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/3mza7zam) | [mtzqp9gr](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/mtzqp9gr) | [vz9zkqro](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/vz9zkqro) |
+| Minipigs / sub-03 | [dp02wmlx](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/dp02wmlx) | [fmakmjku](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/fmakmjku) | [cjjw7kqe](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/cjjw7kqe) |
+| Minipigs / sub-04 | [gznd7udy](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/gznd7udy) | [fzxnk9qm](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/fzxnk9qm) | [uv3v4qwp](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/uv3v4qwp) |
+| Minipigs / sub-05 | [qb0wham8](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/qb0wham8) | [8ylinpgd](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/8ylinpgd) | [f2kooeea](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/f2kooeea) |
+| Minipigs / sub-06 | [l0bxriwc](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/l0bxriwc) | [18c37yrr](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/18c37yrr) | [vxaxrw7t](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/vxaxrw7t) |
+| Minipigs / sub-07 | [7jl8yhvl](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/7jl8yhvl) | [ze3cj4hw](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/ze3cj4hw) | [9gv2glg2](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/9gv2glg2) |
+| Monkeys / sub-01 | [xqlorudd](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/xqlorudd) | [oalhvwze](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/oalhvwze) | [4ufexa4o](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/4ufexa4o) |
+| Monkeys / sub-02 | [xirc3ujl](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/xirc3ujl) | [au20wit8](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/au20wit8) | [1kcff6li](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/1kcff6li) |
+| Monkeys / sub-03 | [29be61gt](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/29be61gt) | [yzvi964a](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/yzvi964a) | [ky1i3aec](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/ky1i3aec) |
+| Monkeys / sub-04 | [adochvjq](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/adochvjq) | [vwohtaxd](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/vwohtaxd) | [r3vclvri](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/r3vclvri) |
+| Monkeys / sub-05 | [t6qjxb4j](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/t6qjxb4j) | [s2zw618u](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/s2zw618u) | [y6hxic6g](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/y6hxic6g) |
 
 ### Analysis
 
-TBD -- use `analysis/20260904-MS-fullpool-finetune-transfer_analysis.py` to
-fetch the dedicated W&B groups, check all planned cells, and calculate paired
-test-F1 and convergence-cost effects against the Phase-2 scratch controls.
+This pretraining-only check used read-only `wandb.Api()` queries and
+`run.scan_history()` for the exact Mila runs above, plus local JSON/config
+reads and SHA-256 checks of best and final checkpoint files. No figures were
+generated.
+
+Downstream analysis remains pending. The analysis script now selects the Mila
+source runs through the committed checkpoint registry and identifies target
+runs by explicit `run.cell_id`, `run.checkpoint_id`, and source-seed fields;
+it does not infer source checkpoint provenance from run names or the old
+Clariden source groups.
+
+On 2026-09-09, the downstream fan-out review independently revalidated all 36
+selected best checkpoint and source-selection manifests, regenerated 360
+minipig and 117 monkey cells byte-for-byte, and composed representative compiled
+overrides for both species. The required targeted suite passed 106 tests after
+review fixes. The review added duplicate scientific-checkpoint rejection,
+source-selection semantic validation, content-addressed compiler provenance in
+lock files, stricter resume/W&B identity guards, exact compiled-cell filtering
+in this analysis script, and the RTX 8000 `16-mixed` fallback. It did not change
+the scientific training budget, target fraction, optimizer recipe, or transfer
+regime.
+
+Controlled launch inputs are preserved under `launch/phase4a/canaries/`: one
+cell per species for `tasks_per_node=1`, followed by distinct matched two-cell
+lists for `tasks_per_node=2`. No four-cell list will be prepared unless the
+two-cell benchmark leaves credible headroom. Submission remains pending a clean,
+committed tree and explicit authorization to commit.
 
 ### Figures
 
-TBD
+None requested for the pretraining completion check.
 
 ## Conclusions
 
-TBD
+The Mila source-pretraining stage completed successfully, with all 36 expected
+best and final checkpoints verified on shared storage. Preserve the existing
+source-F1-selected best checkpoints for this transfer gate. The one incomplete
+W&B record is documented above and does not require a pretraining rerun.
+Downstream worker access and strict source-to-target loading still need their
+normal prelaunch checks; this completion check did not execute a handoff.
+
+**User-confirmed interpretation (2026-09-09):** All source slices show
+validation-loss overfitting by 10K steps with the current model and
+hyperparameters. Future pretraining will use 10,000 steps with validation
+every 100 steps as a compute-saving policy. This is a tradeoff: source F1
+continues improving after 10K in 35/36 runs, by an average 5.60 percentage
+points for minipigs and 2.49 for monkeys. The loss evidence therefore supports
+early overfitting, but does not establish that 10K preserves the best source
+F1 or downstream transfer quality.
+
+The experiment's transfer hypothesis remains **untested** until the 477
+downstream finetunings are evaluated against the matched scratch controls.
+Keep the overall status `In Progress`.
 
 ## Notes for future experiments
 
+- For all future source-pretraining experiments with the current model and
+  hyperparameters, use `trainer.max_steps=10000` and
+  `trainer.val_check_interval=100`, replacing the completed batch's 50,000/500
+  schedule. This reduces the optimizer-step budget by 80% while preserving
+  100 scheduled validation evaluations. Wall-clock savings have not been
+  benchmarked. This step records the policy; it does not modify configs.
+- Use the verified Mila best manifests for the upcoming full-finetuning
+  matrix. The future 10K policy does not retroactively replace these checkpoints
+  or change the current gate's source-F1 selection rule.
 - Advance to the frozen-representation experiment only as a separately
   controlled hypothesis, with a frozen-random representation baseline.
 - Advance to the 10/25/50/100% source-volume study only if this gate passes

@@ -720,6 +720,102 @@ def _validate_checkpoint_policy(
         )
 
 
+_CELL_PROVENANCE_FIELDS = (
+    "name",
+    "group",
+    "tags",
+    "cell_id",
+    "checkpoint_set_id",
+    "checkpoint_id",
+    "source_selection_seed",
+    "source_model_seed",
+    "source_condition",
+    "condition_labels",
+    "target_species",
+    "target_subject",
+    "seed",
+    "pretrained_checkpoint_manifest",
+    "pretrained_checkpoint_manifest_hash",
+    "pretrained_checkpoint_sha256",
+    "pretrained_transfer_regime",
+)
+
+
+def _compiled_cell_provenance(cfg: DictConfig) -> dict:
+    """Return immutable identity dimensions for a compiled target cell."""
+    provenance = {
+        key: OmegaConf.select(cfg, f"run.{key}", default=None)
+        for key in _CELL_PROVENANCE_FIELDS
+    }
+    provenance = {
+        key: OmegaConf.to_container(value, resolve=True)
+        if OmegaConf.is_config(value)
+        else value
+        for key, value in provenance.items()
+    }
+    recording_ids = OmegaConf.select(
+        cfg, "data.dataset_kwargs.recording_ids", default=[]
+    )
+    provenance["target_recording"] = (
+        str(recording_ids[0]) if recording_ids else None
+    )
+    provenance["target_fraction"] = OmegaConf.select(
+        cfg, "data.training_fraction", default=None
+    )
+    provenance["wandb_project"] = OmegaConf.select(
+        cfg, "logger.project", default=None
+    )
+    provenance["wandb_run_id"] = OmegaConf.select(
+        cfg, "logger.id", default=None
+    )
+    return provenance
+
+
+def _write_or_validate_cell_provenance(
+    cfg: DictConfig, output_dir: str, *, resume: bool
+) -> dict:
+    """Persist fresh cell identity or require an exact match before resume."""
+    import json
+
+    expected = _compiled_cell_provenance(cfg)
+    if not expected.get("cell_id") or not expected.get("checkpoint_id"):
+        raise ValueError(
+            "Manifest-based target runs require compiled run.cell_id and "
+            "run.checkpoint_id provenance fields"
+        )
+    path = Path(output_dir) / "compiled-cell-provenance.json"
+    if resume:
+        if not path.is_file():
+            raise RuntimeError(
+                f"Refusing manifest-transfer resume without prior cell provenance: {path}"
+            )
+        prior = json.loads(path.read_text(encoding="utf-8"))
+        if prior != expected:
+            differing = sorted(
+                key
+                for key in set(prior) | set(expected)
+                if prior.get(key) != expected.get(key)
+            )
+            raise RuntimeError(
+                "Refusing to resume a different compiled cell; mismatched fields: "
+                + ", ".join(differing)
+            )
+        return prior
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(expected, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        os.replace(temporary_name, path)
+    finally:
+        Path(temporary_name).unlink(missing_ok=True)
+    return expected
+
+
 # -- WandB -----------------------------------------------------------------
 
 
@@ -1202,6 +1298,27 @@ def _load_and_validate_checkpoint_manifest(
     resolved_manifest_path = _resolve_manifest_path(manifest_path)
     manifest = load_checkpoint_manifest(resolved_manifest_path)
 
+    declared_manifest_hash = OmegaConf.select(
+        cfg, "run.pretrained_checkpoint_manifest_hash", default=None
+    )
+    if (
+        declared_manifest_hash
+        and manifest["manifest_hash"] != declared_manifest_hash
+    ):
+        raise ValueError(
+            "Configured checkpoint manifest hash disagrees with the loaded manifest"
+        )
+    declared_checkpoint_hash = OmegaConf.select(
+        cfg, "run.pretrained_checkpoint_sha256", default=None
+    )
+    if (
+        declared_checkpoint_hash
+        and manifest["checkpoint"]["sha256"] != declared_checkpoint_hash
+    ):
+        raise ValueError(
+            "Configured checkpoint SHA-256 disagrees with the loaded manifest"
+        )
+
     checkpoint_root = os.environ.get("FOUNDRY_CHECKPOINT_ROOT")
     if checkpoint_root:
         verify_checkpoint_integrity(manifest, checkpoint_root)
@@ -1224,6 +1341,29 @@ def _load_and_validate_checkpoint_manifest(
         trained_on.get("source_selection_id"),
     )
 
+    return manifest
+
+
+def _prepare_manifest_transfer_for_run(
+    cfg: DictConfig,
+    datamodule,
+    output_dir: str,
+    resume_path: str | None,
+) -> dict | None:
+    """Validate a fresh source manifest, or validate identity and skip on resume."""
+    configured_manifest = OmegaConf.select(
+        cfg, "run.pretrained_checkpoint_manifest", default=None
+    )
+    if resume_path and configured_manifest:
+        _write_or_validate_cell_provenance(cfg, output_dir, resume=True)
+        logger.info(
+            "Resuming compiled cell %s; source manifest transfer will not be reapplied.",
+            OmegaConf.select(cfg, "run.cell_id"),
+        )
+        return None
+    manifest = _load_and_validate_checkpoint_manifest(cfg, datamodule)
+    if manifest is not None:
+        _write_or_validate_cell_provenance(cfg, output_dir, resume=False)
     return manifest
 
 
@@ -1511,6 +1651,10 @@ def _emit_source_checkpoint_manifests(
                 getattr(datamodule, "selection_manifest_path", "unknown")
             )
             trained_on["source_manifest_hash"] = source_manifest.manifest_hash
+            trained_on["source_selection_seed"] = int(
+                source_manifest.condition.source_selection_seed
+            )
+            trained_on["source_model_seed"] = int(cfg.run.seed)
             trained_on["excluded_target"] = {
                 "species": source_manifest.target_species,
                 "subject": source_manifest.target_subject,
@@ -1794,6 +1938,12 @@ def main(cfg: DictConfig):
     _write_snapshot_task_provenance(output_dir)
     _configure_wandb(cfg, output_dir)
 
+    # Resolve resume before any source transfer. A resumed target cell restores
+    # complete local trainer state and must never reapply source weights.
+    ckpt_path = _get_resume_checkpoint_path(
+        cfg, checkpoint_dir, slurm_restart_count
+    )
+
     # Inject WandB sweep hyperparameters if running under sweep
     _inject_sweep_hyperparams(cfg)
 
@@ -1843,8 +1993,9 @@ def main(cfg: DictConfig):
     pretrained_ckpt = OmegaConf.select(
         cfg, "run.pretrained_checkpoint", default=None
     )
-    checkpoint_manifest = _load_and_validate_checkpoint_manifest(
-        cfg, datamodule
+    _validate_checkpoint_policy(ckpt_path, pretrained_ckpt)
+    checkpoint_manifest = _prepare_manifest_transfer_for_run(
+        cfg, datamodule, output_dir, ckpt_path
     )
 
     if checkpoint_manifest is not None:
@@ -1901,17 +2052,6 @@ def main(cfg: DictConfig):
         _log_neurosoft_provenance_to_wandb(
             trainer, neurosoft_provenance, output_dir
         )
-
-    ckpt_path = _get_resume_checkpoint_path(
-        cfg, checkpoint_dir, slurm_restart_count
-    )
-
-    effective_pretrained = pretrained_ckpt or (
-        OmegaConf.select(
-            cfg, "run.pretrained_checkpoint_manifest", default=None
-        )
-    )
-    _validate_checkpoint_policy(ckpt_path, effective_pretrained)
 
     run_failed = False
     try:

@@ -1,0 +1,29 @@
+schema: foundry-downstream-recipe
+version: 1
+recipe_id: phase4a-full-ft
+output_stem: phase4a-downstream
+audit_path: docs/neurosoft-phase0-audit.json
+eligible_session_selection:
+  eligible: true
+base_experiments:
+  minipigs: auditory_decoding/neurosoft_conv_bigru_transfer_minipigs
+  monkeys: auditory_decoding/neurosoft_conv_bigru_transfer_monkeys
+transfer_regimes: [full_finetuning]
+target_training_fractions: [1.0]
+target_finetuning_seeds: [42, 43, 44]
+expected_source_seed_pairs: [[42, 42], [43, 43], [44, 44]]
+evaluate_test: true
+condition_labels:
+  study: phase4a
+  target_data: full
+species:
+  minipigs:
+    wandb_group: PHASE4A_FULL_FINETUNE_MINIPIGS
+    wandb_tags: [transfer, minipigs, 8band, phase4a, full_finetuning]
+    expected_checkpoints: 21
+    expected_cells: 360
+  monkeys:
+    wandb_group: PHASE4A_FULL_FINETUNE_MONKEYS
+    wandb_tags: [transfer, monkeys, 8band, phase4a, full_finetuning]
+    expected_checkpoints: 15
+    expected_cells: 117

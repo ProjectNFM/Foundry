@@ -12,6 +12,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -28,12 +29,21 @@ from _wandb_utils import csv_dir, default_entity, unwrap_summary_value
 
 
 PREFIX = "20260904-MS-fullpool-finetune-transfer"
+REGISTRY = (
+    Path(__file__).resolve().parents[1]
+    / "launch/checkpoint_sets/phase4a-mila-best.jsonl"
+)
+CELL_LISTS = {
+    species: Path(__file__).resolve().parents[1]
+    / f"launch/phase4a/phase4a-downstream-{species}.jsonl"
+    for species in ("minipigs", "monkeys")
+}
 PROJECT = "neurosoft_supervised_pretraining"
 TASK = "neurosoft_acoustic_stim_8band"
 SEEDS = {42, 43, 44}
 SOURCE_GROUPS = {
-    "minipigs": "PHASE4A_FULLPOOL_SOURCE_MINIPIGS",
-    "monkeys": "PHASE4A_FULLPOOL_SOURCE_MONKEYS",
+    "minipigs": "NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS",
+    "monkeys": "NEUROSOFT_SOURCE_PRETRAINING_MONKEYS",
 }
 TRANSFER_GROUPS = {
     "minipigs": "PHASE4A_FULL_FINETUNE_MINIPIGS",
@@ -50,11 +60,14 @@ RUN_COLUMNS = [
     "species",
     "run_id",
     "run_name",
+    "cell_id",
+    "checkpoint_id",
     "state",
     "recording",
     "subject",
     "target_seed",
     "source_seed",
+    "source_model_seed",
     "source_manifest",
     "checkpoint_manifest",
     "transfer_regime",
@@ -81,7 +94,9 @@ def nested(config: dict[str, Any], *keys: str) -> Any:
     return value
 
 
-def summary_scalar(summary: dict[str, Any], key: str, aggregate: str = "max") -> float | None:
+def summary_scalar(
+    summary: dict[str, Any], key: str, aggregate: str = "max"
+) -> float | None:
     for candidate in (f"{key}.{aggregate}", key):
         value = summary.get(candidate)
         if value is not None:
@@ -99,7 +114,10 @@ def recording_id(config: dict[str, Any], name: str) -> str | None:
     value = nested(config, "neurosoft", "recording_id")
     if value:
         return str(value)
-    match = re.search(r"(sub-\d+_ses-\d+_task-AcousStim_acq-[A-Za-z]+(?:anest)?_desc-raw)", name)
+    match = re.search(
+        r"(sub-\d+_ses-\d+_task-AcousStim_acq-[A-Za-z]+(?:anest)?_desc-raw)",
+        name,
+    )
     return match.group(1) if match else None
 
 
@@ -111,23 +129,112 @@ def subject_id(recording: str | None, config: dict[str, Any]) -> str | None:
     return match.group(1) if match else None
 
 
-def source_seed(config: dict[str, Any], name: str) -> int | None:
+def source_seed(config: dict[str, Any]) -> int | None:
     value = nested(config, "run", "source_selection_seed")
-    if value is None:
-        value = nested(config, "neurosoft", "source_selection_seed")
-    if value is not None:
-        return int(value)
-    match = re.search(r"selection[-_](42|43|44)", str(nested(config, "source_manifest") or name))
-    return int(match.group(1)) if match else None
+    return int(value) if value is not None else None
 
 
-def fetch_group(api: Any, entity: str, group: str, label: str, species: str) -> list[dict[str, Any]]:
+def selected_source_runs() -> dict[str, dict[str, Any]]:
+    """Index selected source W&B IDs from the committed checkpoint registry."""
+    selected: dict[str, dict[str, Any]] = {}
+    for line in REGISTRY.read_text(encoding="utf-8").splitlines():
+        record = json.loads(line)
+        manifest = json.loads(
+            Path(record["manifest_path"]).read_text(encoding="utf-8")
+        )
+        selected[str(manifest["wandb"]["run_id"])] = record
+    return selected
+
+
+def compiled_cells() -> dict[str, dict[str, Any]]:
+    """Index the declared downstream matrix by immutable cell identity."""
+    selected: dict[str, dict[str, Any]] = {}
+    for species, path in CELL_LISTS.items():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            record = json.loads(line)
+            if record["species"] != species:
+                raise ValueError(f"{path}: cell species mismatch")
+            cell_id = str(record["cell_id"])
+            if cell_id in selected:
+                raise ValueError(f"Duplicate compiled cell ID: {cell_id}")
+            selected[cell_id] = record
+    return selected
+
+
+def is_declared_transfer_run(
+    run_id: str,
+    run_name: str,
+    config: dict[str, Any],
+    species: str,
+    selected_cells: dict[str, dict[str, Any]],
+) -> bool:
+    """Require W&B transfer provenance to match one exact compiled cell."""
+    cell_id = nested(config, "run", "cell_id")
+    cell = selected_cells.get(str(cell_id))
+    if cell is None:
+        return False
+    recording_ids = nested(config, "data", "dataset_kwargs", "recording_ids")
+    observed = {
+        "run_name": run_name,
+        "species": species,
+        "target_recording": (
+            str(recording_ids[0])
+            if isinstance(recording_ids, list) and recording_ids
+            else None
+        ),
+        "target_fraction": nested(config, "data", "training_fraction"),
+        "target_finetuning_seed": nested(config, "run", "seed"),
+        "checkpoint_id": nested(config, "run", "checkpoint_id"),
+        "checkpoint_manifest": nested(
+            config, "run", "pretrained_checkpoint_manifest"
+        ),
+        "checkpoint_manifest_hash": nested(
+            config, "run", "pretrained_checkpoint_manifest_hash"
+        ),
+        "checkpoint_sha256": nested(
+            config, "run", "pretrained_checkpoint_sha256"
+        ),
+        "source_selection_seed": nested(config, "run", "source_selection_seed"),
+        "source_model_seed": nested(config, "run", "source_model_seed"),
+        "transfer_regime": nested(config, "run", "pretrained_transfer_regime"),
+    }
+    expected = {key: cell[key] for key in observed}
+    if observed != expected:
+        print(
+            f"Skipping undeclared/mismatched transfer run {run_name} ({run_id})",
+            flush=True,
+        )
+        return False
+    return True
+
+
+def fetch_group(
+    api: Any,
+    entity: str,
+    group: str,
+    label: str,
+    species: str,
+    selected_sources: dict[str, dict[str, Any]],
+    selected_cells: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
     print(f"Fetching {label}: {group}", flush=True)
     rows: list[dict[str, Any]] = []
-    for run in api.runs(f"{entity}/{PROJECT}", filters={"group": group}, per_page=500, lazy=False):
+    for run in api.runs(
+        f"{entity}/{PROJECT}",
+        filters={"group": group},
+        per_page=500,
+        lazy=False,
+    ):
+        selected = selected_sources.get(str(run.id))
+        if label == "source" and selected is None:
+            continue
         config = dict(run.config or {})
         summary = dict(run.summary or {})
         name = str(run.name or "")
+        if label == "transfer" and not is_declared_transfer_run(
+            str(run.id), name, config, species, selected_cells
+        ):
+            continue
         record = recording_id(config, name)
         target_seed = nested(config, "run", "seed")
         rows.append(
@@ -136,21 +243,52 @@ def fetch_group(api: Any, entity: str, group: str, label: str, species: str) -> 
                 "species": species,
                 "run_id": run.id,
                 "run_name": name,
+                "cell_id": nested(config, "run", "cell_id"),
+                "checkpoint_id": nested(config, "run", "checkpoint_id"),
                 "state": run.state,
                 "recording": record,
                 "subject": subject_id(record, config),
-                "target_seed": int(target_seed) if target_seed is not None else None,
-                "source_seed": source_seed(config, name),
+                "target_seed": int(target_seed)
+                if target_seed is not None
+                else None,
+                "source_seed": (
+                    selected["source_selection_seed"]
+                    if selected
+                    else source_seed(config)
+                ),
+                "source_model_seed": (
+                    selected["source_model_seed"]
+                    if selected
+                    else nested(config, "run", "source_model_seed")
+                ),
                 "source_manifest": nested(config, "source_manifest"),
-                "checkpoint_manifest": nested(config, "run", "pretrained_checkpoint_manifest"),
-                "transfer_regime": nested(config, "run", "pretrained_transfer_regime"),
-                "test_supported_f1": summary_scalar(summary, f"test/{TASK}_supported_f1"),
-                "best_val_supported_f1": summary_scalar(summary, f"val/{TASK}_supported_f1"),
-                "optimizer_steps": summary_scalar(summary, "compute/optimizer_steps", "max"),
-                "best_step": summary_scalar(summary, "compute/best_step", "max"),
-                "best_windows": summary_scalar(summary, "compute/best_windows", "max"),
-                "best_flops": summary_scalar(summary, "compute/best_flops", "max"),
-                "wall_time_s": summary_scalar(summary, "compute/wall_time_s", "max"),
+                "checkpoint_manifest": nested(
+                    config, "run", "pretrained_checkpoint_manifest"
+                ),
+                "transfer_regime": nested(
+                    config, "run", "pretrained_transfer_regime"
+                ),
+                "test_supported_f1": summary_scalar(
+                    summary, f"test/{TASK}_supported_f1"
+                ),
+                "best_val_supported_f1": summary_scalar(
+                    summary, f"val/{TASK}_supported_f1"
+                ),
+                "optimizer_steps": summary_scalar(
+                    summary, "compute/optimizer_steps", "max"
+                ),
+                "best_step": summary_scalar(
+                    summary, "compute/best_step", "max"
+                ),
+                "best_windows": summary_scalar(
+                    summary, "compute/best_windows", "max"
+                ),
+                "best_flops": summary_scalar(
+                    summary, "compute/best_flops", "max"
+                ),
+                "wall_time_s": summary_scalar(
+                    summary, "compute/wall_time_s", "max"
+                ),
             }
         )
     return rows
@@ -167,7 +305,9 @@ def completeness(source: pd.DataFrame, transfer: pd.DataFrame) -> None:
         )
 
 
-def paired_effects(transfer: pd.DataFrame, scratch: pd.DataFrame) -> pd.DataFrame:
+def paired_effects(
+    transfer: pd.DataFrame, scratch: pd.DataFrame
+) -> pd.DataFrame:
     """Average source seeds, then compare against identical session/target seeds."""
     finished_transfer = transfer[
         (transfer.state == "finished")
@@ -185,18 +325,25 @@ def paired_effects(transfer: pd.DataFrame, scratch: pd.DataFrame) -> pd.DataFram
         return pd.DataFrame()
 
     unit = ["species", "subject", "recording", "target_seed"]
-    pretrained = (
-        finished_transfer.groupby(unit, as_index=False)
-        .agg(
-            pretrain_replicates=("source_seed", "nunique"),
-            pretrained_test_supported_f1=("test_supported_f1", "mean"),
-            pretrained_best_step=("best_step", "mean"),
-            pretrained_best_windows=("best_windows", "mean"),
-            pretrained_best_flops=("best_flops", "mean"),
-            pretrained_wall_time_s=("wall_time_s", "mean"),
-        )
+    pretrained = finished_transfer.groupby(unit, as_index=False).agg(
+        pretrain_replicates=("source_seed", "nunique"),
+        pretrained_test_supported_f1=("test_supported_f1", "mean"),
+        pretrained_best_step=("best_step", "mean"),
+        pretrained_best_windows=("best_windows", "mean"),
+        pretrained_best_flops=("best_flops", "mean"),
+        pretrained_wall_time_s=("wall_time_s", "mean"),
     )
-    control = finished_scratch[unit + ["test_supported_f1", "best_step", "best_windows", "best_flops", "wall_time_s"]].rename(
+    pretrained = pretrained[pretrained.pretrain_replicates == len(SEEDS)]
+    control = finished_scratch[
+        unit
+        + [
+            "test_supported_f1",
+            "best_step",
+            "best_windows",
+            "best_flops",
+            "wall_time_s",
+        ]
+    ].rename(
         columns={
             "test_supported_f1": "scratch_test_supported_f1",
             "best_step": "scratch_best_step",
@@ -205,18 +352,28 @@ def paired_effects(transfer: pd.DataFrame, scratch: pd.DataFrame) -> pd.DataFram
             "wall_time_s": "scratch_wall_time_s",
         }
     )
-    paired = pretrained.merge(control, on=unit, how="inner", validate="one_to_one")
-    paired["test_f1_gain"] = paired.pretrained_test_supported_f1 - paired.scratch_test_supported_f1
+    paired = pretrained.merge(
+        control, on=unit, how="inner", validate="one_to_one"
+    )
+    paired["test_f1_gain"] = (
+        paired.pretrained_test_supported_f1 - paired.scratch_test_supported_f1
+    )
     for metric in ("best_step", "best_windows", "best_flops", "wall_time_s"):
-        paired[f"{metric}_saved"] = paired[f"scratch_{metric}"] - paired[f"pretrained_{metric}"]
+        paired[f"{metric}_saved"] = (
+            paired[f"scratch_{metric}"] - paired[f"pretrained_{metric}"]
+        )
     return paired
 
 
 def subject_balanced(paired: pd.DataFrame) -> pd.DataFrame:
     if paired.empty:
         return pd.DataFrame()
-    session_means = paired.groupby(["species", "subject", "recording"], as_index=False).mean(numeric_only=True)
-    return session_means.groupby("species", as_index=False).mean(numeric_only=True)
+    session_means = paired.groupby(
+        ["species", "subject", "recording"], as_index=False
+    ).mean(numeric_only=True)
+    return session_means.groupby("species", as_index=False).mean(
+        numeric_only=True
+    )
 
 
 def main() -> None:
@@ -224,15 +381,43 @@ def main() -> None:
     api = wandb.Api()
     entity = entity or api.default_entity
     if not entity:
-        raise RuntimeError("Set WANDB_ENTITY or configure a default W&B entity.")
+        raise RuntimeError(
+            "Set WANDB_ENTITY or configure a default W&B entity."
+        )
 
     source_rows: list[dict[str, Any]] = []
     transfer_rows: list[dict[str, Any]] = []
     scratch_rows: list[dict[str, Any]] = []
+    selected_sources = selected_source_runs()
+    selected_cells = compiled_cells()
     for species in SOURCE_GROUPS:
-        source_rows += fetch_group(api, entity, SOURCE_GROUPS[species], "source", species)
-        transfer_rows += fetch_group(api, entity, TRANSFER_GROUPS[species], "transfer", species)
-        scratch_rows += fetch_group(api, entity, SCRATCH_GROUPS[species], "scratch", species)
+        source_rows += fetch_group(
+            api,
+            entity,
+            SOURCE_GROUPS[species],
+            "source",
+            species,
+            selected_sources,
+            selected_cells,
+        )
+        transfer_rows += fetch_group(
+            api,
+            entity,
+            TRANSFER_GROUPS[species],
+            "transfer",
+            species,
+            selected_sources,
+            selected_cells,
+        )
+        scratch_rows += fetch_group(
+            api,
+            entity,
+            SCRATCH_GROUPS[species],
+            "scratch",
+            species,
+            selected_sources,
+            selected_cells,
+        )
 
     # Declaring columns keeps a not-yet-submitted experiment analyzable: the
     # script prints zero completeness rather than failing on an empty group.
@@ -259,9 +444,17 @@ def main() -> None:
         print("\nNo complete paired source/transfer/scratch cells yet.")
         return
     print("\n=== Paired test supported macro-F1 effect ===")
-    print(paired.groupby("species").test_f1_gain.agg(["count", "mean", "std"]).to_string())
+    print(
+        paired.groupby("species")
+        .test_f1_gain.agg(["count", "mean", "std"])
+        .to_string()
+    )
     print("\n=== Subject-balanced effect ===")
-    print(balanced[["species", "test_f1_gain", "best_step_saved", "best_flops_saved"]].to_string(index=False))
+    print(
+        balanced[
+            ["species", "test_f1_gain", "best_step_saved", "best_flops_saved"]
+        ].to_string(index=False)
+    )
 
 
 if __name__ == "__main__":

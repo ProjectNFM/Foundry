@@ -35,15 +35,28 @@ class_weights:
 
 run:
   project: neurosoft_supervised_pretraining
-  name: tgt_mp_${data.dataset_kwargs.recording_ids.0}_${run.pretrained_transfer_regime}_s${run.seed}
+  name: ${run.cell_id}
   group: NEUROSOFT_TRANSFER_MINIPIGS
   tags: [transfer, minipigs, 8band, phase3]
   seed: 42
+  resume_wandb_if_name_matches: true
+  unsupported_bf16_fallback: 16-mixed
   log_level: INFO
   evaluate_test: false
   pretrained_checkpoint: null
   pretrained_checkpoint_manifest: ???
+  pretrained_checkpoint_manifest_hash: null
+  pretrained_checkpoint_sha256: null
   pretrained_transfer_regime: ???
+  cell_id: uncompiled_minipig_transfer
+  checkpoint_set_id: null
+  checkpoint_id: null
+  source_selection_seed: null
+  source_model_seed: null
+  source_condition: null
+  condition_labels: {}
+  target_species: minipigs
+  target_subject: null
 
 hyperparameters:
   batch_size: 16
