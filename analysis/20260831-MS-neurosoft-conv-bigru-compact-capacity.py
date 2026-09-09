@@ -20,7 +20,12 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import wandb
 
-from _wandb_utils import csv_dir, default_entity, figures_dir, unwrap_summary_value
+from _wandb_utils import (
+    csv_dir,
+    default_entity,
+    figures_dir,
+    unwrap_summary_value,
+)
 
 
 PREFIX = "20260831-MS-neurosoft-conv-bigru-compact-capacity"
@@ -121,7 +126,9 @@ def plot_histories(histories: dict[str, pd.DataFrame], output: Path) -> None:
 def main() -> None:
     rows, histories = collect(default_entity())
     csv_path = csv_dir(__file__) / f"{PREFIX}_partial_runs.csv"
-    figure_path = figures_dir(__file__) / f"{PREFIX}_partial_learning_curves.png"
+    figure_path = (
+        figures_dir(__file__) / f"{PREFIX}_partial_learning_curves.png"
+    )
     rows.to_csv(csv_path, index=False)
     plot_histories(histories, figure_path)
 

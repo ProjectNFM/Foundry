@@ -63,7 +63,9 @@ def _pool_manifest(**overrides):
     return SourcePoolManifest(**base)
 
 
-def _recording(species="minipigs", subject="sub-01", recording_id="sub-01_ses-01"):
+def _recording(
+    species="minipigs", subject="sub-01", recording_id="sub-01_ses-01"
+):
     cid = canonical_recording_id(species, recording_id)
     return SourceRecordingSelection(
         species=species,
@@ -145,9 +147,9 @@ class TestCanonicalRecordingId:
 
     def test_species_collision_avoidance(self):
         raw = "sub-03_ses-01_task-AcousStim_acq-RH_desc-raw"
-        assert canonical_recording_id("minipigs", raw) != canonical_recording_id(
-            "monkeys", raw
-        )
+        assert canonical_recording_id(
+            "minipigs", raw
+        ) != canonical_recording_id("monkeys", raw)
 
     def test_empty_species_fails(self):
         with pytest.raises(ValueError, match="species"):
@@ -379,7 +381,9 @@ class TestSourceSelectionManifest:
         """The same raw recording ID in two species must produce different canonical IDs."""
         rec_pig = _recording(species="minipigs", recording_id="sub-01_ses-01")
         rec_monkey = _recording(species="monkeys", recording_id="sub-01_ses-01")
-        assert rec_pig.canonical_recording_id != rec_monkey.canonical_recording_id
+        assert (
+            rec_pig.canonical_recording_id != rec_monkey.canonical_recording_id
+        )
 
 
 # ── select_class_indices (source selection primitive) ────────────────────────
@@ -389,23 +393,39 @@ class TestSelectClassIndices:
     def test_deterministic(self):
         indices = list(range(10))
         a = select_class_indices(
-            indices, canonical_recording_id="minipigs:sub-01", class_id=0, seed=42, count=5
+            indices,
+            canonical_recording_id="minipigs:sub-01",
+            class_id=0,
+            seed=42,
+            count=5,
         )
         b = select_class_indices(
-            indices, canonical_recording_id="minipigs:sub-01", class_id=0, seed=42, count=5
+            indices,
+            canonical_recording_id="minipigs:sub-01",
+            class_id=0,
+            seed=42,
+            count=5,
         )
         assert a == b
 
     def test_full_count_returns_sorted_all(self):
         indices = [3, 1, 4, 0, 2]
         result = select_class_indices(
-            indices, canonical_recording_id="minipigs:sub-01", class_id=0, seed=42, count=5
+            indices,
+            canonical_recording_id="minipigs:sub-01",
+            class_id=0,
+            seed=42,
+            count=5,
         )
         assert result == sorted(indices)
 
     def test_zero_count_returns_empty(self):
         result = select_class_indices(
-            [0, 1, 2], canonical_recording_id="minipigs:sub-01", class_id=0, seed=42, count=0
+            [0, 1, 2],
+            canonical_recording_id="minipigs:sub-01",
+            class_id=0,
+            seed=42,
+            count=0,
         )
         assert result == []
 
@@ -413,30 +433,54 @@ class TestSelectClassIndices:
         """Smaller counts must be strict subsets of larger counts (nesting)."""
         indices = list(range(20))
         small = select_class_indices(
-            indices, canonical_recording_id="minipigs:sub-01", class_id=0, seed=42, count=5
+            indices,
+            canonical_recording_id="minipigs:sub-01",
+            class_id=0,
+            seed=42,
+            count=5,
         )
         large = select_class_indices(
-            indices, canonical_recording_id="minipigs:sub-01", class_id=0, seed=42, count=10
+            indices,
+            canonical_recording_id="minipigs:sub-01",
+            class_id=0,
+            seed=42,
+            count=10,
         )
         assert set(small).issubset(set(large))
 
     def test_different_seeds_differ(self):
         indices = list(range(20))
         a = select_class_indices(
-            indices, canonical_recording_id="minipigs:sub-01", class_id=0, seed=42, count=5
+            indices,
+            canonical_recording_id="minipigs:sub-01",
+            class_id=0,
+            seed=42,
+            count=5,
         )
         b = select_class_indices(
-            indices, canonical_recording_id="minipigs:sub-01", class_id=0, seed=43, count=5
+            indices,
+            canonical_recording_id="minipigs:sub-01",
+            class_id=0,
+            seed=43,
+            count=5,
         )
         assert a != b
 
     def test_different_recording_ids_differ(self):
         indices = list(range(20))
         a = select_class_indices(
-            indices, canonical_recording_id="minipigs:sub-01", class_id=0, seed=42, count=5
+            indices,
+            canonical_recording_id="minipigs:sub-01",
+            class_id=0,
+            seed=42,
+            count=5,
         )
         b = select_class_indices(
-            indices, canonical_recording_id="minipigs:sub-02", class_id=0, seed=42, count=5
+            indices,
+            canonical_recording_id="minipigs:sub-02",
+            class_id=0,
+            seed=42,
+            count=5,
         )
         assert a != b
 
@@ -449,14 +493,23 @@ class TestSelectClassIndices:
     def test_negative_count_fails(self):
         with pytest.raises(ValueError, match="Requested"):
             select_class_indices(
-                [0, 1], canonical_recording_id="x", class_id=0, seed=42, count=-1
+                [0, 1],
+                canonical_recording_id="x",
+                class_id=0,
+                seed=42,
+                count=-1,
             )
 
 
 # ── committed manifests sanity (runs against the actual v1 tree) ─────────────
 
 
-MANIFEST_ROOT = Path(__file__).resolve().parents[1] / "manifests" / "neurosoft_supervised" / "v1"
+MANIFEST_ROOT = (
+    Path(__file__).resolve().parents[1]
+    / "manifests"
+    / "neurosoft_supervised"
+    / "v1"
+)
 
 
 @pytest.mark.skipif(
@@ -481,7 +534,12 @@ class TestCommittedManifests:
             manifest.validate_no_leakage()
 
     def test_all_selection_manifests_validate_hash(self):
-        families = ["phase3_smoke", "source_volume", "subject_diversity", "species_composition"]
+        families = [
+            "phase3_smoke",
+            "source_volume",
+            "subject_diversity",
+            "species_composition",
+        ]
         checked = 0
         for family_dir in families:
             for path in sorted(MANIFEST_ROOT.glob(f"{family_dir}/**/*.json")):

@@ -264,9 +264,7 @@ class TestSourceAdapterExclusion:
             f"Source adapter keys should never load: {adapter_loaded}"
         )
 
-    def test_full_finetuning_excludes_router_keys_from_excluded(
-        self, tmp_path
-    ):
+    def test_full_finetuning_excludes_router_keys_from_excluded(self, tmp_path):
         """In full_finetuning, router IS transferred, not excluded."""
         src = _build_source_model()
         dst = _build_target_model()
@@ -317,9 +315,7 @@ class TestSourceAdapterExclusion:
 class TestTargetAdapterFreshness:
     """Target adapter parameters must be bitwise identical before and after transfer."""
 
-    def _adapter_state(
-        self, model: nn.Module
-    ) -> dict[str, torch.Tensor]:
+    def _adapter_state(self, model: nn.Module) -> dict[str, torch.Tensor]:
         return {
             k: v.clone()
             for k, v in model.state_dict().items()
@@ -439,9 +435,7 @@ class TestFullFinetuningTrainability:
 
         for prefix in ("temporal_frontend.", "gru.", "router."):
             matched = [k for k in report.loaded if k.startswith(prefix)]
-            assert len(matched) > 0, (
-                f"No keys loaded for {prefix}"
-            )
+            assert len(matched) > 0, f"No keys loaded for {prefix}"
 
 
 # ---------------------------------------------------------------------------
@@ -665,8 +659,18 @@ class TestTargetMismatch:
         }
 
         class _FakeDataModule:
-            dataset_class = type("FakeMinipigs", (), {"__name__": "NeurosoftMinipigs2026"})
-            dataset = type("FakeDataset", (), {"recording_ids": ["sub-06_ses-02_task-AcousStim_acq-LH_desc-raw"]})()
+            dataset_class = type(
+                "FakeMinipigs", (), {"__name__": "NeurosoftMinipigs2026"}
+            )
+            dataset = type(
+                "FakeDataset",
+                (),
+                {
+                    "recording_ids": [
+                        "sub-06_ses-02_task-AcousStim_acq-LH_desc-raw"
+                    ]
+                },
+            )()
 
         with pytest.raises(ValueError, match="does not match"):
             _validate_manifest_target(manifest, _FakeDataModule())
@@ -684,8 +688,18 @@ class TestTargetMismatch:
         }
 
         class _FakeDataModule:
-            dataset_class = type("FakeMinipigs", (), {"__name__": "NeurosoftMinipigs2026"})
-            dataset = type("FakeDataset", (), {"recording_ids": ["sub-06_ses-02_task-AcousStim_acq-LH_desc-raw"]})()
+            dataset_class = type(
+                "FakeMinipigs", (), {"__name__": "NeurosoftMinipigs2026"}
+            )
+            dataset = type(
+                "FakeDataset",
+                (),
+                {
+                    "recording_ids": [
+                        "sub-06_ses-02_task-AcousStim_acq-LH_desc-raw"
+                    ]
+                },
+            )()
 
         with pytest.raises(ValueError, match="does not match"):
             _validate_manifest_target(manifest, _FakeDataModule())
@@ -703,8 +717,18 @@ class TestTargetMismatch:
         }
 
         class _FakeDataModule:
-            dataset_class = type("FakeMinipigs", (), {"__name__": "NeurosoftMinipigs2026"})
-            dataset = type("FakeDataset", (), {"recording_ids": ["sub-06_ses-02_task-AcousStim_acq-LH_desc-raw"]})()
+            dataset_class = type(
+                "FakeMinipigs", (), {"__name__": "NeurosoftMinipigs2026"}
+            )
+            dataset = type(
+                "FakeDataset",
+                (),
+                {
+                    "recording_ids": [
+                        "sub-06_ses-02_task-AcousStim_acq-LH_desc-raw"
+                    ]
+                },
+            )()
 
         _validate_manifest_target(manifest, _FakeDataModule())
 
@@ -714,8 +738,18 @@ class TestTargetMismatch:
         manifest = {"trained_on": {}}
 
         class _FakeDataModule:
-            dataset_class = type("FakeMinipigs", (), {"__name__": "NeurosoftMinipigs2026"})
-            dataset = type("FakeDataset", (), {"recording_ids": ["sub-06_ses-02_task-AcousStim_acq-LH_desc-raw"]})()
+            dataset_class = type(
+                "FakeMinipigs", (), {"__name__": "NeurosoftMinipigs2026"}
+            )
+            dataset = type(
+                "FakeDataset",
+                (),
+                {
+                    "recording_ids": [
+                        "sub-06_ses-02_task-AcousStim_acq-LH_desc-raw"
+                    ]
+                },
+            )()
 
         with pytest.raises(ValueError, match="missing"):
             _validate_manifest_target(manifest, _FakeDataModule())
@@ -775,12 +809,14 @@ class TestTransferReportPersistence:
         output_dir = str(tmp_path / "output")
         os.makedirs(output_dir, exist_ok=True)
 
-        cfg = OmegaConf.create({
-            "run": {
-                "pretrained_checkpoint_manifest": str(json_path),
-                "pretrained_transfer_regime": "full_finetuning",
+        cfg = OmegaConf.create(
+            {
+                "run": {
+                    "pretrained_checkpoint_manifest": str(json_path),
+                    "pretrained_transfer_regime": "full_finetuning",
+                }
             }
-        })
+        )
 
         os.environ["FOUNDRY_CHECKPOINT_ROOT"] = str(tmp_path)
         try:
@@ -815,12 +851,14 @@ class TestTransferReportPersistence:
         output_dir = str(tmp_path / "output")
         os.makedirs(output_dir, exist_ok=True)
 
-        cfg = OmegaConf.create({
-            "run": {
-                "pretrained_checkpoint_manifest": str(json_path),
-                "pretrained_transfer_regime": "full_finetuning",
+        cfg = OmegaConf.create(
+            {
+                "run": {
+                    "pretrained_checkpoint_manifest": str(json_path),
+                    "pretrained_transfer_regime": "full_finetuning",
+                }
             }
-        })
+        )
 
         os.environ["FOUNDRY_CHECKPOINT_ROOT"] = str(tmp_path)
         try:
@@ -845,22 +883,30 @@ class TestTransferReportPersistence:
 class TestManifestSchemaValidation:
     def test_wrong_schema_rejected(self, tmp_path):
         bad_manifest = tmp_path / "bad_schema.json"
-        bad_manifest.write_text(json.dumps({
-            "schema": "wrong-schema",
-            "version": 1,
-            "manifest_hash": "abc",
-        }))
+        bad_manifest.write_text(
+            json.dumps(
+                {
+                    "schema": "wrong-schema",
+                    "version": 1,
+                    "manifest_hash": "abc",
+                }
+            )
+        )
 
         with pytest.raises(CheckpointManifestError, match="Unsupported schema"):
             load_checkpoint_manifest(bad_manifest)
 
     def test_wrong_version_rejected(self, tmp_path):
         bad_manifest = tmp_path / "bad_version.json"
-        bad_manifest.write_text(json.dumps({
-            "schema": "neurosoft-pretraining-checkpoint",
-            "version": 99,
-            "manifest_hash": "abc",
-        }))
+        bad_manifest.write_text(
+            json.dumps(
+                {
+                    "schema": "neurosoft-pretraining-checkpoint",
+                    "version": 99,
+                    "manifest_hash": "abc",
+                }
+            )
+        )
 
         with pytest.raises(
             CheckpointManifestError, match="Unsupported version"
@@ -869,10 +915,14 @@ class TestManifestSchemaValidation:
 
     def test_missing_manifest_hash_rejected(self, tmp_path):
         bad_manifest = tmp_path / "no_hash.json"
-        bad_manifest.write_text(json.dumps({
-            "schema": "neurosoft-pretraining-checkpoint",
-            "version": 1,
-        }))
+        bad_manifest.write_text(
+            json.dumps(
+                {
+                    "schema": "neurosoft-pretraining-checkpoint",
+                    "version": 1,
+                }
+            )
+        )
 
         with pytest.raises(CheckpointManifestError, match="manifest_hash"):
             load_checkpoint_manifest(bad_manifest)
@@ -913,9 +963,7 @@ class TestEndToEndManifestTransfer:
 
         for key in target_before:
             if "session_adapter" in key:
-                assert torch.equal(
-                    target_before[key], dst.state_dict()[key]
-                )
+                assert torch.equal(target_before[key], dst.state_dict()[key])
 
     def test_full_pipeline_frozen_representation(self, tmp_path):
         """Full manifest pipeline with frozen representation."""

@@ -266,10 +266,13 @@ class TestConfusionMatrixCallback:
         experiment = MagicMock()
 
         callback = ConfusionMatrixCallback(log_media=True)
-        with patch(
-            "foundry.training.callbacks.get_wandb_experiment",
-            return_value=experiment,
-        ), patch.object(tracker, "log_wandb") as log_wandb:
+        with (
+            patch(
+                "foundry.training.callbacks.get_wandb_experiment",
+                return_value=experiment,
+            ),
+            patch.object(tracker, "log_wandb") as log_wandb,
+        ):
             callback.on_test_epoch_end(trainer, module)
 
         log_wandb.assert_called_once()
@@ -292,10 +295,13 @@ class TestConfusionMatrixCallback:
         experiment = MagicMock()
 
         callback = ConfusionMatrixCallback(log_media=True)
-        with patch(
-            "foundry.training.callbacks.get_wandb_experiment",
-            return_value=experiment,
-        ), patch.object(tracker, "log_wandb") as log_wandb:
+        with (
+            patch(
+                "foundry.training.callbacks.get_wandb_experiment",
+                return_value=experiment,
+            ),
+            patch.object(tracker, "log_wandb") as log_wandb,
+        ):
             callback.on_validation_epoch_end(trainer, module)
 
         log_wandb.assert_not_called()

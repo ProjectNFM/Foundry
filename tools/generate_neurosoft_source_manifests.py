@@ -802,9 +802,9 @@ def generate_phase3_smoke(
                 canonical_id,
                 class_names,
                 seed=42,
-                class_selector=lambda _class_name,
-                _class_id,
-                available: available,
+                class_selector=lambda _class_name, _class_id, available: (
+                    available
+                ),
             )
             for canonical_id in canonical_ids
         ]

@@ -53,13 +53,25 @@ def _mock_trainer(
     callbacks: list | None = None,
     default_root_dir: str = "/tmp/test",
 ) -> MagicMock:
-    trainer = MagicMock(spec_set=[
-        "global_step", "max_steps", "current_epoch", "world_size",
-        "is_global_zero", "precision", "accumulate_grad_batches",
-        "callbacks", "default_root_dir", "callback_metrics",
-        "logged_metrics", "logger", "save_checkpoint", "datamodule",
-        "sanity_checking",
-    ])
+    trainer = MagicMock(
+        spec_set=[
+            "global_step",
+            "max_steps",
+            "current_epoch",
+            "world_size",
+            "is_global_zero",
+            "precision",
+            "accumulate_grad_batches",
+            "callbacks",
+            "default_root_dir",
+            "callback_metrics",
+            "logged_metrics",
+            "logger",
+            "save_checkpoint",
+            "datamodule",
+            "sanity_checking",
+        ]
+    )
     trainer.global_step = global_step
     trainer.max_steps = max_steps
     trainer.current_epoch = current_epoch
@@ -193,9 +205,7 @@ class TestMilestoneScheduleComputation:
         assert all(0 < s <= 3 for s in steps)
 
     def test_custom_fractions(self):
-        cb = ComputeMilestoneCheckpointCallback(
-            milestone_fractions=[0.5, 1.0]
-        )
+        cb = ComputeMilestoneCheckpointCallback(milestone_fractions=[0.5, 1.0])
         schedule = cb._build_milestone_schedule(100)
         assert set(schedule.keys()) == {50, 100}
 
@@ -212,13 +222,9 @@ class TestMilestoneScheduleComputation:
 
     def test_invalid_fraction_rejected(self):
         with pytest.raises(ValueError, match="0 < fraction"):
-            ComputeMilestoneCheckpointCallback(
-                milestone_fractions=[0.0, 0.5]
-            )
+            ComputeMilestoneCheckpointCallback(milestone_fractions=[0.0, 0.5])
         with pytest.raises(ValueError, match="0 < fraction"):
-            ComputeMilestoneCheckpointCallback(
-                milestone_fractions=[1.5]
-            )
+            ComputeMilestoneCheckpointCallback(milestone_fractions=[1.5])
 
 
 class TestMilestoneExactTrigger:
@@ -282,9 +288,7 @@ class TestMilestoneExactTrigger:
 
     def test_non_global_zero_skips(self, tmp_path):
         cb = ComputeMilestoneCheckpointCallback(checkpoint_dir=str(tmp_path))
-        trainer = _mock_trainer(
-            max_steps=500, is_global_zero=False
-        )
+        trainer = _mock_trainer(max_steps=500, is_global_zero=False)
         pl_module = MagicMock()
 
         cb.on_fit_start(trainer, pl_module)
@@ -346,9 +350,7 @@ class TestMilestoneResumeRequeue:
         state = cb.state_dict()
         assert state["milestone_steps"][5]["saved"] is True
 
-        cb2 = ComputeMilestoneCheckpointCallback(
-            checkpoint_dir=str(tmp_path)
-        )
+        cb2 = ComputeMilestoneCheckpointCallback(checkpoint_dir=str(tmp_path))
         cb2.load_state_dict(state)
         cb2.on_fit_start(trainer, pl_module)
 
@@ -371,9 +373,7 @@ class TestMilestoneResumeRequeue:
         cb.on_train_batch_end(trainer, pl_module, None, {}, 0)
 
         state = cb.state_dict()
-        cb2 = ComputeMilestoneCheckpointCallback(
-            checkpoint_dir=str(tmp_path)
-        )
+        cb2 = ComputeMilestoneCheckpointCallback(checkpoint_dir=str(tmp_path))
         cb2.load_state_dict(state)
 
         save_count = [0]
@@ -388,7 +388,9 @@ class TestMilestoneResumeRequeue:
 
         trainer.global_step = 5
         cb2.on_train_batch_end(trainer, pl_module, None, {}, 0)
-        assert save_count[0] == 0, "Resumed callback re-saved an existing milestone"
+        assert save_count[0] == 0, (
+            "Resumed callback re-saved an existing milestone"
+        )
 
 
 class TestMilestoneUnreached:
@@ -466,9 +468,7 @@ class TestMilestoneComputeSnapshot:
         batch = _mock_batch(batch_size=16)
         for i in range(5):
             trainer.global_step = i + 1
-            compute_cb.on_train_batch_end(
-                trainer, pl_module, None, batch, i
-            )
+            compute_cb.on_train_batch_end(trainer, pl_module, None, batch, i)
             cb.on_train_batch_end(trainer, pl_module, None, batch, i)
 
         info = cb._milestone_steps[5]
@@ -539,7 +539,9 @@ class TestComputeTrackingPerSessionFlops:
             )
             cb.on_train_batch_end(trainer, pl_module, None, batch, i)
             current_flops = cb._cumulative_flops(trainer)
-            assert current_flops > prev_flops, "FLOPs must be monotonically increasing"
+            assert current_flops > prev_flops, (
+                "FLOPs must be monotonically increasing"
+            )
             prev_flops = current_flops
 
     def test_session_flops_and_flops_per_window_mutually_exclusive(self):
@@ -839,9 +841,7 @@ class TestCheckpointManifestWriteAndLoad:
         _write_fake_checkpoint(ckpt)
 
         manifest_dir = tmp_path / "manifests"
-        json_path, md_path = _write_manifest_for_checkpoint(
-            ckpt, manifest_dir
-        )
+        json_path, md_path = _write_manifest_for_checkpoint(ckpt, manifest_dir)
 
         assert json_path.exists()
         assert md_path.exists()
@@ -910,7 +910,9 @@ class TestCheckpointManifestWriteAndLoad:
         with pytest.raises(CheckpointManifestError, match="not found"):
             verify_checkpoint_integrity(manifest, str(tmp_path))
 
-    def test_valid_checkpoint_passes_integrity_with_correct_root(self, tmp_path):
+    def test_valid_checkpoint_passes_integrity_with_correct_root(
+        self, tmp_path
+    ):
         ckpt = tmp_path / "checkpoints" / "best.ckpt"
         _write_fake_checkpoint(ckpt)
 
@@ -995,9 +997,7 @@ class TestCheckpointManifestWriter:
 
         manifest = CheckpointManifestWriter.load(json_path)
         assert manifest["checkpoint"]["kind"] == "best"
-        CheckpointManifestWriter.verify_integrity(
-            manifest, str(tmp_path)
-        )
+        CheckpointManifestWriter.verify_integrity(manifest, str(tmp_path))
 
 
 class TestCheckpointManifestAtomicWrite:
@@ -1012,7 +1012,9 @@ class TestCheckpointManifestAtomicWrite:
                 fake_path,
                 manifest_dir,
                 kind="best",
-                trained_on={"excluded_target": {"species": "t", "subject": "s"}},
+                trained_on={
+                    "excluded_target": {"species": "t", "subject": "s"}
+                },
                 selection={},
                 compute={},
                 recipe={},

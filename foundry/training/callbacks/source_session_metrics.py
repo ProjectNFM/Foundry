@@ -105,8 +105,12 @@ class SourceSessionMetricsCallback(L.Callback):
                 continue
             if sid not in self._val_session_buffers:
                 self._val_session_buffers[sid] = {"preds": [], "targets": []}
-            self._val_session_buffers[sid]["preds"].append(item_p.detach().cpu())
-            self._val_session_buffers[sid]["targets"].append(item_t.detach().cpu())
+            self._val_session_buffers[sid]["preds"].append(
+                item_p.detach().cpu()
+            )
+            self._val_session_buffers[sid]["targets"].append(
+                item_t.detach().cpu()
+            )
 
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: L.LightningModule
@@ -171,9 +175,9 @@ class SourceSessionMetricsCallback(L.Callback):
             session_f1_values.append(supported_f1)
             epoch_scores[session_id] = supported_f1
 
-            logger_metrics[f"val_session/source_session/{short}/supported_f1"] = (
-                supported_f1
-            )
+            logger_metrics[
+                f"val_session/source_session/{short}/supported_f1"
+            ] = supported_f1
             logger_metrics[f"val_session/source_session/{short}/class_mask"] = (
                 class_mask.tolist()
             )
