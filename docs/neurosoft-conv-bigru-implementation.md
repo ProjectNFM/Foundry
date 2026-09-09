@@ -8,7 +8,7 @@ from-scratch and supervised-pretraining architecture in Phase 2 onward of the
 ## Implementation completion record
 
 The model and its transfer contract are implemented in
-`foundry/models/neurosoft_conv_bigru.py`, exported from `foundry.models`, and
+`foundry/models/neurosoft_models.py`, exported from `foundry.models`, and
 configured by `configs/model/neurosoft_conv_bigru.yaml`. The implementation:
 
 - provides one fresh, session-specific `Linear(C_session, adapter_dim)` input
@@ -92,7 +92,7 @@ transfer boundary or pretraining behavior.
 The model is implemented in:
 
 ```text
-foundry/models/neurosoft_conv_bigru.py
+foundry/models/neurosoft_models.py
 ```
 
 `NeurosoftConvBiGRU` is exported from `foundry/models/__init__.py`, and its

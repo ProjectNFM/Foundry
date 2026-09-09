@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from foundry.data.datasets.neurosoft import NeurosoftMinipigs2026
 from foundry.tasks.config import TaskConfig
 from foundry.tasks.classification_mapping import filter_intervals_by_mapping
-from foundry.models.neurosoft_conv_bigru import NeurosoftConvBiGRU
+from foundry.models.neurosoft_models import NeurosoftConvBiGRU
 from foundry.seed import set_seed
 
 DATA_ROOT = "./data/processed/"
@@ -441,7 +441,7 @@ def conv_only_test(task_config, n_channels, batch, n_steps=500, lr=0.001):
     print("CONV-ONLY TEST (no GRU, global avg pool)")
     print(f"{'=' * 70}")
 
-    from foundry.models.neurosoft_conv_bigru import (
+    from foundry.models.neurosoft_models import (
         SessionInputAdapter,
         _SeparableTemporalBlock,
     )
@@ -551,7 +551,7 @@ def adapter_only_test(task_config, n_channels, batch, n_steps=500, lr=0.001):
     print("ADAPTER-ONLY TEST (linear adapter → global avg pool → readout)")
     print(f"{'=' * 70}")
 
-    from foundry.models.neurosoft_conv_bigru import SessionInputAdapter
+    from foundry.models.neurosoft_models import SessionInputAdapter
     from foundry.models.readout import build_readout_router
 
     class AdapterOnlyModel(nn.Module):

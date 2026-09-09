@@ -102,7 +102,7 @@ an implicit fallback.
 | `foundry/data/transforms/__init__.py` | Export the transform. |
 | `foundry/data/datamodules/base.py` | Add the fit/load lifecycle, transform insertion, and normalization provenance. |
 | NeuroSoft data/experiment YAML | Explicitly declare the normalization mode and numerical parameters. |
-| `foundry/models/neurosoft_conv_bigru.py` | No normalizer or new learned parameters; only share a neutral modality/channel-selection helper if needed. |
+| `foundry/models/neurosoft_models.py` | No normalizer or new learned parameters; only share a neutral modality/channel-selection helper if needed. |
 | `tests/` | Unit, integration, leakage, and checkpoint-provenance regression tests. |
 
 Do not extend `RescaleSignal`: it mutates arrays in place and its arbitrary

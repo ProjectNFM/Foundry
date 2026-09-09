@@ -80,7 +80,7 @@ Phase 3 must extend, not replace, the following working pieces.
 | `docs/neurosoft-phase0-audit.json` | Content-hashed session eligibility, causal split hashes, target-specific source pools, volume caps, diversity bins, and species-composition budgets. |
 | `foundry/data/fraction_manifest.py` | Stable interval identities, canonical JSON hashing, class-aware deterministic permutations, and nesting semantics. |
 | `foundry/data/datamodules/base.py` | Dataset construction, interval filtering, deterministic fixed-window loaders, fraction manifests, and per-recording train-only normalization. |
-| `foundry/models/neurosoft_conv_bigru.py` | Session adapters, shared temporal frontend/BiGRU/router, and model-declared transfer components. |
+| `foundry/models/neurosoft_models.py` | Session adapters, shared temporal frontend/BiGRU/router, and model-declared transfer components. |
 | `foundry/training/pretrained.py` | Atomic validate-before-apply checkpoint transfer and structured `TransferReport`. |
 | `foundry/training/callbacks/metrics.py` | Collection of validation predictions by session. |
 | `foundry/training/callbacks/compute.py` | Steps, windows, signal seconds, wall time, parameter counts, and best-checkpoint compute counters. |

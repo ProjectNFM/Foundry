@@ -31,7 +31,7 @@ from foundry.data.datasets.neurosoft import (
 )
 from foundry.tasks.config import TaskConfig
 from foundry.tasks.classification_mapping import filter_intervals_by_mapping
-from foundry.models.neurosoft_conv_bigru import (
+from foundry.models.neurosoft_models import (
     NeurosoftConvBiGRU,
     _SeparableTemporalBlock,
 )
