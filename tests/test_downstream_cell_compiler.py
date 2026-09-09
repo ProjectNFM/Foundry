@@ -287,12 +287,13 @@ def test_actual_phase4a_registry_compiles_exact_matrix() -> None:
 )
 @pytest.mark.parametrize("species", ["minipigs", "monkeys"])
 def test_phase4a_cell_resolves_transfer_config(
-    tmp_path: Path, species: str
+    tmp_path: Path, species: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cells, _ = compile_cells(
         PHASE4A_REGISTRY, PHASE4A_RECIPE, PHASE4A_AUDIT, CHECKPOINT_ROOT
     )
     row = cells[species][0]
+    monkeypatch.setenv("FOUNDRY_DATA_ROOT", "/shared/processed")
     GlobalHydra.instance().clear()
     try:
         with initialize_config_dir(
@@ -310,6 +311,7 @@ def test_phase4a_cell_resolves_transfer_config(
         assert cfg.run.checkpoint_id == row["checkpoint_id"]
         assert cfg.run.resume_wandb_if_name_matches is True
         assert cfg.run.unsupported_bf16_fallback == "16-mixed"
+        assert str(cfg.data.root) == "/shared/processed"
         assert cfg.data.training_fraction_seed == row["target_finetuning_seed"]
     finally:
         GlobalHydra.instance().clear()

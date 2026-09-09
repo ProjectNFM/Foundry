@@ -356,6 +356,20 @@ lists for `tasks_per_node=2`. No four-cell list will be prepared unless the
 two-cell benchmark leaves credible headroom. Submission remains pending a clean,
 committed tree and explicit authorization to commit.
 
+The first one-cell submissions on Mila `unkillable` used 4 CPUs and 32 GB:
+minipig job `10725026`, snapshot
+`20260909T190543_NEUROSOFT_TRANSFER_MINIPIGS_0499da75_3838ee53`; monkey job
+`10725050`, snapshot
+`20260909T190720_NEUROSOFT_TRANSFER_MONKEYS_0499da75_3ebc2c4b`. Both failed
+before model construction because the snapshot workers resolved
+`data.root=./data/processed/`, while the checkout's ignored `data/processed`
+symlink is not part of a Git archive. Peak GPU memory was only 166 MiB, so
+these failures provide no packing evidence. The logs also showed CUDA 13
+reporting BF16 support on the compute-7.5 RTX 8000; native-BF16 detection must
+therefore include the compute capability. The retry fix makes the data root
+explicitly environment-backed and requires compute capability 8.0 or newer
+for BF16. Only the two explicit failed cells may be retried.
+
 ### Figures
 
 None requested for the pretraining completion check.

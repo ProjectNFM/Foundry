@@ -72,7 +72,10 @@ def _resolve_precision_for_hardware(cfg: DictConfig) -> None:
         gpu_name = torch.cuda.get_device_name()
         major, minor = torch.cuda.get_device_capability()
         capability = f"{major}.{minor}"
-        if requested == "bf16-mixed" and not torch.cuda.is_bf16_supported():
+        # CUDA may report BF16 support through emulation on pre-Ampere GPUs.
+        # Foundry's mixed-BF16 policy requires native tensor-core support.
+        native_bf16 = major >= 8 and torch.cuda.is_bf16_supported()
+        if requested == "bf16-mixed" and not native_bf16:
             fallback = OmegaConf.select(
                 cfg, "run.unsupported_bf16_fallback", default=None
             )

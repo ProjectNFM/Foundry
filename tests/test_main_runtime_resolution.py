@@ -76,7 +76,9 @@ def test_rtx_8000_uses_explicit_fp16_fallback():
         patch.object(
             main.torch.cuda, "get_device_capability", return_value=(7, 5)
         ),
-        patch.object(main.torch.cuda, "is_bf16_supported", return_value=False),
+        # Recent CUDA versions may report emulated support on Turing. The
+        # compute capability must still force the declared FP16 fallback.
+        patch.object(main.torch.cuda, "is_bf16_supported", return_value=True),
     ):
         main._resolve_precision_for_hardware(cfg)
 
