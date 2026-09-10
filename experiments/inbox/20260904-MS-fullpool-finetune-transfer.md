@@ -398,6 +398,23 @@ loaded and zero missing, unexpected, shape-mismatched, or dtype-mismatched
 tensors. The deliberate adapter exclusions were 170 tensors per minipig cell
 and 62 per monkey cell.
 
+The four-cell benchmarks used 1 CPU per independent process, retaining 4 CPUs
+and 32 GB per allocation. Minipig job `10736056`, Git
+`a61319012a727acc3d04362d9ae1a0c347008803`, snapshot
+`20260910T023456_NEUROSOFT_TRANSFER_MINIPIGS_a6131901_e1e7f3ed`,
+completed all four cells in 20:11: 11.89 valid cells/GPU-hour, 1.77 times
+two-cell throughput and 3.77 times one-cell throughput. Its four processes
+accounted for 16--17% GPU utilization and 342 MiB peak memory each. Monkey job
+`10736064`, from the same Git revision, snapshot
+`20260910T023638_NEUROSOFT_TRANSFER_MONKEYS_a6131901_e6ea5b7d`,
+completed all four cells in 41:42: 5.76 valid cells/GPU-hour, 38% below
+two-cell throughput. Its processes accounted for approximately 14--17% GPU
+utilization and 342 MiB each; one late-improving cell determined allocation
+wall time. All eight cells produced exact compiled provenance, matching W&B
+IDs, best/last checkpoints, test results, and zero-mismatch strict-transfer
+reports without requeue. The measured production packing choice is therefore
+four minipig processes per GPU and two monkey processes per GPU.
+
 One attempted two-cell submission requested 4 CPUs per process and was rejected
 by `QOSMaxCpuPerUserLimit` before receiving a Slurm job ID; its unused snapshot
 was
@@ -407,6 +424,16 @@ the user-requested 4 CPUs and 32 GB for the allocation. On 2026-09-09 the user
 also authorized launching all remaining downstream production cells on Mila
 `long` after benchmarking; production lists must exclude every successful
 canary cell and must be committed before submission.
+
+The production inputs are
+`launch/phase4a/production/minipigs-remaining-after-canaries.jsonl` (353 cells,
+SHA-256 `dea880821132c910bd301e8c619a823c2fd204d46fd6ea9449419ca153a31fc6`)
+and `launch/phase4a/production/monkeys-remaining-after-canaries.jsonl` (110
+cells, SHA-256
+`7fee822520e06c5a88e1bf9116c0ce93db959900f382bbaa492b58b195d471a6`).
+Each list has unique cell, run, and W&B identities, has zero overlap with its
+seven successful canary cells, and its union with those canaries exactly
+reconstructs the committed 360- or 117-cell species matrix.
 
 ### Figures
 
@@ -418,8 +445,11 @@ The Mila source-pretraining stage completed successfully, with all 36 expected
 best and final checkpoints verified on shared storage. Preserve the existing
 source-F1-selected best checkpoints for this transfer gate. The one incomplete
 W&B record is documented above and does not require a pretraining rerun.
-Downstream worker access and strict source-to-target loading still need their
-normal prelaunch checks; this completion check did not execute a handoff.
+Controlled downstream handoffs for both species verified worker access,
+strict source transfer, target fraction provenance, checkpoint output,
+validation/test execution, W&B identity, and packed independent-process
+execution. The full scientific transfer hypothesis remains pending production
+completion and paired analysis.
 
 **User-confirmed interpretation (2026-09-09):** All source slices show
 validation-loss overfitting by 10K steps with the current model and
