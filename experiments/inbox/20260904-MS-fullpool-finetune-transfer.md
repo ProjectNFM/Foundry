@@ -659,9 +659,23 @@ signature and rejects cells with a test metric or final checkpoint. It produced:
   53 cells, SHA-256
   `ec009161297da67d8d8f2b3498f022919b79496397144020f691c67436b095de`.
 
-The retry must request `hydra.launcher.gres=gpu:rtx8000:1` explicitly, retain
-the original corrected cell/W&B identities and `0.0015` downstream LR, use
-Mila `long`, and continue excluding `cn-c019` and `cn-c034`.
+The retries were submitted from clean Git revision
+`b1fce59fc0e0d972c2503883123c0101981f6542`, retaining the original corrected
+cell/W&B identities and `0.0015` downstream LR. Both use Mila `long`, continue
+excluding `cn-c019` and `cn-c034`, and explicitly request
+`hydra.launcher.gres=gpu:rtx8000:1`:
+
+- Minipigs: four cells and four CPUs per allocation; Slurm array
+  `10749806_[0-6]` (7 allocations for 28 cells), snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260910T190003_NEUROSOFT_TRANSFER_MINIPIGS_b1fce59f_0c0f27c4`.
+- Monkeys: two cells and four CPUs per allocation; Slurm array
+  `10749813_[0-26]` (27 allocations for 53 cells), snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260910T190041_NEUROSOFT_TRANSFER_MONKEYS_b1fce59f_4d4f5e11`.
+
+Immediate `squeue` and `scontrol show job` checks found both arrays pending for
+priority and confirmed `TresPerNode=gres/gpu:rtx8000:1`, 32 GB, the intended
+task/CPU packing, three-hour limit, requeue enabled, and the two node
+exclusions.
 
 ### Figures
 
