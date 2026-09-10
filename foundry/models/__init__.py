@@ -57,6 +57,10 @@ from foundry.models.baselines import (
     ShallowConvNet,
     EEGNetEncoder,
 )
+from foundry.models.neurosoft_models import (
+    NeurosoftConvBiGRU,
+    SessionInputAdapter,
+)
 
 __all__ = [
     "POYOEEGModel",
@@ -73,6 +77,8 @@ __all__ = [
     "GRU",
     "ShallowConvNet",
     "EEGNetEncoder",
+    "NeurosoftConvBiGRU",
+    "SessionInputAdapter",
     "ChannelStrategy",
     "FixedChannelStrategy",
     "PerChannelStrategy",

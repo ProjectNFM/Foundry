@@ -1,0 +1,24 @@
+# @package _global_
+# Controlled local-only precision benchmark. Never submit this config as a
+# production job; compare trainer.precision=16-mixed and 32-true with all
+# other overrides held fixed.
+
+defaults:
+  - /experiment/pretraining/neurosoft_conv_bigru_supervised_minipigs
+  - override /logger: csv
+  - _self_
+
+run:
+  name: src_mp_rtx8000_benchmark_${trainer.precision}_s${run.seed}
+  tags: [source-pretraining, minipigs, local-benchmark]
+
+trainer:
+  max_steps: 250
+  max_epochs: -1
+  val_check_interval: 250
+  num_sanity_val_steps: 0
+  callbacks:
+    step_performance_benchmark:
+      _target_: foundry.training.callbacks.StepPerformanceBenchmarkCallback
+      warmup_steps: 25
+      filename: precision_benchmark.json

@@ -14,6 +14,7 @@ from torch_brain.samplers import RandomFixedWindowSampler
 
 from foundry.data.samplers import (
     FastRandomFixedWindowSampler,
+    NeurosoftFirstFixedWindowSampler,
     VariableLengthBatchSampler,
 )
 
@@ -115,6 +116,36 @@ class TestDeterminism:
             outputs.append(_collect(sampler))
 
         assert outputs[0] != outputs[1]
+
+
+class TestNeurosoftFirstFixedWindowSampler:
+    def test_short_and_long_stimulus_policy(self):
+        """Skip real short trials and take the first 0.5 s of longer ones."""
+        intervals = _make_intervals(
+            ("session", [(0.0, 0.1), (1.0, 1.5 - 1e-12), (2.0, 2.75)])
+        )
+        sampler = NeurosoftFirstFixedWindowSampler(
+            sampling_intervals=intervals,
+            window_length=0.5,
+            drop_short=True,
+            generator=torch.Generator().manual_seed(42),
+        )
+
+        windows = sorted(_collect(sampler))
+
+        assert len(sampler) == 2
+        assert windows == [("session", 1.0, 1.5), ("session", 2.0, 2.5)]
+
+    def test_short_interval_raises_when_requested(self):
+        sampler = NeurosoftFirstFixedWindowSampler(
+            sampling_intervals=_make_intervals(("session", [(0.0, 0.1)])),
+            window_length=0.5,
+            drop_short=False,
+            generator=torch.Generator().manual_seed(42),
+        )
+
+        with pytest.raises(ValueError, match="too short"):
+            _collect(sampler)
 
 
 # ---------------------------------------------------------------------------

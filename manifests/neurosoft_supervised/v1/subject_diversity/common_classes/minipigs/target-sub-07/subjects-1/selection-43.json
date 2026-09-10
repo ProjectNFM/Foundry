@@ -1,0 +1,109 @@
+{
+  "condition": {
+    "class_coverage_policy": "common_classes",
+    "requested_fraction": null,
+    "sensitivity_only": false,
+    "source_composition": "same_species",
+    "source_selection_seed": 43,
+    "subject_count_bin": 1
+  },
+  "family": "subject_diversity",
+  "manifest_hash": "63c64b5e72eaaa35fda2faa60bbb89f9c33ec588da471efaced41c082f993113",
+  "phase0_audit_sha256": "48cd1a57189bb7f0fe63b8fc3cbd6949deb82c215d0c8edd431b94794bc9467a",
+  "recordings": [
+    {
+      "available_train_windows": 630,
+      "available_validation_windows": 217,
+      "canonical_recording_id": "minipigs:sub-06_ses-02_task-AcousStim_acq-LH_desc-raw",
+      "raw_channel_count": 32,
+      "recording_id": "sub-06_ses-02_task-AcousStim_acq-LH_desc-raw",
+      "species": "minipigs",
+      "subject": "sub-06",
+      "supported_channel_count": 18,
+      "train_counts_by_class": {
+        "high_mids": 73,
+        "high_treble": 0,
+        "low_bass": 143,
+        "low_mids": 72,
+        "low_treble": 37,
+        "mid_bass": 36,
+        "mid_treble": 178,
+        "midrange": 91
+      },
+      "train_selected_interval_ids_hash": "85453a48b75c20e16c33d00588393a072e86b52ec58eec8828d3777f38a62137",
+      "train_source_intervals_hash": "48de2f32411e61a606ae56340f3ce437605598622ee5fbdd23ae068f39239ca7",
+      "valid_selected_interval_ids_hash": "6249458621b871bb9d8e432dcb6e475b34d969918113cd800d289eb6180457d6",
+      "valid_source_intervals_hash": "6249458621b871bb9d8e432dcb6e475b34d969918113cd800d289eb6180457d6"
+    },
+    {
+      "available_train_windows": 629,
+      "available_validation_windows": 217,
+      "canonical_recording_id": "minipigs:sub-06_ses-02_task-AcousStim_acq-RH_desc-raw",
+      "raw_channel_count": 32,
+      "recording_id": "sub-06_ses-02_task-AcousStim_acq-RH_desc-raw",
+      "species": "minipigs",
+      "subject": "sub-06",
+      "supported_channel_count": 18,
+      "train_counts_by_class": {
+        "high_mids": 73,
+        "high_treble": 0,
+        "low_bass": 143,
+        "low_mids": 72,
+        "low_treble": 37,
+        "mid_bass": 36,
+        "mid_treble": 177,
+        "midrange": 91
+      },
+      "train_selected_interval_ids_hash": "7d9791799eb200a57782eed2f92ade81faf303c0a2b4f069ae65ae6cc58ba424",
+      "train_source_intervals_hash": "7b9ebe48ae56ac065e60c8ab1172fb27fe1986033bd391f6a061e44c48b9ada7",
+      "valid_selected_interval_ids_hash": "ad329919820a3bd0605558b32704be6984c8ade7c2152385bec5514ac04f7240",
+      "valid_source_intervals_hash": "ad329919820a3bd0605558b32704be6984c8ade7c2152385bec5514ac04f7240"
+    }
+  ],
+  "schema": "neurosoft-source-selection",
+  "selection_id": "diversity_minipigs_target-sub-07_subjects1_sel43",
+  "source_pool_hash": "64af9d1cd85b17c645ea04b57e751b4ddc6b563d7912f1e420bb91aa14963ed8",
+  "source_pool_manifest": "../../../../../source_pools/minipigs/target-sub-07.json",
+  "source_test_policy": "forbidden",
+  "subjects": [
+    "minipigs:sub-06"
+  ],
+  "summary": {
+    "available_train_windows": 1259,
+    "available_validation_windows": 434,
+    "batch_size": 16,
+    "realized_fraction": 1.0,
+    "realized_train_windows_per_epoch": 1248,
+    "represented_class_intersection": [
+      "high_mids",
+      "low_bass",
+      "low_mids",
+      "low_treble",
+      "mid_bass",
+      "mid_treble",
+      "midrange"
+    ],
+    "represented_class_union": [
+      "high_mids",
+      "low_bass",
+      "low_mids",
+      "low_treble",
+      "mid_bass",
+      "mid_treble",
+      "midrange"
+    ],
+    "requested_fraction": null,
+    "sampler_implementation": "foundry.data.samplers.NeurosoftFirstFixedWindowSampler/onset-anchored-fixed-window-v1",
+    "selected_signal_seconds": 629.5,
+    "selected_train_examples": 1259,
+    "selection_implementation": "neurosoft-classwise-permutation-v1",
+    "source_recording_count": 2,
+    "source_subject_count": 1,
+    "validation_examples": 434,
+    "window_seconds": 0.5
+  },
+  "target_leakage": [],
+  "target_species": "minipigs",
+  "target_subject": "sub-07",
+  "version": 1
+}

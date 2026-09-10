@@ -1,0 +1,157 @@
+{
+  "condition": {
+    "class_coverage_policy": "eight_class_anchor",
+    "requested_fraction": null,
+    "sensitivity_only": true,
+    "source_composition": "same_species",
+    "source_selection_seed": 43,
+    "subject_count_bin": 1
+  },
+  "family": "eight_class_anchor",
+  "manifest_hash": "19454b11637ac4622230c0c5d80a83f63c1c434138d5c9ee02171b45b5b2800d",
+  "phase0_audit_sha256": "48cd1a57189bb7f0fe63b8fc3cbd6949deb82c215d0c8edd431b94794bc9467a",
+  "recordings": [
+    {
+      "available_train_windows": 753,
+      "available_validation_windows": 120,
+      "canonical_recording_id": "minipigs:sub-02_ses-01_task-AcousStim_acq-LH_desc-raw",
+      "raw_channel_count": 32,
+      "recording_id": "sub-02_ses-01_task-AcousStim_acq-LH_desc-raw",
+      "species": "minipigs",
+      "subject": "sub-02",
+      "supported_channel_count": 24,
+      "train_counts_by_class": {
+        "high_mids": 195,
+        "high_treble": 72,
+        "low_bass": 106,
+        "low_mids": 71,
+        "low_treble": 0,
+        "mid_bass": 0,
+        "mid_treble": 152,
+        "midrange": 157
+      },
+      "train_selected_interval_ids_hash": "9c7943a0eec997504ff4abea6c5b9ee99b278899e308c227b6d437caedce8a4b",
+      "train_source_intervals_hash": "9c7943a0eec997504ff4abea6c5b9ee99b278899e308c227b6d437caedce8a4b",
+      "valid_selected_interval_ids_hash": "b4c28fa10952199db7b7c632219d31215692f15384f5b7d7ad3848d3314e9636",
+      "valid_source_intervals_hash": "b4c28fa10952199db7b7c632219d31215692f15384f5b7d7ad3848d3314e9636"
+    },
+    {
+      "available_train_windows": 706,
+      "available_validation_windows": 114,
+      "canonical_recording_id": "minipigs:sub-02_ses-01_task-AcousStim_acq-RH_desc-raw",
+      "raw_channel_count": 32,
+      "recording_id": "sub-02_ses-01_task-AcousStim_acq-RH_desc-raw",
+      "species": "minipigs",
+      "subject": "sub-02",
+      "supported_channel_count": 32,
+      "train_counts_by_class": {
+        "high_mids": 106,
+        "high_treble": 72,
+        "low_bass": 107,
+        "low_mids": 70,
+        "low_treble": 0,
+        "mid_bass": 0,
+        "mid_treble": 171,
+        "midrange": 180
+      },
+      "train_selected_interval_ids_hash": "13ec605bcccad16ed4667a729fc081000492ee2a4494ec8dd453db1b613a6a64",
+      "train_source_intervals_hash": "13ec605bcccad16ed4667a729fc081000492ee2a4494ec8dd453db1b613a6a64",
+      "valid_selected_interval_ids_hash": "df115a722866379294abf7c65245c234d808d8cd8010e0a5b1e4b4b94bab518e",
+      "valid_source_intervals_hash": "df115a722866379294abf7c65245c234d808d8cd8010e0a5b1e4b4b94bab518e"
+    },
+    {
+      "available_train_windows": 1075,
+      "available_validation_windows": 182,
+      "canonical_recording_id": "minipigs:sub-02_ses-02_task-AcousStim_acq-LH_desc-raw",
+      "raw_channel_count": 32,
+      "recording_id": "sub-02_ses-02_task-AcousStim_acq-LH_desc-raw",
+      "species": "minipigs",
+      "subject": "sub-02",
+      "supported_channel_count": 24,
+      "train_counts_by_class": {
+        "high_mids": 71,
+        "high_treble": 287,
+        "low_bass": 291,
+        "low_mids": 71,
+        "low_treble": 70,
+        "mid_bass": 71,
+        "mid_treble": 142,
+        "midrange": 72
+      },
+      "train_selected_interval_ids_hash": "f29d73687e26abe0f165b11b639c511039d47c2b463f902671a6a18e65c88fa8",
+      "train_source_intervals_hash": "923d5562afc8712143ca2c3ad3ca6a5870e060c91f5fd233aeec25699e533db7",
+      "valid_selected_interval_ids_hash": "5295319fd9b7fd9fc234af274e3228a65d3f02373b7be7ae2c89d5d41037a7b8",
+      "valid_source_intervals_hash": "5295319fd9b7fd9fc234af274e3228a65d3f02373b7be7ae2c89d5d41037a7b8"
+    },
+    {
+      "available_train_windows": 1075,
+      "available_validation_windows": 182,
+      "canonical_recording_id": "minipigs:sub-02_ses-02_task-AcousStim_acq-RH_desc-raw",
+      "raw_channel_count": 32,
+      "recording_id": "sub-02_ses-02_task-AcousStim_acq-RH_desc-raw",
+      "species": "minipigs",
+      "subject": "sub-02",
+      "supported_channel_count": 32,
+      "train_counts_by_class": {
+        "high_mids": 71,
+        "high_treble": 287,
+        "low_bass": 291,
+        "low_mids": 71,
+        "low_treble": 70,
+        "mid_bass": 71,
+        "mid_treble": 142,
+        "midrange": 72
+      },
+      "train_selected_interval_ids_hash": "20a871290c8cea893cfde2e347906a0aa6882451b98421ae6d89d869aa4035b5",
+      "train_source_intervals_hash": "a41e801ecca8df521eb9c692ad36badd5ce0d97d6a9614386284473be1b479d2",
+      "valid_selected_interval_ids_hash": "6397adb67e09582f7a5556046f4701239c9e27dcd6b4807f9cbafd2c224ce424",
+      "valid_source_intervals_hash": "6397adb67e09582f7a5556046f4701239c9e27dcd6b4807f9cbafd2c224ce424"
+    }
+  ],
+  "schema": "neurosoft-source-selection",
+  "selection_id": "eight_class_minipigs_target-sub-06_subjects1_sel43",
+  "source_pool_hash": "39b3a56fb9de04eb7555a35e4e45f31d90da93dd3bf7a7e927d123ebe8565ade",
+  "source_pool_manifest": "../../../../../source_pools/minipigs/target-sub-06.json",
+  "source_test_policy": "forbidden",
+  "subjects": [
+    "minipigs:sub-02"
+  ],
+  "summary": {
+    "available_train_windows": 3609,
+    "available_validation_windows": 598,
+    "batch_size": 16,
+    "realized_fraction": 1.0,
+    "realized_train_windows_per_epoch": 3600,
+    "represented_class_intersection": [
+      "high_mids",
+      "high_treble",
+      "low_bass",
+      "low_mids",
+      "mid_treble",
+      "midrange"
+    ],
+    "represented_class_union": [
+      "high_mids",
+      "high_treble",
+      "low_bass",
+      "low_mids",
+      "low_treble",
+      "mid_bass",
+      "mid_treble",
+      "midrange"
+    ],
+    "requested_fraction": null,
+    "sampler_implementation": "foundry.data.samplers.NeurosoftFirstFixedWindowSampler/onset-anchored-fixed-window-v1",
+    "selected_signal_seconds": 1804.5,
+    "selected_train_examples": 3609,
+    "selection_implementation": "neurosoft-classwise-permutation-v1",
+    "source_recording_count": 4,
+    "source_subject_count": 1,
+    "validation_examples": 598,
+    "window_seconds": 0.5
+  },
+  "target_leakage": [],
+  "target_species": "minipigs",
+  "target_subject": "sub-06",
+  "version": 1
+}

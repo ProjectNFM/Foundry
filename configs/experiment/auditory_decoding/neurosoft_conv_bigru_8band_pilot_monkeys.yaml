@@ -1,0 +1,83 @@
+# @package _global_
+#
+# Phase 2 pilot: Conv-BiGRU scratch on a single monkey session.
+# Validates training path before launching the full 765-cell Phase-2 matrix.
+#
+# Usage (one run at a time):
+#   python main.py \
+#     experiment=auditory_decoding/neurosoft_conv_bigru_8band_pilot_monkeys \
+#     phase2_pilot_recording_id=sub-01_ses-04_task-AcousStim_acq-RH_desc-raw \
+#     data.training_fraction=1.0 \
+#     run.seed=42 \
+#     hydra/launcher=local_gpu \
+#     -m
+
+defaults:
+  - override /model: neurosoft_conv_bigru
+  - override /data: neurosoft_monkeys/singlesess
+
+task_configs:
+  - neurosoft_acoustic_stim_8band
+
+phase2_pilot_recording_id: ???
+
+data:
+  split_type: intrasession-causal
+  audit_json: docs/neurosoft-phase0-audit.json
+  audit_species: monkeys
+  task_type: acoustic_stim
+  training_fraction_task: neurosoft_acoustic_stim_8band
+  training_fraction: ???
+  training_fraction_seed: ${run.seed}
+  training_fraction_min_class_support: 3
+  training_fraction_min_present_classes: 6
+  input_normalization:
+    mode: recording_train_channel_zscore
+    supported_modalities: [eeg, ecog, seeg, ieeg]
+    scale_floor: 1.0e-8
+    accumulator_dtype: float64
+  dataset_kwargs:
+    recording_ids:
+      - ${phase2_pilot_recording_id}
+
+run:
+  project: neurosoft_supervised_pretraining
+  name: conv_bigru_mk_${data.dataset_kwargs.recording_ids.0}_f${data.training_fraction}_s${run.seed}
+  group: PHASE2_CONV_BIGRU_PILOT
+  tags: [phase2, conv-bigru, monkeys, 8band, pilot, scratch, input-normalized]
+  seed: ???
+  log_level: INFO
+  evaluate_test: true
+
+hyperparameters:
+  batch_size: 16
+  sequence_length: 0.5
+  fold_number: 0
+  num_workers: 1
+  learning_rate: 0.0015
+  weight_decay: 0.018
+
+trainer:
+  max_epochs: 200
+  precision: bf16-mixed
+  callbacks:
+    early_stopping:
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      patience: 40
+    model_checkpoint:
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      auto_insert_metric_name: false
+    compute_tracking:
+      _target_: foundry.training.callbacks.ComputeTrackingCallback
+      monitor: val/neurosoft_acoustic_stim_8band_supported_f1
+      mode: max
+      sequence_length: ${hyperparameters.sequence_length}
+      require_flops: true
+      flops_per_window: 768098304
+      flop_method: torch-flop-counter-v1
+
+hydra:
+  sweeper:
+    max_batch_size: 1

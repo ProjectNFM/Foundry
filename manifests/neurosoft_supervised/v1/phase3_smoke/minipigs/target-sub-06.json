@@ -1,0 +1,110 @@
+{
+  "condition": {
+    "class_coverage_policy": "all_available",
+    "requested_fraction": null,
+    "sensitivity_only": false,
+    "source_composition": "same_species",
+    "source_selection_seed": 42,
+    "subject_count_bin": null
+  },
+  "family": "phase3_smoke",
+  "manifest_hash": "91d54e282150f9a23bb63c13238632d284668ce799d47830b3da3a6939771870",
+  "phase0_audit_sha256": "48cd1a57189bb7f0fe63b8fc3cbd6949deb82c215d0c8edd431b94794bc9467a",
+  "recordings": [
+    {
+      "available_train_windows": 753,
+      "available_validation_windows": 120,
+      "canonical_recording_id": "minipigs:sub-02_ses-01_task-AcousStim_acq-LH_desc-raw",
+      "raw_channel_count": 32,
+      "recording_id": "sub-02_ses-01_task-AcousStim_acq-LH_desc-raw",
+      "species": "minipigs",
+      "subject": "sub-02",
+      "supported_channel_count": 24,
+      "train_counts_by_class": {
+        "high_mids": 195,
+        "high_treble": 72,
+        "low_bass": 106,
+        "low_mids": 71,
+        "low_treble": 0,
+        "mid_bass": 0,
+        "mid_treble": 152,
+        "midrange": 157
+      },
+      "train_selected_interval_ids_hash": "9c7943a0eec997504ff4abea6c5b9ee99b278899e308c227b6d437caedce8a4b",
+      "train_source_intervals_hash": "9c7943a0eec997504ff4abea6c5b9ee99b278899e308c227b6d437caedce8a4b",
+      "valid_selected_interval_ids_hash": "b4c28fa10952199db7b7c632219d31215692f15384f5b7d7ad3848d3314e9636",
+      "valid_source_intervals_hash": "b4c28fa10952199db7b7c632219d31215692f15384f5b7d7ad3848d3314e9636"
+    },
+    {
+      "available_train_windows": 780,
+      "available_validation_windows": 135,
+      "canonical_recording_id": "minipigs:sub-03_ses-06_task-AcousStim_acq-LH_desc-raw",
+      "raw_channel_count": 32,
+      "recording_id": "sub-03_ses-06_task-AcousStim_acq-LH_desc-raw",
+      "species": "minipigs",
+      "subject": "sub-03",
+      "supported_channel_count": 24,
+      "train_counts_by_class": {
+        "high_mids": 71,
+        "high_treble": 71,
+        "low_bass": 213,
+        "low_mids": 70,
+        "low_treble": 70,
+        "mid_bass": 71,
+        "mid_treble": 143,
+        "midrange": 71
+      },
+      "train_selected_interval_ids_hash": "b3d8f5679c4c861104c00eb3a7ec239eba7bd9ab52ae95ac83910f31ffe2aacc",
+      "train_source_intervals_hash": "3bb763da6a09156abc3026236bbf97929020c07406f7ae1d947d1bd8fd0e071d",
+      "valid_selected_interval_ids_hash": "ebeb987a65b8c41c72ae1206d500b4b35b52c046dae91883a7dfc5929ad2de18",
+      "valid_source_intervals_hash": "ebeb987a65b8c41c72ae1206d500b4b35b52c046dae91883a7dfc5929ad2de18"
+    }
+  ],
+  "schema": "neurosoft-source-selection",
+  "selection_id": "smoke_minipigs_target-sub-06",
+  "source_pool_hash": "39b3a56fb9de04eb7555a35e4e45f31d90da93dd3bf7a7e927d123ebe8565ade",
+  "source_pool_manifest": "../../source_pools/minipigs/target-sub-06.json",
+  "source_test_policy": "forbidden",
+  "subjects": [
+    "minipigs:sub-02",
+    "minipigs:sub-03"
+  ],
+  "summary": {
+    "available_train_windows": 1533,
+    "available_validation_windows": 255,
+    "batch_size": 16,
+    "realized_fraction": 1.0,
+    "realized_train_windows_per_epoch": 1520,
+    "represented_class_intersection": [
+      "high_mids",
+      "high_treble",
+      "low_bass",
+      "low_mids",
+      "mid_treble",
+      "midrange"
+    ],
+    "represented_class_union": [
+      "high_mids",
+      "high_treble",
+      "low_bass",
+      "low_mids",
+      "low_treble",
+      "mid_bass",
+      "mid_treble",
+      "midrange"
+    ],
+    "requested_fraction": null,
+    "sampler_implementation": "foundry.data.samplers.NeurosoftFirstFixedWindowSampler/onset-anchored-fixed-window-v1",
+    "selected_signal_seconds": 766.5,
+    "selected_train_examples": 1533,
+    "selection_implementation": "neurosoft-classwise-permutation-v1",
+    "source_recording_count": 2,
+    "source_subject_count": 2,
+    "validation_examples": 255,
+    "window_seconds": 0.5
+  },
+  "target_leakage": [],
+  "target_species": "minipigs",
+  "target_subject": "sub-06",
+  "version": 1
+}

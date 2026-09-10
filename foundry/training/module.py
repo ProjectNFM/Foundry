@@ -85,6 +85,8 @@ class FoundryModule(L.LightningModule):
         self.val_metrics = nn.ModuleDict()
         self.test_metrics = nn.ModuleDict()
         self._val_confusion_trackers: dict[str, ConfusionMatrixTracker] = {}
+        self._test_confusion_trackers: dict[str, ConfusionMatrixTracker] = {}
+        self.input_normalization_artifacts: dict[str, str] | None = None
 
         for name, cfg in model.task_configs.items():
             self._task_losses[name] = instantiate(cfg.loss)
@@ -105,6 +107,17 @@ class FoundryModule(L.LightningModule):
                     num_classes=cfg.output_dim,
                     class_names=cfg.get_class_names(),
                 )
+                self._test_confusion_trackers[name] = ConfusionMatrixTracker(
+                    num_classes=cfg.output_dim,
+                    class_names=cfg.get_class_names(),
+                )
+
+    def on_save_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        """Record immutable input-normalization artifact identity in checkpoints."""
+        if self.input_normalization_artifacts is not None:
+            checkpoint["input_normalization"] = dict(
+                self.input_normalization_artifacts
+            )
 
     def _metric_summary_mode(
         self, task_name: str, metric_name: str, cfg: Any
@@ -172,14 +185,14 @@ class FoundryModule(L.LightningModule):
         return {"loss": step_output.loss, "step_output": step_output}
 
     def _shared_step(self, stage: str, batch: Dict[str, Any]) -> StepOutput:
-        """Run a single training or validation step.
+        """Run a single training, validation, or test step.
 
         Unpacks the batch, runs the model forward pass, computes the
         sequence-weighted multitask loss, updates per-task metrics, and
         optionally tracks confusion matrices for classification tasks.
 
         Args:
-            stage: ``"train"`` or ``"val"``.
+            stage: ``"train"``, ``"val"``, or ``"test"``.
             batch: Collated batch dict containing model inputs, target
                 values/weights, task indices, and metadata.
 
@@ -255,14 +268,18 @@ class FoundryModule(L.LightningModule):
                     batch_size=batch_size,
                 )
 
-            if stage == "val" and name in self._val_confusion_trackers:
+            confusion_trackers = {
+                "val": self._val_confusion_trackers,
+                "test": self._test_confusion_trackers,
+            }.get(stage, {})
+            if name in confusion_trackers:
                 if cfg.kind == "multiclass":
                     pred_classes = preds.argmax(dim=-1)
                 elif cfg.kind == "binary":
                     pred_classes = (preds[:, 1] > preds[:, 0]).long()
                 else:
                     continue
-                self._val_confusion_trackers[name].update(pred_classes, target)
+                confusion_trackers[name].update(pred_classes, target)
 
         return StepOutput(
             loss=total_loss,

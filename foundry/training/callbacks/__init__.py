@@ -22,6 +22,15 @@ from foundry.training.callbacks.metrics import (
     ConfusionMatrixCallback,
     SessionMetricsCallback,
 )
+from foundry.training.callbacks.performance import (
+    StepPerformanceBenchmarkCallback,
+)
+from foundry.training.callbacks.source_session_metrics import (
+    SourceSessionMetricsCallback,
+)
+from foundry.training.callbacks.compute_milestone import (
+    ComputeMilestoneCheckpointCallback,
+)
 from foundry.training.callbacks.tuning import EffectiveBatchSizeCallback
 from foundry.training.callbacks.visualization import (
     ReconstructionVisualizationCallback,
@@ -38,6 +47,7 @@ def get_wandb_experiment(trainer: Trainer):
 
 
 __all__ = [
+    "ComputeMilestoneCheckpointCallback",
     "ComputeTrackingCallback",
     "ConfusionMatrixCallback",
     "DeterministicSamplerCallback",
@@ -46,6 +56,8 @@ __all__ = [
     "ParameterWatcherCallback",
     "ReconstructionVisualizationCallback",
     "SessionMetricsCallback",
+    "SourceSessionMetricsCallback",
+    "StepPerformanceBenchmarkCallback",
     "VocabInitializerCallback",
     "get_wandb_experiment",
 ]

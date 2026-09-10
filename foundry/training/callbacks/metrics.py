@@ -209,26 +209,53 @@ class SessionMetricsCallback(L.Callback):
 
 
 class ConfusionMatrixCallback(L.Callback):
-    """Log confusion matrices for classification tasks at validation epoch end.
+    """Log confusion matrices for classification tasks at epoch end.
 
-    Reads ``pl_module._val_confusion_trackers`` (populated by
-    :class:`~foundry.training.module.FoundryModule` during validation steps)
-    and handles all logging — generic metric payloads plus W&B-native
-    interactive visualizations.
+    Scalar confusion-matrix payloads are logged for validation and test. W&B
+    media is opt-in and, by default, only emitted during test evaluation.
+
+    Args:
+        log_media: Whether to upload rendered confusion matrices as W&B media.
+        media_stage: Stage on which to upload media when ``log_media`` is true.
+            Defaults to ``"test"`` so routine validation does not create media.
     """
+
+    def __init__(
+        self, log_media: bool = False, media_stage: str = "test"
+    ) -> None:
+        super().__init__()
+        if media_stage not in ("val", "test"):
+            raise ValueError("media_stage must be 'val' or 'test'")
+        self.log_media = log_media
+        self.media_stage = media_stage
 
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: L.LightningModule
     ) -> None:
+        self._log_epoch_end(trainer, pl_module, stage="val")
+
+    def on_test_epoch_end(
+        self, trainer: Trainer, pl_module: L.LightningModule
+    ) -> None:
+        self._log_epoch_end(trainer, pl_module, stage="test")
+
+    def _log_epoch_end(
+        self,
+        trainer: Trainer,
+        pl_module: L.LightningModule,
+        stage: str,
+    ) -> None:
         trackers: dict[str, ConfusionMatrixTracker] = getattr(
-            pl_module, "_val_confusion_trackers", {}
+            pl_module, f"_{stage}_confusion_trackers", {}
         )
         if not trackers:
             return
 
-        from foundry.training.callbacks import get_wandb_experiment
+        wandb_experiment = None
+        if self.log_media and self.media_stage == stage:
+            from foundry.training.callbacks import get_wandb_experiment
 
-        wandb_experiment = get_wandb_experiment(trainer)
+            wandb_experiment = get_wandb_experiment(trainer)
 
         for name, tracker in trackers.items():
             counts, normalized = tracker.compute()
@@ -237,9 +264,9 @@ class ConfusionMatrixCallback(L.Callback):
                 continue
 
             payload = {
-                f"val/{name}_confusion_counts": counts.tolist(),
-                f"val/{name}_confusion_normalized": normalized.tolist(),
-                f"val/{name}_confusion_class_names": tracker.class_names,
+                f"{stage}/{name}_confusion_counts": counts.tolist(),
+                f"{stage}/{name}_confusion_normalized": normalized.tolist(),
+                f"{stage}/{name}_confusion_class_names": tracker.class_names,
             }
 
             if trainer.logger is not None:
@@ -252,6 +279,7 @@ class ConfusionMatrixCallback(L.Callback):
                     trainer.current_epoch,
                     counts,
                     normalized,
+                    stage=stage,
                 )
 
             tracker.reset()

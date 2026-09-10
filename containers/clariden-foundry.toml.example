@@ -1,0 +1,16 @@
+# Copy this file outside the repository, replace the pinned image placeholder,
+# and set FOUNDRY_CLARIDEN_EDF to the resulting absolute path.
+image = "nvcr.io#nvidia/pytorch:REPLACE_WITH_PINNED_ARM64_TAG"
+writable = true
+
+mounts = [
+  "${FOUNDRY_SNAPSHOT_ROOT}:${FOUNDRY_SNAPSHOT_ROOT}",
+  "${PROJECT}:${PROJECT}",
+  "/capstor/scratch/cscs/${USER}:/capstor/scratch/cscs/${USER}",
+  "${FOUNDRY_CLARIDEN_VENV}:${FOUNDRY_CLARIDEN_VENV}",
+  "${FOUNDRY_ENV_FILE}:${FOUNDRY_ENV_FILE}:ro",
+]
+
+[env]
+PATH = "${FOUNDRY_CLARIDEN_VENV}/bin:${PATH}"
+PYTHONPATH = "${FOUNDRY_SNAPSHOT_SOURCE_DIR}:${PYTHONPATH:-}"

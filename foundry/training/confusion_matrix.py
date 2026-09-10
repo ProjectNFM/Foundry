@@ -102,6 +102,7 @@ class ConfusionMatrixTracker:
         epoch: int,
         counts: torch.Tensor,
         normalized: torch.Tensor,
+        stage: str = "val",
     ) -> None:
         """Log confusion matrix as a W&B image so the media panel gets a step slider.
 
@@ -118,7 +119,7 @@ class ConfusionMatrixTracker:
                 counts, normalized, task_name, epoch
             )
             experiment.log(
-                {f"val/{task_name}_confusion_matrix": wandb.Image(fig)},
+                {f"{stage}/{task_name}_confusion_matrix": wandb.Image(fig)},
                 commit=False,
             )
             fig.clear()

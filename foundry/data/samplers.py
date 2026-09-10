@@ -77,6 +77,61 @@ class FastRandomFixedWindowSampler(RandomFixedWindowSampler):
             yield DatasetIndex(name, s, e)
 
 
+class NeurosoftFirstFixedWindowSampler(RandomFixedWindowSampler):
+    """Emit one onset-anchored window per sampleable NeuroSoft stimulus.
+
+    NeuroSoft source recordings contain a small number of annotation durations
+    that are just below 0.5 s because of floating-point timestamp round-off,
+    plus some genuinely short 0.1 s stimuli.  A supervised fixed-window task
+    needs a deterministic policy for both: accept only intervals at least one
+    window long within a narrow timestamp tolerance, and take the *first*
+    window from a longer interval.  In particular, a 0.75 s stimulus produces
+    ``[start, start + 0.5)`` rather than a jittered late window.
+
+    This is deliberately NeuroSoft-specific.  It must not replace the generic
+    sampler, whose multi-window/jitter behavior is used by other datasets.
+    """
+
+    timestamp_tolerance_seconds = 1e-9
+
+    @classmethod
+    def sampleable_mask(cls, starts, ends, window_length: float) -> np.ndarray:
+        """Return the shared NeuroSoft eligibility rule for raw intervals."""
+        return np.asarray(ends) - np.asarray(starts) >= (
+            window_length - cls.timestamp_tolerance_seconds
+        )
+
+    def _is_sampleable(self, start: float, end: float) -> bool:
+        return bool(self.sampleable_mask([start], [end], self.window_length)[0])
+
+    def __len__(self) -> int:
+        return sum(
+            self._is_sampleable(float(start), float(end))
+            for intervals in self.sampling_intervals.values()
+            for start, end in intervals
+        )
+
+    def __iter__(self):
+        tuples: list[tuple[str, float, float]] = []
+        for session_name, sampling_intervals in self.sampling_intervals.items():
+            for start, end in sampling_intervals:
+                start = float(start)
+                end = float(end)
+                if not self._is_sampleable(start, end):
+                    if self.drop_short:
+                        continue
+                    raise ValueError(
+                        f"Interval {(start, end)} is too short to sample "
+                        f"from. Minimum length is {self.window_length}."
+                    )
+                tuples.append((session_name, start, start + self.window_length))
+
+        perm = torch.randperm(len(tuples), generator=self.generator).tolist()
+        for index in perm:
+            name, start, end = tuples[index]
+            yield DatasetIndex(name, start, end)
+
+
 class VariableLengthBatchSampler(torch.utils.data.Sampler):
     """Batch sampler that randomly selects a window length per batch.
 

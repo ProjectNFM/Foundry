@@ -25,9 +25,38 @@ class FoundrySlurmQueueConf(SlurmQueueConf):
     snapshot: SnapshotConf = field(default_factory=SnapshotConf)
 
 
+@dataclass
+class ClaridenSlurmQueueConf(FoundrySlurmQueueConf):
+    """Configuration contract for one-node Clariden worker pools."""
+
+    _target_: str = (
+        "hydra_plugins.foundry_launcher.clariden_launcher."
+        "ClaridenNodePoolLauncher"
+    )
+    exclusive: bool = True
+    jobs_per_gpu: int = 1
+    workers_per_node: Optional[int] = None
+    cpus_per_worker: Optional[int] = None
+    memory_per_worker_gb: Optional[int] = None
+    drain_guard_min: int = 10
+    minimum_start_budget_min: int = 0
+    container_environment: Optional[str] = None
+    application_environment_file: Optional[str] = None
+    data_root: Optional[str] = None
+    resume_snapshot: Optional[str] = None
+    retry_failed: bool = True
+
+
 ConfigStore.instance().store(
     group="hydra/launcher",
     name="foundry_submitit_slurm",
     node=FoundrySlurmQueueConf(),
+    provider="foundry_launcher",
+)
+
+ConfigStore.instance().store(
+    group="hydra/launcher",
+    name="foundry_clariden_slurm",
+    node=ClaridenSlurmQueueConf(),
     provider="foundry_launcher",
 )

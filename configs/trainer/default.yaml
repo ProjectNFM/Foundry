@@ -47,6 +47,10 @@ callbacks:
     log_every_n_steps: 500
   confusion_matrix:
     _target_: foundry.training.callbacks.ConfusionMatrixCallback
+    # W&B confusion-matrix images are expensive/high-cardinality; keep them
+    # disabled for routine training/validation and opt in for test evaluation.
+    log_media: false
+    media_stage: test
   session_metrics:
     _target_: foundry.training.callbacks.SessionMetricsCallback
   parameter_watcher:

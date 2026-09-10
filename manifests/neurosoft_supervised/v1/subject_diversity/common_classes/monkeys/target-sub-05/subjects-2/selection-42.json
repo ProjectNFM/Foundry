@@ -1,0 +1,106 @@
+{
+  "condition": {
+    "class_coverage_policy": "common_classes",
+    "requested_fraction": null,
+    "sensitivity_only": false,
+    "source_composition": "same_species",
+    "source_selection_seed": 42,
+    "subject_count_bin": 2
+  },
+  "family": "subject_diversity",
+  "manifest_hash": "70325b78a603290e43f0c87bd750987f12b88a4b6d07d1c7b3f891a4857d217e",
+  "phase0_audit_sha256": "48cd1a57189bb7f0fe63b8fc3cbd6949deb82c215d0c8edd431b94794bc9467a",
+  "recordings": [
+    {
+      "available_train_windows": 98,
+      "available_validation_windows": 86,
+      "canonical_recording_id": "monkeys:sub-03_ses-01_task-AcousStim_acq-RH_desc-raw",
+      "raw_channel_count": 32,
+      "recording_id": "sub-03_ses-01_task-AcousStim_acq-RH_desc-raw",
+      "species": "monkeys",
+      "subject": "sub-03",
+      "supported_channel_count": 29,
+      "train_counts_by_class": {
+        "high_mids": 39,
+        "high_treble": 0,
+        "low_bass": 16,
+        "low_mids": 13,
+        "low_treble": 0,
+        "mid_bass": 0,
+        "mid_treble": 10,
+        "midrange": 20
+      },
+      "train_selected_interval_ids_hash": "b1cfe3b8395b5b59d420f852186712277fb0b0c4648ce11cfa104edf4b673d74",
+      "train_source_intervals_hash": "5ae57574fea129eb16a34094228a6a2bcc875629cde418d1486bab18cabaa9b1",
+      "valid_selected_interval_ids_hash": "b48129441e25d7b9b36ebf9f15e70dbb06b7259578b255d5783429306bed4efd",
+      "valid_source_intervals_hash": "b48129441e25d7b9b36ebf9f15e70dbb06b7259578b255d5783429306bed4efd"
+    },
+    {
+      "available_train_windows": 340,
+      "available_validation_windows": 296,
+      "canonical_recording_id": "monkeys:sub-04_ses-01_task-AcousStim_acq-RH_desc-raw",
+      "raw_channel_count": 32,
+      "recording_id": "sub-04_ses-01_task-AcousStim_acq-RH_desc-raw",
+      "species": "monkeys",
+      "subject": "sub-04",
+      "supported_channel_count": 29,
+      "train_counts_by_class": {
+        "high_mids": 107,
+        "high_treble": 0,
+        "low_bass": 62,
+        "low_mids": 58,
+        "low_treble": 0,
+        "mid_bass": 0,
+        "mid_treble": 61,
+        "midrange": 52
+      },
+      "train_selected_interval_ids_hash": "71f9c2a2d45fef5281a2ef8e5d330462e086bc10fa58567aba6c5af0187a1507",
+      "train_source_intervals_hash": "c294bdc028de663372c372585e281afc085e85137e62130232a36214ff48dab4",
+      "valid_selected_interval_ids_hash": "c103a68df7d15cdc4c223a8852c0b376e52095fdd31c77c08049de9e9ac3d6b4",
+      "valid_source_intervals_hash": "c103a68df7d15cdc4c223a8852c0b376e52095fdd31c77c08049de9e9ac3d6b4"
+    }
+  ],
+  "schema": "neurosoft-source-selection",
+  "selection_id": "diversity_monkeys_target-sub-05_subjects2_sel42",
+  "source_pool_hash": "b8e65f1fb6a0642aae46415d8a69a925cd6e8e942ef9c0a16a9fcd6d254e724d",
+  "source_pool_manifest": "../../../../../source_pools/monkeys/target-sub-05.json",
+  "source_test_policy": "forbidden",
+  "subjects": [
+    "monkeys:sub-03",
+    "monkeys:sub-04"
+  ],
+  "summary": {
+    "available_train_windows": 438,
+    "available_validation_windows": 382,
+    "batch_size": 16,
+    "realized_fraction": 1.0,
+    "realized_train_windows_per_epoch": 432,
+    "represented_class_intersection": [
+      "high_mids",
+      "low_bass",
+      "low_mids",
+      "mid_treble",
+      "midrange"
+    ],
+    "represented_class_union": [
+      "high_mids",
+      "low_bass",
+      "low_mids",
+      "mid_treble",
+      "midrange"
+    ],
+    "requested_fraction": null,
+    "sampler_implementation": "foundry.data.samplers.NeurosoftFirstFixedWindowSampler/onset-anchored-fixed-window-v1",
+    "selected_signal_seconds": 219.0,
+    "selected_train_examples": 438,
+    "selection_implementation": "neurosoft-classwise-permutation-v1",
+    "source_recording_count": 2,
+    "source_subject_count": 2,
+    "validation_examples": 382,
+    "window_seconds": 0.5
+  },
+  "target_leakage": [],
+  "target_species": "monkeys",
+  "target_subject": "sub-05",
+  "version": 1
+}

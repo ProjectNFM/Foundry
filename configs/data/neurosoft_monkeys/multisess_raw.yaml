@@ -9,6 +9,12 @@ pin_memory: false
 sequence_length: ${hyperparameters.sequence_length}
 seed: ${run.seed}
 
+input_normalization:
+  mode: disabled
+  supported_modalities: [eeg, ecog, seeg, ieeg]
+  scale_floor: 1.0e-8
+  accumulator_dtype: float64
+
 split_type: ???
 
 dataset_kwargs:

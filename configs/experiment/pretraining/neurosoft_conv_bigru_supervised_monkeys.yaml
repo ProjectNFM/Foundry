@@ -1,0 +1,90 @@
+# @package _global_
+# NeuroSoft Phase 3 supervised source pretraining for monkeys.
+
+defaults:
+  - override /model: neurosoft_conv_bigru
+  - override /data: neurosoft_monkeys/source_pretraining
+  - override /logger: wandb
+
+task_configs: [neurosoft_acoustic_stim_8band]
+source_manifest: ???
+
+model:
+  num_samples: 1000
+
+data:
+  split_type: intrasession-causal
+  audit_json: docs/neurosoft-phase0-audit.json
+  audit_species: monkeys
+  task_type: acoustic_stim
+  input_normalization:
+    mode: recording_train_global_zscore
+    supported_modalities: [eeg, ecog, seeg, ieeg]
+    scale_floor: 1.0e-8
+    accumulator_dtype: float64
+    cache:
+      enabled: true
+      # Null uses FOUNDRY_NORMALIZATION_CACHE, then
+      # <data.root>/.foundry_normalization_cache.
+      directory: null
+
+class_weights:
+  mode: none
+
+run:
+  project: neurosoft_supervised_pretraining
+  # Selection IDs encode target, family/condition, and selection seed.  Keep
+  # the model seed explicit because it is a distinct source of randomness.
+  name: src_mk_${path_stem:${source_manifest}}_m${run.seed}
+  group: NEUROSOFT_SOURCE_PRETRAINING_MONKEYS
+  tags: [source-pretraining, monkeys, 8band, phase3]
+  seed: ???
+  log_level: INFO
+  evaluate_test: false
+  # Explicit and recorded: Turing/RTX 8000 uses FP16; A100 keeps BF16.
+  unsupported_bf16_fallback: 16-mixed
+
+hyperparameters:
+  batch_size: 16
+  sequence_length: 0.5
+  fold_number: 0
+  num_workers: 1
+  num_channels: null
+  session_configs: null
+  learning_rate: 0.00025
+  weight_decay: 0.018
+
+stage:
+  mode: direct
+
+trainer:
+  max_steps: ???
+  max_epochs: -1
+  precision: bf16-mixed
+  gradient_clip_val: 1.0
+  log_every_n_steps: 50
+  val_check_interval: ???
+  callbacks:
+    learning_rate_monitor:
+      logging_interval: epoch
+    early_stopping:
+      monitor: val/source_session_mean_supported_f1
+      mode: max
+      patience: 40
+      strict: true
+    model_checkpoint:
+      monitor: val/source_session_mean_supported_f1
+      mode: max
+      auto_insert_metric_name: false
+    source_session_metrics:
+      _target_: foundry.training.callbacks.SourceSessionMetricsCallback
+      monitor_task: neurosoft_acoustic_stim_8band
+      num_classes: 8
+    compute_tracking:
+      _target_: foundry.training.callbacks.ComputeTrackingCallback
+      monitor: val/source_session_mean_supported_f1
+      mode: max
+      sequence_length: ${hyperparameters.sequence_length}
+      require_flops: false
+    compute_milestones:
+      _target_: foundry.training.callbacks.ComputeMilestoneCheckpointCallback

@@ -1,0 +1,5 @@
+# Install beside clariden-foundry.toml after configuring that base EDF.
+base_environment = "clariden-foundry"
+
+[annotations]
+com.hooks.nvidia_cuda_mps.enabled = "true"

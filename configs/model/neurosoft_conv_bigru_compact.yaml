@@ -1,0 +1,19 @@
+_target_: foundry.models.NeurosoftConvBiGRU
+
+# Compact Phase-2 architecture. Session adapters remain target-specific; the
+# shared encoder is deliberately reduced for small single-session datasets.
+session_configs: ${hyperparameters.session_configs}
+num_samples: 1000
+adapter_dim: 32
+temporal_channels: 64
+temporal_kernel_samples: 64
+# Retain the parent recipe's temporal resolution. The capacity experiment must
+# not conflate a shorter recurrent sequence with a narrower/shallower model.
+temporal_stride: 4
+conv_depth: 1
+dropout_rate: 0.3
+adapter_initializer: pytorch_default
+gru_hidden_size: 64
+gru_num_layers: 1
+gru_bidirectional: true
+gru_dropout: 0.0

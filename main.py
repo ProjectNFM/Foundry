@@ -26,6 +26,10 @@ from foundry.tools.stage_data import (
     stage_data,
 )
 from foundry.training.pretrained import TransferMode, load_pretrained_weights
+from foundry.training.checkpoint_manifest import (
+    load_checkpoint_manifest,
+    verify_checkpoint_integrity,
+)
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 logger = logging.getLogger(__name__)
@@ -55,6 +59,56 @@ def _get_slurm_restart_count() -> int:
         return 0
 
 
+def _resolve_precision_for_hardware(cfg: DictConfig) -> None:
+    """Resolve an explicitly configured BF16 fallback and record hardware."""
+    requested = str(OmegaConf.select(cfg, "trainer.precision"))
+    gpu_name = "cpu"
+    capability = None
+    effective = requested
+
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name()
+        major, minor = torch.cuda.get_device_capability()
+        capability = f"{major}.{minor}"
+        if requested == "bf16-mixed" and not torch.cuda.is_bf16_supported():
+            fallback = OmegaConf.select(
+                cfg, "run.unsupported_bf16_fallback", default=None
+            )
+            if fallback not in {"16-mixed", "32-true"}:
+                raise RuntimeError(
+                    f"GPU {gpu_name!r} (compute capability {capability}) does "
+                    "not support the requested trainer.precision='bf16-mixed'. "
+                    "Set run.unsupported_bf16_fallback=16-mixed for normal "
+                    "RTX 8000 training or 32-true for a correctness diagnostic."
+                )
+            effective = str(fallback)
+            OmegaConf.update(cfg, "trainer.precision", effective)
+            logger.warning(
+                "Precision fallback: requested=%s effective=%s gpu=%s "
+                "compute_capability=%s",
+                requested,
+                effective,
+                gpu_name,
+                capability,
+            )
+
+    for key, value in {
+        "run.requested_precision": requested,
+        "run.effective_precision": effective,
+        "run.gpu_name": gpu_name,
+        "run.gpu_compute_capability": capability,
+    }.items():
+        OmegaConf.update(cfg, key, value, force_add=True)
+    logger.info(
+        "Compute precision: requested=%s effective=%s gpu=%s "
+        "compute_capability=%s",
+        requested,
+        effective,
+        gpu_name,
+        capability or "n/a",
+    )
+
+
 # -- Config patching -------------------------------------------------------
 
 
@@ -79,6 +133,13 @@ def _configure_wandb(cfg: DictConfig, output_dir: str) -> None:
         return
 
     OmegaConf.update(cfg, "logger.save_dir", output_dir)
+    # Node-pool attempts need a unique, parent-recorded identity even if an
+    # experiment config happened to provide a reusable logger ID.
+    foundry_run_id = os.environ.get("FOUNDRY_WANDB_RUN_ID")
+    if foundry_run_id:
+        OmegaConf.update(cfg, "logger.id", foundry_run_id)
+        return
+
     if OmegaConf.select(cfg, "logger.id") is not None:
         return
 
@@ -224,12 +285,31 @@ def _populate_data_driven_hyperparams(cfg: DictConfig) -> None:
     if session_configs is not None and num_channels is not None:
         return
 
+    # Manifest-backed and training-fraction datamodules validate their
+    # intervals against task mappings during setup.  Attach those mappings
+    # before the discovery setup rather than waiting for the later model/data
+    # construction path to do so.
+    task_configs = _load_task_configs(cfg)
+
     if _is_neuralbench_data(cfg):
         dm = instantiate(cfg.data, tokenizer=None)
     else:
         normalize_data_config(cfg.data)
         dm = instantiate(cfg.data, tokenizer=None)
-    dm.setup("fit")
+    dm._task_configs = task_configs
+    is_source_discovery = (
+        OmegaConf.select(cfg, "data.role", default=None) == "source_pretraining"
+    )
+    if is_source_discovery:
+        # Source setup must still load and validate the selection manifest so
+        # metadata reflects the selected pool, but this temporary datamodule
+        # must never scan training signals for normalization statistics.
+        dm.setup("fit", fit_normalization=False)
+        logger.info(
+            "Source metadata discovery completed without fitting normalization"
+        )
+    else:
+        dm.setup("fit")
 
     if session_configs is None:
         if hasattr(dm, "get_session_configs"):
@@ -486,6 +566,33 @@ def _build_model_and_data(cfg: DictConfig):
     return model, datamodule
 
 
+def _resolve_pretrained_components(
+    model: torch.nn.Module,
+    cfg: DictConfig,
+) -> tuple[str, ...] | None:
+    """Resolve an optional model-declared pretrained transfer regime."""
+    regime = OmegaConf.select(
+        cfg, "run.pretrained_transfer_regime", default=None
+    )
+    if regime is None:
+        return None
+
+    components_for_mode = getattr(
+        model, "transferable_components_for_mode", None
+    )
+    if not callable(components_for_mode):
+        raise ValueError(
+            f"Model {type(model).__name__} does not support named pretrained "
+            f"transfer regimes; cannot use {regime!r}."
+        )
+    components = tuple(components_for_mode(str(regime)))
+    if not components:
+        raise ValueError(
+            f"Pretrained transfer regime {regime!r} selected no components."
+        )
+    return components
+
+
 def _build_lightning_module(cfg: DictConfig, model, datamodule):
     """Instantiate the :class:`FoundryModule` Lightning wrapper from config."""
     return instantiate(cfg.module, model=model)
@@ -615,6 +722,32 @@ def _log_config_to_wandb(trainer, cfg: DictConfig):
     )
 
 
+def _log_normalization_artifacts_to_wandb(
+    trainer, artifacts: dict[str, str] | None
+) -> None:
+    """Upload the immutable input-normalization artifacts when WandB is active."""
+    if artifacts is None or not isinstance(trainer.logger, WandbLogger):
+        return
+    import wandb
+
+    trainer.logger.experiment.config.update(
+        {
+            "input_normalization/stats_sha256": artifacts["stats_sha256"],
+            "input_normalization/train_interval_hash": artifacts[
+                "train_interval_hash"
+            ],
+        },
+        allow_val_change=True,
+    )
+    artifact = wandb.Artifact(
+        name=f"input-normalization-{artifacts['stats_sha256'][:16]}",
+        type="input-normalization",
+    )
+    artifact.add_file(artifacts["stats_path"])
+    artifact.add_file(artifacts["manifest_path"])
+    trainer.logger.experiment.log_artifact(artifact)
+
+
 def _parse_bids_components(recording_id: str) -> dict[str, str]:
     """Extract BIDS components (sub, ses, acq, etc.) from a recording ID."""
     components = {}
@@ -633,6 +766,56 @@ def _derive_species(datamodule) -> str | None:
     if "monkey" in class_name:
         return "monkeys"
     return None
+
+
+def _derive_target_subject(datamodule) -> str:
+    """Return the sole BIDS subject in a downstream transfer datamodule."""
+    if getattr(datamodule, "dataset", None) is None:
+        datamodule.setup("fit")
+    recording_ids = list(getattr(datamodule.dataset, "recording_ids", []))
+    subjects = {
+        f"sub-{subject}"
+        for recording_id in recording_ids
+        if (subject := _parse_bids_components(str(recording_id)).get("sub"))
+        is not None
+    }
+    if len(subjects) != 1:
+        raise ValueError(
+            "Manifest-based NeuroSoft transfer requires exactly one target "
+            f"subject, got recording IDs {recording_ids!r}"
+        )
+    return next(iter(subjects))
+
+
+def _validate_manifest_target(manifest: dict, datamodule) -> None:
+    """Require a transfer manifest to exclude this exact downstream target."""
+    trained_on = manifest.get("trained_on")
+    excluded = (
+        trained_on.get("excluded_target")
+        if isinstance(trained_on, dict)
+        else None
+    )
+    if not isinstance(excluded, dict):
+        raise ValueError(
+            "Checkpoint manifest is missing trained_on.excluded_target"
+        )
+    manifest_species = excluded.get("species")
+    manifest_subject = excluded.get("subject")
+    species = _derive_species(datamodule)
+    subject = _derive_target_subject(datamodule)
+    if not isinstance(manifest_species, str) or not isinstance(
+        manifest_subject, str
+    ):
+        raise ValueError(
+            "Checkpoint manifest excluded_target must contain string species "
+            "and subject fields"
+        )
+    if species != manifest_species or subject != manifest_subject:
+        raise ValueError(
+            "Checkpoint manifest target does not match the downstream target: "
+            f"manifest={manifest_species}/{manifest_subject}, "
+            f"downstream={species}/{subject}"
+        )
 
 
 def _prepare_fraction_provenance(
@@ -901,8 +1084,11 @@ def _write_snapshot_task_provenance(output_dir: str) -> None:
     # Hydra leaves ``job.num`` as a mandatory-but-unresolved value for a
     # one-item local multirun.  That task still maps to the first snapshot
     # config, so use index 0 when no explicit job number is available.
+    task_index_raw = os.environ.get("FOUNDRY_SNAPSHOT_TASK_INDEX")
     task_index = int(
-        OmegaConf.select(
+        task_index_raw
+        if task_index_raw is not None
+        else OmegaConf.select(
             HydraConfig.get(), "job.num", default=0, throw_on_missing=False
         )
     )
@@ -923,6 +1109,538 @@ def _write_snapshot_task_provenance(output_dir: str) -> None:
 # -- Entry point ------------------------------------------------------------
 
 
+def _resolve_manifest_path(path: str | os.PathLike[str]) -> Path:
+    """Resolve a configured manifest from Hydra's transient run directory."""
+    candidate = Path(path)
+    if candidate.is_file():
+        return candidate.resolve()
+    if not candidate.is_absolute():
+        try:
+            from hydra.utils import get_original_cwd
+
+            candidate = Path(get_original_cwd()) / candidate
+        except ValueError:
+            pass
+    if candidate.is_file():
+        return candidate.resolve()
+    raise FileNotFoundError(f"Checkpoint manifest not found: {path}")
+
+
+def _load_and_validate_checkpoint_manifest(
+    cfg: DictConfig,
+    datamodule,
+) -> dict | None:
+    """Load a checkpoint manifest, validate provenance, and return it.
+
+    Returns ``None`` when ``run.pretrained_checkpoint_manifest`` is not set.
+    Raises on provenance mismatches so no bad transfer can proceed.
+    """
+    manifest_path = OmegaConf.select(
+        cfg, "run.pretrained_checkpoint_manifest", default=None
+    )
+    if manifest_path is None:
+        return None
+
+    pretrained_ckpt = OmegaConf.select(
+        cfg, "run.pretrained_checkpoint", default=None
+    )
+    if pretrained_ckpt:
+        raise ValueError(
+            "run.pretrained_checkpoint and run.pretrained_checkpoint_manifest "
+            "are mutually exclusive."
+        )
+
+    resolved_manifest_path = _resolve_manifest_path(manifest_path)
+    manifest = load_checkpoint_manifest(resolved_manifest_path)
+
+    checkpoint_root = os.environ.get("FOUNDRY_CHECKPOINT_ROOT")
+    if checkpoint_root:
+        verify_checkpoint_integrity(manifest, checkpoint_root)
+    else:
+        manifest_dir = str(resolved_manifest_path.parent.parent)
+        verify_checkpoint_integrity(manifest, manifest_dir)
+
+    _validate_manifest_target(manifest, datamodule)
+    trained_on = manifest["trained_on"]
+    excluded = trained_on["excluded_target"]
+
+    logger.info(
+        "Loaded checkpoint manifest: kind=%s monitor=%s score=%.4f "
+        "excluded_target=%s/%s source=%s",
+        manifest["checkpoint"]["kind"],
+        manifest["selection"]["monitor"],
+        manifest["selection"]["monitor_value"],
+        excluded.get("species"),
+        excluded.get("subject"),
+        trained_on.get("source_selection_id"),
+    )
+
+    return manifest
+
+
+def _apply_manifest_transfer(
+    model: torch.nn.Module,
+    manifest: dict,
+    cfg: DictConfig,
+    output_dir: str,
+) -> None:
+    """Apply pretrained weights from a checkpoint manifest.
+
+    Resolves the checkpoint path, loads weights using the existing strict
+    transfer pipeline, and persists the transfer report.
+    """
+    checkpoint_root = os.environ.get("FOUNDRY_CHECKPOINT_ROOT")
+    checkpoint_info = manifest["checkpoint"]
+    rel_path = checkpoint_info["path"]
+
+    if checkpoint_root:
+        ckpt_path = Path(checkpoint_root) / rel_path
+    else:
+        manifest_path = _resolve_manifest_path(
+            OmegaConf.select(cfg, "run.pretrained_checkpoint_manifest")
+        )
+        ckpt_path = manifest_path.parent.parent / rel_path
+
+    if not ckpt_path.exists():
+        raise FileNotFoundError(
+            f"Checkpoint not found at resolved path: {ckpt_path}"
+        )
+
+    regime = OmegaConf.select(
+        cfg, "run.pretrained_transfer_regime", default=None
+    )
+    if regime is None:
+        raise ValueError(
+            "run.pretrained_transfer_regime must be set when using "
+            "pretrained_checkpoint_manifest (e.g. 'full_finetuning' or "
+            "'frozen_representation')"
+        )
+
+    components = _resolve_pretrained_components(model, cfg)
+    freeze = regime == "frozen_representation"
+
+    report = load_pretrained_weights(
+        model,
+        ckpt_path,
+        freeze=freeze,
+        mode=TransferMode.STRICT,
+        components=components,
+    )
+
+    report_dict = {
+        "source_checkpoint_manifest": str(
+            OmegaConf.select(cfg, "run.pretrained_checkpoint_manifest")
+        ),
+        "source_checkpoint_path": str(ckpt_path),
+        "source_checkpoint_sha256": checkpoint_info["sha256"],
+        "transfer_regime": regime,
+        "components": list(components) if components else [],
+        "loaded": report.loaded,
+        "skipped_excluded": report.skipped_excluded,
+        "missing_in_checkpoint": report.missing_in_checkpoint,
+        "unexpected_in_checkpoint": report.unexpected_in_checkpoint,
+        "shape_mismatched": report.shape_mismatched,
+        "dtype_mismatched": report.dtype_mismatched,
+    }
+
+    import json as _json
+
+    report_json_path = os.path.join(output_dir, "transfer-report.json")
+    with open(report_json_path, "w") as f:
+        _json.dump(report_dict, f, indent=2, ensure_ascii=True)
+
+    report_md_lines = [
+        "# Transfer Report",
+        "",
+        f"- **Regime:** {regime}",
+        f"- **Checkpoint:** `{ckpt_path}`",
+        f"- **SHA-256:** `{checkpoint_info['sha256']}`",
+        f"- **Loaded:** {len(report.loaded)}",
+        f"- **Excluded (by design):** {len(report.skipped_excluded)}",
+        f"- **Missing in checkpoint:** {len(report.missing_in_checkpoint)}",
+        f"- **Shape mismatched:** {len(report.shape_mismatched)}",
+        f"- **Dtype mismatched:** {len(report.dtype_mismatched)}",
+        "",
+        "## Loaded Parameters",
+        "",
+    ]
+    for key in report.loaded[:50]:
+        report_md_lines.append(f"- `{key}`")
+    if len(report.loaded) > 50:
+        report_md_lines.append(f"- ... and {len(report.loaded) - 50} more")
+    report_md_lines.extend(["", "## Excluded Parameters", ""])
+    for key in report.skipped_excluded[:50]:
+        report_md_lines.append(f"- `{key}`")
+    if len(report.skipped_excluded) > 50:
+        report_md_lines.append(
+            f"- ... and {len(report.skipped_excluded) - 50} more"
+        )
+
+    report_md_path = os.path.join(output_dir, "transfer-report.md")
+    with open(report_md_path, "w") as f:
+        f.write("\n".join(report_md_lines))
+
+    logger.info(
+        "Transfer from manifest: loaded=%d excluded=%d regime=%s report=%s",
+        len(report.loaded),
+        len(report.skipped_excluded),
+        regime,
+        report_json_path,
+    )
+
+
+def _configure_source_compute_callbacks(
+    trainer, datamodule, cfg: DictConfig
+) -> None:
+    """Set realized_train_windows_per_epoch on the ComputeTrackingCallback.
+
+    Called after the source datamodule is set up so the manifest summary is
+    available. This enables effective-epoch computation in compute tracking.
+    """
+    from foundry.training.callbacks.compute import ComputeTrackingCallback
+
+    manifest = getattr(datamodule, "_source_manifest", None)
+    if manifest is None:
+        return
+
+    realized_windows = getattr(
+        manifest.summary, "realized_train_windows_per_epoch", None
+    )
+    if realized_windows is None:
+        return
+
+    for callback in trainer.callbacks:
+        if isinstance(callback, ComputeTrackingCallback):
+            callback.realized_train_windows_per_epoch = int(realized_windows)
+            logger.info(
+                "Configured ComputeTrackingCallback: "
+                "realized_train_windows_per_epoch=%d",
+                realized_windows,
+            )
+            break
+
+
+def _emit_source_checkpoint_manifests(
+    trainer,
+    cfg: DictConfig,
+    datamodule,
+    output_dir: str,
+    normalization_artifacts: dict | None,
+) -> None:
+    """Write JSON/Markdown checkpoint manifests for best and milestone checkpoints.
+
+    Called after ``trainer.fit()`` in source-pretraining mode. Gathers metadata
+    from callbacks, the source manifest, and run config, then writes manifest
+    files for the best checkpoint and each saved milestone.
+    """
+    from lightning.pytorch.callbacks import ModelCheckpoint
+
+    from foundry.training.callbacks.compute import ComputeTrackingCallback
+    from foundry.training.callbacks.compute_milestone import (
+        ComputeMilestoneCheckpointCallback,
+    )
+    from foundry.training.callbacks.source_session_metrics import (
+        SourceSessionMetricsCallback,
+    )
+    from foundry.training.checkpoint_manifest import write_checkpoint_manifest
+
+    source_manifest = getattr(datamodule, "_source_manifest", None)
+    manifest_dir = os.path.join(output_dir, "manifests")
+
+    compute_cb = None
+    milestone_cb = None
+    session_metrics_cb = None
+    model_ckpt_cb = None
+    for callback in trainer.callbacks:
+        if isinstance(callback, ComputeTrackingCallback):
+            compute_cb = callback
+        elif isinstance(callback, ComputeMilestoneCheckpointCallback):
+            milestone_cb = callback
+        elif isinstance(callback, SourceSessionMetricsCallback):
+            session_metrics_cb = callback
+        elif isinstance(callback, ModelCheckpoint):
+            model_ckpt_cb = callback
+
+    git_sha = os.environ.get("FOUNDRY_SNAPSHOT_GIT_SHA", "unknown")
+    snapshot_bundle = os.environ.get("FOUNDRY_SNAPSHOT_BUNDLE", "unknown")
+
+    from hydra_plugins.foundry_launcher.launch_snapshot import (
+        get_slurm_job_identifiers,
+    )
+
+    slurm_ids = get_slurm_job_identifiers()
+    slurm_job_id = (
+        slurm_ids.get("slurm_job_id", "unknown") if slurm_ids else "unknown"
+    )
+
+    wandb_info = {"project": "unknown", "group": "unknown", "run_id": "unknown"}
+    if trainer.logger is not None:
+        from lightning.pytorch.loggers import WandbLogger
+
+        if isinstance(trainer.logger, WandbLogger):
+            exp = trainer.logger.experiment
+            if exp is not None:
+                wandb_info = {
+                    "project": getattr(exp, "project", "unknown"),
+                    "group": OmegaConf.select(
+                        cfg, "run.group", default="unknown"
+                    ),
+                    "run_id": getattr(exp, "id", "unknown"),
+                }
+
+    norm_hashes: dict[str, str] = {}
+    if normalization_artifacts and isinstance(normalization_artifacts, dict):
+        for key, value in normalization_artifacts.items():
+            if isinstance(value, dict) and "hash" in value:
+                norm_hashes[str(key)] = str(value["hash"])
+            elif isinstance(value, str):
+                norm_hashes[str(key)] = value
+
+    recipe = {
+        "model": OmegaConf.to_container(cfg.model, resolve=True),
+        "hyperparameters": OmegaConf.to_container(
+            cfg.hyperparameters, resolve=True
+        ),
+        "requested_precision": OmegaConf.select(
+            cfg, "run.requested_precision", default=str(trainer.precision)
+        ),
+        "trainer_precision": str(trainer.precision),
+        "gpu_compute_capability": OmegaConf.select(
+            cfg, "run.gpu_compute_capability", default=None
+        ),
+    }
+
+    def _build_trained_on(compute_snap: dict) -> dict:
+        trained_on: dict = {}
+        if source_manifest is not None:
+            trained_on["source_selection_id"] = source_manifest.selection_id
+            trained_on["source_manifest_path"] = str(
+                getattr(datamodule, "selection_manifest_path", "unknown")
+            )
+            trained_on["source_manifest_hash"] = source_manifest.manifest_hash
+            trained_on["excluded_target"] = {
+                "species": source_manifest.target_species,
+                "subject": source_manifest.target_subject,
+            }
+            trained_on["subjects"] = list(source_manifest.subjects)
+            trained_on["recordings"] = [
+                r.canonical_recording_id for r in source_manifest.recordings
+            ]
+            trained_on["selected_train_examples"] = (
+                source_manifest.summary.selected_train_examples
+            )
+            trained_on["available_train_windows"] = (
+                source_manifest.summary.available_train_windows
+            )
+            trained_on["realized_train_windows_per_epoch"] = (
+                source_manifest.summary.realized_train_windows_per_epoch
+            )
+            trained_on["class_union"] = list(
+                source_manifest.summary.represented_class_union
+            )
+            trained_on["class_intersection"] = list(
+                source_manifest.summary.represented_class_intersection
+            )
+        else:
+            trained_on["excluded_target"] = {
+                "species": "unknown",
+                "subject": "unknown",
+            }
+
+        trained_on["processed_windows"] = compute_snap.get(
+            "processed_windows", 0
+        )
+        ee = compute_snap.get("effective_epochs")
+        trained_on["completed_effective_epochs"] = (
+            round(ee, 4) if ee is not None else 0.0
+        )
+        trained_on["optimizer_steps"] = compute_snap.get("optimizer_steps", 0)
+        return trained_on
+
+    def _build_selection(compute_snap: dict) -> dict:
+        selection: dict = {
+            "monitor": (compute_cb.monitor if compute_cb else "unknown"),
+            "monitor_value": compute_snap.get("monitor_value", 0.0),
+            "source_session_scores": {},
+        }
+        if session_metrics_cb is not None:
+            selection["source_session_scores"] = dict(
+                session_metrics_cb._best_session_scores
+            )
+        return selection
+
+    def _build_compute(compute_snap: dict) -> dict:
+        return {
+            "cumulative_flops": compute_snap.get("cumulative_flops", 0),
+            "flop_method": compute_snap.get("flop_method", "none"),
+            "signal_seconds": compute_snap.get("signal_seconds", 0.0),
+            "wall_time_seconds": compute_snap.get("wall_time_seconds", 0.0),
+            "gpu": compute_snap.get("gpu", "unknown"),
+            "gpu_compute_capability": compute_snap.get(
+                "gpu_compute_capability",
+                OmegaConf.select(
+                    cfg, "run.gpu_compute_capability", default="unknown"
+                ),
+            ),
+            "precision": compute_snap.get("precision", "unknown"),
+        }
+
+    written_manifests: list[str] = []
+
+    if model_ckpt_cb is not None and model_ckpt_cb.best_model_path:
+        best_path = model_ckpt_cb.best_model_path
+        if os.path.isfile(best_path):
+            if compute_cb is not None:
+                snap = compute_cb.get_best_compute_snapshot()
+                snap["precision"] = str(trainer.precision)
+            else:
+                snap = {
+                    "processed_windows": 0,
+                    "optimizer_steps": trainer.global_step,
+                    "monitor_value": 0.0,
+                }
+
+            try:
+                json_path, md_path = write_checkpoint_manifest(
+                    best_path,
+                    manifest_dir,
+                    kind="best",
+                    trained_on=_build_trained_on(snap),
+                    selection=_build_selection(snap),
+                    compute=_build_compute(snap),
+                    recipe=recipe,
+                    normalization_artifact_hashes=norm_hashes,
+                    git_sha=git_sha,
+                    snapshot_bundle=snapshot_bundle,
+                    slurm_job_id=slurm_job_id,
+                    wandb_info=wandb_info,
+                )
+                written_manifests.append(str(json_path))
+                logger.info("Wrote best checkpoint manifest: %s", json_path)
+            except Exception:
+                logger.warning(
+                    "Failed to write best checkpoint manifest",
+                    exc_info=True,
+                )
+
+    if milestone_cb is not None:
+        for step, info in sorted(milestone_cb.get_saved_milestones().items()):
+            ckpt_path = info.get("path")
+            if not ckpt_path or not os.path.isfile(ckpt_path):
+                continue
+
+            snap = info.get("compute_snapshot", {})
+            snap.setdefault("precision", str(trainer.precision))
+            snap.setdefault("optimizer_steps", step)
+
+            realized_pct = info.get("realized_pct", 0.0)
+            kind = f"milestone-{realized_pct:.0f}pct"
+
+            if session_metrics_cb is not None:
+                snap["monitor_value"] = (
+                    session_metrics_cb._latest_mean_f1 or 0.0
+                )
+
+            try:
+                json_path, md_path = write_checkpoint_manifest(
+                    ckpt_path,
+                    manifest_dir,
+                    kind=kind,
+                    trained_on=_build_trained_on(snap),
+                    selection=_build_selection(snap),
+                    compute=_build_compute(snap),
+                    recipe=recipe,
+                    normalization_artifact_hashes=norm_hashes,
+                    git_sha=git_sha,
+                    snapshot_bundle=snapshot_bundle,
+                    slurm_job_id=slurm_job_id,
+                    wandb_info=wandb_info,
+                )
+                written_manifests.append(str(json_path))
+                logger.info(
+                    "Wrote milestone checkpoint manifest (step %d): %s",
+                    step,
+                    json_path,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to write milestone manifest for step %d",
+                    step,
+                    exc_info=True,
+                )
+
+    logger.info(
+        "Checkpoint manifest emission: %d manifests written",
+        len(written_manifests),
+    )
+    return written_manifests
+
+
+def _build_source_model_and_data(cfg: DictConfig):
+    """Build model and datamodule for source pretraining with canonical session IDs.
+
+    When the datamodule uses a source manifest, session configs and ID aliases
+    are derived from the manifest recordings instead of from the dataset's
+    default session structure.
+    """
+    _populate_data_driven_hyperparams(cfg)
+
+    task_configs = _load_task_configs(cfg)
+    if not _is_neuralbench_data(cfg):
+        normalize_data_config(cfg.data)
+
+    datamodule = instantiate(cfg.data, tokenizer=None)
+    datamodule._task_configs = task_configs
+
+    task_configs, setup_done = _validate_and_apply_focal_loss_weights(
+        cfg, datamodule, task_configs
+    )
+    task_configs, setup_done = _apply_auto_class_weights(
+        cfg, datamodule, task_configs, setup_done=setup_done
+    )
+
+    if not setup_done:
+        datamodule.setup("fit")
+        setup_done = True
+
+    source_session_configs = getattr(
+        datamodule, "get_source_session_configs", lambda: None
+    )()
+    source_id_aliases = getattr(
+        datamodule, "get_source_id_aliases", lambda: None
+    )()
+
+    if source_session_configs is not None:
+        OmegaConf.update(
+            cfg,
+            "hyperparameters.session_configs",
+            source_session_configs,
+            force_add=True,
+        )
+        logger.info(
+            "Source pretraining: derived session_configs from manifest "
+            "(%d sessions).",
+            len(source_session_configs),
+        )
+
+    ModelClass = get_class(cfg.model._target_)
+    model_kwargs = {
+        k: instantiate(v) if OmegaConf.is_config(v) else v
+        for k, v in cfg.model.items()
+        if k != "_target_"
+    }
+    model_kwargs.pop("session_emb", None)
+    if source_id_aliases is not None:
+        model_kwargs["id_aliases"] = source_id_aliases
+
+    model = ModelClass(task_configs=task_configs, **model_kwargs)
+
+    tokenizer = model.tokenize if hasattr(model, "tokenize") else None
+    datamodule.set_tokenizer(tokenizer)
+
+    return model, datamodule
+
+
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 @hydra_main_wrapper
 def main(cfg: DictConfig):
@@ -934,6 +1652,7 @@ def main(cfg: DictConfig):
     evaluation.
     """
     setup_logging(cfg.run.log_level)
+    _resolve_precision_for_hardware(cfg)
     torch.set_float32_matmul_precision(
         str(
             OmegaConf.select(
@@ -985,7 +1704,13 @@ def main(cfg: DictConfig):
     # strips them from cfg.data.
     OmegaConf.resolve(cfg.run)
 
-    model, datamodule = _build_model_and_data(cfg)
+    is_source_pretraining = (
+        OmegaConf.select(cfg, "data.role", default=None) == "source_pretraining"
+    )
+    if is_source_pretraining:
+        model, datamodule = _build_source_model_and_data(cfg)
+    else:
+        model, datamodule = _build_model_and_data(cfg)
 
     # Prepare fraction manifests before WandB logging and training.
     if (
@@ -996,17 +1721,42 @@ def main(cfg: DictConfig):
             datamodule.setup("fit")
         datamodule.prepare_training_fraction_manifests()
 
+    normalization_artifacts = None
+    if getattr(datamodule, "input_normalization_config", None):
+        normalization_cfg = datamodule.input_normalization_config
+        if normalization_cfg and normalization_cfg.get("mode") != "disabled":
+            # Fit before any loader is constructed, then capture the exact
+            # frozen artifact used by this run.
+            datamodule.setup("fit")
+            normalization_artifacts = datamodule.write_normalization_artifacts(
+                output_dir,
+                git_sha=os.environ.get("FOUNDRY_SNAPSHOT_GIT_SHA"),
+            )
+
+    # -- Pretrained weight transfer -------------------------------------------
+
     pretrained_ckpt = OmegaConf.select(
         cfg, "run.pretrained_checkpoint", default=None
     )
-    if pretrained_ckpt:
+    checkpoint_manifest = _load_and_validate_checkpoint_manifest(
+        cfg, datamodule
+    )
+
+    if checkpoint_manifest is not None:
+        _apply_manifest_transfer(model, checkpoint_manifest, cfg, output_dir)
+    elif pretrained_ckpt:
         freeze = OmegaConf.select(cfg, "run.freeze_pretrained", default=False)
         transfer_mode_str = OmegaConf.select(
             cfg, "run.pretrained_transfer_mode", default="strict"
         )
         transfer_mode = TransferMode(transfer_mode_str)
+        components = _resolve_pretrained_components(model, cfg)
         load_pretrained_weights(
-            model, pretrained_ckpt, freeze=freeze, mode=transfer_mode
+            model,
+            pretrained_ckpt,
+            freeze=freeze,
+            mode=transfer_mode,
+            components=components,
         )
     elif OmegaConf.select(cfg, "run.freeze_backbone", default=False):
         if hasattr(model, "transferable_components"):
@@ -1029,9 +1779,14 @@ def main(cfg: DictConfig):
         model = torch.compile(model, mode=str(compile_mode))
 
     lightning_module = _build_lightning_module(cfg, model, datamodule)
+    lightning_module.input_normalization_artifacts = normalization_artifacts
     trainer = _build_trainer(cfg)
 
+    if is_source_pretraining:
+        _configure_source_compute_callbacks(trainer, datamodule, cfg)
+
     _log_config_to_wandb(trainer, cfg)
+    _log_normalization_artifacts_to_wandb(trainer, normalization_artifacts)
 
     # Log fraction provenance to WandB if manifests were prepared.
     neurosoft_provenance = _prepare_fraction_provenance(
@@ -1046,7 +1801,12 @@ def main(cfg: DictConfig):
         cfg, checkpoint_dir, slurm_restart_count
     )
 
-    _validate_checkpoint_policy(ckpt_path, pretrained_ckpt)
+    effective_pretrained = pretrained_ckpt or (
+        OmegaConf.select(
+            cfg, "run.pretrained_checkpoint_manifest", default=None
+        )
+    )
+    _validate_checkpoint_policy(ckpt_path, effective_pretrained)
 
     run_failed = False
     try:
@@ -1056,6 +1816,14 @@ def main(cfg: DictConfig):
             ckpt_path=ckpt_path,
             weights_only=False,
         )
+        if is_source_pretraining:
+            _emit_source_checkpoint_manifests(
+                trainer,
+                cfg,
+                datamodule,
+                output_dir,
+                normalization_artifacts,
+            )
         if OmegaConf.select(cfg, "run.evaluate_test", default=False):
             logger.info(
                 "Evaluating the best validation checkpoint on the test split."

@@ -1,0 +1,111 @@
+{
+  "condition": {
+    "class_coverage_policy": "eight_class_anchor",
+    "requested_fraction": null,
+    "sensitivity_only": true,
+    "source_composition": "same_species",
+    "source_selection_seed": 42,
+    "subject_count_bin": 1
+  },
+  "family": "eight_class_anchor",
+  "manifest_hash": "163d312085ab058926e318ff67799f58d3bb89846dd322791f5fd4acef438906",
+  "phase0_audit_sha256": "48cd1a57189bb7f0fe63b8fc3cbd6949deb82c215d0c8edd431b94794bc9467a",
+  "recordings": [
+    {
+      "available_train_windows": 1082,
+      "available_validation_windows": 217,
+      "canonical_recording_id": "minipigs:sub-06_ses-02_task-AcousStim_acq-LH_desc-raw",
+      "raw_channel_count": 32,
+      "recording_id": "sub-06_ses-02_task-AcousStim_acq-LH_desc-raw",
+      "species": "minipigs",
+      "subject": "sub-06",
+      "supported_channel_count": 18,
+      "train_counts_by_class": {
+        "high_mids": 73,
+        "high_treble": 216,
+        "low_bass": 143,
+        "low_mids": 72,
+        "low_treble": 71,
+        "mid_bass": 146,
+        "mid_treble": 217,
+        "midrange": 144
+      },
+      "train_selected_interval_ids_hash": "4cc13f670567de5c682958947dd55986019e9bfccedf4085de3a1c042f89c708",
+      "train_source_intervals_hash": "48de2f32411e61a606ae56340f3ce437605598622ee5fbdd23ae068f39239ca7",
+      "valid_selected_interval_ids_hash": "6249458621b871bb9d8e432dcb6e475b34d969918113cd800d289eb6180457d6",
+      "valid_source_intervals_hash": "6249458621b871bb9d8e432dcb6e475b34d969918113cd800d289eb6180457d6"
+    },
+    {
+      "available_train_windows": 1082,
+      "available_validation_windows": 217,
+      "canonical_recording_id": "minipigs:sub-06_ses-02_task-AcousStim_acq-RH_desc-raw",
+      "raw_channel_count": 32,
+      "recording_id": "sub-06_ses-02_task-AcousStim_acq-RH_desc-raw",
+      "species": "minipigs",
+      "subject": "sub-06",
+      "supported_channel_count": 18,
+      "train_counts_by_class": {
+        "high_mids": 73,
+        "high_treble": 216,
+        "low_bass": 143,
+        "low_mids": 72,
+        "low_treble": 71,
+        "mid_bass": 146,
+        "mid_treble": 217,
+        "midrange": 144
+      },
+      "train_selected_interval_ids_hash": "b9431d712983a4a9546316e19027fb0d5a8a5b6873c234881230a9f9b7ec3c61",
+      "train_source_intervals_hash": "7b9ebe48ae56ac065e60c8ab1172fb27fe1986033bd391f6a061e44c48b9ada7",
+      "valid_selected_interval_ids_hash": "ad329919820a3bd0605558b32704be6984c8ade7c2152385bec5514ac04f7240",
+      "valid_source_intervals_hash": "ad329919820a3bd0605558b32704be6984c8ade7c2152385bec5514ac04f7240"
+    }
+  ],
+  "schema": "neurosoft-source-selection",
+  "selection_id": "eight_class_minipigs_target-sub-02_subjects1_sel42",
+  "source_pool_hash": "51ba237e867305f7d28eea78c574a5c2e717d0bd3c2a68e8119c3591841a5597",
+  "source_pool_manifest": "../../../../../source_pools/minipigs/target-sub-02.json",
+  "source_test_policy": "forbidden",
+  "subjects": [
+    "minipigs:sub-06"
+  ],
+  "summary": {
+    "available_train_windows": 2164,
+    "available_validation_windows": 434,
+    "batch_size": 16,
+    "realized_fraction": 1.0,
+    "realized_train_windows_per_epoch": 2160,
+    "represented_class_intersection": [
+      "high_mids",
+      "high_treble",
+      "low_bass",
+      "low_mids",
+      "low_treble",
+      "mid_bass",
+      "mid_treble",
+      "midrange"
+    ],
+    "represented_class_union": [
+      "high_mids",
+      "high_treble",
+      "low_bass",
+      "low_mids",
+      "low_treble",
+      "mid_bass",
+      "mid_treble",
+      "midrange"
+    ],
+    "requested_fraction": null,
+    "sampler_implementation": "foundry.data.samplers.NeurosoftFirstFixedWindowSampler/onset-anchored-fixed-window-v1",
+    "selected_signal_seconds": 1082.0,
+    "selected_train_examples": 2164,
+    "selection_implementation": "neurosoft-classwise-permutation-v1",
+    "source_recording_count": 2,
+    "source_subject_count": 1,
+    "validation_examples": 434,
+    "window_seconds": 0.5
+  },
+  "target_leakage": [],
+  "target_species": "minipigs",
+  "target_subject": "sub-02",
+  "version": 1
+}
