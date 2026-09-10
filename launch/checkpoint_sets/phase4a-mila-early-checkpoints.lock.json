@@ -1,0 +1,20 @@
+{
+  "checkpoint_set_id": "phase4a-mila-early-checkpoints-v1",
+  "milestone_steps": [
+    500,
+    1500,
+    5000,
+    15000
+  ],
+  "records": 144,
+  "records_by_species": {
+    "minipigs": 84,
+    "monkeys": 60
+  },
+  "registry": "launch/checkpoint_sets/phase4a-mila-early-checkpoints.jsonl",
+  "registry_sha256": "3878a5a1730b201ccf25271d48426bca98c52fb306717f581471cdc226942cfb",
+  "schema": "foundry-checkpoint-registry-lock",
+  "source_registry": "launch/checkpoint_sets/phase4a-mila-best.jsonl",
+  "source_registry_sha256": "a0adda49282ccd615da864bda4cb66518cf0e27f00cb4712e234ad0a59d04099",
+  "version": 1
+}

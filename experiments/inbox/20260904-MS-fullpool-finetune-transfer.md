@@ -3,7 +3,7 @@
 **Status:** In Progress
 **Date started:** 2026-09-04
 **Parent experiment:** [NeuroSoft Supervised Pretraining Pipeline](20260903-MS-neurosoft-supervised-pretraining-pipeline.md)
-**Follow-up experiments:** Frozen-representation transfer gate (TBD); Phase 4 source-volume study (TBD)
+**Follow-up experiments:** [Phase 4B -- Early Source-Checkpoint Transfer](20260910-MS-early-checkpoint-transfer.md); Frozen-representation transfer gate (TBD); Phase 4 source-volume study (TBD)
 **Tags:** neurosoft, supervised-pretraining, transfer, full-finetuning, full-pool, phase4, 8band, intrasession-causal, clariden
 
 ## Background
