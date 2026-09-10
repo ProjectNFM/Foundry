@@ -480,6 +480,19 @@ records in the two hash-pinned production JSONLs. At that check, 11 minipig
 allocations were running and the remaining minipig and monkey array tasks were
 queued; no task failure had been reported.
 
+Subsequently, minipig array allocations 12 and 13 failed for node-level
+infrastructure reasons. Allocation 12 (Slurm job `10736380`, node `cn-c019`)
+encountered an uncorrectable GPU ECC error in all four workers during CUDA
+device setup. Allocation 13 (Slurm job `10736381`, node `cn-c034`) failed all
+four workers during Python initialization with `LookupError: unknown encoding:
+UTF-8`, consistent with transient access to the shared uv Python installation.
+None of the eight cells wrote `last.ckpt`, and other production packs continued
+training normally. The exact affected cells are preserved in
+`launch/phase4a/retries/minipigs-production-array12-13.jsonl` (8 unique cells,
+SHA-256 `caa10d496fe3f953d882af35b25e0e026ea3df6b9e9673f1765361ec521fd086`).
+Only that explicit list may be retried; completed or still-running production
+cells must not be resubmitted.
+
 ### Figures
 
 None requested for the pretraining completion check.
