@@ -512,6 +512,19 @@ uv run python main.py \
   hydra.launcher.mem_gb=32 -m
 ```
 
+Four later minipig allocations failed on the same two unhealthy nodes before
+the node exclusion was applied: array tasks 18 and 23 (Slurm jobs `10736394`
+and `10736408`) on ECC-failing `cn-c019`, and array tasks 19 and 25 (Slurm
+jobs `10736395` and `10736410`) on Python-initialization-failing `cn-c034`.
+Their 16 cells also wrote no `last.ckpt`. The exact second retry list is
+`launch/phase4a/retries/minipigs-production-array18-19-23-25.jsonl` (SHA-256
+`211bca8f2ce8c16e16efb618a6450c684184fd97590820d265658924e20e3fb1`).
+`cn-c019` and `cn-c034` were then added to the pending-task exclusion lists for
+production arrays `10736352` and `10736373` and retry array `10736403` using
+`scontrol update`; running work on other nodes was left untouched. Subsequent
+retry submissions carry the same exclusion as a snapshot-recorded Hydra
+launcher override.
+
 ### Figures
 
 None requested for the pretraining completion check.
