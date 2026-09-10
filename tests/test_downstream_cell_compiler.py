@@ -26,6 +26,10 @@ PHASE4A_REGISTRY = REPO_ROOT / "launch/checkpoint_sets/phase4a-mila-best.jsonl"
 PHASE4A_RECIPE = (
     REPO_ROOT / "configs/downstream_recipes/phase4a_full_finetuning.yaml"
 )
+PHASE4A_CORRECTED_RECIPE = (
+    REPO_ROOT
+    / "configs/downstream_recipes/phase4a_full_finetuning_lr1p5e3.yaml"
+)
 PHASE4A_AUDIT = REPO_ROOT / "docs/neurosoft-phase0-audit.json"
 CHECKPOINT_ROOT = Path("/network/scratch/s/sobralm/foundry-checkpoints")
 
@@ -279,6 +283,38 @@ def test_actual_phase4a_registry_compiles_exact_matrix() -> None:
     assert len({(row["wandb_group"], row["run_name"]) for row in rows}) == 477
     assert (
         len({(row["wandb_group"], row["wandb_run_id"]) for row in rows}) == 477
+    )
+
+
+@pytest.mark.skipif(
+    not CHECKPOINT_ROOT.is_dir(), reason="Mila checkpoint storage unavailable"
+)
+def test_corrected_phase4a_recipe_pins_matched_downstream_lr() -> None:
+    cells, metadata = compile_cells(
+        PHASE4A_REGISTRY,
+        PHASE4A_CORRECTED_RECIPE,
+        PHASE4A_AUDIT,
+        CHECKPOINT_ROOT,
+    )
+    assert metadata["counts"] == {"minipigs": 360, "monkeys": 117}
+    rows = cells["minipigs"] + cells["monkeys"]
+    assert all(
+        row["fixed_overrides"] == ["hyperparameters.learning_rate=0.0015"]
+        for row in rows
+    )
+    assert all(
+        "hyperparameters.learning_rate=0.0015" in row["overrides"]
+        for row in rows
+    )
+    assert not (
+        {row["cell_id"] for row in rows}
+        & {
+            old["cell_id"]
+            for species_rows in compile_cells(
+                PHASE4A_REGISTRY, PHASE4A_RECIPE, PHASE4A_AUDIT, CHECKPOINT_ROOT
+            )[0].values()
+            for old in species_rows
+        }
     )
 
 

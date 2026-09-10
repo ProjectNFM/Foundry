@@ -344,7 +344,7 @@ class TestTransferConfigs:
         assert cfg.model.adapter_dim == 64
         assert cfg.model.temporal_channels == 128
         assert cfg.model.gru_hidden_size == 128
-        assert cfg.hyperparameters.learning_rate == 0.00025
+        assert cfg.hyperparameters.learning_rate == 0.0015
         assert cfg.hyperparameters.batch_size == 16
 
     def test_transfer_config_seeds(self, _hydra_context):
@@ -585,8 +585,10 @@ class TestRecipeConsistency:
                 f"model.{key} mismatch: source={src_val}, target={tgt_val}"
             )
 
-    def test_source_and_transfer_use_same_hyperparameters(self, _hydra_context):
-        """Source and transfer use the same optimizer hyperparameters."""
+    def test_source_and_transfer_use_independent_learning_rates(
+        self, _hydra_context
+    ):
+        """Source LR must not overwrite the matched downstream recipe."""
         src_cfg = compose(
             config_name="config",
             overrides=[
@@ -610,9 +612,9 @@ class TestRecipeConsistency:
                 ],
             )
 
-        for key in ["learning_rate", "weight_decay", "batch_size"]:
-            src_val = OmegaConf.select(src_cfg, f"hyperparameters.{key}")
-            tgt_val = OmegaConf.select(tgt_cfg, f"hyperparameters.{key}")
-            assert src_val == tgt_val, (
-                f"hyperparameters.{key}: source={src_val}, target={tgt_val}"
-            )
+        assert src_cfg.hyperparameters.learning_rate == 0.00025
+        assert tgt_cfg.hyperparameters.learning_rate == 0.0015
+        assert src_cfg.hyperparameters.weight_decay == 0.018
+        assert tgt_cfg.hyperparameters.weight_decay == 0.018
+        assert src_cfg.hyperparameters.batch_size == 16
+        assert tgt_cfg.hyperparameters.batch_size == 16

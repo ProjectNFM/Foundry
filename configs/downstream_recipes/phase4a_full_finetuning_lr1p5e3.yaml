@@ -1,0 +1,35 @@
+schema: foundry-downstream-recipe
+version: 1
+recipe_id: phase4a-full-ft-lr1p5e3
+output_stem: phase4a-downstream-lr1p5e3
+audit_path: docs/neurosoft-phase0-audit.json
+eligible_session_selection:
+  eligible: true
+base_experiments:
+  minipigs: auditory_decoding/neurosoft_conv_bigru_transfer_minipigs
+  monkeys: auditory_decoding/neurosoft_conv_bigru_transfer_monkeys
+transfer_regimes: [full_finetuning]
+target_training_fractions: [1.0]
+target_finetuning_seeds: [42, 43, 44]
+expected_source_seed_pairs: [[42, 42], [43, 43], [44, 44]]
+evaluate_test: true
+# Pin the scientific repair inside each compiled cell as well as in the base
+# config. This prevents later config drift from silently changing the rerun.
+fixed_overrides:
+  - hyperparameters.learning_rate=0.0015
+condition_labels:
+  study: phase4a
+  target_data: full
+  downstream_lr: lr1p5e3
+  repair: matched_phase2
+species:
+  minipigs:
+    wandb_group: PHASE4A_FULL_FINETUNE_LR1P5E3_MINIPIGS
+    wandb_tags: [transfer, minipigs, 8band, phase4a, full_finetuning, lr1p5e3, matched_phase2]
+    expected_checkpoints: 21
+    expected_cells: 360
+  monkeys:
+    wandb_group: PHASE4A_FULL_FINETUNE_LR1P5E3_MONKEYS
+    wandb_tags: [transfer, monkeys, 8band, phase4a, full_finetuning, lr1p5e3, matched_phase2]
+    expected_checkpoints: 15
+    expected_cells: 117

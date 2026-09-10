@@ -7,7 +7,10 @@ Foundry compiles downstream runs from two declarations:
   selection and expected hashes/metadata used to reject stale or accidental
   inputs.
 - A downstream YAML recipe defines target eligibility, experiment configs,
-  regimes, fractions, target seeds, W&B metadata, and expected matrix counts.
+  regimes, fractions, target seeds, W&B metadata, expected matrix counts, and
+  optional `fixed_overrides` copied into every compiled cell. Use fixed
+  overrides to pin critical scientific settings that must not drift with a
+  base config.
 
 The compiler validates every checkpoint-manifest self-hash, checkpoint SHA-256,
 source-selection-manifest self-hash, excluded target/species, source selection
@@ -33,6 +36,13 @@ The Phase 4A outputs are
 `launch/phase4a/phase4a-downstream-monkeys.jsonl`. Changing transfer regime or
 target fraction is a recipe change. New source mixtures, fractions, milestone
 kinds, and model seeds are represented by new registry records.
+
+The corrected Phase 4A matched-LR rerun uses
+`configs/downstream_recipes/phase4a_full_finetuning_lr1p5e3.yaml` and emits
+`phase4a-downstream-lr1p5e3-{minipigs,monkeys}.jsonl`. It pins
+`hyperparameters.learning_rate=0.0015` inside every cell and uses new cell and
+W&B identities. The original lists are retained only as provenance for the
+invalidated `0.00025` downstream arm.
 
 ## Mila launch shape (later, not part of artifact compilation)
 

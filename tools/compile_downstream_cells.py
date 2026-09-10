@@ -411,6 +411,47 @@ def _hydra_mapping(value: dict[str, Any]) -> str:
     return "{" + ",".join(parts) + "}"
 
 
+def _fixed_overrides(recipe: dict[str, Any]) -> list[str]:
+    """Validate recipe-pinned Hydra overrides copied into every cell."""
+    overrides = recipe.get("fixed_overrides", [])
+    if not isinstance(overrides, list) or not all(
+        isinstance(item, str) and item and "=" in item for item in overrides
+    ):
+        raise ValueError(
+            "fixed_overrides must be a list of Hydra key=value strings"
+        )
+    keys = [_override.split("=", 1)[0].lstrip("+") for _override in overrides]
+    if len(keys) != len(set(keys)):
+        raise ValueError("fixed_overrides contains duplicate Hydra keys")
+    reserved = {
+        "data.dataset_kwargs.recording_ids",
+        "data.training_fraction",
+        "run.seed",
+        "run.pretrained_checkpoint_manifest",
+        "run.pretrained_checkpoint_manifest_hash",
+        "run.pretrained_checkpoint_sha256",
+        "run.pretrained_transfer_regime",
+        "run.evaluate_test",
+        "run.group",
+        "run.tags",
+        "run.cell_id",
+        "run.checkpoint_set_id",
+        "run.checkpoint_id",
+        "run.source_selection_seed",
+        "run.source_model_seed",
+        "run.source_condition",
+        "run.condition_labels",
+        "run.target_species",
+        "run.target_subject",
+    }
+    conflicts = sorted(set(keys) & reserved)
+    if conflicts:
+        raise ValueError(
+            f"fixed_overrides conflicts with compiler fields: {conflicts}"
+        )
+    return list(overrides)
+
+
 def compile_cells(
     registry_path: Path,
     recipe_path: Path,
@@ -421,6 +462,7 @@ def compile_cells(
         registry_path, checkpoint_root, recipe_path.resolve().parents[2]
     )
     recipe = _load_recipe(recipe_path)
+    fixed_overrides = _fixed_overrides(recipe)
     audit, audit_hash = _load_audit(audit_path)
     configured_species = set(recipe["species"])
     registry_species = {str(record["species"]) for record in registry}
@@ -594,8 +636,10 @@ def compile_cells(
                             "wandb_tags": list(
                                 species_recipe.get("wandb_tags", [])
                             ),
+                            "fixed_overrides": fixed_overrides,
                         }
                         row["overrides"] = [
+                            *fixed_overrides,
                             f"data.dataset_kwargs.recording_ids={_quote_list(recording_id)}",
                             f"data.training_fraction={fraction_value}",
                             f"run.seed={int(target_seed)}",

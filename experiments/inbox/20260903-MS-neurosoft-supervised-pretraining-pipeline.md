@@ -51,8 +51,9 @@ failing this gate.
   source manifests in `manifests/neurosoft_supervised/v1/`.
 - **Task:** `neurosoft_acoustic_stim_8band`.
 - **Split:** `intrasession-causal`; source test access forbidden.
-- **Source recipe:** the exact Phase 2 normalized Conv--BiGRU recipe (see
-  implementation plan §Fixed source recipe).
+- **Source recipe:** the source-specific normalized Conv--BiGRU recipe (see
+  implementation plan §Fixed source recipe). Its optimizer is independent of
+  the matched Phase-2 downstream finetuning optimizer.
 - **Model seed:** 42 for all Phase 3 runs.
 - **Target fraction:** 100% causal target training data; target fraction
   seed 42.

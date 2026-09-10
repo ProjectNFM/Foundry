@@ -16,6 +16,13 @@ hash-verified checkpoint manifests.  Phase 2 provides the matched normalized
 Conv--BiGRU scratch full-finetuning runs; it is the control for this experiment,
 not EEGNet or an unpaired historical run.
 
+On 2026-09-10, a post-run audit found that the first downstream matrix did
+not use that matched optimizer recipe. Commit `ec06969` had changed both
+transfer configs from the Phase-2 learning rate `0.0015` to the source-
+pretraining learning rate `0.00025`. That matrix is retained as an invalidated
+low-LR diagnostic arm and is not evidence for or against the primary transfer
+hypothesis. The corrected matrix restores and explicitly pins `0.0015`.
+
 The roadmap's full Phase 4 study varies source volume (10/25/50/100%) and
 eventually evaluates intermediate compute checkpoints and lower target-data
 fractions.  That is too large to be the first scientific claim.  This gate fixes
@@ -47,8 +54,9 @@ independent expected benefit.
 
 ### Setup
 
-- **Model:** The Phase-2 train-global-normalized `NeurosoftConvBiGRU` recipe;
-  no Phase-4-specific hyperparameter tuning.
+- **Model:** The Phase-2 train-global-normalized `NeurosoftConvBiGRU` recipe,
+  including downstream learning rate `0.0015`; no Phase-4-specific
+  hyperparameter tuning. The source-pretraining optimizer is independent.
 - **Source data:** The audited `source_volume` manifests at `fraction-1.00`,
   same species as the target, with every recording of the target subject
   excluded.  Source training sees causal train/validation intervals only; its
@@ -75,9 +83,11 @@ independent expected benefit.
   `NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS` and
   `NEUROSOFT_SOURCE_PRETRAINING_MONKEYS` for downstream transfer; exact run
   identities are recorded below. Exclude earlier pilots in those groups and
-  the separate Clariden `PHASE4A_FULLPOOL_SOURCE_*` runs. Planned downstream
-  groups remain `PHASE4A_FULL_FINETUNE_MINIPIGS` and
-  `PHASE4A_FULL_FINETUNE_MONKEYS`.
+  the separate Clariden `PHASE4A_FULLPOOL_SOURCE_*` runs. The invalidated
+  low-LR downstream groups are `PHASE4A_FULL_FINETUNE_MINIPIGS` and
+  `PHASE4A_FULL_FINETUNE_MONKEYS`. The corrected primary groups are
+  `PHASE4A_FULL_FINETUNE_LR1P5E3_MINIPIGS` and
+  `PHASE4A_FULL_FINETUNE_LR1P5E3_MONKEYS`.
 - **Actual source execution:** Mila Slurm arrays `10711898` (minipigs,
   tasks 0–5) and `10711900` (monkeys, tasks 0–3), Git
   `979b1c859fa848fa8f988a1e54e5bcd6862bb79a`, Quadro RTX 8000,
@@ -146,9 +156,12 @@ before treating the session/target-seed pair as an inferential replicate.
 The reusable Mila fan-out implementation is documented in
 [`docs/downstream-checkpoint-fanout.md`](../../docs/downstream-checkpoint-fanout.md).
 Its selected checkpoint registry is
-`launch/checkpoint_sets/phase4a-mila-best.jsonl`; the Phase 4A recipe is
-`configs/downstream_recipes/phase4a_full_finetuning.yaml`; and its compiled
-cell lists contain 360 minipig and 117 monkey cells under `launch/phase4a/`.
+`launch/checkpoint_sets/phase4a-mila-best.jsonl`. The original low-LR recipe
+and cell lists are retained for provenance. The corrected recipe is
+`configs/downstream_recipes/phase4a_full_finetuning_lr1p5e3.yaml`; its new,
+non-colliding cell lists contain 360 minipig and 117 monkey cells under
+`launch/phase4a/`, with `hyperparameters.learning_rate=0.0015` embedded in
+every cell.
 These artifacts use the existing packed Submitit cell-list launcher. No
 downstream jobs were submitted while creating or validating them.
 
@@ -242,6 +255,9 @@ matrix irreproducible.
   initialization, and epoch-level learning-rate monitor remain enabled.
 - `data.training_fraction=1.0` and `training_fraction_seed=${run.seed}` for
   all target cells.
+- Corrected target cells explicitly set
+  `hyperparameters.learning_rate=0.0015`, matching the Phase-2 scratch
+  controls. The completed invalidated matrix used `0.00025`.
 - `run.pretrained_checkpoint_manifest`: the verified best manifest produced
   by the matching target-excluded source cell.
 - `run.pretrained_transfer_regime=full_finetuning` and
@@ -253,7 +269,8 @@ matrix irreproducible.
 
 ### Summary
 
-**Pretraining complete; downstream transfer pending (checked 2026-09-09).**
+**Pretraining complete; first downstream matrix invalidated; corrected matched-
+LR downstream relaunch pending (updated 2026-09-10).**
 The selected Mila batch covers all 36 planned full-pool source cells: seven
 minipig and five monkey excluded target subjects, each with paired
 source-selection/model seeds 42, 43, and 44. All 36 W&B runs are `finished`.
@@ -326,6 +343,42 @@ paired selection/model seed. Links identify the machine-readable run IDs.
 | Monkeys / sub-04 | [adochvjq](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/adochvjq) | [vwohtaxd](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/vwohtaxd) | [r3vclvri](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/r3vclvri) |
 | Monkeys / sub-05 | [t6qjxb4j](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/t6qjxb4j) | [s2zw618u](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/s2zw618u) | [y6hxic6g](https://wandb.ai/poyo-eeg/neurosoft_supervised_pretraining/runs/y6hxic6g) |
 
+### Invalidated downstream matrix and repair audit
+
+All 477 originally planned downstream cells produced scientifically readable
+results: 473 W&B runs finished normally and four minipig runs were recovered
+from complete, allowlisted first-attempt local summaries after their restart
+hit an infrastructure failure. The comparison had 158 of 159 matched scratch
+session/seed controls; monkey
+`sub-01_ses-014_task-AcousStim_acq-RH_desc-raw`, seed 43, lacks its historical
+scratch result.
+
+The first downstream matrix is nevertheless **invalid for the primary
+initialization comparison**. The Phase-2 scratch controls used learning rate
+`0.0015`, while all 477 transfer cells inherited `0.00025`. The mismatch was
+introduced by commit `ec06969`, which changed the source and downstream
+learning rates together. A test named
+`test_source_and_transfer_use_same_hyperparameters` encoded the incorrect
+invariant that source pretraining and target finetuning must share an optimizer
+recipe; the purported Phase-2 matching test was updated to the same incorrect
+value. This escaped review even though the Phase-3 execution notes explicitly
+said that the `0.00025` overrides were source-only.
+
+The invalidated arm produced the following descriptive results. They are
+recorded to preserve work and diagnose learning-rate sensitivity, not as a
+verdict on pretraining:
+
+| Species | Scratch test F1 (`lr=0.0015`) | Transfer test F1 (`lr=0.00025`) | Difference | Subject bootstrap 95% CI |
+|---|---:|---:|---:|---:|
+| Minipigs | 0.420634 | 0.364189 | -0.056445 | [-0.077643, -0.032149] |
+| Monkeys | 0.453742 | 0.409961 | -0.043781 | [-0.089379, 0.015860] |
+
+The repair restores both transfer base configs to `0.0015`, replaces the
+source/target optimizer-equality test with explicit independent source and
+matched-target assertions, and adds a corrected recipe that pins the LR in
+every compiled cell. New recipe, cell, run, and W&B group identities prevent
+the corrected jobs from resuming or overwriting the invalidated runs.
+
 ### Analysis
 
 This pretraining-only check used read-only `wandb.Api()` queries and
@@ -333,11 +386,12 @@ This pretraining-only check used read-only `wandb.Api()` queries and
 reads and SHA-256 checks of best and final checkpoint files. No figures were
 generated.
 
-Downstream analysis remains pending. The analysis script now selects the Mila
-source runs through the committed checkpoint registry and identifies target
-runs by explicit `run.cell_id`, `run.checkpoint_id`, and source-seed fields;
-it does not infer source checkpoint provenance from run names or the old
-Clariden source groups.
+The analysis script selects the Mila source runs through the committed
+checkpoint registry and identifies target runs by explicit `run.cell_id`,
+`run.checkpoint_id`, and source-seed fields; it does not infer source checkpoint
+provenance from run names or the old Clariden source groups. By default it now
+targets the corrected `lr=0.0015` matrix. Set
+`PHASE4A_TRANSFER_CONDITION=invalid_lr2p5e4` to reproduce the invalidated arm.
 
 On 2026-09-09, the downstream fan-out review independently revalidated all 36
 selected best checkpoint and source-selection manifests, regenerated 360
@@ -536,19 +590,22 @@ arguments matched the first retry except for the exact second retry list.
 
 ### Figures
 
-None requested for the pretraining completion check.
+These figures describe only the invalidated mismatched-LR arm and must not be
+used as evidence for the primary hypothesis:
+
+![Invalidated subject-balanced test effect](../../analysis/figures/20260904-MS-fullpool-finetune-transfer_subject_balanced_test_f1.png)
+
+![Invalidated compute comparison](../../analysis/figures/20260904-MS-fullpool-finetune-transfer_compute_savings.png)
 
 ## Conclusions
 
-The Mila source-pretraining stage completed successfully, with all 36 expected
-best and final checkpoints verified on shared storage. Preserve the existing
-source-F1-selected best checkpoints for this transfer gate. The one incomplete
-W&B record is documented above and does not require a pretraining rerun.
-Controlled downstream handoffs for both species verified worker access,
-strict source transfer, target fraction provenance, checkpoint output,
-validation/test execution, W&B identity, and packed independent-process
-execution. The full scientific transfer hypothesis remains pending production
-completion and paired analysis.
+The Mila source-pretraining stage remains valid: all 36 expected best and final
+checkpoints were verified on shared storage, and no source rerun is required.
+The first 477-cell downstream matrix is invalidated as a test of initialization
+because its `0.00025` target learning rate did not match the `0.0015` scratch
+controls. Its apparent negative transfer must not be interpreted causally.
+The full scientific transfer hypothesis remains untested pending completion
+and paired analysis of the corrected `0.0015` downstream matrix.
 
 **User-confirmed interpretation (2026-09-09):** All source slices show
 validation-loss overfitting by 10K steps with the current model and
@@ -559,9 +616,8 @@ points for minipigs and 2.49 for monkeys. The loss evidence therefore supports
 early overfitting, but does not establish that 10K preserves the best source
 F1 or downstream transfer quality.
 
-The experiment's transfer hypothesis remains **untested** until the 477
-downstream finetunings are evaluated against the matched scratch controls.
-Keep the overall status `In Progress`.
+Keep the overall status `In Progress` until the corrected 477 downstream
+finetunings are evaluated against the matched scratch controls.
 
 ## Notes for future experiments
 
@@ -574,6 +630,9 @@ Keep the overall status `In Progress`.
 - Use the verified Mila best manifests for the upcoming full-finetuning
   matrix. The future 10K policy does not retroactively replace these checkpoints
   or change the current gate's source-F1 selection rule.
+- Never require source-pretraining and downstream-finetuning optimizer
+  hyperparameters to match. Require downstream transfer to match its scratch
+  control, and pin critical scientific overrides in compiled cells.
 - Advance to the frozen-representation experiment only as a separately
   controlled hypothesis, with a frozen-random representation baseline.
 - Advance to the 10/25/50/100% source-volume study only if this gate passes

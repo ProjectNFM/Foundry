@@ -883,7 +883,8 @@ logged as structured config; names are not provenance.
 
 ### Fixed source recipe
 
-Use the exact normalized Phase 2 starting recipe:
+Use the source-specific Phase 3 recipe below. Its optimizer is independent of
+the matched Phase 2 downstream finetuning recipe:
 
 ```yaml
 model:
@@ -930,6 +931,7 @@ selection. For Phase 3 canonical runs:
 target training fraction = 100%
 model seed = 42
 target fraction seed = 42
+downstream learning rate = 0.0015
 evaluate target test = true
 ```
 
