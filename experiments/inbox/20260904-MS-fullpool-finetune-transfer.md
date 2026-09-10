@@ -352,9 +352,10 @@ regime.
 
 Controlled launch inputs are preserved under `launch/phase4a/canaries/`: one
 cell per species for `tasks_per_node=1`, followed by distinct matched two-cell
-lists for `tasks_per_node=2`. No four-cell list will be prepared unless the
-two-cell benchmark leaves credible headroom. Submission remains pending a clean,
-committed tree and explicit authorization to commit.
+lists for `tasks_per_node=2`. The successful two-cell measurements left enough
+GPU and memory headroom to prepare distinct four-cell lists for
+`tasks_per_node=4`. All benchmark lists contain real compiled cells and are
+mutually disjoint within a species, so successful cells are not rerun.
 
 The first one-cell submissions on Mila `unkillable` used 4 CPUs and 32 GB:
 minipig job `10725026`, snapshot
@@ -369,6 +370,43 @@ reporting BF16 support on the compute-7.5 RTX 8000; native-BF16 detection must
 therefore include the compute capability. The retry fix makes the data root
 explicitly environment-backed and requires compute capability 8.0 or newer
 for BF16. Only the two explicit failed cells may be retried.
+
+The corrected one-cell retries used Git
+`dfb2e05475ea108f684f57f7836f9a132efb4a21`, 4 CPUs, 32 GB, and the
+`unkillable` partition. Minipig job `10725160` (snapshot
+`20260909T191307_NEUROSOFT_TRANSFER_MINIPIGS_dfb2e054_d88267b0`)
+completed in 19:02, for 3.15 valid cells/GPU-hour; its accounted process peak
+was 342 MiB at 19% GPU utilization. Monkey job `10735375` (snapshot
+`20260910T013101_NEUROSOFT_TRANSFER_MONKEYS_dfb2e054_797e538c`)
+completed in 17:22, for 3.45 valid cells/GPU-hour; its accounted process peak
+was 342 MiB at 22% GPU utilization. Both performed strict fresh transfer,
+wrote best and last checkpoints, ran validation and test, preserved compiled
+provenance and deterministic W&B identity, and completed without requeue.
+
+The two-cell benchmarks retained 4 CPUs and 32 GB per allocation by assigning
+2 CPUs to each independent process. Minipig job `10735674` (snapshot
+`20260910T015123_NEUROSOFT_TRANSFER_MINIPIGS_dfb2e054_bc837b37`)
+completed both cells in 17:55: 6.70 valid cells/GPU-hour, 2.13 times its
+one-cell throughput. The two processes accounted for 26--28% GPU utilization
+and 342 MiB peak memory each. Monkey job `10735678` (snapshot
+`20260910T015214_NEUROSOFT_TRANSFER_MONKEYS_dfb2e054_64f83cde`)
+completed both cells in 13:01: 9.22 valid cells/GPU-hour, 2.67 times its
+one-cell throughput. Its processes accounted for 29% and 28% GPU utilization
+and 342 MiB each. All four cells wrote best/last checkpoints, completed test
+evaluation and W&B sync, and had strict-transfer reports with 26 shared tensors
+loaded and zero missing, unexpected, shape-mismatched, or dtype-mismatched
+tensors. The deliberate adapter exclusions were 170 tensors per minipig cell
+and 62 per monkey cell.
+
+One attempted two-cell submission requested 4 CPUs per process and was rejected
+by `QOSMaxCpuPerUserLimit` before receiving a Slurm job ID; its unused snapshot
+was
+`20260910T015003_NEUROSOFT_TRANSFER_MINIPIGS_dfb2e054_08fbe414`.
+The four-cell benchmark therefore uses 1 CPU per independent process, retaining
+the user-requested 4 CPUs and 32 GB for the allocation. On 2026-09-09 the user
+also authorized launching all remaining downstream production cells on Mila
+`long` after benchmarking; production lists must exclude every successful
+canary cell and must be committed before submission.
 
 ### Figures
 
