@@ -270,7 +270,7 @@ matrix irreproducible.
 ### Summary
 
 **Pretraining complete; first downstream matrix invalidated; corrected matched-
-LR downstream relaunch pending (updated 2026-09-10).**
+LR downstream matrix submitted on Mila (updated 2026-09-10).**
 The selected Mila batch covers all 36 planned full-pool source cells: seven
 minipig and five monkey excluded target subjects, each with paired
 source-selection/model seeds 42, 43, and 44. All 36 W&B runs are `finished`.
@@ -587,6 +587,48 @@ Its immutable snapshot is
 The launch included
 `+hydra.launcher.additional_parameters.exclude=cn-c019\,cn-c034`; all other
 arguments matched the first retry except for the exact second retry list.
+
+### Corrected matched-LR relaunch (2026-09-10)
+
+The repair was committed as clean Git revision
+`a01aef594002e67ede92bbd1868c87574d36f38b`. It restores the transfer base
+configs to `hyperparameters.learning_rate=0.0015` while retaining the source
+pretraining LR of `0.00025`. The corrected compiler recipe also pins
+`hyperparameters.learning_rate=0.0015` into every JSONL row, and launch-time
+Hydra expansion was inspected to confirm that value for both species.
+
+The immutable corrected inputs are:
+
+- `launch/phase4a/phase4a-downstream-lr1p5e3-minipigs.jsonl`: 360 cells,
+  SHA-256
+  `58cd057f160acd80209ee5a8d4c360302c491baf5e2e3ac574d7d92f9da0550b`,
+  W&B group `PHASE4A_FULL_FINETUNE_LR1P5E3_MINIPIGS`.
+- `launch/phase4a/phase4a-downstream-lr1p5e3-monkeys.jsonl`: 117 cells,
+  SHA-256
+  `7a6a570b9861cf646cf5b606a98377d9963a4a98e3eb7d4de9d34ada3e3e8d3e`,
+  W&B group `PHASE4A_FULL_FINETUNE_LR1P5E3_MONKEYS`.
+
+Both lists use new cell, run, and W&B identities and have zero cell-ID overlap
+with the invalidated matrix. Immediately before each submission,
+`git status --short` was empty. Both launches used Mila `long`, immutable Git
+snapshots, 32 GB per allocation, and excluded the unhealthy nodes `cn-c019`
+and `cn-c034`:
+
+- Minipigs: four cells per allocation, one CPU per cell; Slurm array
+  `10745139_[0-89]` (90 allocations), snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260910T141637_NEUROSOFT_TRANSFER_MINIPIGS_a01aef59_69204411`.
+- Monkeys: two cells per allocation, two CPUs per cell; Slurm array
+  `10745153_[0-58]` (59 allocations), snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260910T141729_NEUROSOFT_TRANSFER_MONKEYS_a01aef59_46af0a3c`.
+
+The first minipig command attempt passed the comma-separated exclusion as an
+unquoted Hydra override and failed locally during override parsing. It created
+neither a snapshot nor a Slurm job and therefore has no experimental effect;
+the immediately repeated, quoted command produced the recorded submission.
+An immediate scheduler check found 12 minipig allocations running and the
+remaining minipig allocations queued for priority; the monkey array was also
+queued for priority. All reported allocations were on `long` with 4 CPUs and
+32 GB, and no task was in a failed state.
 
 ### Figures
 
