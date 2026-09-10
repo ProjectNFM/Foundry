@@ -468,6 +468,21 @@ def completion_audit(
             "91cb2c2e should be W&B-finished with only its server summary missing."
         )
     if not transfer.analysis_usable.all() and not ALLOW_INCOMPLETE:
+        incomplete = transfer.loc[
+            ~transfer.analysis_usable,
+            [
+                "species",
+                "run_id",
+                "run_name",
+                "cell_id",
+                "state",
+                "metric_source",
+            ],
+        ]
+        print(
+            "Incomplete declared transfer cells (strict analysis stops):\n"
+            + incomplete.to_string(index=False)
+        )
         raise RuntimeError(
             "At least one declared transfer cell has no usable result."
         )

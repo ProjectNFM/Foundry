@@ -1,6 +1,6 @@
 # Phase 4A -- Full-Pool Pretraining Full-Finetuning Transfer Gate
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-09-04
 **Parent experiment:** [NeuroSoft Supervised Pretraining Pipeline](20260903-MS-neurosoft-supervised-pretraining-pipeline.md)
 **Follow-up experiments:** [Phase 4B -- Early Source-Checkpoint Transfer](20260910-MS-early-checkpoint-transfer.md); Frozen-representation transfer gate (TBD); Phase 4 source-volume study (TBD)
@@ -269,9 +269,8 @@ matrix irreproducible.
 
 ### Summary
 
-**Pretraining complete; first downstream matrix invalidated; corrected matched-
-LR matrix has 396/477 usable cells and 81 infrastructure retries prepared
-(updated 2026-09-10).**
+**Pretraining complete; first downstream matrix invalidated; corrected
+matched-LR matrix complete and analyzed (updated 2026-09-10).**
 The selected Mila batch covers all 36 planned full-pool source cells: seven
 minipig and five monkey excluded target subjects, each with paired
 source-selection/model seeds 42, 43, and 44. All 36 W&B runs are `finished`.
@@ -296,6 +295,15 @@ The original dedicated Clariden groups are not the selected transfer source.
 At inspection they contained 20 minipig and 15 monkey runs, with model seed
 42 throughout, including selection-seed 43/44 cells. Do not merge these with
 the Mila replicates or select runs solely by the originally planned group names.
+
+The corrected, matched-Phase-2-LR transfer matrix is complete: all 360
+minipig and 117 monkey declared cells are W&B `finished`, have exact compiled
+cell/checkpoint provenance, and have usable final test and selected-checkpoint
+metrics. The 28 minipig and 53 monkey V100/cuDNN failures were retried on RTX
+8000s in arrays `10749806_[0-6]` and `10749813_[0-26]`; every retry task
+completed with exit code `0:0`. The final strict audit used neither the
+invalidated `0.00025` arm nor provisional partial artifacts or local-summary
+recovery. It found zero corrected-matrix recoveries.
 
 ### Metrics
 
@@ -380,12 +388,43 @@ matched-target assertions, and adds a corrected recipe that pins the LR in
 every compiled cell. New recipe, cell, run, and W&B group identities prevent
 the corrected jobs from resuming or overwriting the invalidated runs.
 
+### Corrected matched-LR final comparison
+
+The final comparison uses only
+`PHASE4A_FULL_FINETUNE_LR1P5E3_MINIPIGS` and
+`PHASE4A_FULL_FINETUNE_LR1P5E3_MONKEYS`, whose compiled downstream learning
+rate is exactly `0.0015`, against the Phase-2 100%-data scratch controls. For
+each target session/seed, the three source-seed transfer outcomes are averaged
+before pairing. Results are then averaged by session and subject, so subjects
+rather than source replicas determine the reported aggregate.
+
+| Species | Subjects | Sessions | Paired session/seed units | Scratch test macro-F1 | Transfer test macro-F1 | Transfer − scratch | Subject bootstrap 95% CI | Steps/windows/FLOPs saved | Validation epochs to 80% peak saved |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Minipigs | 7 | 40 | 120 | 0.4206 | 0.3971 | -0.0235 | [-0.0338, -0.0145] | -57.1% | -0.24 |
+| Monkeys | 5 | 13 | 38 | 0.4537 | 0.4434 | -0.0103 | [-0.0337, 0.0209] | +4.2% | +0.39 |
+
+The historical Phase-2 scratch control for monkey
+`sub-01_ses-014_task-AcousStim_acq-RH_desc-raw`, target seed 43, is missing.
+It is not imputed: 158 of 159 eligible transfer session/seed units are paired,
+including all 120 minipig and 38 of 39 monkey units. The analysis verifies that
+every available canonical scratch control pairs to a transfer unit.
+
 ### Analysis
 
-This pretraining-only check used read-only `wandb.Api()` queries and
-`run.scan_history()` for the exact Mila runs above, plus local JSON/config
-reads and SHA-256 checks of best and final checkpoint files. No figures were
-generated.
+The final reproducible analysis uses read-only `wandb.Api()` queries, exact
+validation histories, and the committed source registry and compiled cell
+lists. It rejects incomplete, undeclared, or mismatched-provenance transfer
+records before computing a metric; it was run without
+`PHASE4A_ALLOW_INCOMPLETE`:
+
+```bash
+uv run python analysis/20260904-MS-fullpool-finetune-transfer_analysis.py
+```
+
+The script averages source seeds before forming session/target-seed pairs,
+then reports subject-balanced F1 and compute/convergence effects. CSV caches
+are deliberately ignored; the committed script and figures reproduce the
+results from W&B.
 
 The analysis script selects the Mila source runs through the committed
 checkpoint registry and identifies target runs by explicit `run.cell_id`,
@@ -679,6 +718,17 @@ exclusions.
 
 ### Figures
 
+These final figures use only the corrected `lr=0.0015` matrix and matched
+Phase-2 scratch controls:
+
+![Corrected subject-balanced test effect](../../analysis/figures/20260904-MS-fullpool-finetune-transfer_corrected_lr1p5e3_subject_balanced_test_f1.png)
+
+![Corrected session test comparison](../../analysis/figures/20260904-MS-fullpool-finetune-transfer_corrected_lr1p5e3_session_test_f1.png)
+
+![Corrected compute savings](../../analysis/figures/20260904-MS-fullpool-finetune-transfer_corrected_lr1p5e3_compute_savings.png)
+
+![Corrected validation convergence](../../analysis/figures/20260904-MS-fullpool-finetune-transfer_corrected_lr1p5e3_validation_epoch_to_80pct.png)
+
 These figures describe only the invalidated mismatched-LR arm and must not be
 used as evidence for the primary hypothesis:
 
@@ -693,8 +743,16 @@ checkpoints were verified on shared storage, and no source rerun is required.
 The first 477-cell downstream matrix is invalidated as a test of initialization
 because its `0.00025` target learning rate did not match the `0.0015` scratch
 controls. Its apparent negative transfer must not be interpreted causally.
-The full scientific transfer hypothesis remains untested pending completion
-and paired analysis of the corrected `0.0015` downstream matrix.
+The corrected `0.0015` matrix now supplies the primary test, and it does not
+support the full-pool, validation-selected full-finetuning transfer hypothesis.
+Relative to the matched Phase-2 controls, minipig transfer lowers
+subject-balanced test macro-F1 by 2.35 percentage points (95% CI -3.38 to
+-1.45) and reaches its selected checkpoint with 57.1% more, not fewer,
+steps/windows/FLOPs. Monkey transfer also has lower mean F1 (-1.03 points),
+with an interval spanning no effect, and its small compute (+4.2%) and
+convergence (+0.39 epoch) advantages are not reliable. Thus best-validation
+full-pool initialization produces no demonstrated downstream performance or
+efficiency improvement in either species.
 
 **User-confirmed interpretation (2026-09-09):** All source slices show
 validation-loss overfitting by 10K steps with the current model and
@@ -705,8 +763,12 @@ points for minipigs and 2.49 for monkeys. The loss evidence therefore supports
 early overfitting, but does not establish that 10K preserves the best source
 F1 or downstream transfer quality.
 
-Keep the overall status `In Progress` until the corrected 477 downstream
-finetunings are evaluated against the matched scratch controls.
+**User-confirmed interpretation (2026-09-10):** pretraining from the
+best-validation checkpoint brings no downstream performance improvement and
+no demonstrated downstream efficiency improvement. This Phase 4A gate is
+therefore closed; do not expand this full-finetuning initialization regime to
+source-volume, lower-data, or checkpoint-milestone studies without a new,
+separately justified hypothesis.
 
 ## Notes for future experiments
 
@@ -724,8 +786,11 @@ finetunings are evaluated against the matched scratch controls.
   control, and pin critical scientific overrides in compiled cells.
 - Advance to the frozen-representation experiment only as a separately
   controlled hypothesis, with a frozen-random representation baseline.
-- Advance to the 10/25/50/100% source-volume study only if this gate passes
-  source/target provenance and produces an interpretable transfer estimate.
-- If pretrained full finetuning fails to match scratch at 100% target data,
-  stop the low-data and checkpoint-milestone expansion and diagnose the
-  transfer recipe first.
+- Do not advance the 10/25/50/100% source-volume, low-data, or
+  best-checkpoint-milestone expansions for this full-finetuning initialization
+  recipe: the completed matched-LR gate did not improve performance or
+  efficiency.
+- Any future transfer study should change one scientifically motivated element
+  (for example, representation freezing or an earlier source checkpoint) and
+  retain matched scratch controls, exact compiled provenance, and a
+  pre-specified efficiency metric.
