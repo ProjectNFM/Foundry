@@ -435,6 +435,51 @@ Each list has unique cell, run, and W&B identities, has zero overlap with its
 seven successful canary cells, and its union with those canaries exactly
 reconstructs the committed 360- or 117-cell species matrix.
 
+Production was submitted from clean Git revision
+`8a5ac28b581849ccb89e5cec142d2a8c709ef49c` after the user's explicit
+2026-09-09 instruction to launch the complete downstream work. The minipig
+command used the 353-cell production list above with `tasks_per_node=4`,
+`cpus_per_task=1`, `mem_gb=32`, and `partition=long`. It submitted Slurm array
+`10736352_[0-88]` (89 allocations; the final allocation contains one cell)
+from snapshot
+`/network/scratch/s/sobralm/foundry-launches/20260910T034356_NEUROSOFT_TRANSFER_MINIPIGS_8a5ac28b_1dd150a2`:
+
+```bash
+FOUNDRY_DATA_ROOT=/network/scratch/s/sobralm/brainsets/processed \
+FOUNDRY_SNAPSHOT_ROOT=/network/scratch/s/sobralm/foundry-launches \
+FOUNDRY_CHECKPOINT_ROOT=/network/scratch/s/sobralm/foundry-checkpoints \
+uv run python main.py \
+  experiment=auditory_decoding/neurosoft_conv_bigru_transfer_minipigs \
+  hydra/launcher=slurm_default hydra.launcher.partition=long \
+  hydra.launcher.cell_list=launch/phase4a/production/minipigs-remaining-after-canaries.jsonl \
+  hydra.launcher.tasks_per_node=4 hydra.launcher.cpus_per_task=1 \
+  hydra.launcher.mem_gb=32 -m
+```
+
+The monkey command used the 110-cell production list with
+`tasks_per_node=2`, `cpus_per_task=2`, `mem_gb=32`, and `partition=long`.
+It submitted Slurm array `10736373_[0-54]` (55 allocations) from snapshot
+`/network/scratch/s/sobralm/foundry-launches/20260910T034532_NEUROSOFT_TRANSFER_MONKEYS_8a5ac28b_404e9e5b`:
+
+```bash
+FOUNDRY_DATA_ROOT=/network/scratch/s/sobralm/brainsets/processed \
+FOUNDRY_SNAPSHOT_ROOT=/network/scratch/s/sobralm/foundry-launches \
+FOUNDRY_CHECKPOINT_ROOT=/network/scratch/s/sobralm/foundry-checkpoints \
+uv run python main.py \
+  experiment=auditory_decoding/neurosoft_conv_bigru_transfer_monkeys \
+  hydra/launcher=slurm_default hydra.launcher.partition=long \
+  hydra.launcher.cell_list=launch/phase4a/production/monkeys-remaining-after-canaries.jsonl \
+  hydra.launcher.tasks_per_node=2 hydra.launcher.cpus_per_task=2 \
+  hydra.launcher.mem_gb=32 -m
+```
+
+Scheduler inspection immediately after submission confirmed one RTX 8000 GPU,
+4 CPUs, 32 GB, the `long` partition, requeue enabled, and a three-hour limit
+for every allocation. Exact cell and deterministic W&B run identities are the
+records in the two hash-pinned production JSONLs. At that check, 11 minipig
+allocations were running and the remaining minipig and monkey array tasks were
+queued; no task failure had been reported.
+
 ### Figures
 
 None requested for the pretraining completion check.
