@@ -270,7 +270,8 @@ matrix irreproducible.
 ### Summary
 
 **Pretraining complete; first downstream matrix invalidated; corrected matched-
-LR downstream matrix submitted on Mila (updated 2026-09-10).**
+LR matrix has 396/477 usable cells and 81 infrastructure retries prepared
+(updated 2026-09-10).**
 The selected Mila batch covers all 36 planned full-pool source cells: seven
 minipig and five monkey excluded target subjects, each with paired
 source-selection/model seeds 42, 43, and 44. All 36 W&B runs are `finished`.
@@ -629,6 +630,38 @@ An immediate scheduler check found 12 minipig allocations running and the
 remaining minipig allocations queued for priority; the monkey array was also
 queued for priority. All reported allocations were on `long` with 4 CPUs and
 32 GB, and no task was in a failed state.
+
+### V100/cuDNN failure audit and RTX 8000 retry
+
+After the arrays reached terminal scheduler states, W&B and local-log audit
+found 396/477 scientifically usable corrected cells: 332/360 minipig and
+64/117 monkey cells. The other 81 cells—28 minipig and 53 monkey—failed before
+model construction with the same error: cuDNN 9.2 refuses GPUs with compute
+capability below 7.5. Slurm accounting and node metadata identify the affected
+hardware as V100 GPUs (compute capability 7.0) on `cn-b001`–`cn-b003` and
+`cn-e002`–`cn-e003`.
+
+The failure was caused by the generic `gres: gpu:1` request on the heterogeneous
+`long` partition. The runtime's unsupported-BF16 fallback correctly selected
+FP16 on V100, but that cannot repair cuDNN's independent removal of V100
+support. These failures are unrelated to the learning rate, data, checkpoint,
+or measured model performance. None of the 81 cells has a test metric or
+`checkpoints/last.ckpt`.
+
+The deterministic selector
+`tools/generate_phase4a_cudnn_retry_lists.py` requires the exact failure
+signature and rejects cells with a test metric or final checkpoint. It produced:
+
+- `launch/phase4a/retries/corrected-lr1p5e3-cudnn-v100-minipigs.jsonl`:
+  28 cells, SHA-256
+  `0d8448efb40f0bf0ad4b94a8efc24a627111ed2f812d8e2d6acd28ad6ab78e28`.
+- `launch/phase4a/retries/corrected-lr1p5e3-cudnn-v100-monkeys.jsonl`:
+  53 cells, SHA-256
+  `ec009161297da67d8d8f2b3498f022919b79496397144020f691c67436b095de`.
+
+The retry must request `hydra.launcher.gres=gpu:rtx8000:1` explicitly, retain
+the original corrected cell/W&B identities and `0.0015` downstream LR, use
+Mila `long`, and continue excluding `cn-c019` and `cn-c034`.
 
 ### Figures
 

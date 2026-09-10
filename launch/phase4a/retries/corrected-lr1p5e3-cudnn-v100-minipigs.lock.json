@@ -1,0 +1,16 @@
+{
+  "failure_signature": "RuntimeError: cuDNN version 92000 is not compatible with devices with SM < 7.5.",
+  "reason": "cuDNN 9.2 rejects V100 GPUs with compute capability 7.0",
+  "retry_cell_count": 28,
+  "retry_cell_list": "launch/phase4a/retries/corrected-lr1p5e3-cudnn-v100-minipigs.jsonl",
+  "retry_cell_list_sha256": "0d8448efb40f0bf0ad4b94a8efc24a627111ed2f812d8e2d6acd28ad6ab78e28",
+  "schema_version": 1,
+  "selection_guards": {
+    "exact_failure_signature_required": true,
+    "last_checkpoint_must_be_absent": true,
+    "test_metric_must_be_absent": true
+  },
+  "source_cell_list": "launch/phase4a/phase4a-downstream-lr1p5e3-minipigs.jsonl",
+  "source_cell_list_sha256": "58cd057f160acd80209ee5a8d4c360302c491baf5e2e3ac574d7d92f9da0550b",
+  "species": "minipigs"
+}

@@ -46,11 +46,14 @@ from _wandb_utils import (
 TRANSFER_CONDITION = os.environ.get(
     "PHASE4A_TRANSFER_CONDITION", "corrected_lr1p5e3"
 )
+ALLOW_INCOMPLETE = os.environ.get("PHASE4A_ALLOW_INCOMPLETE", "0") == "1"
 if TRANSFER_CONDITION not in {"corrected_lr1p5e3", "invalid_lr2p5e4"}:
     raise ValueError(
         "PHASE4A_TRANSFER_CONDITION must be corrected_lr1p5e3 or invalid_lr2p5e4"
     )
 PREFIX = f"20260904-MS-fullpool-finetune-transfer_{TRANSFER_CONDITION}"
+if ALLOW_INCOMPLETE:
+    PREFIX += "_partial"
 PROJECT = "neurosoft_supervised_pretraining"
 TASK = "neurosoft_acoustic_stim_8band"
 SEEDS = {42, 43, 44}
@@ -464,14 +467,28 @@ def completion_audit(
         raise RuntimeError(
             "91cb2c2e should be W&B-finished with only its server summary missing."
         )
-    if not transfer.analysis_usable.all():
+    if not transfer.analysis_usable.all() and not ALLOW_INCOMPLETE:
         raise RuntimeError(
             "At least one declared transfer cell has no usable result."
         )
-    missing_metrics = transfer[REQUIRED_TRANSFER_METRICS].isna().sum()
+    usable_transfer = transfer[transfer.analysis_usable].copy()
+    if ALLOW_INCOMPLETE and len(usable_transfer) != len(transfer):
+        unusable = transfer[~transfer.analysis_usable]
+        print(
+            "WARNING: provisional incomplete-matrix analysis; excluding "
+            f"{len(unusable)}/{len(transfer)} transfer cells."
+        )
+        print(
+            "Excluded transfer cells by species/state:\n"
+            + unusable.groupby(["species", "state"])
+            .size()
+            .unstack(fill_value=0)
+            .to_string()
+        )
+    missing_metrics = usable_transfer[REQUIRED_TRANSFER_METRICS].isna().sum()
     if missing_metrics.any():
-        affected = transfer[
-            transfer[REQUIRED_TRANSFER_METRICS].isna().any(axis=1)
+        affected = usable_transfer[
+            usable_transfer[REQUIRED_TRANSFER_METRICS].isna().any(axis=1)
         ][["run_id", "cell_id", "state", "metric_source"]]
         raise RuntimeError(
             "Transfer runs lack required metrics: "
@@ -479,7 +496,7 @@ def completion_audit(
             f"affected={affected.to_dict(orient='records')}"
         )
     print(
-        f"Scientifically usable transfer results: {int(transfer.analysis_usable.sum())}/{len(transfer)}"
+        f"Scientifically usable transfer results: {len(usable_transfer)}/{len(transfer)}"
     )
     print(f"Verified local-summary recoveries: {len(recovered)}")
     return recovered[
@@ -927,6 +944,8 @@ def main() -> None:
     transfer = pd.DataFrame(transfer_rows, columns=RUN_COLUMNS)
     scratch = pd.DataFrame(scratch_rows, columns=RUN_COLUMNS)
     recovery = completion_audit(source, transfer, selected_cells)
+    if ALLOW_INCOMPLETE:
+        transfer = transfer[transfer.analysis_usable].copy()
     scratch_full = canonical_scratch(scratch)
     transfer = add_validation_convergence(api, entity, transfer, "transfer")
     scratch_full = add_validation_convergence(
@@ -936,25 +955,32 @@ def main() -> None:
     session, subject = reductions(paired)
     summary = species_summary(paired, session, subject)
 
-    expected_transfer_units = transfer.groupby(
-        ["species", "subject", "recording", "target_seed"]
-    ).ngroups
-    if len(paired) != len(scratch_full):
+    pairing_unit = ["species", "subject", "recording", "target_seed"]
+    if ALLOW_INCOMPLETE:
+        transfer_units = transfer.groupby(pairing_unit, as_index=False).agg(
+            pretrain_replicates=("source_seed", "nunique")
+        )
+        transfer_units = transfer_units[
+            transfer_units.pretrain_replicates.eq(len(SEEDS))
+        ]
+    else:
+        transfer_units = transfer[pairing_unit].drop_duplicates()
+    expected_transfer_units = len(transfer_units)
+    if not ALLOW_INCOMPLETE and len(paired) != len(scratch_full):
         raise RuntimeError(
             "Every canonical scratch run should produce one paired result."
         )
-    missing_controls = expected_transfer_units - len(scratch_full)
+    observed_controls = len(paired) if ALLOW_INCOMPLETE else len(scratch_full)
+    missing_controls = expected_transfer_units - observed_controls
     print(
-        f"Canonical 100%-data scratch controls: {len(scratch_full)}/{expected_transfer_units} transfer session/seed units"
+        "Canonical 100%-data scratch controls paired to eligible transfer "
+        f"units: {observed_controls}/{expected_transfer_units}"
     )
     if missing_controls:
         missing = (
-            transfer[["species", "subject", "recording", "target_seed"]]
-            .drop_duplicates()
+            transfer_units[pairing_unit]
             .merge(
-                scratch_full[
-                    ["species", "subject", "recording", "target_seed"]
-                ],
+                scratch_full[pairing_unit],
                 how="left",
                 indicator=True,
             )
