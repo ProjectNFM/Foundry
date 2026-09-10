@@ -525,6 +525,15 @@ production arrays `10736352` and `10736373` and retry array `10736403` using
 retry submissions carry the same exclusion as a snapshot-recorded Hydra
 launcher override.
 
+The 16-cell second retry was submitted from clean Git revision
+`3facaa3266809837a7297f0f4390d7fc78c29138` as Slurm array
+`10736446_[0-3]` on `long`, with four cells, 4 CPUs, and 32 GB per allocation.
+Its immutable snapshot is
+`/network/scratch/s/sobralm/foundry-launches/20260910T035954_NEUROSOFT_TRANSFER_MINIPIGS_3facaa32_97a49c2d`.
+The launch included
+`+hydra.launcher.additional_parameters.exclude=cn-c019\,cn-c034`; all other
+arguments matched the first retry except for the exact second retry list.
+
 ### Figures
 
 None requested for the pretraining completion check.
