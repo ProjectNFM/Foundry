@@ -493,6 +493,25 @@ SHA-256 `caa10d496fe3f953d882af35b25e0e026ea3df6b9e9673f1765361ec521fd086`).
 Only that explicit list may be retried; completed or still-running production
 cells must not be resubmitted.
 
+The eight-cell retry was submitted from clean Git revision
+`dc8cfb945b4880fc7f6c1f2347b0979bbfb56ebd` on `long` with
+`tasks_per_node=4`, `cpus_per_task=1`, and `mem_gb=32`. Slurm array
+`10736403_[0-1]` contains exactly two packed allocations and uses snapshot
+`/network/scratch/s/sobralm/foundry-launches/20260910T035223_NEUROSOFT_TRANSFER_MINIPIGS_dc8cfb94_deda359f`.
+The exact command was:
+
+```bash
+FOUNDRY_DATA_ROOT=/network/scratch/s/sobralm/brainsets/processed \
+FOUNDRY_SNAPSHOT_ROOT=/network/scratch/s/sobralm/foundry-launches \
+FOUNDRY_CHECKPOINT_ROOT=/network/scratch/s/sobralm/foundry-checkpoints \
+uv run python main.py \
+  experiment=auditory_decoding/neurosoft_conv_bigru_transfer_minipigs \
+  hydra/launcher=slurm_default hydra.launcher.partition=long \
+  hydra.launcher.cell_list=launch/phase4a/retries/minipigs-production-array12-13.jsonl \
+  hydra.launcher.tasks_per_node=4 hydra.launcher.cpus_per_task=1 \
+  hydra.launcher.mem_gb=32 -m
+```
+
 ### Figures
 
 None requested for the pretraining completion check.
