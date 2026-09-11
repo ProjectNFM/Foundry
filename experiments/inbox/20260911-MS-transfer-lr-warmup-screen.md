@@ -78,8 +78,10 @@ will show no worse stable validation convergence than scratch at the same LR.
 
 The adapter warmup trains both the fresh target session adapter and fresh
 router, since both are required before the transferred encoder can be used
-effectively. Frozen frontend/GRU modules must remain in evaluation mode during
-this phase so their dropout does not inject stochasticity into the fixed
+effectively. The frozen temporal frontend remains in evaluation mode. The GRU
+must remain in training mode because cuDNN requires that mode for backward
+through a recurrent block into the trainable adapter; its dropout is disabled
+during warmup so it does not inject stochasticity into the fixed
 representation.
 
 ### LR matrix
@@ -190,7 +192,8 @@ monkeys Slurm array `10762987_[0-58]` (234 cells), snapshot
   with no decay.
 - Adapter-warmup arms set `adapter_warmup_steps=500`; only
   `session_adapter` and `router` are trainable during that phase, with the
-  frontend/GRU kept in evaluation mode before being unfrozen.
+  frontend in evaluation mode and the GRU in deterministic training mode for
+  cuDNN-compatible backward before both are unfrozen.
 - Scratch cells carry explicit null source provenance and use the same target
   data, seed, LR values, and common schedule.
 

@@ -53,7 +53,8 @@ class FoundryModule(L.LightningModule):
         scheduler_interval (str): Scheduler update interval (e.g. "step" or "epoch").
         adapter_warmup_steps (int): Initial optimizer steps during which the
             fresh session adapter and router train while the frontend/GRU are
-            frozen and evaluated.
+            frozen. The frontend is evaluated; the GRU remains in training
+            mode with dropout disabled so cuDNN can backpropagate through it.
     """
 
     def __init__(
@@ -99,6 +100,7 @@ class FoundryModule(L.LightningModule):
         if self.adapter_warmup_steps < 0:
             raise ValueError("adapter_warmup_steps must be non-negative")
         self._adapter_warmup_active = False
+        self._adapter_warmup_gru_dropout: float | None = None
         self.save_hyperparameters(ignore=["model"])
 
         self._task_losses = nn.ModuleDict()
@@ -460,19 +462,28 @@ class FoundryModule(L.LightningModule):
         return groups
 
     def _set_adapter_warmup_state(self, active: bool) -> None:
-        """Freeze/evaluate the transferred encoder during adapter warmup."""
+        """Freeze the transferred encoder during adapter warmup.
+
+        The frozen GRU must remain in training mode while the fresh adapter is
+        being optimized.  The adapter still needs gradients through the GRU,
+        and cuDNN RNN backward is only supported for a training-mode RNN.  A
+        frozen GRU has no parameter updates, so disabling its dropout preserves
+        a deterministic representation without switching it to eval mode.
+        """
         if self.adapter_warmup_steps <= 0:
             return
         if active == self._adapter_warmup_active:
             if active:
-                for component_name in ("temporal_frontend", "gru"):
-                    component = getattr(self.model, component_name, None)
-                    if component is None:
-                        raise ValueError(
-                            "adapter warmup requires model component "
-                            f"{component_name!r}"
-                        )
-                    component.eval()
+                frontend = getattr(self.model, "temporal_frontend", None)
+                gru = getattr(self.model, "gru", None)
+                if frontend is None or gru is None:
+                    raise ValueError(
+                        "adapter warmup requires model components "
+                        "'temporal_frontend' and 'gru'"
+                    )
+                frontend.eval()
+                gru.train()
+                self._disable_gru_dropout_for_adapter_warmup(gru)
             return
         for component_name in ("temporal_frontend", "gru"):
             component = getattr(self.model, component_name, None)
@@ -486,9 +497,24 @@ class FoundryModule(L.LightningModule):
             # A frozen encoder must not apply dropout or update train-time
             # behavior while the fresh adapter/router are calibrated.
             if active:
-                component.eval()
+                if component_name == "gru":
+                    # cuDNN RNN backward requires training mode even when all
+                    # GRU parameters are frozen: gradients still flow through
+                    # it into the trainable session adapter.
+                    component.train()
+                    self._disable_gru_dropout_for_adapter_warmup(component)
+                else:
+                    component.eval()
             elif self.model.training:
+                self._restore_gru_dropout_after_adapter_warmup(
+                    component_name, component
+                )
                 component.train()
+            else:
+                self._restore_gru_dropout_after_adapter_warmup(
+                    component_name, component
+                )
+                component.eval()
         self._adapter_warmup_active = active
         logger.info(
             "Adapter warmup %s at optimizer step %d (frontend/GRU %s)",
@@ -496,6 +522,25 @@ class FoundryModule(L.LightningModule):
             self.global_step,
             "frozen" if active else "trainable",
         )
+
+    def _disable_gru_dropout_for_adapter_warmup(self, gru: nn.Module) -> None:
+        """Keep a frozen GRU deterministic while retaining cuDNN backward."""
+        if not hasattr(gru, "dropout"):
+            return
+        if self._adapter_warmup_gru_dropout is None:
+            self._adapter_warmup_gru_dropout = float(gru.dropout)
+        gru.dropout = 0.0
+
+    def _restore_gru_dropout_after_adapter_warmup(
+        self, component_name: str, component: nn.Module
+    ) -> None:
+        """Restore the GRU's configured dropout after the warmup phase."""
+        if (
+            component_name == "gru"
+            and self._adapter_warmup_gru_dropout is not None
+        ):
+            component.dropout = self._adapter_warmup_gru_dropout
+            self._adapter_warmup_gru_dropout = None
 
     def on_train_epoch_start(self) -> None:
         if self.adapter_warmup_steps > 0:

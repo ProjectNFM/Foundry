@@ -272,19 +272,54 @@ def test_adapter_warmup_freezes_encoder_and_keeps_router_adapter_trainable():
     )
     assert all(not p.requires_grad for p in model.gru.parameters())
     assert model.temporal_frontend.training is False
-    assert model.gru.training is False
+    # A cuDNN GRU must remain in training mode for backward through its
+    # frozen weights into the trainable session adapter.
+    assert model.gru.training is True
+
+    adapted = model.session_adapter(torch.randn(2, 3, 2))
+    encoded, _ = model.gru(adapted)
+    encoded.sum().backward()
+    assert model.session_adapter.weight.grad is not None
+    assert all(p.grad is None for p in model.gru.parameters())
     assert all(p.requires_grad for p in model.router.parameters())
     assert all(p.requires_grad for p in model.session_adapter.parameters())
 
     model.train()
     module.on_train_epoch_start()
     assert model.temporal_frontend.training is False
-    assert model.gru.training is False
+    # The GRU must stay in training mode so cuDNN can backpropagate through
+    # the frozen recurrent weights into the trainable session adapter.
+    assert model.gru.training is True
     module._set_adapter_warmup_state(False)
     assert all(p.requires_grad for p in model.temporal_frontend.parameters())
     assert all(p.requires_grad for p in model.gru.parameters())
     assert model.temporal_frontend.training is True
     assert model.gru.training is True
+
+
+def test_adapter_warmup_disables_gru_dropout_and_restores_it():
+    from foundry.training import FoundryModule
+
+    class _WarmupModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.temporal_frontend = nn.Linear(2, 2)
+            self.gru = nn.GRU(
+                2, 2, num_layers=2, dropout=0.25, batch_first=True
+            )
+            self.router = nn.Linear(2, 2)
+            self.session_adapter = nn.Linear(2, 2)
+            self.task_configs = {}
+
+    model = _WarmupModel()
+    module = FoundryModule(model=model, adapter_warmup_steps=500)
+    module._set_adapter_warmup_state(True)
+
+    assert model.gru.training is True
+    assert model.gru.dropout == pytest.approx(0.0)
+
+    module._set_adapter_warmup_state(False)
+    assert model.gru.dropout == pytest.approx(0.25)
 
 
 def test_transfer_batch_to_device_converts_float64_to_float32():
