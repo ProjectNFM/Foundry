@@ -1,6 +1,6 @@
 # Phase 4C -- 500-Step Head Reset and Backbone Freezing
 
-**Status:** Draft
+**Status:** In Progress
 **Date started:** 2026-09-11
 **Parent experiment:** [Phase 4B -- Early Source-Checkpoint Transfer](20260910-MS-early-checkpoint-transfer.md)
 **Follow-up experiments:** TBD -- replicate the winning regime with source seeds 43 and 44; then screen denser early checkpoints and source-pretraining hyperparameters.
@@ -123,25 +123,18 @@ target cells) before making a source-seed-robust claim.
 
 ### Launch command
 
-Implementation must first add the strict `full_finetuning_reset_router` mode,
-the frozen-random control recipe, and a compiled-cell recipe that pins source
-seed `(42,42)`.  Before a production launch, compile the exact cell lists,
-audit their source-manifest/checkpoint hashes and control identities, commit
-the implementation, and confirm a clean Git tree.  Use normal snapshotting
-and the legacy-cluster `long` partition.
+The strict `full_finetuning_reset_router` mode, frozen-random control recipe,
+and compiled-cell recipe pinning source seed `(42,42)` were committed in
+`9d9dacd`.  The exact cell lists passed source-manifest/checkpoint hash and
+identity audits, and the production launch used normal snapshotting on the
+legacy-cluster `long` partition.
 
 ```bash
-# To be filled after the transfer-mode and recipe implementation is committed.
 export FOUNDRY_DATA_ROOT=/network/scratch/s/sobralm/brainsets/processed
 export FOUNDRY_SNAPSHOT_ROOT=/network/scratch/s/sobralm/foundry-launches
 export FOUNDRY_CHECKPOINT_ROOT=/network/scratch/s/sobralm/foundry-checkpoints
 
 git status --short  # must print nothing
-
-# Compile audited Phase-4C cells (validation only; this task does not submit
-# them), then submit one normal Hydra multirun per species/condition with
-# hydra/launcher=slurm_default, hydra.launcher.partition=long, and the
-# generated cell list.
 
 uv run python tools/compile_downstream_cells.py \
   --registry launch/checkpoint_sets/phase4a-mila-early-checkpoints.jsonl \
@@ -150,7 +143,28 @@ uv run python tools/compile_downstream_cells.py \
   --checkpoint-root "$FOUNDRY_CHECKPOINT_ROOT" \
   --output-dir launch/phase4c \
   --check
+
+uv run python main.py \
+  experiment=auditory_decoding/neurosoft_conv_bigru_transfer_minipigs \
+  hydra/launcher=slurm_default hydra.launcher.partition=long \
+  hydra.launcher.gres=gpu:rtx8000:1 \
+  hydra.launcher.cell_list=launch/phase4c/phase4c-step500-head-reset-minipigs.jsonl \
+  hydra.launcher.tasks_per_node=4 hydra.launcher.cpus_per_task=1 \
+  hydra.launcher.mem_gb=32 -m
+
+uv run python main.py \
+  experiment=auditory_decoding/neurosoft_conv_bigru_transfer_monkeys \
+  hydra/launcher=slurm_default hydra.launcher.partition=long \
+  hydra.launcher.gres=gpu:rtx8000:1 \
+  hydra.launcher.cell_list=launch/phase4c/phase4c-step500-head-reset-monkeys.jsonl \
+  hydra.launcher.tasks_per_node=2 hydra.launcher.cpus_per_task=2 \
+  hydra.launcher.mem_gb=32 -m
 ```
+
+Submitted on 2026-09-11: minipigs Slurm array `10760272_[0-89]` (360 cells),
+snapshot `/network/scratch/s/sobralm/foundry-launches/20260911T152934_NEUROSOFT_TRANSFER_MINIPIGS_9d9dacdd_4e06eed8`;
+monkeys Slurm array `10760271_[0-58]` (117 cells), snapshot
+`/network/scratch/s/sobralm/foundry-launches/20260911T152939_NEUROSOFT_TRANSFER_MONKEYS_9d9dacdd_ecf02170`.
 
 ### Key config overrides
 
