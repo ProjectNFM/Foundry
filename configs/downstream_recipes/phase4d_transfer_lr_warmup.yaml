@@ -1,0 +1,99 @@
+schema: foundry-downstream-recipe
+version: 1
+recipe_id: phase4d-transfer-lr-warmup
+output_stem: phase4d-transfer-lr-warmup
+audit_path: docs/neurosoft-phase0-audit.json
+eligible_session_selection:
+  eligible: true
+base_experiments:
+  minipigs: auditory_decoding/neurosoft_conv_bigru_transfer_minipigs
+  monkeys: auditory_decoding/neurosoft_conv_bigru_transfer_monkeys
+# The compiler uses condition_matrix below. Keep this declaration populated
+# for compatibility with the original downstream-recipe schema.
+transfer_regimes:
+  - full_finetuning_reset_router
+checkpoint_filter:
+  condition:
+    milestone: step500
+  source_selection_seed: 42
+  source_model_seed: 42
+target_training_fractions: [1.0]
+target_finetuning_seeds: [42]
+learning_rates: [0.0003, 0.0015, 0.003]
+expected_source_seed_pairs: [[42, 42]]
+evaluate_test: true
+fixed_overrides:
+  - hyperparameters.warmup_fraction=0.1
+  - hyperparameters.start_lr_factor=0.0001
+  - hyperparameters.scheduler_name=phased
+  - hyperparameters.scheduler_interval=step
+  - hyperparameters.hold=0
+  - hyperparameters.decay=0
+condition_matrix:
+  - id: transfer_uniform
+    source: pretrained
+    transfer_regime: full_finetuning_reset_router
+    adapter_warmup_steps: 0
+    backbone_lr_multiplier: null
+  - id: transfer_discriminative
+    source: pretrained
+    transfer_regime: full_finetuning_reset_router
+    adapter_warmup_steps: 0
+    backbone_lr_multiplier: 0.1
+  - id: transfer_adapter_warmup_uniform
+    source: pretrained
+    transfer_regime: full_finetuning_reset_router
+    adapter_warmup_steps: 500
+    backbone_lr_multiplier: null
+  - id: transfer_adapter_warmup_discriminative
+    source: pretrained
+    transfer_regime: full_finetuning_reset_router
+    adapter_warmup_steps: 500
+    backbone_lr_multiplier: 0.1
+  - id: scratch_uniform
+    source: scratch
+    transfer_regime: null
+    adapter_warmup_steps: 0
+    backbone_lr_multiplier: null
+  - id: scratch_adapter_warmup
+    source: scratch
+    transfer_regime: null
+    adapter_warmup_steps: 500
+    backbone_lr_multiplier: null
+species:
+  minipigs:
+    wandb_tags: [transfer, minipigs, 8band, phase4d, lr-warmup]
+    wandb_groups:
+      transfer_uniform: PHASE4D_TRANSFER_UNIFORM_MINIPIGS
+      transfer_discriminative: PHASE4D_TRANSFER_DISCRIMINATIVE_MINIPIGS
+      transfer_adapter_warmup_uniform: PHASE4D_TRANSFER_ADAPTER_WARMUP_UNIFORM_MINIPIGS
+      transfer_adapter_warmup_discriminative: PHASE4D_TRANSFER_ADAPTER_WARMUP_DISCRIMINATIVE_MINIPIGS
+      scratch_uniform: PHASE4D_SCRATCH_UNIFORM_MINIPIGS
+      scratch_adapter_warmup: PHASE4D_SCRATCH_ADAPTER_WARMUP_MINIPIGS
+    wandb_tags_by_regime:
+      transfer_uniform: [transfer, minipigs, 8band, phase4d, uniform]
+      transfer_discriminative: [transfer, minipigs, 8band, phase4d, discriminative]
+      transfer_adapter_warmup_uniform: [transfer, minipigs, 8band, phase4d, adapter-warmup, uniform]
+      transfer_adapter_warmup_discriminative: [transfer, minipigs, 8band, phase4d, adapter-warmup, discriminative]
+      scratch_uniform: [scratch, minipigs, 8band, phase4d, uniform]
+      scratch_adapter_warmup: [scratch, minipigs, 8band, phase4d, adapter-warmup]
+    expected_checkpoints: 7
+    expected_cells: 720
+  monkeys:
+    wandb_tags: [transfer, monkeys, 8band, phase4d, lr-warmup]
+    wandb_groups:
+      transfer_uniform: PHASE4D_TRANSFER_UNIFORM_MONKEYS
+      transfer_discriminative: PHASE4D_TRANSFER_DISCRIMINATIVE_MONKEYS
+      transfer_adapter_warmup_uniform: PHASE4D_TRANSFER_ADAPTER_WARMUP_UNIFORM_MONKEYS
+      transfer_adapter_warmup_discriminative: PHASE4D_TRANSFER_ADAPTER_WARMUP_DISCRIMINATIVE_MONKEYS
+      scratch_uniform: PHASE4D_SCRATCH_UNIFORM_MONKEYS
+      scratch_adapter_warmup: PHASE4D_SCRATCH_ADAPTER_WARMUP_MONKEYS
+    wandb_tags_by_regime:
+      transfer_uniform: [transfer, monkeys, 8band, phase4d, uniform]
+      transfer_discriminative: [transfer, monkeys, 8band, phase4d, discriminative]
+      transfer_adapter_warmup_uniform: [transfer, monkeys, 8band, phase4d, adapter-warmup, uniform]
+      transfer_adapter_warmup_discriminative: [transfer, monkeys, 8band, phase4d, adapter-warmup, discriminative]
+      scratch_uniform: [scratch, monkeys, 8band, phase4d, uniform]
+      scratch_adapter_warmup: [scratch, monkeys, 8band, phase4d, adapter-warmup]
+    expected_checkpoints: 5
+    expected_cells: 234

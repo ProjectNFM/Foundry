@@ -213,6 +213,80 @@ def test_backbone_head_param_groups_use_transferable_components():
     assert len(groups[0]["params"]) > len(groups[1]["params"])
 
 
+def test_backbone_components_can_exclude_fresh_router_from_low_lr_group():
+    from foundry.training import FoundryModule
+
+    class _TransferModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.temporal_frontend = nn.Linear(2, 2)
+            self.gru = nn.Linear(2, 2)
+            self.router = nn.Linear(2, 2)
+            self.session_adapter = nn.Linear(2, 2)
+            self.task_configs = {}
+
+        def transferable_components(self) -> tuple[str, ...]:
+            return ("temporal_frontend", "gru", "router")
+
+        def forward(self, x):
+            return x
+
+    module = FoundryModule(
+        model=_TransferModel(),
+        learning_rate=1.5e-3,
+        backbone_learning_rate=1.5e-4,
+        backbone_components=("temporal_frontend", "gru"),
+    )
+    groups = module._build_param_groups()
+
+    low_lr_params = {id(param) for param in groups[0]["params"]}
+    high_lr_params = {id(param) for param in groups[1]["params"]}
+    assert groups[0]["lr"] == pytest.approx(1.5e-4)
+    assert groups[1]["lr"] == pytest.approx(1.5e-3)
+    assert id(module.model.temporal_frontend.weight) in low_lr_params
+    assert id(module.model.gru.weight) in low_lr_params
+    assert id(module.model.router.weight) in high_lr_params
+    assert id(module.model.session_adapter.weight) in high_lr_params
+
+
+def test_adapter_warmup_freezes_encoder_and_keeps_router_adapter_trainable():
+    from foundry.training import FoundryModule
+
+    class _WarmupModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.temporal_frontend = nn.Sequential(
+                nn.Linear(2, 2), nn.Dropout()
+            )
+            self.gru = nn.GRU(2, 2, batch_first=True)
+            self.router = nn.Linear(2, 2)
+            self.session_adapter = nn.Linear(2, 2)
+            self.task_configs = {}
+
+    model = _WarmupModel()
+    module = FoundryModule(model=model, adapter_warmup_steps=500)
+    module._set_adapter_warmup_state(True)
+
+    assert all(
+        not p.requires_grad for p in model.temporal_frontend.parameters()
+    )
+    assert all(not p.requires_grad for p in model.gru.parameters())
+    assert model.temporal_frontend.training is False
+    assert model.gru.training is False
+    assert all(p.requires_grad for p in model.router.parameters())
+    assert all(p.requires_grad for p in model.session_adapter.parameters())
+
+    model.train()
+    module.on_train_epoch_start()
+    assert model.temporal_frontend.training is False
+    assert model.gru.training is False
+    module._set_adapter_warmup_state(False)
+    assert all(p.requires_grad for p in model.temporal_frontend.parameters())
+    assert all(p.requires_grad for p in model.gru.parameters())
+    assert model.temporal_frontend.training is True
+    assert model.gru.training is True
+
+
 def test_transfer_batch_to_device_converts_float64_to_float32():
     from foundry.training import FoundryModule
 
@@ -364,6 +438,26 @@ def test_scheduler_warmup_only():
     final_lr = optimizer.param_groups[0]["lr"]
     # After warmup, LR should be at or near base_lr
     assert final_lr > initial_lr
+
+
+def test_scheduler_warmup_fraction_uses_estimated_optimizer_steps():
+    from unittest.mock import MagicMock
+
+    from foundry.training import FoundryModule
+
+    cfg = TaskConfig.from_yaml(TASKS_CONFIG_DIR / "neurosoft_on_vs_off.yaml")
+    module = FoundryModule(
+        model=_StubTaskModel({cfg.name: cfg}),
+        warmup_fraction=0.1,
+        scheduler_interval="step",
+    )
+    trainer = MagicMock()
+    trainer.estimated_stepping_batches = 250
+    module._trainer = trainer
+
+    scheduler = module.configure_optimizers()["lr_scheduler"]["scheduler"]
+
+    assert scheduler.total_iters == 25
 
 
 def test_scheduler_onecycle_matches_neuralbench_recipe():

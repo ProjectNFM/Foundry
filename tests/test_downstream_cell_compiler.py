@@ -242,6 +242,108 @@ def test_synthetic_random_control_has_no_source_provenance(
     assert len({row["wandb_run_id"] for row in cells["minipigs"]}) == 6
 
 
+def test_condition_matrix_compiles_recipe_and_lr_fanout(
+    tmp_path: Path,
+) -> None:
+    registry, recipe, audit, root = _fixture(tmp_path)
+    payload = yaml.safe_load(recipe.read_text())
+    payload["recipe_id"] = "matrix"
+    payload["target_finetuning_seeds"] = [42]
+    payload["learning_rates"] = [3e-4, 1.5e-3, 3e-3]
+    payload["fixed_overrides"] = [
+        "hyperparameters.warmup_fraction=0.1",
+        "hyperparameters.scheduler_interval=step",
+    ]
+    payload["transfer_regimes"] = ["full_finetuning_reset_router"]
+    payload["condition_matrix"] = [
+        {
+            "id": "transfer_uniform",
+            "source": "pretrained",
+            "transfer_regime": "full_finetuning_reset_router",
+            "adapter_warmup_steps": 0,
+            "backbone_lr_multiplier": None,
+        },
+        {
+            "id": "transfer_discriminative",
+            "source": "pretrained",
+            "transfer_regime": "full_finetuning_reset_router",
+            "adapter_warmup_steps": 0,
+            "backbone_lr_multiplier": 0.1,
+        },
+        {
+            "id": "transfer_adapter_warmup_uniform",
+            "source": "pretrained",
+            "transfer_regime": "full_finetuning_reset_router",
+            "adapter_warmup_steps": 500,
+            "backbone_lr_multiplier": None,
+        },
+        {
+            "id": "transfer_adapter_warmup_discriminative",
+            "source": "pretrained",
+            "transfer_regime": "full_finetuning_reset_router",
+            "adapter_warmup_steps": 500,
+            "backbone_lr_multiplier": 0.1,
+        },
+        {
+            "id": "scratch_uniform",
+            "source": "scratch",
+            "transfer_regime": None,
+            "adapter_warmup_steps": 0,
+            "backbone_lr_multiplier": None,
+        },
+        {
+            "id": "scratch_adapter_warmup",
+            "source": "scratch",
+            "transfer_regime": None,
+            "adapter_warmup_steps": 500,
+            "backbone_lr_multiplier": None,
+        },
+    ]
+    payload["species"]["minipigs"]["expected_cells"] = 18
+    payload["species"]["minipigs"]["wandb_groups"] = {
+        condition["id"]: condition["id"].upper()
+        for condition in payload["condition_matrix"]
+    }
+    recipe.write_text(yaml.safe_dump(payload, sort_keys=False))
+
+    cells, metadata = compile_cells(registry, recipe, audit, root)
+    rows = cells["minipigs"]
+    assert metadata["counts"] == {"minipigs": 18}
+    assert metadata["per_condition_counts"] == {
+        "scratch_adapter_warmup": 3,
+        "scratch_uniform": 3,
+        "transfer_adapter_warmup_discriminative": 3,
+        "transfer_adapter_warmup_uniform": 3,
+        "transfer_discriminative": 3,
+        "transfer_uniform": 3,
+    }
+    assert sum(row["checkpoint_id"] is not None for row in rows) == 12
+    assert sum(row["checkpoint_id"] is None for row in rows) == 6
+    assert (
+        len(
+            {
+                tuple(
+                    sorted(item.split("=", 1)[0] for item in row["overrides"])
+                )
+                for row in rows
+            }
+        )
+        == 1
+    )
+    discriminative = next(
+        row for row in rows if row["condition_id"] == "transfer_discriminative"
+    )
+    assert (
+        "hyperparameters.backbone_learning_rate=3e-05"
+        in discriminative["overrides"]
+    )
+    scratch = next(
+        row for row in rows if row["condition_id"] == "scratch_uniform"
+    )
+    assert scratch["checkpoint_manifest"] is None
+    assert "run.pretrained_transfer_regime=null" in scratch["overrides"]
+
+
 @pytest.mark.parametrize("field", ["manifest_hash", "checkpoint_sha256"])
 def test_registry_hash_disagreement_is_rejected(
     tmp_path: Path, field: str

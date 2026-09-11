@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any, Dict
 
 import lightning as L
@@ -39,13 +40,20 @@ class FoundryModule(L.LightningModule):
         learning_rate (float): Base learning rate for the optimizer.
         weight_decay (float): Weight decay (L2 penalty) used in the optimizer.
         cwt_lr_multiplier (float): Multiplier to apply to learning rate for CWT parameter groups.
+        backbone_components (sequence[str] | None): Components to receive
+            ``backbone_learning_rate`` when using discriminative LR.
         warmup (int): Number of steps for the learning rate warmup phase.
+        warmup_fraction (float | None): Fraction of estimated optimizer steps
+            to warm up when ``warmup`` is zero.
         start_lr_factor (float): Starting learning rate as a fraction of `learning_rate` during warmup.
         hold (int): Number of steps to hold the learning rate after warmup.
         hold_scheduler_type (str): Type of scheduler to use during the hold phase, e.g. "constant" or "cosine".
         decay (int): Number of steps for cosine learning rate decay after the hold phase.
         end_lr_factor (float): Fraction of `learning_rate` for the final learning rate at the end of decay.
         scheduler_interval (str): Scheduler update interval (e.g. "step" or "epoch").
+        adapter_warmup_steps (int): Initial optimizer steps during which the
+            fresh session adapter and router train while the frontend/GRU are
+            frozen and evaluated.
     """
 
     def __init__(
@@ -55,14 +63,17 @@ class FoundryModule(L.LightningModule):
         weight_decay: float = 0.01,
         cwt_lr_multiplier: float = 1.0,
         backbone_learning_rate: float | None = None,
+        backbone_components: list[str] | tuple[str, ...] | None = None,
         scheduler_name: str = "phased",
         warmup: int = 0,
+        warmup_fraction: float | None = None,
         start_lr_factor: float = 1e-4,
         hold: int = 0,
         hold_scheduler_type: str = "constant",
         decay: int = 0,
         end_lr_factor: float = 0.1,
         scheduler_interval: str = "step",
+        adapter_warmup_steps: int = 0,
     ):
         super().__init__()
         self.model = model
@@ -70,14 +81,24 @@ class FoundryModule(L.LightningModule):
         self.weight_decay = weight_decay
         self.cwt_lr_multiplier = cwt_lr_multiplier
         self.backbone_learning_rate = backbone_learning_rate
+        self.backbone_components = (
+            tuple(str(name) for name in backbone_components)
+            if backbone_components is not None
+            else None
+        )
         self.scheduler_name = scheduler_name
         self.warmup = warmup
+        self.warmup_fraction = warmup_fraction
         self.hold = hold
         self.hold_scheduler_type = hold_scheduler_type
         self.decay = decay
         self.end_lr_factor = end_lr_factor
         self.start_lr_factor = start_lr_factor
         self.scheduler_interval = scheduler_interval
+        self.adapter_warmup_steps = int(adapter_warmup_steps)
+        if self.adapter_warmup_steps < 0:
+            raise ValueError("adapter_warmup_steps must be non-negative")
+        self._adapter_warmup_active = False
         self.save_hyperparameters(ignore=["model"])
 
         self._task_losses = nn.ModuleDict()
@@ -380,9 +401,18 @@ class FoundryModule(L.LightningModule):
         Returns:
             List of one or two param-group dicts.
         """
-        component_prefixes = tuple(
-            f"{name}." for name in self.model.transferable_components()
-        )
+        components = self.backbone_components
+        if components is None:
+            components = tuple(self.model.transferable_components())
+        missing_components = [
+            name for name in components if not hasattr(self.model, name)
+        ]
+        if missing_components:
+            raise ValueError(
+                "backbone_components do not exist on the model: "
+                f"{missing_components}"
+            )
+        component_prefixes = tuple(f"{name}." for name in components)
         backbone_params = []
         head_params = []
         for name, param in self.model.named_parameters():
@@ -429,6 +459,57 @@ class FoundryModule(L.LightningModule):
         )
         return groups
 
+    def _set_adapter_warmup_state(self, active: bool) -> None:
+        """Freeze/evaluate the transferred encoder during adapter warmup."""
+        if self.adapter_warmup_steps <= 0:
+            return
+        if active == self._adapter_warmup_active:
+            if active:
+                for component_name in ("temporal_frontend", "gru"):
+                    component = getattr(self.model, component_name, None)
+                    if component is None:
+                        raise ValueError(
+                            "adapter warmup requires model component "
+                            f"{component_name!r}"
+                        )
+                    component.eval()
+            return
+        for component_name in ("temporal_frontend", "gru"):
+            component = getattr(self.model, component_name, None)
+            if component is None:
+                raise ValueError(
+                    "adapter warmup requires model component "
+                    f"{component_name!r}"
+                )
+            for parameter in component.parameters():
+                parameter.requires_grad = not active
+            # A frozen encoder must not apply dropout or update train-time
+            # behavior while the fresh adapter/router are calibrated.
+            if active:
+                component.eval()
+            elif self.model.training:
+                component.train()
+        self._adapter_warmup_active = active
+        logger.info(
+            "Adapter warmup %s at optimizer step %d (frontend/GRU %s)",
+            "started" if active else "finished",
+            self.global_step,
+            "frozen" if active else "trainable",
+        )
+
+    def on_train_epoch_start(self) -> None:
+        if self.adapter_warmup_steps > 0:
+            self._set_adapter_warmup_state(
+                self.global_step < self.adapter_warmup_steps
+            )
+
+    def on_train_batch_start(self, batch: Any, batch_idx: int) -> None:
+        del batch, batch_idx
+        if self.adapter_warmup_steps > 0:
+            self._set_adapter_warmup_state(
+                self.global_step < self.adapter_warmup_steps
+            )
+
     def configure_optimizers(self):
         """Build AdamW optimizer and multi-phase LR scheduler.
 
@@ -466,16 +547,38 @@ class FoundryModule(L.LightningModule):
         milestones = []
         current_step = 0
 
+        warmup_steps = self.warmup
+        if self.warmup_fraction is not None:
+            if self.warmup != 0:
+                raise ValueError(
+                    "Set either warmup or warmup_fraction, not both"
+                )
+            if not 0 < self.warmup_fraction <= 1:
+                raise ValueError("warmup_fraction must be in (0, 1]")
+            warmup_steps = max(
+                1,
+                math.ceil(
+                    self.trainer.estimated_stepping_batches
+                    * self.warmup_fraction
+                ),
+            )
+            logger.info(
+                "Using %.1f%% optimizer-step LR warmup: %d of %d steps",
+                100 * self.warmup_fraction,
+                warmup_steps,
+                self.trainer.estimated_stepping_batches,
+            )
+
         # Warmup phase
-        if self.warmup > 0:
+        if warmup_steps > 0:
             warmup = torch.optim.lr_scheduler.LinearLR(
                 optimizer,
                 start_factor=self.start_lr_factor,
                 end_factor=1.0,
-                total_iters=self.warmup,
+                total_iters=warmup_steps,
             )
             schedulers.append(warmup)
-            current_step += self.warmup
+            current_step += warmup_steps
             milestones.append(current_step)
 
         # Hold phase
@@ -537,6 +640,10 @@ class FoundryModule(L.LightningModule):
         }
 
     def on_fit_start(self):
+        if self.adapter_warmup_steps > 0:
+            self._set_adapter_warmup_state(
+                self.global_step < self.adapter_warmup_steps
+            )
         self._configure_wandb_metric_summaries()
 
     def _configure_wandb_metric_summaries(self):

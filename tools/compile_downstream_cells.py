@@ -383,6 +383,10 @@ def _slug_fraction(value: float) -> str:
     return format(float(value), ".8g").replace(".", "p")
 
 
+def _slug_learning_rate(value: float) -> str:
+    return format(float(value), ".8g").replace(".", "p").replace("-", "m")
+
+
 def _quote_list(value: str) -> str:
     if any(char in value for char in "[], ' \t\n"):
         return "[" + json.dumps(value, ensure_ascii=True) + "]"
@@ -555,15 +559,66 @@ def compile_cells(
     all_outputs: set[tuple[str, str]] = set()
     all_wandb_ids: set[tuple[str, str]] = set()
     per_checkpoint: Counter[str] = Counter()
+    per_condition: Counter[str] = Counter()
     random_regime = "frozen_random_control"
     regimes = [str(regime) for regime in recipe["transfer_regimes"]]
     if len(regimes) != len(set(regimes)):
         raise ValueError("transfer_regimes contains duplicates")
 
+    condition_matrix = recipe.get("condition_matrix")
+    if condition_matrix is not None:
+        if not isinstance(condition_matrix, list) or not condition_matrix:
+            raise ValueError("condition_matrix must be a non-empty list")
+        condition_ids: set[str] = set()
+        for condition in condition_matrix:
+            if not isinstance(condition, dict):
+                raise ValueError("condition_matrix entries must be mappings")
+            condition_id = str(condition.get("id", ""))
+            if not condition_id or condition_id in condition_ids:
+                raise ValueError(
+                    "condition_matrix entries require unique non-empty ids"
+                )
+            condition_ids.add(condition_id)
+            source = str(condition.get("source", ""))
+            if source not in {"pretrained", "scratch"}:
+                raise ValueError(
+                    f"{condition_id}: source must be 'pretrained' or 'scratch'"
+                )
+            regime = condition.get("transfer_regime")
+            if source == "pretrained" and not regime:
+                raise ValueError(
+                    f"{condition_id}: pretrained conditions require transfer_regime"
+                )
+            if source == "scratch" and regime is not None:
+                raise ValueError(
+                    f"{condition_id}: scratch conditions must have null transfer_regime"
+                )
+            warmup_steps = int(condition.get("adapter_warmup_steps", 0))
+            if warmup_steps < 0:
+                raise ValueError(
+                    f"{condition_id}: adapter_warmup_steps must be non-negative"
+                )
+            multiplier = condition.get("backbone_lr_multiplier")
+            if multiplier is not None and float(multiplier) <= 0:
+                raise ValueError(
+                    f"{condition_id}: backbone_lr_multiplier must be positive"
+                )
+        learning_rates = [
+            float(value) for value in recipe.get("learning_rates", [])
+        ]
+        if not learning_rates or any(value <= 0 for value in learning_rates):
+            raise ValueError(
+                "condition_matrix recipes require positive learning_rates"
+            )
+    else:
+        learning_rates = []
+
     def emit_cell(
         target: dict[str, Any],
         regime: str,
         checkpoint: dict[str, Any] | None,
+        condition: dict[str, Any] | None = None,
+        learning_rate: float | None = None,
     ) -> None:
         species = str(target["species"])
         subject = str(target["subject"])
@@ -573,10 +628,21 @@ def compile_cells(
         ]
         species_recipe = recipe["species"][species]
         groups = species_recipe.get("wandb_groups", {})
-        wandb_group = str(groups.get(regime, species_recipe.get("wandb_group")))
+        condition_id = str(condition["id"]) if condition is not None else regime
+        wandb_group = str(
+            groups.get(
+                condition_id,
+                groups.get(regime, species_recipe.get("wandb_group")),
+            )
+        )
         tags_by_regime = species_recipe.get("wandb_tags_by_regime", {})
         wandb_tags = list(
-            tags_by_regime.get(regime, species_recipe.get("wandb_tags", []))
+            tags_by_regime.get(
+                condition_id,
+                tags_by_regime.get(
+                    regime, species_recipe.get("wandb_tags", [])
+                ),
+            )
         )
         if checkpoint is None:
             checkpoint_set = None
@@ -586,9 +652,15 @@ def compile_cells(
             checkpoint_sha256 = None
             source_selection_seed = None
             source_model_seed = None
-            source_condition = "random_frozen_backbone_control"
+            source_condition = (
+                str(condition.get("source_condition", "scratch"))
+                if condition is not None
+                else "random_frozen_backbone_control"
+            )
             condition_label = source_condition
-            checkpoint_identity = "random-control"
+            checkpoint_identity = (
+                condition_id if condition is not None else "random-control"
+            )
         else:
             checkpoint_set = checkpoint_set_id
             checkpoint_id = str(checkpoint["checkpoint_id"])
@@ -612,9 +684,15 @@ def compile_cells(
                     f"{recording_id}: target fraction {fraction_value} is unavailable"
                 )
             for target_seed in recipe["target_finetuning_seeds"]:
+                lr_suffix = (
+                    f"lr{_slug_learning_rate(learning_rate)}__"
+                    if learning_rate is not None
+                    else ""
+                )
                 cell_id = (
                     f"{recipe['recipe_id']}__{species}__{recording_id}__"
-                    f"{checkpoint_identity}__{regime}__"
+                    f"{checkpoint_identity}__{condition_id}__"
+                    f"{lr_suffix}"
                     f"f{_slug_fraction(fraction_value)}__t{int(target_seed)}"
                 )
                 if cell_id in all_ids:
@@ -636,8 +714,47 @@ def compile_cells(
                     )
                 all_wandb_ids.add(wandb_identity)
                 labels = dict(recipe.get("condition_labels", {}))
-                if checkpoint is None:
+                if condition is not None:
+                    labels.update(
+                        {
+                            "condition": condition_id,
+                            "source": str(condition["source"]),
+                            "adapter_warmup_steps": int(
+                                condition.get("adapter_warmup_steps", 0)
+                            ),
+                        }
+                    )
+                    if learning_rate is not None:
+                        labels["base_lr"] = learning_rate
+                if checkpoint is None and condition is None:
                     labels["transfer_control"] = "random_frozen_backbone"
+                elif checkpoint is None and condition is not None:
+                    labels["transfer_control"] = "scratch"
+                cell_overrides = list(fixed_overrides)
+                if condition is not None:
+                    cell_overrides.extend(
+                        [
+                            f"hyperparameters.learning_rate={learning_rate}",
+                            "hyperparameters.backbone_learning_rate="
+                            + (
+                                f"{float(learning_rate) * float(condition['backbone_lr_multiplier']):.8g}"
+                                if condition.get("backbone_lr_multiplier")
+                                is not None
+                                else "null"
+                            ),
+                            "hyperparameters.backbone_components="
+                            + (
+                                "[temporal_frontend,gru]"
+                                if condition.get("backbone_lr_multiplier")
+                                is not None
+                                else "null"
+                            ),
+                            "hyperparameters.adapter_warmup_steps="
+                            + str(
+                                int(condition.get("adapter_warmup_steps", 0))
+                            ),
+                        ]
+                    )
                 row = {
                     "cell_id": cell_id,
                     "run_name": cell_id,
@@ -654,7 +771,18 @@ def compile_cells(
                     "source_model_seed": source_model_seed,
                     "source_condition": source_condition,
                     "condition_labels": labels,
-                    "transfer_regime": regime,
+                    "transfer_regime": (
+                        condition.get("transfer_regime")
+                        if condition is not None
+                        else regime
+                    ),
+                    "condition_id": condition_id,
+                    "base_learning_rate": learning_rate,
+                    "adapter_warmup_steps": (
+                        int(condition.get("adapter_warmup_steps", 0))
+                        if condition is not None
+                        else 0
+                    ),
                     "target_fraction": fraction_value,
                     "target_finetuning_seed": int(target_seed),
                     "evaluate_test": bool(recipe.get("evaluate_test", False)),
@@ -664,11 +792,19 @@ def compile_cells(
                     "fixed_overrides": fixed_overrides,
                 }
                 overrides = [
-                    *fixed_overrides,
+                    *cell_overrides,
                     f"data.dataset_kwargs.recording_ids={_quote_list(recording_id)}",
                     f"data.training_fraction={fraction_value}",
                     f"run.seed={int(target_seed)}",
-                    f"run.pretrained_transfer_regime={regime}",
+                    "run.pretrained_transfer_regime="
+                    + (
+                        str(condition["transfer_regime"])
+                        if condition is not None
+                        and condition.get("transfer_regime") is not None
+                        else "null"
+                        if condition is not None
+                        else regime
+                    ),
                     f"run.evaluate_test={str(bool(recipe.get('evaluate_test', False))).lower()}",
                     f"run.group={wandb_group}",
                     f"run.tags={json.dumps(wandb_tags, separators=(',', ':'))}",
@@ -710,38 +846,82 @@ def compile_cells(
                     )
                 row["overrides"] = overrides
                 by_species.setdefault(species, []).append(row)
+                per_condition[condition_id] += 1
                 if checkpoint is not None:
                     per_checkpoint[checkpoint_id] += 1
 
-    for checkpoint in sorted(
-        registry, key=lambda item: str(item["checkpoint_id"])
-    ):
-        species = str(checkpoint["species"])
-        subject = str(checkpoint["excluded_target_subject"])
-        compatible = [
-            r for r in eligible.get(species, []) if r.get("subject") == subject
-        ]
-        if not compatible:
-            raise ValueError(
-                f"{checkpoint['checkpoint_id']}: no eligible {species}/{subject} target sessions"
-            )
-        for target in compatible:
-            for regime in regimes:
-                if regime == random_regime:
-                    continue
-                if (
-                    target.get("species") != species
-                    or target.get("subject") != subject
-                ):
-                    raise ValueError(
-                        f"Invalid target compatibility for {checkpoint['checkpoint_id']}"
-                    )
-                emit_cell(target, regime, checkpoint)
-
-    if random_regime in regimes:
+    if condition_matrix is not None:
+        for checkpoint in sorted(
+            registry, key=lambda item: str(item["checkpoint_id"])
+        ):
+            species = str(checkpoint["species"])
+            subject = str(checkpoint["excluded_target_subject"])
+            compatible = [
+                r
+                for r in eligible.get(species, [])
+                if r.get("subject") == subject
+            ]
+            if not compatible:
+                raise ValueError(
+                    f"{checkpoint['checkpoint_id']}: no eligible {species}/{subject} target sessions"
+                )
+            for target in compatible:
+                for condition in condition_matrix:
+                    if condition["source"] != "pretrained":
+                        continue
+                    for learning_rate in learning_rates:
+                        emit_cell(
+                            target,
+                            str(condition["transfer_regime"]),
+                            checkpoint,
+                            condition,
+                            learning_rate,
+                        )
         for species, targets in sorted(eligible.items()):
             for target in targets:
-                emit_cell(target, random_regime, None)
+                for condition in condition_matrix:
+                    if condition["source"] != "scratch":
+                        continue
+                    for learning_rate in learning_rates:
+                        emit_cell(
+                            target,
+                            "scratch",
+                            None,
+                            condition,
+                            learning_rate,
+                        )
+    else:
+        for checkpoint in sorted(
+            registry, key=lambda item: str(item["checkpoint_id"])
+        ):
+            species = str(checkpoint["species"])
+            subject = str(checkpoint["excluded_target_subject"])
+            compatible = [
+                r
+                for r in eligible.get(species, [])
+                if r.get("subject") == subject
+            ]
+            if not compatible:
+                raise ValueError(
+                    f"{checkpoint['checkpoint_id']}: no eligible {species}/{subject} target sessions"
+                )
+            for target in compatible:
+                for regime in regimes:
+                    if regime == random_regime:
+                        continue
+                    if (
+                        target.get("species") != species
+                        or target.get("subject") != subject
+                    ):
+                        raise ValueError(
+                            f"Invalid target compatibility for {checkpoint['checkpoint_id']}"
+                        )
+                    emit_cell(target, regime, checkpoint)
+
+        if random_regime in regimes:
+            for species, targets in sorted(eligible.items()):
+                for target in targets:
+                    emit_cell(target, random_regime, None)
 
     counts = {
         species: len(rows) for species, rows in sorted(by_species.items())
@@ -766,6 +946,7 @@ def compile_cells(
         "audit_sha256": audit_hash,
         "counts": counts,
         "per_checkpoint_counts": dict(sorted(per_checkpoint.items())),
+        "per_condition_counts": dict(sorted(per_condition.items())),
     }
     return by_species, metadata
 

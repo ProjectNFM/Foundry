@@ -17,6 +17,7 @@ hyperparameters:
   fold_number: ???
   num_workers: ???
   warmup: 0
+  warmup_fraction: null
   start_lr_factor: 1e-4
   hold: 0
   hold_scheduler_type: "constant"
@@ -30,6 +31,8 @@ hyperparameters:
   scheduler_name: phased
   cwt_lr_multiplier: 1.0
   backbone_learning_rate: null
+  backbone_components: null
+  adapter_warmup_steps: 0
 
 extract:
   output_dir: outputs/embeddings/default

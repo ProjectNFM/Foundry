@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-09-11
 **Parent experiment:** [Phase 4B -- Early Source-Checkpoint Transfer](20260910-MS-early-checkpoint-transfer.md)
-**Follow-up experiments:** TBD -- kept open pending interpretation of this mechanism screen.
+**Follow-up experiments:** [Phase 4D -- Transfer Recipe and LR Warmup Screen](20260911-MS-transfer-lr-warmup-screen.md)
 **Tags:** neurosoft, supervised-pretraining, transfer, head-reset, frozen-representation, checkpoint-milestone, phase4, 8band, mila
 
 ## Background
