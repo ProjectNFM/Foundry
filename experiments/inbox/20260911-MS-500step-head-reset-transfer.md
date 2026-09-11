@@ -1,9 +1,9 @@
 # Phase 4C -- 500-Step Head Reset and Backbone Freezing
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-09-11
 **Parent experiment:** [Phase 4B -- Early Source-Checkpoint Transfer](20260910-MS-early-checkpoint-transfer.md)
-**Follow-up experiments:** TBD -- replicate the winning regime with source seeds 43 and 44; then screen denser early checkpoints and source-pretraining hyperparameters.
+**Follow-up experiments:** TBD -- kept open pending interpretation of this mechanism screen.
 **Tags:** neurosoft, supervised-pretraining, transfer, head-reset, frozen-representation, checkpoint-milestone, phase4, 8band, mila
 
 ## Background
@@ -182,22 +182,56 @@ monkeys Slurm array `10760271_[0-58]` (117 cells), snapshot
   `hyperparameters.learning_rate=0.0015` in every target cell.
 - New recipe/checkpoint-set IDs, cell IDs, W&B groups, and compiler locks must
   not overlap prior Phase-4A or Phase-4B identities.
+- **Final W&B audit:** project `poyo-eeg/neurosoft_supervised_pretraining`;
+  all 477 new Phase-4C runs finished successfully (360 minipigs, 117 monkeys)
+  and all 159 reused Phase-4B head-reuse controls finished successfully (120
+  minipigs, 39 monkeys).  The matched Phase-2 scratch pool contained 158 of
+  159 expected finished controls; the missing unit was monkey
+  `sub-01_ses-014`, target seed 43.
 
 ## Results
 
 ### Summary
 
-TBD
+All new Phase-4C cells completed successfully and passed the declared W&B
+identity/configuration audit.  The exact common paired population contained
+120 minipig subject-seed-recording units and 38 monkey units, after excluding
+the one unavailable monkey scratch unit.
+
+The full-finetuning head-reset condition was close to scratch and substantially
+better than either frozen condition.  This supports the interpretation that
+target adaptation of the backbone is important.  However, head reset did not
+show a reliable performance or convergence advantage over scratch.  The
+learned frozen representation was not better than the frozen random control.
 
 ### Metrics
 
-TBD
+Subject-balanced means and 95% subject-bootstrap intervals are shown below.
+Positive stable-step savings indicate earlier stable time-to-90%-of-peak
+validation performance.
+
+| Species | Condition | Test supported macro-F1 | F1 change vs scratch | Stable steps saved vs scratch |
+|---|---|---:|---:|---:|
+| Minipigs | Scratch | 0.4206 [0.3535, 0.4877] | — | — |
+| Minipigs | 500-step head reuse | 0.4188 [0.3467, 0.4855] | -0.0018 [-0.0097, 0.0064] | -103 [-328, 76] |
+| Minipigs | 500-step head reset | 0.4126 [0.3396, 0.4828] | -0.0080 [-0.0157, 0.0003] | -191 [-476, 37] |
+| Minipigs | 500-step frozen representation | 0.3755 [0.3131, 0.4388] | -0.0452 [-0.0886, -0.0020] | -2358 [-3189, -1531] |
+| Minipigs | Frozen random control | 0.3792 [0.3239, 0.4363] | -0.0414 [-0.0867, 0.0041] | -3180 [-4294, -2046] |
+| Monkeys | Scratch | 0.4541 [0.3230, 0.5886] | — | — |
+| Monkeys | 500-step head reuse | 0.4527 [0.3031, 0.6092] | -0.0013 [-0.0200, 0.0199] | 809 [-105, 2455] |
+| Monkeys | 500-step head reset | 0.4570 [0.3053, 0.6274] | 0.0029 [-0.0204, 0.0389] | 626 [-223, 2022] |
+| Monkeys | 500-step frozen representation | 0.4026 [0.2437, 0.5546] | -0.0515 [-0.0993, -0.0132] | -1185 [-2737, 624] |
+| Monkeys | Frozen random control | 0.4187 [0.2879, 0.5513] | -0.0354 [-0.0535, -0.0156] | -2645 [-4726, -263] |
+
+Stable convergence endpoints used the trailing three-validation rolling median
+and were right-censored at the final validation step when no stable crossing
+occurred. The complete run-level endpoints, censoring indicators, and paired
+subject-level tables are saved in `analysis/csv/`.
 
 ### Analysis
 
-Use the W&B-backed script below after cell lists and run groups are finalized.
-It must audit every new run against the compiled cell definition and intersect
-the exact paired population across reused and new conditions.
+The W&B-backed script audits every new run against the compiled cell definition
+and intersects the exact paired population across reused and new conditions.
 
 ```bash
 uv run python analysis/20260911-MS-500step-head-reset-transfer_analysis.py
@@ -205,12 +239,35 @@ uv run python analysis/20260911-MS-500step-head-reset-transfer_analysis.py
 
 ### Figures
 
-TBD
+![Absolute test supported macro-F1](../../analysis/figures/20260911-MS-500step-head-reset-transfer_absolute_test_f1.png)
+
+![Paired test supported macro-F1 gain](../../analysis/figures/20260911-MS-500step-head-reset-transfer_paired_test_f1_gain.png)
+
+![Stable time-to-90%-of-peak efficiency](../../analysis/figures/20260911-MS-500step-head-reset-transfer_time_to_90_saved.png)
+
+![Validation learning curves](../../analysis/figures/20260911-MS-500step-head-reset-transfer_validation_curves.png)
 
 ## Conclusions
 
-TBD
+**Verdict: partially confirmed.**
+
+The results support the mechanistic interpretation that training the backbone
+is important for target adaptation. Both frozen conditions were clearly below
+scratch in test supported macro-F1 and were substantially slower to reach the
+stable validation endpoint. The frozen learned representation did not provide
+an observable advantage over the frozen random representation under this
+restricted optimizer, so the experiment does not establish value for a frozen
+500-step representation itself.
+
+Resetting the source router while fully finetuning the backbone produced
+near-scratch performance and improved substantially over both frozen
+conditions. It did not pass the prespecified transfer gate, however: the lower
+95% paired-bootstrap F1 bounds were below the -0.01 non-inferiority margin for
+both species, and the convergence intervals did not support consistently
+earlier stable performance. Therefore this mechanism screen supports
+backbone adaptation as important, but does not justify claiming that head reset
+is performance-safe and faster than scratch.
 
 ## Notes for future experiments
 
-TBD
+No follow-up experiment has been selected yet; next steps remain open.
