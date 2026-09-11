@@ -68,6 +68,21 @@ def scalar(value: Any, unwrap_key: str = "max") -> float | None:
     return result if np.isfinite(result) else None
 
 
+def summary_scalar(
+    summary: Any, key: str, unwrap_key: str = "max"
+) -> float | None:
+    """Read a W&B summary metric stored as ``metric.max``/``metric.min``."""
+    for candidate in (f"{key}.{unwrap_key}", key):
+        try:
+            value = summary.get(candidate)
+        except AttributeError:
+            value = None
+        result = scalar(value, unwrap_key)
+        if result is not None:
+            return result
+    return None
+
+
 def load_cells() -> dict[str, dict[str, Any]]:
     cells: dict[str, dict[str, Any]] = {}
     for species in ("minipigs", "monkeys"):
@@ -123,8 +138,10 @@ def validate_run(run: Any, expected: dict[str, Any]) -> dict[str, Any]:
         "run_id": str(run.id),
         "run_name": str(run.name or ""),
         "state": str(run.state),
-        "test_supported_f1": scalar((run.summary or {}).get(TEST_F1)),
-        "best_val_supported_f1": scalar((run.summary or {}).get(VALIDATION_F1)),
+        "test_supported_f1": summary_scalar(run.summary or {}, TEST_F1),
+        "best_val_supported_f1": summary_scalar(
+            run.summary or {}, VALIDATION_F1
+        ),
     }
 
 
@@ -165,19 +182,46 @@ def stable_endpoint(history: pd.DataFrame) -> dict[str, Any]:
 def fetch_one(
     api: Any, entity: str, expected: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    run = api.run(f"{entity}/{PROJECT}/{expected['wandb_run_id']}")
-    if run.state != "finished":
-        raise RuntimeError(f"{run.id}: run state is {run.state}")
-    record = validate_run(run, expected)
+    try:
+        run = api.run(f"{entity}/{PROJECT}/{expected['wandb_run_id']}")
+        record = validate_run(run, expected)
+    except Exception as exc:
+        record = {
+            "condition": expected["condition_id"],
+            "species": expected["species"],
+            "subject": expected["target_subject"],
+            "recording": expected["target_recording"],
+            "base_lr": expected["base_learning_rate"],
+            "adapter_warmup_steps": expected["adapter_warmup_steps"],
+            "source": "pretrained" if expected["checkpoint_id"] else "scratch",
+            "cell_id": expected["cell_id"],
+            "run_id": str(expected["wandb_run_id"]),
+            "run_name": str(expected["run_name"]),
+            "state": "fetch_error",
+            "test_supported_f1": None,
+            "best_val_supported_f1": None,
+            "analysis_eligible": False,
+            "analysis_error": str(exc),
+        }
+        return record, expected
+
+    record["analysis_eligible"] = False
+    record["analysis_error"] = "missing test supported macro-F1 summary"
     if record["test_supported_f1"] is None:
-        raise RuntimeError(f"{run.id}: missing test supported macro-F1 summary")
-    history = run.history(
-        keys=["_step", "trainer/global_step", VALIDATION_F1],
-        samples=10_000,
-        pandas=True,
-    )
-    endpoint = stable_endpoint(history)
-    record.update(endpoint)
+        return record, expected
+
+    try:
+        history = run.history(
+            keys=["_step", "trainer/global_step", VALIDATION_F1],
+            samples=10_000,
+            pandas=True,
+        )
+        endpoint = stable_endpoint(history)
+        record.update(endpoint)
+        record["analysis_eligible"] = True
+        record["analysis_error"] = ""
+    except Exception as exc:
+        record["analysis_error"] = str(exc)
     return record, expected
 
 
@@ -219,7 +263,28 @@ def main() -> None:
             "W&B results do not cover the compiled Phase-4D matrix"
         )
 
-    subject = frame.groupby(
+    out_csv = csv_dir(__file__)
+    frame.to_csv(out_csv / f"{PREFIX}_runs.csv", index=False)
+
+    coverage = frame.groupby(["species", "condition"], as_index=False).agg(
+        expected_cells=("cell_id", "size"),
+        eligible_cells=("analysis_eligible", "sum"),
+        finished_state=(
+            "state",
+            lambda values: int((values == "finished").sum()),
+        ),
+        test_metric_cells=(
+            "test_supported_f1",
+            lambda values: int(values.notna().sum()),
+        ),
+    )
+    coverage["ineligible_cells"] = (
+        coverage.expected_cells - coverage.eligible_cells
+    )
+    coverage.to_csv(out_csv / f"{PREFIX}_coverage.csv", index=False)
+
+    eligible = frame[frame.analysis_eligible].copy()
+    subject = eligible.groupby(
         ["species", "condition", "base_lr", "subject"], as_index=False
     ).agg(
         test_supported_f1=("test_supported_f1", "mean"),
@@ -276,10 +341,20 @@ def main() -> None:
                 }
             )
     summary = pd.DataFrame(summaries)
-    out_csv = csv_dir(__file__)
-    frame.to_csv(out_csv / f"{PREFIX}_runs.csv", index=False)
     subject.to_csv(out_csv / f"{PREFIX}_subject_summary.csv", index=False)
     summary.to_csv(out_csv / f"{PREFIX}_paired_summary.csv", index=False)
+
+    condition_summary = eligible.groupby(
+        ["species", "condition", "base_lr"], as_index=False
+    ).agg(
+        n_cells=("cell_id", "size"),
+        mean_test_supported_f1=("test_supported_f1", "mean"),
+        mean_best_val_supported_f1=("best_val_supported_f1", "mean"),
+        mean_stable_step=("stable_step", "mean"),
+    )
+    condition_summary.to_csv(
+        out_csv / f"{PREFIX}_condition_summary.csv", index=False
+    )
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5), constrained_layout=True)
     for axis, metric, title, ylabel in [
@@ -296,7 +371,18 @@ def main() -> None:
             "optimizer steps",
         ),
     ]:
-        plotted = summary[summary.metric.eq(metric)]
+        plotted = summary[summary.metric.eq(metric)].copy()
+        if plotted.empty:
+            axis.text(
+                0.5,
+                0.5,
+                "No eligible paired results",
+                ha="center",
+                va="center",
+                transform=axis.transAxes,
+            )
+            axis.set_axis_off()
+            continue
         positions = np.arange(len(plotted))
         axis.errorbar(
             positions,
@@ -321,6 +407,11 @@ def main() -> None:
         axis.set_title(title)
         axis.set_ylabel(ylabel)
     fig.savefig(figures_dir(__file__) / f"{PREFIX}_paired_effects.png", dpi=160)
+    print("Coverage by species and condition:")
+    print(coverage.to_string(index=False))
+    print("\nEligible condition means:")
+    print(condition_summary.to_string(index=False))
+    print("\nPaired transfer-minus-scratch summaries:")
     print(summary.to_string(index=False))
 
 

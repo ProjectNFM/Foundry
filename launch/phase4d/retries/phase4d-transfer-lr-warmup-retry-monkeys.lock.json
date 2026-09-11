@@ -1,0 +1,19 @@
+{
+  "audit_csv": "analysis/csv/20260911-MS-transfer-lr-warmup-screen_runs.csv",
+  "audit_csv_sha256": "11e132ad7968c739f8d585cdd87a246094c9e8ecbc0ffe07c73b0347bbf024cf",
+  "failure_states": {
+    "crashed": 4,
+    "failed": 107
+  },
+  "reason": "retry cells without a valid target test metric after fixing trainer.test checkpoint loading",
+  "retry_cell_count": 111,
+  "retry_cell_list": "launch/phase4d/retries/phase4d-transfer-lr-warmup-retry-monkeys.jsonl",
+  "retry_cell_list_sha256": "b216fea0eab841d81ab68349c12fc8e09697f205bb3ac36f9b7dc103bac1e086",
+  "retry_tag": "retry_weights_only_false",
+  "schema": "foundry-phase4d-retry-cell-lock",
+  "selection_guard": "analysis_eligible=false",
+  "source_cell_list": "launch/phase4d/phase4d-transfer-lr-warmup-monkeys.jsonl",
+  "source_cell_list_sha256": "b69f3b67abf1f0d0f4ff66ce855e4e6959a0b2969015e0d409054b812b707ff6",
+  "species": "monkeys",
+  "version": 1
+}

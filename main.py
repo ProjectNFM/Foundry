@@ -2305,6 +2305,7 @@ def main(cfg: DictConfig):
                 lightning_module,
                 datamodule=datamodule,
                 ckpt_path="best",
+                weights_only=False,
             )
     except BaseException:
         run_failed = True

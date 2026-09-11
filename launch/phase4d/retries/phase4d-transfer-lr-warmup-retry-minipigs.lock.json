@@ -1,0 +1,19 @@
+{
+  "audit_csv": "analysis/csv/20260911-MS-transfer-lr-warmup-screen_runs.csv",
+  "audit_csv_sha256": "11e132ad7968c739f8d585cdd87a246094c9e8ecbc0ffe07c73b0347bbf024cf",
+  "failure_states": {
+    "crashed": 181,
+    "failed": 177
+  },
+  "reason": "retry cells without a valid target test metric after fixing trainer.test checkpoint loading",
+  "retry_cell_count": 358,
+  "retry_cell_list": "launch/phase4d/retries/phase4d-transfer-lr-warmup-retry-minipigs.jsonl",
+  "retry_cell_list_sha256": "beda5f6c0d9c3ab7b1e21827815c22d0e8449e76b93a78af01516e46149b9227",
+  "retry_tag": "retry_weights_only_false",
+  "schema": "foundry-phase4d-retry-cell-lock",
+  "selection_guard": "analysis_eligible=false",
+  "source_cell_list": "launch/phase4d/phase4d-transfer-lr-warmup-minipigs.jsonl",
+  "source_cell_list_sha256": "f6080f4f3e1f5001484e6c422b4189d07a5cb4707bec60d4e0d6e9e35c4c0a7d",
+  "species": "minipigs",
+  "version": 1
+}

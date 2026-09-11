@@ -1,0 +1,13 @@
+species,condition,expected_cells,eligible_cells,finished_state,test_metric_cells,ineligible_cells
+minipigs,scratch_adapter_warmup,120,120,120,120,0
+minipigs,scratch_uniform,120,120,120,120,0
+minipigs,transfer_adapter_warmup_discriminative,120,0,0,0,120
+minipigs,transfer_adapter_warmup_uniform,120,33,33,33,87
+minipigs,transfer_discriminative,120,0,0,0,120
+minipigs,transfer_uniform,120,89,89,89,31
+monkeys,scratch_adapter_warmup,39,39,39,39,0
+monkeys,scratch_uniform,39,39,39,39,0
+monkeys,transfer_adapter_warmup_discriminative,39,0,0,0,39
+monkeys,transfer_adapter_warmup_uniform,39,15,15,15,24
+monkeys,transfer_discriminative,39,0,0,0,39
+monkeys,transfer_uniform,39,30,30,30,9
