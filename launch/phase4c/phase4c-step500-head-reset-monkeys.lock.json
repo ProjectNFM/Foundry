@@ -1,7 +1,7 @@
 {
   "audit_sha256": "48cd1a57189bb7f0fe63b8fc3cbd6949deb82c215d0c8edd431b94794bc9467a",
   "checkpoint_set_id": "phase4a-mila-early-checkpoints-v1",
-  "compiler_sha256": "74f0b8666c7b36f6da84f0a36e098521efee68564c55f55b72b2b9808b70124c",
+  "compiler_sha256": "faf8ffa5a92699caeb4f5bb49fb5859ef34ad10757d7232530af54fd09b68a78",
   "compiler_version": "1",
   "counts": {
     "minipigs": 360,
