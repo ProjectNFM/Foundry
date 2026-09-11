@@ -170,6 +170,11 @@ uv run python main.py \
   hydra.launcher.mem_gb=32 -m
 ```
 
+Submitted on 2026-09-11: minipigs Slurm array `10762984_[0-179]` (720 cells),
+snapshot `/network/scratch/s/sobralm/foundry-launches/20260911T195832_NEUROSOFT_TRANSFER_MINIPIGS_5cf5ed35_a732b7ce`;
+monkeys Slurm array `10762987_[0-58]` (234 cells), snapshot
+`/network/scratch/s/sobralm/foundry-launches/20260911T195915_NEUROSOFT_TRANSFER_MONKEYS_5cf5ed35_d76c5dc4`.
+
 ### Key config overrides
 
 - Fixed Phase-4C 500-step source manifest, source selection/model seeds
