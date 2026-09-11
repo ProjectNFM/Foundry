@@ -692,6 +692,22 @@ def compile_cells(
                             f"run.source_model_seed={source_model_seed}",
                         ]
                     )
+                else:
+                    # The packed launcher requires every coupled cell vector
+                    # to expose the same override keys. Keep the random
+                    # control source-free with explicit nulls; main.py treats
+                    # them as absent and records no source identity.
+                    overrides[3:3] = [
+                        "run.pretrained_checkpoint_manifest=null",
+                        "run.pretrained_checkpoint_manifest_hash=null",
+                        "run.pretrained_checkpoint_sha256=null",
+                    ]
+                    overrides.extend(
+                        [
+                            "run.source_selection_seed=null",
+                            "run.source_model_seed=null",
+                        ]
+                    )
                 row["overrides"] = overrides
                 by_species.setdefault(species, []).append(row)
                 if checkpoint is not None:

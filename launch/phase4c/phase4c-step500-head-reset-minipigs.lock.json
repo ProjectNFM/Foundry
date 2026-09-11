@@ -1,7 +1,7 @@
 {
   "audit_sha256": "48cd1a57189bb7f0fe63b8fc3cbd6949deb82c215d0c8edd431b94794bc9467a",
   "checkpoint_set_id": "phase4a-mila-early-checkpoints-v1",
-  "compiler_sha256": "faf8ffa5a92699caeb4f5bb49fb5859ef34ad10757d7232530af54fd09b68a78",
+  "compiler_sha256": "3451a235d0a0a9137b5e5e7abb7183aa7614eb8630aab2fdb0940c326794dfa5",
   "compiler_version": "1",
   "counts": {
     "minipigs": 360,
@@ -9,7 +9,7 @@
   },
   "output_count": 360,
   "output_path": "phase4c-step500-head-reset-minipigs.jsonl",
-  "output_sha256": "90c7bc91cb4413589a2dc29fe50d2ca62006fdd903c7d6d57b99b6e9bd9cccef",
+  "output_sha256": "ee96ccfd5c3a632cd14d9d8d1af94be4f409ee7e05418a86d71011fd44026742",
   "output_stem": "phase4c-step500-head-reset",
   "per_checkpoint_counts": {
     "fullpool-minipigs-sub-01-sel42-model42-step500": 12,

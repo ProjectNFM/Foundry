@@ -155,10 +155,13 @@ uv run python tools/compile_downstream_cells.py \
 ### Key config overrides
 
 - `run.pretrained_checkpoint_manifest`: the audited Phase-4B 500-step manifest
-  for the matching target subject and source seed pair `(42,42)`.
+  for the matching target subject and source seed pair `(42,42)`; random
+  controls carry explicit nulls for source fields so packed cell vectors stay
+  structurally identical while retaining no source provenance.
 - `run.pretrained_transfer_regime=full_finetuning_reset_router` or
   `frozen_representation`; frozen-random is a separate explicit no-checkpoint
-  mode, never a missing-manifest fallback.
+  mode, never a missing-manifest fallback. Its manifest and source-seed
+  overrides are explicit `null` values only.
 - `run.source_selection_seed=42`, `run.source_model_seed=42`, and
   `run.evaluate_test=true` for every pretrained cell.
 - `run.seed in {42,43,44}`, `data.training_fraction=1.0`, and

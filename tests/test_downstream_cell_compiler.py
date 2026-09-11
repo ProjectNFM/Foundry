@@ -215,11 +215,27 @@ def test_synthetic_random_control_has_no_source_provenance(
     assert all(row["checkpoint_manifest"] is None for row in random_rows)
     assert all(row["source_selection_seed"] is None for row in random_rows)
     assert all(
-        not any(
-            "pretrained_checkpoint_manifest" in value
-            for value in row["overrides"]
-        )
+        "run.pretrained_checkpoint_manifest=null" in row["overrides"]
         for row in random_rows
+    )
+    assert all(
+        "run.source_selection_seed=null" in row["overrides"]
+        and "run.source_model_seed=null" in row["overrides"]
+        for row in random_rows
+    )
+    assert (
+        len(
+            {
+                tuple(
+                    sorted(
+                        _override.split("=", 1)[0]
+                        for _override in row["overrides"]
+                    )
+                )
+                for row in cells["minipigs"]
+            }
+        )
+        == 1
     )
     assert {row["wandb_group"] for row in random_rows} == {"RANDOM"}
     assert len({row["cell_id"] for row in cells["minipigs"]}) == 6
