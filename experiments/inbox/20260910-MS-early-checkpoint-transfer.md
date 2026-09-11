@@ -1,6 +1,6 @@
 # Phase 4B -- Early Source-Checkpoint Transfer
 
-**Status:** Draft
+**Status:** Completed
 **Date started:** 2026-09-10
 **Parent experiment:** [Phase 4A -- Full-Pool Pretraining Full-Finetuning Transfer Gate](20260904-MS-fullpool-finetune-transfer.md)
 **Follow-up experiments:** TBD
@@ -134,33 +134,93 @@ uv run python main.py \
 
 ### Summary
 
-TBD
+All 1,908 declared early-milestone transfer runs and all 477 reused
+validation-selected-best controls passed the W&B state and compiled-provenance
+audit.  The primary comparison uses the 157 session/target-seed units shared
+by scratch, every milestone, and best: 120 minipig and 37 monkey units.  It
+excludes the documented Phase-2 monkey scratch gap
+`sub-01_ses-014_task-AcousStim_acq-RH_desc-raw`, seed 43, and the separate
+5K monkey transfer unit `sub-05_ses-01_task-AcousStim_acq-RH_desc-raw`, seed
+43, whose W&B summary retains only two of three source-seed replicates.
+
+Absolute performance is flat from scratch to the 500-step source checkpoint
+in both species.  Thereafter, minipig performance declines monotonically as
+source-pretraining age increases, from 0.4210 at 500 steps to 0.3971 at the
+validation-selected best checkpoint, below scratch (0.4206).  Monkey effects
+are less precise, but the 500-step checkpoint is likewise the only condition
+numerically at or above scratch.  These transfer results are consistent with
+longer source optimization yielding less transferable representations; they
+do not directly establish a source-side overfitting mechanism.
 
 ### Metrics
 
-TBD
+Subject-balanced test supported macro-F1.  Source seeds are averaged before
+target-seed/session pairing; sessions are averaged within subject; species
+means weight subjects equally.  Intervals are 95% subject-bootstrap CIs.
+
+| Species | Scratch (0) | 500 | 1,500 | 5,000 | 15,000 | Validation-selected best |
+|---|---:|---:|---:|---:|---:|---:|
+| Minipigs (7 subjects) | 0.4206 | 0.4210 | 0.4192 | 0.4082 | 0.4020 | 0.3971 |
+| Monkeys (5 subjects) | 0.4577 | 0.4585 | 0.4386 | 0.4418 | 0.4447 | 0.4466 |
+
+| Species | 500 − scratch | 1,500 − scratch | 5,000 − scratch | 15,000 − scratch | Best − scratch |
+|---|---:|---:|---:|---:|---:|
+| Minipigs | +0.0004 [-0.0040, +0.0052] | -0.0015 [-0.0065, +0.0041] | -0.0125 [-0.0217, -0.0044] | -0.0187 [-0.0307, -0.0073] | -0.0235 [-0.0338, -0.0145] |
+| Monkeys | +0.0008 [-0.0147, +0.0187] | -0.0190 [-0.0351, -0.0068] | -0.0158 [-0.0288, -0.0052] | -0.0130 [-0.0361, +0.0115] | -0.0111 [-0.0337, +0.0185] |
+
+Downstream optimizer-step efficiency does not offset the F1 pattern:
+minipig transfer increases, rather than reduces, selected optimizer steps at
+every checkpoint age (28.2% to 57.8% more steps on average).  Monkey point
+estimates favor 1.5K--15K checkpoints by 8.8%--10.0%, but their bootstrap
+intervals include zero.
 
 ### Analysis
 
-The analysis script fetches declared runs through `wandb.Api()`; it accepts no
-run solely by name.  For each milestone it averages the three source-seed
-results within a target session/target-seed, pairs that mean to the same
-matched-LR scratch cell, averages target seeds then sessions within subject,
-and reports equal-weight subject means by species.  The primary outcome is
-test supported macro-F1 gain.  Downstream transfer efficiency is the paired
-percent reduction in target best-checkpoint optimizer steps versus scratch;
-windows, FLOPs, and best-checkpoint wall time are secondary efficiency
-measures.  Source-pretraining compute is intentionally not added: it is a
-fixed, already-completed input shared by all four milestone arms.
+The reproducible analysis fetches all early, best-control, and scratch data
+through `wandb.Api()`, validates each transfer run against its compiled cell
+and exact W&B ID, and restricts every condition to the shared paired sample.
+It averages source seeds before target pairing, then target seeds and sessions
+within subjects before equal-weight species aggregation.  CSV outputs contain
+the raw audited rows, exclusions, common-unit table, subject effects, and
+bootstrap summaries.
+
+```bash
+uv run python analysis/20260910-MS-early-checkpoint-transfer_analysis.py
+```
 
 ### Figures
 
-TBD
+![Absolute test supported macro-F1 by source-pretraining age](../../analysis/figures/20260910-MS-early-checkpoint-transfer_absolute_test_f1_by_pretraining.png)
+
+![Paired test supported macro-F1 gain versus scratch](../../analysis/figures/20260910-MS-early-checkpoint-transfer_paired_test_f1_gain_by_pretraining.png)
+
+![Paired downstream best-step efficiency](../../analysis/figures/20260910-MS-early-checkpoint-transfer_best_step_efficiency_by_pretraining.png)
+
+![Subject-level absolute test supported macro-F1 trajectories](../../analysis/figures/20260910-MS-early-checkpoint-transfer_subject_test_f1_trajectories.png)
 
 ## Conclusions
 
-TBD
+**Verdict: partially confirmed.**  The data support the premise that a much
+earlier source checkpoint is preferable to the validation-selected best
+checkpoint for downstream transfer: the 500-step checkpoint is effectively
+neutral versus scratch in both species, whereas the best checkpoint is
+clearly detrimental in minipigs and numerically detrimental in monkeys.
+However, the preregistered hypothesis that 5K or 15K would provide positive
+transfer efficiency versus scratch is not supported.  Longer source training
+is associated with progressively worse minipig transfer and no reliable
+monkey gain, a pattern consistent with excessive source pretraining and
+reduced representation transferability.
 
 ## Notes for future experiments
 
-TBD
+- Retrain the source model with a substantially lower maximum optimizer-step
+  budget and save checkpoints at dense early milestones, so the useful
+  pretraining window can be localized rather than inferred from widely spaced
+  late checkpoints.
+- Compare downstream transfer modes at those early source checkpoints:
+  full finetuning, frozen-backbone training with a randomly reinitialized
+  classification head (a linear-probe-like control), and intermediate
+  partially frozen variants where appropriate.
+- Keep the same matched scratch controls, target splits, source-target
+  exclusion, paired seeds, and subject-balanced analysis so checkpoint age
+  and downstream adaptation mode remain isolated factors.
