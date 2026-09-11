@@ -458,10 +458,34 @@ def compile_cells(
     audit_path: Path,
     checkpoint_root: Path,
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
+    recipe = _load_recipe(recipe_path)
     registry, checkpoint_set_id = validate_registry(
         registry_path, checkpoint_root, recipe_path.resolve().parents[2]
     )
-    recipe = _load_recipe(recipe_path)
+    checkpoint_filter = recipe.get("checkpoint_filter", {})
+    if checkpoint_filter:
+        if not isinstance(checkpoint_filter, dict):
+            raise ValueError("checkpoint_filter must be a mapping")
+        condition_filter = checkpoint_filter.get("condition", {})
+        if not isinstance(condition_filter, dict):
+            raise ValueError("checkpoint_filter.condition must be a mapping")
+        registry = [
+            record
+            for record in registry
+            if all(
+                record.get(key) == value
+                for key, value in checkpoint_filter.items()
+                if key != "condition"
+            )
+            and all(
+                record.get("condition", {}).get(key) == value
+                for key, value in condition_filter.items()
+            )
+        ]
+        if not registry:
+            raise ValueError(
+                f"checkpoint_filter selected no records from {registry_path}"
+            )
     fixed_overrides = _fixed_overrides(recipe)
     audit, audit_hash = _load_audit(audit_path)
     configured_species = set(recipe["species"])
@@ -531,6 +555,148 @@ def compile_cells(
     all_outputs: set[tuple[str, str]] = set()
     all_wandb_ids: set[tuple[str, str]] = set()
     per_checkpoint: Counter[str] = Counter()
+    random_regime = "frozen_random_control"
+    regimes = [str(regime) for regime in recipe["transfer_regimes"]]
+    if len(regimes) != len(set(regimes)):
+        raise ValueError("transfer_regimes contains duplicates")
+
+    def emit_cell(
+        target: dict[str, Any],
+        regime: str,
+        checkpoint: dict[str, Any] | None,
+    ) -> None:
+        species = str(target["species"])
+        subject = str(target["subject"])
+        recording_id = str(target["recording_id"])
+        fraction_values = [
+            float(value) for value in recipe["target_training_fractions"]
+        ]
+        species_recipe = recipe["species"][species]
+        groups = species_recipe.get("wandb_groups", {})
+        wandb_group = str(groups.get(regime, species_recipe.get("wandb_group")))
+        tags_by_regime = species_recipe.get("wandb_tags_by_regime", {})
+        wandb_tags = list(
+            tags_by_regime.get(regime, species_recipe.get("wandb_tags", []))
+        )
+        if checkpoint is None:
+            checkpoint_set = None
+            checkpoint_id = None
+            manifest_path = None
+            manifest_hash = None
+            checkpoint_sha256 = None
+            source_selection_seed = None
+            source_model_seed = None
+            source_condition = "random_frozen_backbone_control"
+            condition_label = source_condition
+            checkpoint_identity = "random-control"
+        else:
+            checkpoint_set = checkpoint_set_id
+            checkpoint_id = str(checkpoint["checkpoint_id"])
+            manifest_path = checkpoint["manifest_path"]
+            manifest_hash = checkpoint["manifest_hash"]
+            checkpoint_sha256 = checkpoint["checkpoint_sha256"]
+            source_selection_seed = int(checkpoint["source_selection_seed"])
+            source_model_seed = int(checkpoint["source_model_seed"])
+            source_condition = checkpoint["condition"]
+            condition_label = str(
+                source_condition.get("label") or checkpoint["checkpoint_set_id"]
+            )
+            checkpoint_identity = checkpoint_id
+
+        for fraction_value in fraction_values:
+            availability = target.get("fraction_availability", {}).get(
+                f"{fraction_value:.2f}", {}
+            )
+            if not availability.get("available", False):
+                raise ValueError(
+                    f"{recording_id}: target fraction {fraction_value} is unavailable"
+                )
+            for target_seed in recipe["target_finetuning_seeds"]:
+                cell_id = (
+                    f"{recipe['recipe_id']}__{species}__{recording_id}__"
+                    f"{checkpoint_identity}__{regime}__"
+                    f"f{_slug_fraction(fraction_value)}__t{int(target_seed)}"
+                )
+                if cell_id in all_ids:
+                    raise ValueError(f"Duplicate cell ID: {cell_id}")
+                all_ids.add(cell_id)
+                output_identity = (wandb_group, cell_id)
+                if output_identity in all_outputs:
+                    raise ValueError(
+                        f"Duplicate output/W&B identity: {output_identity}"
+                    )
+                all_outputs.add(output_identity)
+                wandb_run_id = hashlib.md5(
+                    cell_id.encode("utf-8"), usedforsecurity=False
+                ).hexdigest()[:8]
+                wandb_identity = (wandb_group, wandb_run_id)
+                if wandb_identity in all_wandb_ids:
+                    raise ValueError(
+                        f"Duplicate deterministic W&B identity: {wandb_identity}"
+                    )
+                all_wandb_ids.add(wandb_identity)
+                labels = dict(recipe.get("condition_labels", {}))
+                if checkpoint is None:
+                    labels["transfer_control"] = "random_frozen_backbone"
+                row = {
+                    "cell_id": cell_id,
+                    "run_name": cell_id,
+                    "base_experiment": recipe["base_experiments"][species],
+                    "species": species,
+                    "target_subject": subject,
+                    "target_recording": recording_id,
+                    "checkpoint_set_id": checkpoint_set,
+                    "checkpoint_id": checkpoint_id,
+                    "checkpoint_manifest": manifest_path,
+                    "checkpoint_manifest_hash": manifest_hash,
+                    "checkpoint_sha256": checkpoint_sha256,
+                    "source_selection_seed": source_selection_seed,
+                    "source_model_seed": source_model_seed,
+                    "source_condition": source_condition,
+                    "condition_labels": labels,
+                    "transfer_regime": regime,
+                    "target_fraction": fraction_value,
+                    "target_finetuning_seed": int(target_seed),
+                    "evaluate_test": bool(recipe.get("evaluate_test", False)),
+                    "wandb_group": wandb_group,
+                    "wandb_run_id": wandb_run_id,
+                    "wandb_tags": wandb_tags,
+                    "fixed_overrides": fixed_overrides,
+                }
+                overrides = [
+                    *fixed_overrides,
+                    f"data.dataset_kwargs.recording_ids={_quote_list(recording_id)}",
+                    f"data.training_fraction={fraction_value}",
+                    f"run.seed={int(target_seed)}",
+                    f"run.pretrained_transfer_regime={regime}",
+                    f"run.evaluate_test={str(bool(recipe.get('evaluate_test', False))).lower()}",
+                    f"run.group={wandb_group}",
+                    f"run.tags={json.dumps(wandb_tags, separators=(',', ':'))}",
+                    f"run.cell_id={cell_id}",
+                    f"run.checkpoint_set_id={checkpoint_set if checkpoint_set is not None else 'null'}",
+                    f"run.checkpoint_id={checkpoint_id if checkpoint_id is not None else 'null'}",
+                    f"run.source_condition={condition_label}",
+                    "++run.condition_labels=" + _hydra_mapping(labels),
+                    f"run.target_species={species}",
+                    f"run.target_subject={subject}",
+                ]
+                if checkpoint is not None:
+                    overrides[3:3] = [
+                        f"run.pretrained_checkpoint_manifest={manifest_path}",
+                        f"run.pretrained_checkpoint_manifest_hash={manifest_hash}",
+                        f"run.pretrained_checkpoint_sha256={checkpoint_sha256}",
+                    ]
+                    overrides.extend(
+                        [
+                            f"run.source_selection_seed={source_selection_seed}",
+                            f"run.source_model_seed={source_model_seed}",
+                        ]
+                    )
+                row["overrides"] = overrides
+                by_species.setdefault(species, []).append(row)
+                if checkpoint is not None:
+                    per_checkpoint[checkpoint_id] += 1
+
     for checkpoint in sorted(
         registry, key=lambda item: str(item["checkpoint_id"])
     ):
@@ -543,128 +709,23 @@ def compile_cells(
             raise ValueError(
                 f"{checkpoint['checkpoint_id']}: no eligible {species}/{subject} target sessions"
             )
-        condition = checkpoint["condition"]
-        condition_label = str(
-            condition.get("label") or checkpoint["checkpoint_set_id"]
-        )
-        species_recipe = recipe["species"][species]
         for target in compatible:
-            recording_id = str(target["recording_id"])
-            if (
-                target.get("species") != species
-                or target.get("subject") != subject
-            ):
-                raise ValueError(
-                    f"Invalid target compatibility for {checkpoint['checkpoint_id']}"
-                )
-            for regime in recipe["transfer_regimes"]:
-                for fraction in recipe["target_training_fractions"]:
-                    fraction_value = float(fraction)
-                    availability = target.get("fraction_availability", {}).get(
-                        f"{fraction_value:.2f}", {}
+            for regime in regimes:
+                if regime == random_regime:
+                    continue
+                if (
+                    target.get("species") != species
+                    or target.get("subject") != subject
+                ):
+                    raise ValueError(
+                        f"Invalid target compatibility for {checkpoint['checkpoint_id']}"
                     )
-                    if not availability.get("available", False):
-                        raise ValueError(
-                            f"{recording_id}: target fraction {fraction_value} is unavailable"
-                        )
-                    for target_seed in recipe["target_finetuning_seeds"]:
-                        cell_id = (
-                            f"{recipe['recipe_id']}__{species}__{recording_id}__"
-                            f"{checkpoint['checkpoint_id']}__{regime}__"
-                            f"f{_slug_fraction(fraction_value)}__t{int(target_seed)}"
-                        )
-                        if cell_id in all_ids:
-                            raise ValueError(f"Duplicate cell ID: {cell_id}")
-                        all_ids.add(cell_id)
-                        output_identity = (
-                            str(species_recipe["wandb_group"]),
-                            cell_id,
-                        )
-                        if output_identity in all_outputs:
-                            raise ValueError(
-                                f"Duplicate output/W&B identity: {output_identity}"
-                            )
-                        all_outputs.add(output_identity)
-                        wandb_run_id = hashlib.md5(
-                            cell_id.encode("utf-8"), usedforsecurity=False
-                        ).hexdigest()[:8]
-                        wandb_identity = (
-                            str(species_recipe["wandb_group"]),
-                            wandb_run_id,
-                        )
-                        if wandb_identity in all_wandb_ids:
-                            raise ValueError(
-                                f"Duplicate deterministic W&B identity: {wandb_identity}"
-                            )
-                        all_wandb_ids.add(wandb_identity)
-                        row = {
-                            "cell_id": cell_id,
-                            "run_name": cell_id,
-                            "base_experiment": recipe["base_experiments"][
-                                species
-                            ],
-                            "species": species,
-                            "target_subject": subject,
-                            "target_recording": recording_id,
-                            "checkpoint_set_id": checkpoint_set_id,
-                            "checkpoint_id": checkpoint["checkpoint_id"],
-                            "checkpoint_manifest": checkpoint["manifest_path"],
-                            "checkpoint_manifest_hash": checkpoint[
-                                "manifest_hash"
-                            ],
-                            "checkpoint_sha256": checkpoint[
-                                "checkpoint_sha256"
-                            ],
-                            "source_selection_seed": int(
-                                checkpoint["source_selection_seed"]
-                            ),
-                            "source_model_seed": int(
-                                checkpoint["source_model_seed"]
-                            ),
-                            "source_condition": condition,
-                            "condition_labels": dict(
-                                recipe.get("condition_labels", {})
-                            ),
-                            "transfer_regime": str(regime),
-                            "target_fraction": fraction_value,
-                            "target_finetuning_seed": int(target_seed),
-                            "evaluate_test": bool(
-                                recipe.get("evaluate_test", False)
-                            ),
-                            "wandb_group": str(species_recipe["wandb_group"]),
-                            "wandb_run_id": wandb_run_id,
-                            "wandb_tags": list(
-                                species_recipe.get("wandb_tags", [])
-                            ),
-                            "fixed_overrides": fixed_overrides,
-                        }
-                        row["overrides"] = [
-                            *fixed_overrides,
-                            f"data.dataset_kwargs.recording_ids={_quote_list(recording_id)}",
-                            f"data.training_fraction={fraction_value}",
-                            f"run.seed={int(target_seed)}",
-                            f"run.pretrained_checkpoint_manifest={checkpoint['manifest_path']}",
-                            f"run.pretrained_checkpoint_manifest_hash={checkpoint['manifest_hash']}",
-                            f"run.pretrained_checkpoint_sha256={checkpoint['checkpoint_sha256']}",
-                            f"run.pretrained_transfer_regime={regime}",
-                            f"run.evaluate_test={str(bool(recipe.get('evaluate_test', False))).lower()}",
-                            f"run.group={species_recipe['wandb_group']}",
-                            f"run.tags={json.dumps(species_recipe.get('wandb_tags', []), separators=(',', ':'))}",
-                            f"run.cell_id={cell_id}",
-                            f"run.checkpoint_set_id={checkpoint_set_id}",
-                            f"run.checkpoint_id={checkpoint['checkpoint_id']}",
-                            f"run.source_selection_seed={int(checkpoint['source_selection_seed'])}",
-                            f"run.source_model_seed={int(checkpoint['source_model_seed'])}",
-                            f"run.source_condition={condition_label}",
-                            "++run.condition_labels="
-                            + _hydra_mapping(
-                                recipe.get("condition_labels", {})
-                            ),
-                            f"run.target_species={species}",
-                            f"run.target_subject={subject}",
-                        ]
-                        by_species.setdefault(species, []).append(row)
-                        per_checkpoint[str(checkpoint["checkpoint_id"])] += 1
+                emit_cell(target, regime, checkpoint)
+
+    if random_regime in regimes:
+        for species, targets in sorted(eligible.items()):
+            for target in targets:
+                emit_cell(target, random_regime, None)
 
     counts = {
         species: len(rows) for species, rows in sorted(by_species.items())

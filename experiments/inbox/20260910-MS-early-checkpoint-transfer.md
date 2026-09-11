@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-09-10
 **Parent experiment:** [Phase 4A -- Full-Pool Pretraining Full-Finetuning Transfer Gate](20260904-MS-fullpool-finetune-transfer.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Phase 4C -- 500-Step Head Reset and Backbone Freezing](20260911-MS-500step-head-reset-transfer.md)
 **Tags:** neurosoft, supervised-pretraining, transfer, full-finetuning, checkpoint-milestone, phase4, 8band, mila
 
 ## Background

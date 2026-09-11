@@ -1,0 +1,53 @@
+schema: foundry-downstream-recipe
+version: 1
+recipe_id: phase4c-step500-head-reset
+output_stem: phase4c-step500-head-reset
+audit_path: docs/neurosoft-phase0-audit.json
+eligible_session_selection:
+  eligible: true
+base_experiments:
+  minipigs: auditory_decoding/neurosoft_conv_bigru_transfer_minipigs
+  monkeys: auditory_decoding/neurosoft_conv_bigru_transfer_monkeys
+# The committed Phase-4A early-checkpoint registry contains multiple
+# milestones and source seeds. Select only the audited 500-step, (42,42)
+# source pair for the two pretrained Phase-4C conditions.
+checkpoint_filter:
+  condition:
+    milestone: step500
+  source_selection_seed: 42
+  source_model_seed: 42
+transfer_regimes:
+  - full_finetuning_reset_router
+  - frozen_representation
+  - frozen_random_control
+target_training_fractions: [1.0]
+target_finetuning_seeds: [42, 43, 44]
+expected_source_seed_pairs: [[42, 42]]
+evaluate_test: true
+fixed_overrides:
+  - hyperparameters.learning_rate=0.0015
+condition_labels:
+  study: phase4c
+  target_data: full
+  downstream_lr: lr1p5e3
+  checkpoint_milestone: step500
+  source_seed_pair: s42_m42
+species:
+  minipigs:
+    wandb_group: PHASE4C_STEP500_TRANSFER_MINIPIGS
+    wandb_groups:
+      full_finetuning_reset_router: PHASE4C_STEP500_HEAD_RESET_FULL_FT_MINIPIGS
+      frozen_representation: PHASE4C_STEP500_FROZEN_REPRESENTATION_MINIPIGS
+      frozen_random_control: PHASE4C_FROZEN_RANDOM_MINIPIGS
+    wandb_tags: [transfer, minipigs, 8band, phase4c, step500]
+    expected_checkpoints: 7
+    expected_cells: 360
+  monkeys:
+    wandb_group: PHASE4C_STEP500_TRANSFER_MONKEYS
+    wandb_groups:
+      full_finetuning_reset_router: PHASE4C_STEP500_HEAD_RESET_FULL_FT_MONKEYS
+      frozen_representation: PHASE4C_STEP500_FROZEN_REPRESENTATION_MONKEYS
+      frozen_random_control: PHASE4C_FROZEN_RANDOM_MONKEYS
+    wandb_tags: [transfer, monkeys, 8band, phase4c, step500]
+    expected_checkpoints: 5
+    expected_cells: 117

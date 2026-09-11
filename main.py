@@ -27,7 +27,12 @@ from foundry.tools.stage_data import (
     destination_lock,
     stage_data,
 )
-from foundry.training.pretrained import TransferMode, load_pretrained_weights
+from foundry.training.pretrained import (
+    TransferMode,
+    TransferReport,
+    annotate_parameter_sets,
+    load_pretrained_weights,
+)
 from foundry.training.checkpoint_manifest import (
     load_checkpoint_manifest,
     verify_checkpoint_integrity,
@@ -629,6 +634,117 @@ def _resolve_pretrained_components(
     return components
 
 
+_NEUROSOFT_TRANSFER_REGIMES = {
+    "full_finetuning",
+    "full_finetuning_reset_router",
+    "frozen_representation",
+    "frozen_random_control",
+}
+
+
+def _is_configured(value) -> bool:
+    return value is not None and str(value) != ""
+
+
+def _validate_pretrained_transfer_configuration(cfg: DictConfig) -> None:
+    """Reject transfer combinations that cannot satisfy the audit contract."""
+    regime = OmegaConf.select(
+        cfg, "run.pretrained_transfer_regime", default=None
+    )
+    if regime is None:
+        return
+    regime = str(regime)
+    if regime not in _NEUROSOFT_TRANSFER_REGIMES:
+        raise ValueError(
+            "Unsupported pretrained transfer regime "
+            f"{regime!r}; expected one of {sorted(_NEUROSOFT_TRANSFER_REGIMES)}"
+        )
+
+    manifest = OmegaConf.select(
+        cfg, "run.pretrained_checkpoint_manifest", default=None
+    )
+    checkpoint = OmegaConf.select(
+        cfg, "run.pretrained_checkpoint", default=None
+    )
+    if regime == "full_finetuning_reset_router" and not _is_configured(
+        manifest
+    ):
+        raise ValueError(
+            "full_finetuning_reset_router requires a pretrained checkpoint "
+            "manifest and does not accept an unchecked checkpoint path"
+        )
+    if regime == "frozen_random_control":
+        invalid = []
+        for field, value in (
+            ("pretrained_checkpoint_manifest", manifest),
+            ("pretrained_checkpoint", checkpoint),
+            (
+                "pretrained_checkpoint_manifest_hash",
+                OmegaConf.select(
+                    cfg,
+                    "run.pretrained_checkpoint_manifest_hash",
+                    default=None,
+                ),
+            ),
+            (
+                "pretrained_checkpoint_sha256",
+                OmegaConf.select(
+                    cfg, "run.pretrained_checkpoint_sha256", default=None
+                ),
+            ),
+        ):
+            if _is_configured(value):
+                invalid.append(f"run.{field}")
+        for field in ("source_selection_seed", "source_model_seed"):
+            if _is_configured(
+                OmegaConf.select(cfg, f"run.{field}", default=None)
+            ):
+                invalid.append(f"run.{field}")
+        for field in ("freeze_backbone", "freeze_pretrained"):
+            if OmegaConf.select(cfg, f"run.{field}", default=False):
+                invalid.append(f"run.{field}")
+        if invalid:
+            raise ValueError(
+                "frozen_random_control is a random frozen-backbone control; "
+                "it cannot use pretrained source fields: " + ", ".join(invalid)
+            )
+
+
+def _configure_transfer_trainability(
+    model: torch.nn.Module, regime: str
+) -> tuple[list[str], list[str]]:
+    """Apply the explicit target trainability contract for a regime."""
+    if regime not in _NEUROSOFT_TRANSFER_REGIMES:
+        raise ValueError(f"Unknown transfer regime: {regime!r}")
+    for parameter in model.parameters():
+        parameter.requires_grad = True
+    frozen_components = (
+        ("temporal_frontend", "gru")
+        if regime in {"frozen_representation", "frozen_random_control"}
+        else ()
+    )
+    for component_name in frozen_components:
+        component = getattr(model, component_name, None)
+        if component is None:
+            raise ValueError(
+                f"Transfer regime {regime!r} requires model component "
+                f"{component_name!r}"
+            )
+        for parameter in component.parameters():
+            parameter.requires_grad = False
+    trainable = sorted(
+        name
+        for name, parameter in model.named_parameters()
+        if parameter.requires_grad
+    )
+    frozen = sorted(
+        name
+        for name, parameter in model.named_parameters()
+        if not parameter.requires_grad
+    )
+    return trainable, frozen
+
+
 def _build_lightning_module(cfg: DictConfig, model, datamodule):
     """Instantiate the :class:`FoundryModule` Lightning wrapper from config."""
     return instantiate(cfg.module, model=model)
@@ -781,10 +897,15 @@ def _write_or_validate_cell_provenance(
     import json
 
     expected = _compiled_cell_provenance(cfg)
-    if not expected.get("cell_id") or not expected.get("checkpoint_id"):
+    is_random_control = (
+        expected.get("pretrained_transfer_regime") == "frozen_random_control"
+    )
+    if not expected.get("cell_id") or (
+        not expected.get("checkpoint_id") and not is_random_control
+    ):
         raise ValueError(
-            "Manifest-based target runs require compiled run.cell_id and "
-            "run.checkpoint_id provenance fields"
+            "Compiled target runs require run.cell_id and, except for the "
+            "random frozen-backbone control, run.checkpoint_id provenance fields"
         )
     path = Path(output_dir) / "compiled-cell-provenance.json"
     if resume:
@@ -1370,6 +1491,76 @@ def _prepare_manifest_transfer_for_run(
     return manifest
 
 
+def _persist_transfer_report(
+    report: TransferReport,
+    *,
+    cfg: DictConfig,
+    output_dir: str,
+    regime: str,
+    source_manifest: str | None = None,
+    source_checkpoint: str | None = None,
+    source_checkpoint_sha256: str | None = None,
+    provenance: dict | None = None,
+) -> None:
+    """Persist the machine-readable and human-readable transfer audit."""
+    import json as _json
+
+    report_dict = {
+        "source_checkpoint_manifest": source_manifest,
+        "source_checkpoint_path": source_checkpoint,
+        "source_checkpoint_sha256": source_checkpoint_sha256,
+        "transfer_regime": regime,
+        "components": (provenance or {}).get("selected_components", []),
+        "loaded": report.loaded,
+        "skipped_excluded": report.skipped_excluded,
+        "missing_in_checkpoint": report.missing_in_checkpoint,
+        "unexpected_in_checkpoint": report.unexpected_in_checkpoint,
+        "shape_mismatched": report.shape_mismatched,
+        "dtype_mismatched": report.dtype_mismatched,
+        "fresh": report.fresh,
+        "trainable": report.trainable,
+        "frozen": report.frozen,
+        "provenance": provenance or {},
+    }
+    report_json_path = os.path.join(output_dir, "transfer-report.json")
+    with open(report_json_path, "w") as f:
+        _json.dump(report_dict, f, indent=2, ensure_ascii=True)
+
+    report_md_lines = [
+        "# Transfer Report",
+        "",
+        f"- **Regime:** {regime}",
+        f"- **Checkpoint:** `{source_checkpoint or 'none (random initialization)'}`",
+        f"- **SHA-256:** `{source_checkpoint_sha256 or 'n/a'}`",
+        f"- **Loaded:** {len(report.loaded)}",
+        f"- **Excluded (by design):** {len(report.skipped_excluded)}",
+        f"- **Fresh target tensors:** {len(report.fresh)}",
+        f"- **Trainable parameters:** {len(report.trainable)}",
+        f"- **Frozen parameters:** {len(report.frozen)}",
+        "",
+        "## Provenance",
+        "",
+    ]
+    for key, value in sorted((provenance or {}).items()):
+        report_md_lines.append(f"- **{key}:** `{value}`")
+    report_md_lines.extend(["", "## Loaded Parameters", ""])
+    report_md_lines.extend(f"- `{key}`" for key in report.loaded[:50])
+    if len(report.loaded) > 50:
+        report_md_lines.append(f"- ... and {len(report.loaded) - 50} more")
+    report_md_lines.extend(["", "## Excluded Source Parameters", ""])
+    report_md_lines.extend(f"- `{key}`" for key in report.skipped_excluded[:50])
+    if len(report.skipped_excluded) > 50:
+        report_md_lines.append(
+            f"- ... and {len(report.skipped_excluded) - 50} more"
+        )
+    report_md_lines.extend(["", "## Fresh Target Tensors", ""])
+    report_md_lines.extend(f"- `{key}`" for key in report.fresh[:100])
+    if len(report.fresh) > 100:
+        report_md_lines.append(f"- ... and {len(report.fresh) - 100} more")
+    with open(os.path.join(output_dir, "transfer-report.md"), "w") as f:
+        f.write("\n".join(report_md_lines))
+
+
 def _apply_manifest_transfer(
     model: torch.nn.Module,
     manifest: dict,
@@ -1418,66 +1609,72 @@ def _apply_manifest_transfer(
         mode=TransferMode.STRICT,
         components=components,
     )
-
-    report_dict = {
-        "source_checkpoint_manifest": str(
+    _configure_transfer_trainability(model, regime)
+    annotate_parameter_sets(model, report)
+    _persist_transfer_report(
+        report,
+        cfg=cfg,
+        output_dir=output_dir,
+        regime=regime,
+        source_manifest=str(
             OmegaConf.select(cfg, "run.pretrained_checkpoint_manifest")
         ),
-        "source_checkpoint_path": str(ckpt_path),
-        "source_checkpoint_sha256": checkpoint_info["sha256"],
-        "transfer_regime": regime,
-        "components": list(components) if components else [],
-        "loaded": report.loaded,
-        "skipped_excluded": report.skipped_excluded,
-        "missing_in_checkpoint": report.missing_in_checkpoint,
-        "unexpected_in_checkpoint": report.unexpected_in_checkpoint,
-        "shape_mismatched": report.shape_mismatched,
-        "dtype_mismatched": report.dtype_mismatched,
-    }
-
-    import json as _json
-
-    report_json_path = os.path.join(output_dir, "transfer-report.json")
-    with open(report_json_path, "w") as f:
-        _json.dump(report_dict, f, indent=2, ensure_ascii=True)
-
-    report_md_lines = [
-        "# Transfer Report",
-        "",
-        f"- **Regime:** {regime}",
-        f"- **Checkpoint:** `{ckpt_path}`",
-        f"- **SHA-256:** `{checkpoint_info['sha256']}`",
-        f"- **Loaded:** {len(report.loaded)}",
-        f"- **Excluded (by design):** {len(report.skipped_excluded)}",
-        f"- **Missing in checkpoint:** {len(report.missing_in_checkpoint)}",
-        f"- **Shape mismatched:** {len(report.shape_mismatched)}",
-        f"- **Dtype mismatched:** {len(report.dtype_mismatched)}",
-        "",
-        "## Loaded Parameters",
-        "",
-    ]
-    for key in report.loaded[:50]:
-        report_md_lines.append(f"- `{key}`")
-    if len(report.loaded) > 50:
-        report_md_lines.append(f"- ... and {len(report.loaded) - 50} more")
-    report_md_lines.extend(["", "## Excluded Parameters", ""])
-    for key in report.skipped_excluded[:50]:
-        report_md_lines.append(f"- `{key}`")
-    if len(report.skipped_excluded) > 50:
-        report_md_lines.append(
-            f"- ... and {len(report.skipped_excluded) - 50} more"
-        )
-
-    report_md_path = os.path.join(output_dir, "transfer-report.md")
-    with open(report_md_path, "w") as f:
-        f.write("\n".join(report_md_lines))
+        source_checkpoint=str(ckpt_path),
+        source_checkpoint_sha256=checkpoint_info["sha256"],
+        provenance={
+            "kind": "pretrained_transfer",
+            "selected_components": list(components) if components else [],
+            "excluded_components": [
+                name
+                for name in ("session_adapter", "router")
+                if name not in (components or ())
+            ],
+        },
+    )
 
     logger.info(
         "Transfer from manifest: loaded=%d excluded=%d regime=%s report=%s",
         len(report.loaded),
         len(report.skipped_excluded),
         regime,
-        report_json_path,
+        os.path.join(output_dir, "transfer-report.json"),
+    )
+
+
+def _apply_random_frozen_control(
+    model: torch.nn.Module, cfg: DictConfig, output_dir: str
+) -> None:
+    """Record and apply the explicit random frozen-backbone control."""
+    regime = "frozen_random_control"
+    trainable, frozen = _configure_transfer_trainability(model, regime)
+    report = TransferReport(
+        fresh=sorted(model.state_dict()),
+        trainable=trainable,
+        frozen=frozen,
+    )
+    _persist_transfer_report(
+        report,
+        cfg=cfg,
+        output_dir=output_dir,
+        regime=regime,
+        provenance={
+            "kind": "random_frozen_backbone_control",
+            "description": (
+                "Randomly initialized temporal_frontend and gru are frozen; "
+                "fresh session_adapter and router remain trainable."
+            ),
+            "selected_components": [],
+            "frozen_components": ["temporal_frontend", "gru"],
+            "trainable_components": ["session_adapter", "router"],
+            "source_manifest": "none",
+            "source_seed": "none",
+            "status": "control_initialized",
+        },
+    )
+    logger.info(
+        "Initialized %s: random frozen-backbone control; report=%s",
+        regime,
+        os.path.join(output_dir, "transfer-report.json"),
     )
 
 
@@ -1993,6 +2190,7 @@ def main(cfg: DictConfig):
 
     # -- Pretrained weight transfer -------------------------------------------
 
+    _validate_pretrained_transfer_configuration(cfg)
     pretrained_ckpt = OmegaConf.select(
         cfg, "run.pretrained_checkpoint", default=None
     )
@@ -2017,6 +2215,20 @@ def main(cfg: DictConfig):
             mode=transfer_mode,
             components=components,
         )
+    elif ckpt_path is not None and OmegaConf.select(
+        cfg, "run.pretrained_checkpoint_manifest", default=None
+    ):
+        # A Lightning resume restores tensor/optimizer state but not the
+        # Python-side ``requires_grad`` contract.  Reapply the regime boundary
+        # without loading source weights a second time.
+        _configure_transfer_trainability(
+            model,
+            str(
+                OmegaConf.select(
+                    cfg, "run.pretrained_transfer_regime", default=None
+                )
+            ),
+        )
     elif OmegaConf.select(cfg, "run.freeze_backbone", default=False):
         if hasattr(model, "transferable_components"):
             frozen_count = 0
@@ -2030,6 +2242,19 @@ def main(cfg: DictConfig):
                 "Froze %d backbone parameters (freeze_backbone=true, no checkpoint).",
                 frozen_count,
             )
+
+    if (
+        OmegaConf.select(cfg, "run.pretrained_transfer_regime", default=None)
+        == "frozen_random_control"
+    ):
+        if checkpoint_manifest is not None or pretrained_ckpt:
+            raise ValueError(
+                "frozen_random_control cannot be combined with pretrained transfer"
+            )
+        _write_or_validate_cell_provenance(
+            cfg, output_dir, resume=ckpt_path is not None
+        )
+        _apply_random_frozen_control(model, cfg, output_dir)
 
     compile_mode = OmegaConf.select(cfg, "run.compile", default=False)
     if compile_mode and torch.cuda.is_available():

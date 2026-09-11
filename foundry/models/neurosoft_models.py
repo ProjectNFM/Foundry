@@ -197,6 +197,12 @@ class NeurosoftConvBiGRU(nn.Module):
     SUPPORTED_MODALITIES = {"eeg", "ecog", "seeg", "ieeg"}
     _TRANSFERABLE_COMPONENTS = ("temporal_frontend", "gru", "router")
     _FROZEN_REPRESENTATION_COMPONENTS = ("temporal_frontend", "gru")
+    TRANSFER_REGIMES = (
+        "full_finetuning",
+        "full_finetuning_reset_router",
+        "frozen_representation",
+        "frozen_random_control",
+    )
 
     def __init__(
         self,
@@ -355,10 +361,14 @@ class NeurosoftConvBiGRU(nn.Module):
         """Declare the selected components for a documented transfer regime."""
         if mode == "full_finetuning":
             return self._TRANSFERABLE_COMPONENTS
-        if mode == "frozen_representation":
+        if mode in {
+            "full_finetuning_reset_router",
+            "frozen_representation",
+            "frozen_random_control",
+        }:
             return self._FROZEN_REPRESENTATION_COMPONENTS
         raise ValueError(
-            "mode must be 'full_finetuning' or 'frozen_representation'"
+            "mode must be one of " + ", ".join(self.TRANSFER_REGIMES)
         )
 
     @staticmethod

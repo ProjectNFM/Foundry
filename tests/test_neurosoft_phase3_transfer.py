@@ -209,6 +209,18 @@ class TestTransferRegimeSelection:
         )
         assert components == ("temporal_frontend", "gru")
 
+    def test_reset_router_selects_only_backbone_components(self):
+        model = _build_target_model()
+        assert model.transferable_components_for_mode(
+            "full_finetuning_reset_router"
+        ) == ("temporal_frontend", "gru")
+
+    def test_random_control_declares_backbone_boundary(self):
+        model = _build_target_model()
+        assert model.transferable_components_for_mode(
+            "frozen_random_control"
+        ) == ("temporal_frontend", "gru")
+
     def test_invalid_regime_raises(self):
         model = _build_target_model()
         with pytest.raises(ValueError, match="mode must be"):
@@ -278,6 +290,35 @@ class TestSourceAdapterExclusion:
 
         router_loaded = [k for k in report.loaded if k.startswith("router.")]
         assert len(router_loaded) > 0, "Router keys must be loaded"
+
+    def test_reset_router_excludes_source_router_and_preserves_target_router(
+        self, tmp_path
+    ):
+        src = _build_source_model()
+        dst = _build_target_model()
+        ckpt = tmp_path / "source.ckpt"
+        _save_lightning_ckpt(src, ckpt)
+        router_before = {
+            k: value.clone()
+            for k, value in dst.state_dict().items()
+            if k.startswith("router.")
+        }
+
+        report = load_pretrained_weights(
+            dst,
+            ckpt,
+            components=dst.transferable_components_for_mode(
+                "full_finetuning_reset_router"
+            ),
+            mode=TransferMode.STRICT,
+        )
+
+        assert not any(key.startswith("router.") for key in report.loaded)
+        assert any(key.startswith("router.") for key in report.skipped_excluded)
+        assert any(key.startswith("router.") for key in report.fresh)
+        for key, value in router_before.items():
+            assert torch.equal(value, dst.state_dict()[key])
+        assert all(parameter.requires_grad for parameter in dst.parameters())
 
     def test_frozen_representation_excludes_router_from_transfer(
         self, tmp_path
@@ -521,6 +562,36 @@ class TestFrozenRepresentationTrainability:
             assert name.startswith("router.") or name.startswith(
                 "session_adapter."
             ), f"Unexpected trainable parameter: {name}"
+
+
+class TestRandomFrozenControl:
+    def test_random_control_freezes_only_random_backbone(self, tmp_path):
+        from main import _apply_random_frozen_control
+        from omegaconf import OmegaConf
+
+        model = _build_target_model()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        _apply_random_frozen_control(
+            model,
+            OmegaConf.create(
+                {"run": {"pretrained_transfer_regime": "frozen_random_control"}}
+            ),
+            str(output_dir),
+        )
+
+        for name, parameter in model.named_parameters():
+            if name.startswith(("temporal_frontend.", "gru.")):
+                assert not parameter.requires_grad
+            else:
+                assert parameter.requires_grad
+        report = json.loads((output_dir / "transfer-report.json").read_text())
+        assert report["provenance"]["kind"] == "random_frozen_backbone_control"
+        assert report["provenance"]["source_manifest"] == "none"
+        assert report["transfer_regime"] == "frozen_random_control"
+        assert report["loaded"] == []
+        assert report["frozen"]
+        assert any(key.startswith("router.") for key in report["fresh"])
 
 
 # ---------------------------------------------------------------------------

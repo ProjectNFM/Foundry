@@ -233,6 +233,32 @@ class TestSourcePretrainingConfigs:
 
 
 class TestTransferConfigs:
+    @pytest.mark.parametrize(
+        "regime,manifest",
+        [
+            ("full_finetuning", "/fake/manifest.json"),
+            ("full_finetuning_reset_router", "/fake/manifest.json"),
+            ("frozen_representation", "/fake/manifest.json"),
+            ("frozen_random_control", None),
+        ],
+    )
+    def test_minipigs_transfer_composes_all_four_regimes(
+        self, _hydra_context, regime, manifest
+    ):
+        overrides = [
+            "experiment=auditory_decoding/neurosoft_conv_bigru_transfer_minipigs",
+            "data.dataset_kwargs.recording_ids=[sub-06_ses-02_task-AcousStim_acq-LH_desc-raw]",
+            f"run.pretrained_transfer_regime={regime}",
+        ]
+        if manifest is not None:
+            overrides.append(f"run.pretrained_checkpoint_manifest={manifest}")
+        cfg = compose(config_name="config", overrides=overrides)
+        assert OmegaConf.select(cfg, "run.pretrained_transfer_regime") == regime
+        assert (
+            OmegaConf.select(cfg, "run.pretrained_checkpoint_manifest")
+            == manifest
+        )
+
     def test_minipigs_transfer_composes_full_finetuning(self, _hydra_context):
         cfg = compose(
             config_name="config",

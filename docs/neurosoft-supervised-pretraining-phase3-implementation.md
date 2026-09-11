@@ -833,11 +833,21 @@ Use strict component-scoped loading.
 |---|---|---|---|
 | `full_finetuning` | `temporal_frontend`, `gru`, `router` | target `session_adapter` | every target parameter |
 | `frozen_representation` | `temporal_frontend`, `gru` | target `session_adapter`, `router` | target adapter and router only |
+| `full_finetuning_reset_router` | `temporal_frontend`, `gru` | target `session_adapter`, `router` | every target parameter |
+| `frozen_random_control` | none (random initialization) | random `temporal_frontend`, `gru`, fresh target adapter/router | target adapter and router only |
 
 The transfer report must show every source adapter tensor as intentionally
-excluded. Missing, shape-mismatched, or dtype-mismatched selected shared
-tensors are fatal. `permissive` remains available only for an explicitly
-documented future architecture-change experiment.
+excluded, and reset-router runs must show source router tensors as excluded
+and target router tensors as fresh. Missing, shape-mismatched, or
+dtype-mismatched selected shared tensors are fatal. The random control must
+have no checkpoint or source seed fields and must be reported as a
+random-frozen-backbone control, never as absent or failed transfer.
+
+The downstream compiler accepts `frozen_random_control` in the same recipe as
+manifest-backed modes, but emits its cells from the eligible target audit
+directly. It emits no manifest or source-seed overrides. Use
+`checkpoint_filter.condition.milestone: step500` plus source seed filters for
+Phase 4C's paired 500-step cells.
 
 Given the same model seed and target config, assert that loading does not
 change the freshly initialized target adapter. For frozen representation,
@@ -866,7 +876,7 @@ source_manifest: ???
 run:
   seed: ???                         # model seed
   pretrained_checkpoint_manifest: null
-  pretrained_transfer_regime: null # full_finetuning/frozen_representation
+  pretrained_transfer_regime: null # one of the four documented regimes
 
 data:
   role: source_pretraining

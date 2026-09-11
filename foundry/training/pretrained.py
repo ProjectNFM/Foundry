@@ -59,6 +59,12 @@ class TransferReport:
     unexpected_in_checkpoint: list[str] = field(default_factory=list)
     shape_mismatched: list[str] = field(default_factory=list)
     dtype_mismatched: list[str] = field(default_factory=list)
+    # Target-side accounting is populated after a transfer is applied.  These
+    # lists make the intended fresh/trainability boundary auditable rather
+    # than requiring callers to infer it from the selected components.
+    fresh: list[str] = field(default_factory=list)
+    trainable: list[str] = field(default_factory=list)
+    frozen: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         lines = [
@@ -68,6 +74,9 @@ class TransferReport:
             f"  unexpected in ckpt:     {len(self.unexpected_in_checkpoint)}",
             f"  shape mismatched:       {len(self.shape_mismatched)}",
             f"  dtype mismatched:       {len(self.dtype_mismatched)}",
+            f"  fresh target tensors:   {len(self.fresh)}",
+            f"  trainable parameters:   {len(self.trainable)}",
+            f"  frozen parameters:      {len(self.frozen)}",
         ]
         return "\n".join(lines)
 
@@ -219,6 +228,32 @@ def _freeze_transferred(
     return frozen_count
 
 
+def annotate_parameter_sets(
+    model: nn.Module,
+    report: TransferReport,
+) -> TransferReport:
+    """Record target-side fresh, trainable, and frozen parameter sets.
+
+    ``TransferReport.skipped_excluded`` describes source checkpoint tensors.
+    This helper separately records the target tensors that remain freshly
+    initialized, which is important for head-reset and random-control runs.
+    """
+    loaded = set(report.loaded)
+    state_names = set(model.state_dict())
+    report.fresh = sorted(state_names - loaded)
+    report.trainable = sorted(
+        name
+        for name, parameter in model.named_parameters()
+        if parameter.requires_grad
+    )
+    report.frozen = sorted(
+        name
+        for name, parameter in model.named_parameters()
+        if not parameter.requires_grad
+    )
+    return report
+
+
 def load_pretrained_weights(
     model: nn.Module,
     checkpoint_path: str | Path,
@@ -356,6 +391,8 @@ def load_pretrained_weights(
             "Froze %d pretrained parameters (freeze_pretrained=true).",
             frozen_count,
         )
+
+    annotate_parameter_sets(model, report)
 
     logger.info(
         "Pretrained transfer from %s (%s mode):\n%s",

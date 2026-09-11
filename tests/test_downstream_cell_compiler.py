@@ -186,6 +186,46 @@ def test_synthetic_end_to_end_exact_compilation(tmp_path: Path) -> None:
     assert len(list(task_configs.glob("task_*.json"))) == 4
 
 
+def test_synthetic_random_control_has_no_source_provenance(
+    tmp_path: Path,
+) -> None:
+    registry, recipe, audit, root = _fixture(tmp_path)
+    payload = yaml.safe_load(recipe.read_text())
+    payload["transfer_regimes"] = [
+        "full_finetuning_reset_router",
+        "frozen_representation",
+        "frozen_random_control",
+    ]
+    payload["species"]["minipigs"]["expected_cells"] = 6
+    payload["species"]["minipigs"]["wandb_groups"] = {
+        "full_finetuning_reset_router": "RESET",
+        "frozen_representation": "FROZEN",
+        "frozen_random_control": "RANDOM",
+    }
+    recipe.write_text(yaml.safe_dump(payload, sort_keys=False))
+
+    cells, metadata = compile_cells(registry, recipe, audit, root)
+    assert metadata["counts"] == {"minipigs": 6}
+    random_rows = [
+        row
+        for row in cells["minipigs"]
+        if row["transfer_regime"] == "frozen_random_control"
+    ]
+    assert len(random_rows) == 2
+    assert all(row["checkpoint_manifest"] is None for row in random_rows)
+    assert all(row["source_selection_seed"] is None for row in random_rows)
+    assert all(
+        not any(
+            "pretrained_checkpoint_manifest" in value
+            for value in row["overrides"]
+        )
+        for row in random_rows
+    )
+    assert {row["wandb_group"] for row in random_rows} == {"RANDOM"}
+    assert len({row["cell_id"] for row in cells["minipigs"]}) == 6
+    assert len({row["wandb_run_id"] for row in cells["minipigs"]}) == 6
+
+
 @pytest.mark.parametrize("field", ["manifest_hash", "checkpoint_sha256"])
 def test_registry_hash_disagreement_is_rejected(
     tmp_path: Path, field: str

@@ -45,10 +45,12 @@ run:
   log_level: INFO
   evaluate_test: false
   pretrained_checkpoint: null
-  pretrained_checkpoint_manifest: ???
+  # Source-free cells (including frozen_random_control) deliberately leave
+  # this unset; manifest-backed regimes override it per compiled cell.
+  pretrained_checkpoint_manifest: null
   pretrained_checkpoint_manifest_hash: null
   pretrained_checkpoint_sha256: null
-  pretrained_transfer_regime: ???
+  pretrained_transfer_regime: null
   cell_id: uncompiled_monkey_transfer
   checkpoint_set_id: null
   checkpoint_id: null
