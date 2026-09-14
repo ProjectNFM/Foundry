@@ -1,6 +1,6 @@
 # Phase 4E Runtime Packing Audit
 
-**Status:** Draft
+**Status:** In Progress
 **Date started:** 2026-09-14
 **Parent experiment:** [Phase 4E -- Validation-Loss Checkpoint Transfer Learning Curves](20260914-MS-validation-loss-checkpoint-transfer-learning-curves.md)
 **Follow-up experiments:** TBD
@@ -139,6 +139,27 @@ uv run python main.py \
 - Candidate-specific `tasks_per_node`, `cpus_per_task`, and
   `hyperparameters.num_workers` from
   `launch/phase4e/runtime-audit/manifest.json`.
+
+### Launch record
+
+All arrays use immutable commit `58dd5e00`, Mila `main`, one RTX 8000, 32 GB,
+and `cn-c004` excluded. Each array contains two packed allocations, ordered as
+one 5% pack followed by one 100% pack:
+
+| Configuration | Slurm array | Snapshot bundle suffix |
+|---|---|---|
+| Minipig 4/1/1 | `10791170_[0-1]` | `20260914T175743_..._b5a94673` |
+| Minipig 4/1/0 | `10791172_[0-1]` | `20260914T175802_..._e6d2b94e` |
+| Minipig 8/1/0 | `10791204_[0-1]` | `20260914T175837_..._b4032400` |
+| Monkey 2/2/1 | `10791209_[0-1]` | `20260914T175918_..._661e0ffb` |
+| Monkey 2/1/0 | `10791214_[0-1]` | `20260914T180002_..._80f5691a` |
+| Monkey 4/1/0 | `10791215_[0-1]` | `20260914T180031_..._8766f503` |
+
+The full absolute snapshot paths are machine-recorded in the audit manifest.
+`10791170_0` completed and `10791170_1` was already running on `main` when
+the account QOS left the other five arrays serialized. On explicit direction,
+only those five still-pending arrays were cancelled before starting and will be
+resubmitted unchanged to `long`; no production array was launched.
 
 ## Results
 
