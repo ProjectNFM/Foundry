@@ -18,6 +18,8 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.colors import TwoSlopeNorm
+from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
 import wandb
@@ -44,6 +46,18 @@ CONDITION_ORDER = [
     "scratch_uniform",
     "scratch_adapter_warmup",
 ]
+TRANSFER_CONDITIONS = CONDITION_ORDER[:4]
+LR_ORDER = [0.0003, 0.0015, 0.003]
+CONDITION_LABELS = {
+    "transfer_uniform": "Transfer\nuniform",
+    "transfer_discriminative": "Transfer\ndiscriminative",
+    "transfer_adapter_warmup_uniform": "Transfer + adapter warmup\nuniform",
+    "transfer_adapter_warmup_discriminative": (
+        "Transfer + adapter warmup\ndiscriminative"
+    ),
+    "scratch_uniform": "Scratch\nuniform",
+    "scratch_adapter_warmup": "Scratch + adapter warmup",
+}
 
 
 def nested(value: dict[str, Any], *keys: str) -> Any:
@@ -234,6 +248,456 @@ def bootstrap_interval(
     return float(np.quantile(draws, 0.025)), float(np.quantile(draws, 0.975))
 
 
+def format_lr(value: float) -> str:
+    return f"{value:g}"
+
+
+def plot_paired_forest(summary: pd.DataFrame) -> None:
+    """Plot readable horizontal paired estimates with one facet per species."""
+    metric_specs = [
+        (
+            "f1_delta",
+            "Transfer minus matched scratch F1",
+            "supported macro-F1",
+        ),
+        (
+            "stable_step_saved",
+            "Steps saved versus matched scratch",
+            "optimizer steps",
+        ),
+    ]
+    fig, axes = plt.subplots(
+        2,
+        2,
+        figsize=(16, 14),
+        sharex="col",
+        constrained_layout=True,
+    )
+    for column, (metric, title, xlabel) in enumerate(metric_specs):
+        plotted = summary[summary.metric.eq(metric)].copy()
+        limit = float(
+            np.nanmax(
+                np.abs(plotted[["ci_low", "ci_high"]].to_numpy(dtype=float))
+            )
+            * 1.12
+        )
+        for row, species in enumerate(("minipigs", "monkeys")):
+            axis = axes[row, column]
+            species_data = plotted[plotted.species.eq(species)].copy()
+            species_data["condition_order"] = species_data.condition.map(
+                {
+                    condition: index
+                    for index, condition in enumerate(TRANSFER_CONDITIONS)
+                }
+            )
+            species_data["lr_order"] = species_data.base_lr.map(
+                {lr: index for index, lr in enumerate(LR_ORDER)}
+            )
+            species_data = species_data.sort_values(
+                ["condition_order", "lr_order"]
+            )
+            positions = np.arange(len(species_data))
+            axis.errorbar(
+                species_data["mean"],
+                positions,
+                xerr=[
+                    species_data["mean"] - species_data["ci_low"],
+                    species_data["ci_high"] - species_data["mean"],
+                ],
+                fmt="o",
+                color="#2878b5",
+                ecolor="#2878b5",
+                capsize=3,
+            )
+            axis.axvline(0, color="black", linewidth=0.8)
+            axis.set_xlim(-limit, limit)
+            axis.set_yticks(positions)
+            axis.set_yticklabels(
+                [
+                    f"{CONDITION_LABELS[row.condition]}  |  LR {format_lr(row.base_lr)}"
+                    for row in species_data.itertuples()
+                ],
+                fontsize=8,
+            )
+            axis.grid(axis="x", alpha=0.2)
+            axis.set_title(species.capitalize())
+            if row == 1:
+                axis.set_xlabel(xlabel)
+        axes[0, column].set_title(f"{title}\nMinipigs", fontsize=11)
+        axes[1, column].set_title(f"{title}\nMonkeys", fontsize=11)
+    fig.suptitle(
+        "Paired transfer effects with bootstrap 95% intervals", fontsize=15
+    )
+    fig.savefig(
+        figures_dir(__file__) / f"{PREFIX}_paired_effects.png",
+        dpi=180,
+        bbox_inches="tight",
+    )
+    plt.close(fig)
+
+
+def draw_heatmap(
+    axis: Any,
+    data: pd.DataFrame,
+    value_column: str,
+    row_order: list[str],
+    norm: Any,
+    cmap: str,
+    value_format: str,
+) -> Any:
+    matrix = data.pivot_table(
+        index="condition",
+        columns="base_lr",
+        values=value_column,
+        aggfunc="mean",
+    ).reindex(index=row_order, columns=LR_ORDER)
+    image = axis.imshow(
+        matrix.to_numpy(dtype=float), aspect="auto", cmap=cmap, norm=norm
+    )
+    axis.set_xticks(range(len(LR_ORDER)))
+    axis.set_xticklabels([format_lr(lr) for lr in LR_ORDER])
+    axis.set_yticks(range(len(row_order)))
+    axis.set_yticklabels(
+        [CONDITION_LABELS[condition] for condition in row_order]
+    )
+    axis.set_xlabel("Base learning rate")
+    for y_index, row in enumerate(matrix.to_numpy(dtype=float)):
+        for x_index, value in enumerate(row):
+            if np.isfinite(value):
+                normalized = norm(value) if norm is not None else 0.5
+                text_color = "white" if normalized > 0.62 else "black"
+                axis.text(
+                    x_index,
+                    y_index,
+                    value_format.format(value),
+                    ha="center",
+                    va="center",
+                    color=text_color,
+                    fontsize=9,
+                )
+    axis.tick_params(length=0)
+    for edge in axis.spines.values():
+        edge.set_visible(False)
+    return image
+
+
+def plot_effect_heatmaps(summary: pd.DataFrame) -> None:
+    """Plot paired F1 and speed effects as species-faceted heatmaps."""
+    metric_specs = [
+        ("f1_delta", "Δ test F1", "{:+.3f}"),
+        ("stable_step_saved", "Steps saved", "{:+.0f}"),
+    ]
+    fig, axes = plt.subplots(
+        2, 2, figsize=(15, 10), constrained_layout=True, squeeze=False
+    )
+    for row, (metric, label, value_format) in enumerate(metric_specs):
+        plotted = summary[summary.metric.eq(metric)].copy()
+        maximum = float(
+            np.nanmax(
+                np.abs(plotted[["ci_low", "ci_high"]].to_numpy(dtype=float))
+            )
+        )
+        norm = TwoSlopeNorm(vmin=-maximum, vcenter=0, vmax=maximum)
+        for column, species in enumerate(("minipigs", "monkeys")):
+            axis = axes[row, column]
+            image = draw_heatmap(
+                axis,
+                plotted[plotted.species.eq(species)],
+                "mean",
+                TRANSFER_CONDITIONS,
+                norm,
+                "RdBu_r",
+                value_format,
+            )
+            axis.set_title(f"{species.capitalize()} — {label}")
+            colorbar = fig.colorbar(image, ax=axis, fraction=0.046, pad=0.04)
+            colorbar.ax.set_ylabel(label, rotation=270, labelpad=14)
+    fig.suptitle(
+        "Transfer effects versus matched scratch baselines", fontsize=15
+    )
+    fig.savefig(
+        figures_dir(__file__) / f"{PREFIX}_effect_heatmaps.png",
+        dpi=180,
+        bbox_inches="tight",
+    )
+    plt.close(fig)
+
+
+def plot_absolute_heatmaps(condition_summary: pd.DataFrame) -> None:
+    """Plot absolute test F1 for every recipe, species, and learning rate."""
+    value_column = "mean_test_supported_f1"
+    minimum = float(condition_summary[value_column].min())
+    maximum = float(condition_summary[value_column].max())
+    norm = plt.Normalize(vmin=minimum, vmax=maximum)
+    fig, axes = plt.subplots(
+        1, 2, figsize=(15, 7), constrained_layout=True, squeeze=False
+    )
+    for column, species in enumerate(("minipigs", "monkeys")):
+        axis = axes[0, column]
+        image = draw_heatmap(
+            axis,
+            condition_summary[condition_summary.species.eq(species)],
+            value_column,
+            CONDITION_ORDER,
+            norm,
+            "viridis",
+            "{:.3f}",
+        )
+        axis.axhline(len(TRANSFER_CONDITIONS) - 0.5, color="white", linewidth=2)
+        axis.set_title(species.capitalize())
+        colorbar = fig.colorbar(image, ax=axis, fraction=0.046, pad=0.04)
+        colorbar.ax.set_ylabel(
+            "mean test supported macro-F1", rotation=270, labelpad=14
+        )
+    fig.suptitle(
+        "Absolute test performance by recipe and learning rate", fontsize=15
+    )
+    fig.savefig(
+        figures_dir(__file__) / f"{PREFIX}_absolute_performance.png",
+        dpi=180,
+        bbox_inches="tight",
+    )
+    plt.close(fig)
+
+
+def plot_subject_effects(paired: pd.DataFrame) -> None:
+    """Show subject-level paired F1 effects rather than only aggregate intervals."""
+    colors = {
+        lr: color
+        for lr, color in zip(LR_ORDER, ("#2166ac", "#4dac26", "#b2182b"))
+    }
+    figure, axes = plt.subplots(
+        1, 2, figsize=(16, 8), sharex=True, constrained_layout=True
+    )
+    all_values = paired["f1_delta"].to_numpy(dtype=float)
+    limit = float(np.nanmax(np.abs(all_values)) * 1.18)
+    for axis, species in zip(axes, ("minipigs", "monkeys")):
+        species_data = paired[paired.species.eq(species)]
+        for y_index, condition in enumerate(TRANSFER_CONDITIONS):
+            for lr_index, lr in enumerate(LR_ORDER):
+                subset = species_data[
+                    species_data.condition.eq(condition)
+                    & np.isclose(species_data.base_lr, lr)
+                ]
+                if subset.empty:
+                    continue
+                jitter = np.linspace(-0.07, 0.07, len(subset))
+                y = y_index + (lr_index - 1) * 0.13
+                axis.scatter(
+                    subset.f1_delta,
+                    y + jitter,
+                    color=colors[lr],
+                    alpha=0.75,
+                    s=28,
+                    edgecolor="white",
+                    linewidth=0.4,
+                )
+                axis.scatter(
+                    subset.f1_delta.mean(),
+                    y,
+                    color=colors[lr],
+                    marker="D",
+                    edgecolor="black",
+                    linewidth=0.8,
+                    s=42,
+                    zorder=3,
+                )
+        axis.axvline(0, color="black", linewidth=0.8)
+        axis.set_xlim(-limit, limit)
+        axis.set_yticks(range(len(TRANSFER_CONDITIONS)))
+        axis.set_yticklabels([CONDITION_LABELS[c] for c in TRANSFER_CONDITIONS])
+        axis.invert_yaxis()
+        axis.set_title(species.capitalize())
+        axis.set_xlabel("Subject-level transfer minus scratch test F1")
+        axis.grid(axis="x", alpha=0.2)
+    axes[0].legend(
+        handles=[
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                label=f"LR {format_lr(lr)}",
+                markerfacecolor=colors[lr],
+                markersize=7,
+            )
+            for lr in LR_ORDER
+        ],
+        loc="lower left",
+        frameon=False,
+    )
+    figure.suptitle("Subject-level paired F1 effects", fontsize=15)
+    figure.savefig(
+        figures_dir(__file__) / f"{PREFIX}_subject_paired_effects.png",
+        dpi=180,
+        bbox_inches="tight",
+    )
+    plt.close(figure)
+
+
+def plot_tradeoff(summary: pd.DataFrame) -> None:
+    """Show the accuracy/speed trade-off for each recipe and learning rate."""
+    wide = summary.pivot_table(
+        index=["species", "condition", "base_lr"],
+        columns="metric",
+        values="mean",
+    ).reset_index()
+    colors = {
+        condition: color
+        for condition, color in zip(
+            TRANSFER_CONDITIONS, plt.get_cmap("tab10").colors
+        )
+    }
+    markers = {lr: marker for lr, marker in zip(LR_ORDER, ("o", "s", "^"))}
+    x_limit = float(
+        np.nanmax(np.abs(wide.f1_delta.to_numpy(dtype=float))) * 1.25
+    )
+    y_values = wide.stable_step_saved.to_numpy(dtype=float)
+    y_padding = float((y_values.max() - y_values.min()) * 0.08)
+    fig, axes = plt.subplots(
+        1, 2, figsize=(15, 7), sharex=True, sharey=True, constrained_layout=True
+    )
+    for axis, species in zip(axes, ("minipigs", "monkeys")):
+        species_data = wide[wide.species.eq(species)]
+        for row in species_data.itertuples():
+            axis.scatter(
+                row.f1_delta,
+                row.stable_step_saved,
+                color=colors[row.condition],
+                marker=markers[row.base_lr],
+                s=90,
+                edgecolor="black",
+                linewidth=0.5,
+            )
+        axis.axvline(0, color="black", linewidth=0.8)
+        axis.axhline(0, color="black", linewidth=0.8)
+        axis.set_title(species.capitalize())
+        axis.set_xlabel("Δ test F1 versus matched scratch")
+        axis.grid(alpha=0.2)
+    axes[0].set_ylabel("Steps saved versus matched scratch")
+    axes[0].set_xlim(-x_limit, x_limit)
+    axes[0].set_ylim(y_values.min() - y_padding, y_values.max() + y_padding)
+    condition_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            label=CONDITION_LABELS[c].replace("\n", " "),
+            markerfacecolor=colors[c],
+            markersize=8,
+        )
+        for c in TRANSFER_CONDITIONS
+    ]
+    lr_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker=markers[lr],
+            color="black",
+            linestyle="",
+            label=f"LR {format_lr(lr)}",
+            markersize=8,
+        )
+        for lr in LR_ORDER
+    ]
+    axes[1].legend(
+        handles=condition_handles + lr_handles,
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1),
+        frameon=False,
+    )
+    fig.suptitle(
+        "Accuracy–speed trade-off relative to matched scratch", fontsize=15
+    )
+    fig.savefig(
+        figures_dir(__file__) / f"{PREFIX}_tradeoff.png",
+        dpi=180,
+        bbox_inches="tight",
+    )
+    plt.close(fig)
+
+
+def plot_absolute_tradeoff(condition_summary: pd.DataFrame) -> None:
+    """Show absolute F1 and convergence, including the scratch controls."""
+    colors = {
+        condition: color
+        for condition, color in zip(
+            CONDITION_ORDER, plt.get_cmap("tab10").colors
+        )
+    }
+    markers = {lr: marker for lr, marker in zip(LR_ORDER, ("o", "s", "^"))}
+    x_values = condition_summary.mean_test_supported_f1.to_numpy(dtype=float)
+    y_values = condition_summary.mean_stable_step.to_numpy(dtype=float)
+    x_padding = float((x_values.max() - x_values.min()) * 0.08)
+    y_padding = float((y_values.max() - y_values.min()) * 0.08)
+    fig, axes = plt.subplots(
+        1, 2, figsize=(16, 8), sharex=True, sharey=True, constrained_layout=True
+    )
+    for axis, species in zip(axes, ("minipigs", "monkeys")):
+        species_data = condition_summary[condition_summary.species.eq(species)]
+        for row in species_data.itertuples():
+            axis.scatter(
+                row.mean_test_supported_f1,
+                row.mean_stable_step,
+                color=colors[row.condition],
+                marker=markers[row.base_lr],
+                s=90,
+                edgecolor="black",
+                linewidth=0.5,
+            )
+        axis.set_title(species.capitalize())
+        axis.set_xlabel("Mean test supported macro-F1")
+        axis.grid(alpha=0.2)
+        axis.invert_yaxis()
+    axes[0].set_ylabel(
+        "Mean stable validation endpoint (optimizer steps)\nlower is better"
+    )
+    axes[0].set_xlim(x_values.min() - x_padding, x_values.max() + x_padding)
+    axes[0].set_ylim(y_values.max() + y_padding, y_values.min() - y_padding)
+    condition_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            label=CONDITION_LABELS[condition].replace("\n", " "),
+            markerfacecolor=colors[condition],
+            markersize=8,
+        )
+        for condition in CONDITION_ORDER
+    ]
+    lr_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker=markers[lr],
+            color="black",
+            linestyle="",
+            label=f"LR {format_lr(lr)}",
+            markersize=8,
+        )
+        for lr in LR_ORDER
+    ]
+    axes[1].legend(
+        handles=condition_handles + lr_handles,
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1),
+        frameon=False,
+    )
+    fig.suptitle(
+        "Absolute accuracy–convergence trade-off\n"
+        "higher F1 and earlier convergence are better",
+        fontsize=15,
+    )
+    fig.savefig(
+        figures_dir(__file__) / f"{PREFIX}_absolute_tradeoff.png",
+        dpi=180,
+        bbox_inches="tight",
+    )
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -356,57 +820,12 @@ def main() -> None:
         out_csv / f"{PREFIX}_condition_summary.csv", index=False
     )
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5), constrained_layout=True)
-    for axis, metric, title, ylabel in [
-        (
-            axes[0],
-            "f1_delta",
-            "Transfer minus matched scratch F1",
-            "supported macro-F1",
-        ),
-        (
-            axes[1],
-            "stable_step_saved",
-            "Steps saved versus matched scratch",
-            "optimizer steps",
-        ),
-    ]:
-        plotted = summary[summary.metric.eq(metric)].copy()
-        if plotted.empty:
-            axis.text(
-                0.5,
-                0.5,
-                "No eligible paired results",
-                ha="center",
-                va="center",
-                transform=axis.transAxes,
-            )
-            axis.set_axis_off()
-            continue
-        positions = np.arange(len(plotted))
-        axis.errorbar(
-            positions,
-            plotted["mean"],
-            yerr=[
-                plotted["mean"] - plotted["ci_low"],
-                plotted["ci_high"] - plotted["mean"],
-            ],
-            fmt="o",
-        )
-        axis.axhline(0, color="black", linewidth=0.8)
-        axis.set_xticks(positions)
-        axis.set_xticklabels(
-            [
-                f"{row.species}\n{row.condition}\n{row.base_lr:g}"
-                for row in plotted.itertuples()
-            ],
-            rotation=70,
-            ha="right",
-            fontsize=7,
-        )
-        axis.set_title(title)
-        axis.set_ylabel(ylabel)
-    fig.savefig(figures_dir(__file__) / f"{PREFIX}_paired_effects.png", dpi=160)
+    plot_paired_forest(summary)
+    plot_effect_heatmaps(summary)
+    plot_absolute_heatmaps(condition_summary)
+    plot_subject_effects(paired)
+    plot_tradeoff(summary)
+    plot_absolute_tradeoff(condition_summary)
     print("Coverage by species and condition:")
     print(coverage.to_string(index=False))
     print("\nEligible condition means:")

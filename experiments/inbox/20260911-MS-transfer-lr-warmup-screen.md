@@ -1,6 +1,6 @@
 # Phase 4D -- Transfer Recipe and LR Warmup Screen
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-09-11
 **Parent experiment:** [Phase 4C -- 500-Step Head Reset and Backbone Freezing](20260911-MS-500step-head-reset-transfer.md)
 **Follow-up experiments:** TBD
@@ -202,18 +202,90 @@ monkeys Slurm array `10763304_[0-58]` (234 cells), snapshot
 
 ## Results
 
-TBD
+### Summary
+
+All 954 planned cells produced finished W&B runs with test supported macro-F1
+and stable validation endpoints: 720/720 minipig cells and 234/234 monkey
+cells.  The first relaunch exposed a separate best-checkpoint loading failure
+at test time; after setting `weights_only=False` for the Lightning test
+restore and rerunning the 469 affected cells, all retry arrays completed
+successfully.
+
+The dominant result is strong learning-rate sensitivity.  The low base LR
+(`3e-4`) is usually harmful, while the high base LR (`3e-3`) makes
+discriminative transfer competitive with or better than matched scratch.  The
+adapter-warmup recipes do not provide a consistent additional benefit.
+
+### Metrics
+
+The primary comparison is transfer minus matched scratch test supported
+macro-F1, with 95% subject-bootstrap intervals.  Representative high-LR
+discriminative results are:
+
+| Species | Recipe | Base LR | Δ test F1 | 95% interval | Steps saved |
+|---|---|---:|---:|---:|---:|
+| Minipigs | Transfer, discriminative | 0.003 | +0.019 | [+0.002, +0.040] | -94 |
+| Minipigs | Transfer + adapter warmup, discriminative | 0.003 | +0.018 | [+0.001, +0.040] | -591 |
+| Monkeys | Transfer, discriminative | 0.003 | +0.017 | [-0.008, +0.038] | -1008 |
+| Monkeys | Transfer + adapter warmup, discriminative | 0.003 | +0.019 | [-0.002, +0.040] | -1299 |
+
+At least one recipe/LR is performance-safe under the prespecified lower-bound
+criterion in each species.  However, the strongest-F1 arms generally do not
+converge faster than scratch: their steps-saved estimates are negative,
+especially for monkeys.
+
+### Analysis
+
+The analysis is reproducible with:
+
+```bash
+uv run python analysis/20260911-MS-transfer-lr-warmup-screen_analysis.py
+```
+
+It fetches the W&B runs, validates the compiled cell provenance, computes
+subject-balanced paired transfer-minus-scratch effects, and writes the CSV
+tables under `analysis/csv/`.
+
+### Figures
+
+The main overview is the paired-effect heatmap, with supporting views for
+absolute performance, subject-level variability, and the accuracy/speed
+trade-off:
+
+![Transfer effects versus matched scratch](../../analysis/figures/20260911-MS-transfer-lr-warmup-screen_effect_heatmaps.png)
+
+![Absolute test performance](../../analysis/figures/20260911-MS-transfer-lr-warmup-screen_absolute_performance.png)
+
+![Subject-level paired effects](../../analysis/figures/20260911-MS-transfer-lr-warmup-screen_subject_paired_effects.png)
+
+![Accuracy-speed trade-off](../../analysis/figures/20260911-MS-transfer-lr-warmup-screen_tradeoff.png)
+
+![Absolute accuracy-convergence trade-off](../../analysis/figures/20260911-MS-transfer-lr-warmup-screen_absolute_tradeoff.png)
+
+![Paired effect intervals](../../analysis/figures/20260911-MS-transfer-lr-warmup-screen_paired_effects.png)
 
 ## Conclusions
 
-TBD
+The hypothesis is only partially supported.  The results do not establish a
+major benefit from this checkpoint: recipe effects are modest, noisy, and
+species-dependent.  There is evidence that the apparent transfer failure is
+partly an optimization mismatch, since the discriminative transfer arms at a
+high base LR recover the large F1 deficit and are performance-safe in both
+species.  However, adapter/router warmup does not provide a consistent
+additional benefit.
+
+The expected convergence advantage was not observed.  The stronger-F1
+transfer settings are generally slower than matched scratch, so transfer
+cannot yet be claimed to provide a speed benefit.  Because the target seed was
+fixed to 42, these results also do not establish seed-robust superiority or a
+general hyperparameter optimum.
 
 ## Notes for future experiments
 
-- If adapter warmup and discriminative LR both fail across the LR ladder,
-  prioritize an architectural interface test rather than expanding the
-  optimizer search.
-- If one recipe is clearly stable and performance-safe, rerun only that
-  recipe at target seeds 43 and 44 before making a seed-robust transfer claim.
-- If scratch is highly LR-sensitive, freeze the selected target recipe before
-  evaluating any architectural change so transfer comparisons remain fair.
+### Follow-up: improved source checkpoints
+
+Rerun source pretraining with a maximum of 10K steps instead of 50K steps, and
+select the best checkpoint using validation loss rather than validation F1.
+Use the resulting checkpoints for downstream transfer evaluation across the
+planned target-data training percentages.  This is the sole follow-up planned
+from this experiment.
