@@ -148,17 +148,18 @@ export FOUNDRY_CHECKPOINT_ROOT=/network/scratch/s/sobralm/foundry-checkpoints
 # Production launch requires a clean, committed repository.
 git status --short
 
-# Generate target-excluded source manifests and launch three source seeds per
-# exclusion with max_steps=10000 and val_check_interval=100.  The source
-# recipe must retain the callback-defined 1/3/10/30/100% milestones and monitor
-# val/loss (mode=min) for a separate loss-selected manifest.
+# Verify the existing target-excluded source manifests and generate three
+# paired source-seed cells per exclusion.  Each cell has a fixed 10K-step
+# budget, validation every 100 steps, no early stopping, retained
+# 1/3/10/30/100% milestones, and a separate val/loss-selected best manifest.
 uv run python tools/generate_phase4e_source_registry.py \
-  --audit docs/neurosoft-phase0-audit.json \
   --output-dir launch/phase4e
 
 uv run python main.py \
   experiment=pretraining/neurosoft_conv_bigru_supervised_minipigs \
-  trainer.max_steps=10000 trainer.val_check_interval=100 \
+  run.group=PHASE4E_VALIDATION_LOSS_SOURCE_MINIPIGS \
+  hydra.sweep.dir=/network/scratch/s/sobralm/runs/PHASE4E_VALIDATION_LOSS_SOURCE_MINIPIGS \
+  'hydra.sweep.subdir=${run.name}' \
   hydra/launcher=slurm_default hydra.launcher.partition=long \
   hydra.launcher.gres=gpu:rtx8000:1 \
   hydra.launcher.cell_list=launch/phase4e/phase4e-source-minipigs.jsonl \
@@ -167,15 +168,23 @@ uv run python main.py \
 
 uv run python main.py \
   experiment=pretraining/neurosoft_conv_bigru_supervised_monkeys \
-  trainer.max_steps=10000 trainer.val_check_interval=100 \
+  run.group=PHASE4E_VALIDATION_LOSS_SOURCE_MONKEYS \
+  hydra.sweep.dir=/network/scratch/s/sobralm/runs/PHASE4E_VALIDATION_LOSS_SOURCE_MONKEYS \
+  'hydra.sweep.subdir=${run.name}' \
   hydra/launcher=slurm_default hydra.launcher.partition=long \
   hydra.launcher.gres=gpu:rtx8000:1 \
   hydra.launcher.cell_list=launch/phase4e/phase4e-source-monkeys.jsonl \
   hydra.launcher.tasks_per_node=2 hydra.launcher.cpus_per_task=2 \
   hydra.launcher.mem_gb=32 -m
 
-# After source manifests pass hash/identity audits, compile only the
-# loss-selected checkpoint for each downstream cell plus matched scratch.
+# After all source jobs finish, construct and validate the immutable registry
+# from their loss-selected manifests, then compile only the selected checkpoint
+# for each downstream transfer cell plus its matched scratch control.
+uv run python tools/generate_phase4e_source_registry.py \
+  --registry --output-dir launch/checkpoint_sets \
+  --run-root /network/scratch/s/sobralm/runs \
+  --checkpoint-root "$FOUNDRY_CHECKPOINT_ROOT"
+
 uv run python tools/compile_downstream_cells.py \
   --registry launch/checkpoint_sets/phase4e-validation-loss.jsonl \
   --recipe configs/downstream_recipes/phase4e_validation_loss_learning_curves.yaml \

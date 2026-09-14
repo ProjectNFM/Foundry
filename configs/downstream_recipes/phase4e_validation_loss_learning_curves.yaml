@@ -1,0 +1,53 @@
+schema: foundry-downstream-recipe
+version: 1
+recipe_id: phase4e-validation-loss-learning-curves
+output_stem: phase4e-transfer-learning-curves
+audit_path: docs/neurosoft-phase0-audit.json
+eligible_session_selection:
+  eligible: true
+base_experiments:
+  minipigs: auditory_decoding/neurosoft_conv_bigru_transfer_minipigs
+  monkeys: auditory_decoding/neurosoft_conv_bigru_transfer_monkeys
+transfer_regimes: [full_finetuning_reset_router]
+target_training_fractions: [0.05, 0.10, 0.25, 0.50, 1.00]
+target_finetuning_seeds: [42, 43, 44]
+expected_source_seed_pairs: [[42, 42], [43, 43], [44, 44]]
+evaluate_test: true
+fixed_overrides:
+  - hyperparameters.warmup_fraction=0.1
+  - hyperparameters.start_lr_factor=0.0001
+  - hyperparameters.scheduler_name=phased
+  - hyperparameters.scheduler_interval=step
+  - hyperparameters.hold=0
+  - hyperparameters.decay=0
+condition_matrix:
+  - id: transfer_validation_loss
+    source: pretrained
+    transfer_regime: full_finetuning_reset_router
+    adapter_warmup_steps: 0
+    backbone_lr_multiplier: 0.1
+  - id: scratch_matched
+    source: scratch
+    transfer_regime: null
+    adapter_warmup_steps: 0
+    backbone_lr_multiplier: null
+learning_rates: [0.003]
+species:
+  minipigs:
+    wandb_groups:
+      transfer_validation_loss: PHASE4E_VALIDATION_LOSS_TRANSFER_MINIPIGS
+      scratch_matched: PHASE4E_VALIDATION_LOSS_SCRATCH_MINIPIGS
+    wandb_tags_by_regime:
+      transfer_validation_loss: [transfer, minipigs, 8band, phase4e, validation-loss-selected, learning-curves, discriminative]
+      scratch_matched: [scratch, minipigs, 8band, phase4e, learning-curves, matched-control]
+    expected_checkpoints: 21
+    expected_cells: 2400
+  monkeys:
+    wandb_groups:
+      transfer_validation_loss: PHASE4E_VALIDATION_LOSS_TRANSFER_MONKEYS
+      scratch_matched: PHASE4E_VALIDATION_LOSS_SCRATCH_MONKEYS
+    wandb_tags_by_regime:
+      transfer_validation_loss: [transfer, monkeys, 8band, phase4e, validation-loss-selected, learning-curves, discriminative]
+      scratch_matched: [scratch, monkeys, 8band, phase4e, learning-curves, matched-control]
+    expected_checkpoints: 15
+    expected_cells: 780

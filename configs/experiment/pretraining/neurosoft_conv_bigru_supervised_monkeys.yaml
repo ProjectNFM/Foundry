@@ -13,6 +13,9 @@ model:
   num_samples: 1000
 
 data:
+  # Source pretraining runs from a launcher snapshot; resolve the processed
+  # dataset from the shared path supplied to the launcher, just like transfer.
+  root: ${oc.env:FOUNDRY_DATA_ROOT,./data/processed/}
   split_type: intrasession-causal
   audit_json: docs/neurosoft-phase0-audit.json
   audit_species: monkeys

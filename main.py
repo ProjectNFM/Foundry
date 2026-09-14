@@ -756,7 +756,15 @@ def _build_trainer(cfg: DictConfig):
     Converts callback dicts to lists when Hydra composes them as a mapping.
     """
     if OmegaConf.is_dict(cfg.trainer.get("callbacks")):
-        cfg.trainer.callbacks = list(cfg.trainer.callbacks.values())
+        # A callback may be intentionally disabled with a Hydra ``null``
+        # override (for example, fixed-budget source pretraining disables
+        # early stopping). Lightning does not accept ``None`` in its callback
+        # list, so remove those entries while preserving the configured order.
+        cfg.trainer.callbacks = [
+            callback
+            for callback in cfg.trainer.callbacks.values()
+            if callback is not None
+        ]
     return instantiate(cfg.trainer)
 
 
@@ -1896,10 +1904,31 @@ def _emit_source_checkpoint_manifests(
         trained_on["optimizer_steps"] = compute_snap.get("optimizer_steps", 0)
         return trained_on
 
-    def _build_selection(compute_snap: dict) -> dict:
+    def _build_selection(
+        compute_snap: dict,
+        *,
+        monitor: str | None = None,
+        monitor_value: float | None = None,
+    ) -> dict:
+        """Build selection provenance for the checkpoint being published.
+
+        The best checkpoint is selected by ``ModelCheckpoint``, which need
+        not use the same monitor as compute accounting.  Recording the latter
+        here silently mislabels a loss-selected source checkpoint as an F1
+        checkpoint, so prefer the concrete checkpoint callback values when
+        they are supplied.
+        """
         selection: dict = {
-            "monitor": (compute_cb.monitor if compute_cb else "unknown"),
-            "monitor_value": compute_snap.get("monitor_value", 0.0),
+            "monitor": (
+                monitor
+                if monitor is not None
+                else (compute_cb.monitor if compute_cb else "unknown")
+            ),
+            "monitor_value": (
+                monitor_value
+                if monitor_value is not None
+                else compute_snap.get("monitor_value", 0.0)
+            ),
             "source_session_scores": {},
         }
         if session_metrics_cb is not None:
@@ -1943,12 +1972,22 @@ def _emit_source_checkpoint_manifests(
                 checkpoint_relative_path = _publish_source_checkpoint(
                     best_path, cfg
                 )
+                best_score = model_ckpt_cb.best_model_score
+                if best_score is None:
+                    raise RuntimeError(
+                        "ModelCheckpoint has a best_model_path but no "
+                        "best_model_score"
+                    )
                 json_path, md_path = write_checkpoint_manifest(
                     best_path,
                     manifest_dir,
                     kind="best",
                     trained_on=_build_trained_on(snap),
-                    selection=_build_selection(snap),
+                    selection=_build_selection(
+                        snap,
+                        monitor=str(model_ckpt_cb.monitor),
+                        monitor_value=float(best_score.detach().cpu()),
+                    ),
                     compute=_build_compute(snap),
                     recipe=recipe,
                     normalization_artifact_hashes=norm_hashes,
@@ -1978,11 +2017,12 @@ def _emit_source_checkpoint_manifests(
 
             realized_pct = info.get("realized_pct", 0.0)
             kind = f"milestone-{realized_pct:.0f}pct"
-
-            if session_metrics_cb is not None:
-                snap["monitor_value"] = (
-                    session_metrics_cb._latest_mean_f1 or 0.0
-                )
+            # A compute milestone is saved at train-batch end, before a
+            # same-step validation pass. It is retained for audit, not chosen
+            # by a monitor; do not attach a stale metric value to it.
+            milestone_selection = _build_selection(snap)
+            milestone_selection["monitor"] = "not_selected_milestone"
+            milestone_selection["monitor_value"] = None
 
             try:
                 checkpoint_relative_path = _publish_source_checkpoint(
@@ -1993,7 +2033,7 @@ def _emit_source_checkpoint_manifests(
                     manifest_dir,
                     kind=kind,
                     trained_on=_build_trained_on(snap),
-                    selection=_build_selection(snap),
+                    selection=milestone_selection,
                     compute=_build_compute(snap),
                     recipe=recipe,
                     normalization_artifact_hashes=norm_hashes,
