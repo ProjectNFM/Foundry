@@ -3,6 +3,7 @@ import copy
 import pytest
 
 from tools.combine_downstream_cell_lists import combine_cell_lists
+from tools.exclude_downstream_cells import exclude_cells
 from tools.select_downstream_cells import select_cells
 
 
@@ -56,3 +57,10 @@ def test_combine_cell_lists_preserves_rows_and_rejects_duplicates() -> None:
     assert combined == rows[:3]
     with pytest.raises(ValueError, match="duplicate cell IDs"):
         combine_cell_lists([[rows[0]], [rows[0]]])
+
+
+def test_exclude_cells_preserves_order_and_rejects_unknown_cells() -> None:
+    rows = _rows()
+    assert exclude_cells(rows, [rows[2], rows[0]]) == [rows[1], rows[3]]
+    with pytest.raises(ValueError, match="absent from source"):
+        exclude_cells(rows, [{"cell_id": "not-a-cell"}])
