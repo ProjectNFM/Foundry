@@ -266,7 +266,10 @@ TBD
   `/network/scratch/s/sobralm/foundry-launches/20260914T151855_PHASE4E_VALIDATION_LOSS_SOURCE_MINIPIGS_ebf74839_eb03ffd8`.
   Monkeys: `10788727` (8 packed allocations / 15 cells), snapshot
   `/network/scratch/s/sobralm/foundry-launches/20260914T151937_PHASE4E_VALIDATION_LOSS_SOURCE_MONKEYS_ebf74839_fa4da94e`.
-  Both arrays were queued cleanly at submission time.
+  Both arrays were queued cleanly at submission time. Five minipig packed
+  allocations then started and failed in 2--3 seconds with the same
+  pre-Foundry `functools` import error; the pending remainder of both arrays
+  was cancelled. No source-training cell reached Foundry initialization.
 
 ## Conclusions
 
