@@ -77,7 +77,12 @@ The primary confirmation criteria are prespecified as follows:
   `val/loss`; ties are resolved by the earliest optimizer step.
 - **Target data:** All 40 eligible minipig and 13 eligible monkey recordings,
   with the established `intrasession-causal` splits and nested target-training
-  fractions `0.05`, `0.10`, `0.25`, `0.50`, and `1.00`.
+  fractions `0.05`, `0.10`, `0.25`, `0.50`, and `1.00`. A
+  recording/fraction combination is compiled only when every class present in
+  that recording retains at least three target-training examples, as
+  prespecified by the Phase-0 audit. Unavailable low-fraction combinations are
+  omitted without rebalancing; all nine transfer runs and all three matched
+  scratch runs for that combination are omitted together.
 - **Downstream transfer:** Transfer only the source checkpoint selected by
   minimum source validation loss for the matching target-subject exclusion.
   Use `full_finetuning_reset_router`, fresh target session adapter and router,
@@ -91,10 +96,11 @@ The primary confirmation criteria are prespecified as follows:
 - **Seeds:** Use target fine-tuning seeds `42`, `43`, and `44`. Source seed
   provenance and target seed are kept as separate axes and are never selected
   using target test results.
-- **Scratch controls:** Run a fresh model for every target recording, target
-  fraction, and target seed with the identical normalized data, downstream
-  schedule, checkpoint-selection rule, and stopping criteria. Scratch cells
-  carry explicit null source provenance.
+- **Scratch controls:** Run a fresh model for every available target
+  recording/fraction/seed combination with the identical normalized data,
+  downstream schedule, checkpoint-selection rule, and stopping criteria.
+  Scratch cells carry explicit null source provenance and use exactly the same
+  availability mask as transfer cells.
 - **WandB:** Use the existing `neurosoft_supervised_pretraining` project with
   new Phase-4E groups and deterministic compiled cell IDs. Source-pretraining
   and downstream-transfer identities must not overlap earlier phase groups.
@@ -104,18 +110,36 @@ The primary confirmation criteria are prespecified as follows:
 | Population | Conditions | New cells |
 |---|---:|---:|
 | Source pretraining | 12 target-subject exclusions × 3 source seed pairs | 36 source runs |
-| Transfer: minipigs | 40 recordings × 5 fractions × 3 target seeds × 3 source seeds | 1,800 |
-| Transfer: monkeys | 13 recordings × 5 fractions × 3 target seeds × 3 source seeds | 585 |
-| Scratch: minipigs | 40 recordings × 5 fractions × 3 target seeds | 600 |
-| Scratch: monkeys | 13 recordings × 5 fractions × 3 target seeds | 195 |
-| **Total downstream** |  | **3,180** |
+| Transfer: minipigs | 193 available recording/fractions × 3 target seeds × 3 source seeds | 1,737 |
+| Transfer: monkeys | 62 available recording/fractions × 3 target seeds × 3 source seeds | 558 |
+| Scratch: minipigs | 193 available recording/fractions × 3 target seeds | 579 |
+| Scratch: monkeys | 62 available recording/fractions × 3 target seeds | 186 |
+| **Total downstream** |  | **3,060** |
 
 The 36 source runs each retain the five callback-defined milestone checkpoints
 and one separately retained loss-selected checkpoint, but only one
-loss-selected checkpoint per source run is referenced by the 2,385
+loss-selected checkpoint per source run is referenced by the 2,295
 transfer cells.  The source seed axis is averaged before target-session
 pairing, then target seeds and sessions are averaged within subject before
 species-level summaries.
+
+The availability mask retains 193 of 200 nominal minipig
+recording/fraction combinations (`37`, `37`, `39`, `40`, and `40` recordings
+at 5%, 10%, 25%, 50%, and 100%) and 62 of 65 monkey combinations (`11`, `12`,
+`13`, `13`, and `13`). The ten omitted combinations remove 120 runs from the
+nominal 3,180-cell matrix because each combination expands to nine transfer
+and three scratch runs. The omissions are:
+
+- Minipigs `sub-07_ses-04_task-AcousStim_acq-LH_desc-raw` at 5%, 10%, and
+  25%; `mid_bass` and/or `low_treble` have fewer than three examples.
+- Minipigs `sub-07_ses-04_task-AcousStim_acq-RH_desc-raw` at 5% and 10%;
+  `low_treble` has fewer than three examples.
+- Minipigs `sub-07_ses-05_task-AcousStim_acq-LH_desc-raw` at 5% and 10%;
+  `midrange` and/or `low_treble` have fewer than three examples.
+- Monkeys `sub-01_ses-015_task-AcousStim_acq-RH_desc-raw` at 5% and 10%;
+  `low_bass` has fewer than three examples.
+- Monkeys `sub-01_ses-03_task-AcousStim_acq-RH_desc-raw` at 5%; `low_treble`
+  and `mid_treble` each have only two examples.
 
 ### Metrics and decision rule
 
@@ -234,7 +258,10 @@ Slurm job ID and snapshot bundle path here immediately after launch.
   `start_lr_factor=0.0001`, `scheduler_interval=step`, `hold=0`, and `decay=0`.
 - Target fractions: `data.training_fraction` in `{0.05, 0.10, 0.25, 0.50,
   1.00}`; target seeds in `{42,43,44}`; source seed pairs in
-  `{(42,42),(43,43),(44,44)}`.
+  `{(42,42),(43,43),(44,44)}`. Compile only audit-supported
+  recording/fraction combinations, using the same per-cell availability mask
+  for transfer and scratch rather than lowering the three-example minimum or
+  dropping an otherwise usable recording at all fractions.
 - Downstream checkpoint callback: monitor
   `val/neurosoft_acoustic_stim_8band_supported_f1`, `mode=max`, patience `40`;
   test evaluation only after the selected checkpoint is restored.
@@ -287,6 +314,29 @@ TBD
   Both use immutable snapshot commit `7cef83d1`; their generated submission
   scripts were verified to contain the node exclusion and both arrays were
   pending normally after submission.
+- **Final source outcome:** all six minipig and eight monkey packed
+  allocations completed with exit code `0`, covering all 36 logical source
+  runs. W&B reports 21/21 minipig and 15/15 monkey runs as `finished`. The
+  source audit verified all expected milestones and best-loss manifests, all
+  216 retained manifest/checkpoint hash pairs, and exact agreement between
+  each best manifest and its W&B validation-loss minimum. No non-finite or
+  divergent curves were found. Minipig validation loss improved by 16.7% on
+  average and monkey validation loss by 31.4%; the later monkey overfitting
+  confirms the usefulness of loss-based checkpoint selection. Reproduce with
+  `uv run python analysis/20260914-MS-validation-loss-checkpoint-transfer-learning-curves.py`.
+- **Downstream compilation status:** the hash-verified 36-row source registry
+  was generated at `launch/checkpoint_sets/phase4e-validation-loss.jsonl`.
+  Compilation intentionally stopped when the existing compiler encountered
+  the first audit-unavailable low-fraction cell. Before launch, implement and
+  test an explicit per-cell `skip` policy, update the recipe's expected counts
+  to 2,316 minipig and 744 monkey cells, and recompile the complete 3,060-cell
+  matrix. No downstream jobs have been submitted yet.
+
+### Source-pretraining figures
+
+![Minipig source validation-loss trajectories](../../analysis/figures/20260914-MS-validation-loss-checkpoint-transfer-learning-curves_minipig_source_val_loss.png)
+
+![Monkey source validation-loss trajectories](../../analysis/figures/20260914-MS-validation-loss-checkpoint-transfer-learning-curves_monkey_source_val_loss.png)
 
 ## Conclusions
 
