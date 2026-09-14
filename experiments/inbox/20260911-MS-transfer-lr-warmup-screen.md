@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-09-11
 **Parent experiment:** [Phase 4C -- 500-Step Head Reset and Backbone Freezing](20260911-MS-500step-head-reset-transfer.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Phase 4E -- Validation-Loss Checkpoint Transfer Learning Curves](20260914-MS-validation-loss-checkpoint-transfer-learning-curves.md)
 **Tags:** neurosoft, supervised-pretraining, transfer, learning-rate, warmup, session-adapter, phase4d, 8band, mila
 
 ## Background
