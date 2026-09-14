@@ -1,6 +1,6 @@
 # Phase 4E -- Validation-Loss Checkpoint Transfer Learning Curves
 
-**Status:** Draft
+**Status:** In Progress
 **Date started:** 2026-09-14
 **Parent experiment:** [Phase 4D -- Transfer Recipe and LR Warmup Screen](20260911-MS-transfer-lr-warmup-screen.md)
 **Follow-up experiments:** TBD
@@ -242,6 +242,18 @@ Slurm job ID and snapshot bundle path here immediately after launch.
 ## Results
 
 TBD
+
+### Source-pretraining launch record
+
+- **Minipigs:** Slurm array `10788617` (6 packed allocations / 21 cells),
+  group `PHASE4E_VALIDATION_LOSS_SOURCE_MINIPIGS`, snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260914T151025_PHASE4E_VALIDATION_LOSS_SOURCE_MINIPIGS_edfcb672_2d158bf7`.
+- **Monkeys:** Slurm array `10788618` (8 packed allocations / 15 cells),
+  group `PHASE4E_VALIDATION_LOSS_SOURCE_MONKEYS`, snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260914T151101_PHASE4E_VALIDATION_LOSS_SOURCE_MONKEYS_edfcb672_a4ce7d43`.
+- Both source arrays use immutable snapshot commit `edfcb672`, RTX 8000 GPUs
+  on `long`, fixed `max_steps=10000`, `val_check_interval=100`, no early
+  stopping, and best-checkpoint monitor `val/loss` (`mode=min`).
 
 ## Conclusions
 
