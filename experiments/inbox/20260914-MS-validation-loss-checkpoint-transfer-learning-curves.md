@@ -254,6 +254,11 @@ TBD
 - Both source arrays use immutable snapshot commit `edfcb672`, RTX 8000 GPUs
   on `long`, fixed `max_steps=10000`, `val_check_interval=100`, no early
   stopping, and best-checkpoint monitor `val/loss` (`mode=min`).
+- **Launch outcome:** the started allocations failed before Foundry imported:
+  the worker interpreter raised `ModuleNotFoundError: No module named
+  'functools'` while Submitit imported Python's `contextlib`. The pending
+  monkey allocations were cancelled; no source-training cell began. Correct
+  the compute-node Python environment before submitting a fresh source array.
 
 ## Conclusions
 
