@@ -353,6 +353,20 @@ TBD
 - Both submissions use `long`, 32 GB RAM, the shared snapshot root, the
   project virtual environment, and exclude `cn-c004`.
 
+### Downstream-production launch record
+
+- **Minipigs:** Slurm array `10791974` (286 packed allocations / 2,284
+  pending cells), snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260914T185237_PHASE4E_VALIDATION_LOSS_PRODUCTION_MINIPIGS_4da2dd41_87c2a707`.
+- **Monkeys:** Slurm array `10792003` (91 packed allocations / 728 pending
+  cells), snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260914T185344_PHASE4E_VALIDATION_LOSS_PRODUCTION_MONKEYS_4da2dd41_6cadc1e2`.
+- Both sealed snapshots use immutable commit `4da2dd41`, one RTX 8000 per
+  packed allocation, `tasks_per_node=8`, `cpus_per_task=2`,
+  `hyperparameters.num_workers=1`, `mem_gb=32`, partition `long`, and
+  `cn-c004` exclusion. The minipig array started allocations immediately;
+  the monkey array was pending normally at submission.
+
 ### Source-pretraining figures
 
 ![Minipig source validation-loss trajectories](../../analysis/figures/20260914-MS-validation-loss-checkpoint-transfer-learning-curves_minipig_source_val_loss.png)
