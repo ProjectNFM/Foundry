@@ -220,18 +220,28 @@ uv run python tools/compile_downstream_cells.py \
 
 uv run python main.py \
   experiment=auditory_decoding/neurosoft_conv_bigru_transfer_minipigs \
+  run.group=PHASE4E_VALIDATION_LOSS_PRODUCTION_MINIPIGS \
+  hydra.sweep.dir=/network/scratch/s/sobralm/runs/PHASE4E_VALIDATION_LOSS_PRODUCTION_MINIPIGS \
+  'hydra.sweep.subdir=${run.name}' \
   hydra/launcher=slurm_default hydra.launcher.partition=long \
   hydra.launcher.gres=gpu:rtx8000:1 \
-  hydra.launcher.cell_list=launch/phase4e/phase4e-transfer-learning-curves-minipigs.jsonl \
-  hydra.launcher.tasks_per_node=4 hydra.launcher.cpus_per_task=1 \
+  +hydra.launcher.additional_parameters.exclude=cn-c004 \
+  hydra.launcher.cell_list=launch/phase4e/phase4e-transfer-learning-curves-minipigs-pending.jsonl \
+  hydra.launcher.tasks_per_node=8 hydra.launcher.cpus_per_task=2 \
+  hyperparameters.num_workers=1 \
   hydra.launcher.mem_gb=32 -m
 
 uv run python main.py \
   experiment=auditory_decoding/neurosoft_conv_bigru_transfer_monkeys \
+  run.group=PHASE4E_VALIDATION_LOSS_PRODUCTION_MONKEYS \
+  hydra.sweep.dir=/network/scratch/s/sobralm/runs/PHASE4E_VALIDATION_LOSS_PRODUCTION_MONKEYS \
+  'hydra.sweep.subdir=${run.name}' \
   hydra/launcher=slurm_default hydra.launcher.partition=long \
   hydra.launcher.gres=gpu:rtx8000:1 \
-  hydra.launcher.cell_list=launch/phase4e/phase4e-transfer-learning-curves-monkeys.jsonl \
-  hydra.launcher.tasks_per_node=2 hydra.launcher.cpus_per_task=2 \
+  +hydra.launcher.additional_parameters.exclude=cn-c004 \
+  hydra.launcher.cell_list=launch/phase4e/phase4e-transfer-learning-curves-monkeys-pending.jsonl \
+  hydra.launcher.tasks_per_node=8 hydra.launcher.cpus_per_task=2 \
+  hyperparameters.num_workers=1 \
   hydra.launcher.mem_gb=32 -m
 ```
 
@@ -331,6 +341,17 @@ TBD
   test an explicit per-cell `skip` policy, update the recipe's expected counts
   to 2,316 minipig and 744 monkey cells, and recompile the complete 3,060-cell
   matrix. No downstream jobs have been submitted yet.
+
+### Downstream-production plan
+
+- The runtime audit completed 48 exact Phase 4E cells (32 minipig and 16
+  monkey) under their deterministic production W&B identities. They count
+  toward the scientific matrix and are excluded from fresh submissions.
+- Pending lists contain 2,284 minipig and 728 monkey cells, 3,012 total. The
+  common `tasks_per_node=8`, `cpus_per_task=2`, and `num_workers=1` setup
+  creates 286 and 91 packed RTX-8000 allocations, respectively.
+- Both submissions use `long`, 32 GB RAM, the shared snapshot root, the
+  project virtual environment, and exclude `cn-c004`.
 
 ### Source-pretraining figures
 
