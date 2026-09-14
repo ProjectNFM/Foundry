@@ -491,6 +491,13 @@ def compile_cells(
                 f"checkpoint_filter selected no records from {registry_path}"
             )
     fixed_overrides = _fixed_overrides(recipe)
+    unavailable_fraction_policy = recipe.get(
+        "audit_unavailable_fraction_policy", "error"
+    )
+    if unavailable_fraction_policy not in {"error", "skip"}:
+        raise ValueError(
+            "audit_unavailable_fraction_policy must be 'error' or 'skip'"
+        )
     audit, audit_hash = _load_audit(audit_path)
     configured_species = set(recipe["species"])
     registry_species = {str(record["species"]) for record in registry}
@@ -560,6 +567,8 @@ def compile_cells(
     all_wandb_ids: set[tuple[str, str]] = set()
     per_checkpoint: Counter[str] = Counter()
     per_condition: Counter[str] = Counter()
+    skipped_cells: Counter[str] = Counter()
+    unavailable_target_fractions: set[tuple[str, str, float]] = set()
     random_regime = "frozen_random_control"
     regimes = [str(regime) for regime in recipe["transfer_regimes"]]
     if len(regimes) != len(set(regimes)):
@@ -680,6 +689,14 @@ def compile_cells(
                 f"{fraction_value:.2f}", {}
             )
             if not availability.get("available", False):
+                if unavailable_fraction_policy == "skip":
+                    unavailable_target_fractions.add(
+                        (species, recording_id, fraction_value)
+                    )
+                    skipped_cells[species] += len(
+                        recipe["target_finetuning_seeds"]
+                    )
+                    continue
                 raise ValueError(
                     f"{recording_id}: target fraction {fraction_value} is unavailable"
                 )
@@ -947,6 +964,18 @@ def compile_cells(
         "counts": counts,
         "per_checkpoint_counts": dict(sorted(per_checkpoint.items())),
         "per_condition_counts": dict(sorted(per_condition.items())),
+        "audit_unavailable_fraction_policy": unavailable_fraction_policy,
+        "skipped_cell_counts": dict(sorted(skipped_cells.items())),
+        "unavailable_target_fractions": [
+            {
+                "species": species,
+                "target_recording": recording_id,
+                "target_fraction": fraction,
+            }
+            for species, recording_id, fraction in sorted(
+                unavailable_target_fractions
+            )
+        ],
     }
     return by_species, metadata
 

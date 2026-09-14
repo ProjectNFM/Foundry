@@ -1,0 +1,14 @@
+{
+  "schema": "phase4e-runtime-audit",
+  "version": 1,
+  "project": "neurosoft_supervised_pretraining",
+  "entity": "poyo-eeg",
+  "entries": [
+    {"label": "minipigs-tpn4-cpu1-nw1", "species": "minipigs", "tasks_per_node": 4, "cpus_per_task": 1, "num_workers": 1, "cell_list": "launch/phase4e/runtime-audit/minipigs-tpn4-cpu1-nw1.jsonl", "slurm_job_ids": [], "snapshot_bundle": null},
+    {"label": "minipigs-tpn4-cpu1-nw0", "species": "minipigs", "tasks_per_node": 4, "cpus_per_task": 1, "num_workers": 0, "cell_list": "launch/phase4e/runtime-audit/minipigs-tpn4-cpu1-nw0.jsonl", "slurm_job_ids": [], "snapshot_bundle": null},
+    {"label": "minipigs-tpn8-cpu1-nw0", "species": "minipigs", "tasks_per_node": 8, "cpus_per_task": 1, "num_workers": 0, "cell_list": "launch/phase4e/runtime-audit/minipigs-tpn8-cpu1-nw0.jsonl", "slurm_job_ids": [], "snapshot_bundle": null},
+    {"label": "monkeys-tpn2-cpu2-nw1", "species": "monkeys", "tasks_per_node": 2, "cpus_per_task": 2, "num_workers": 1, "cell_list": "launch/phase4e/runtime-audit/monkeys-tpn2-cpu2-nw1.jsonl", "slurm_job_ids": [], "snapshot_bundle": null},
+    {"label": "monkeys-tpn2-cpu1-nw0", "species": "monkeys", "tasks_per_node": 2, "cpus_per_task": 1, "num_workers": 0, "cell_list": "launch/phase4e/runtime-audit/monkeys-tpn2-cpu1-nw0.jsonl", "slurm_job_ids": [], "snapshot_bundle": null},
+    {"label": "monkeys-tpn4-cpu1-nw0", "species": "monkeys", "tasks_per_node": 4, "cpus_per_task": 1, "num_workers": 0, "cell_list": "launch/phase4e/runtime-audit/monkeys-tpn4-cpu1-nw0.jsonl", "slurm_job_ids": [], "snapshot_bundle": null}
+  ]
+}

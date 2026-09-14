@@ -31,6 +31,13 @@ PHASE4A_CORRECTED_RECIPE = (
     / "configs/downstream_recipes/phase4a_full_finetuning_lr1p5e3.yaml"
 )
 PHASE4A_AUDIT = REPO_ROOT / "docs/neurosoft-phase0-audit.json"
+PHASE4E_REGISTRY = (
+    REPO_ROOT / "launch/checkpoint_sets/phase4e-validation-loss.jsonl"
+)
+PHASE4E_RECIPE = (
+    REPO_ROOT
+    / "configs/downstream_recipes/phase4e_validation_loss_learning_curves.yaml"
+)
 CHECKPOINT_ROOT = Path("/network/scratch/s/sobralm/foundry-checkpoints")
 
 
@@ -344,6 +351,50 @@ def test_condition_matrix_compiles_recipe_and_lr_fanout(
     assert "run.pretrained_transfer_regime=null" in scratch["overrides"]
 
 
+def test_audit_unavailable_fractions_require_explicit_skip_policy(
+    tmp_path: Path,
+) -> None:
+    registry, recipe, audit, root = _fixture(tmp_path)
+    audit_payload = json.loads(audit.read_text())
+    audit_payload.pop("artifact_sha256")
+    audit_payload["recordings"][0]["fraction_availability"]["0.10"] = {
+        "available": False,
+        "reason": "insufficient class support",
+    }
+    audit.write_text(
+        json.dumps(
+            {
+                **audit_payload,
+                "artifact_sha256": _canonical_hash(audit_payload),
+            }
+        )
+    )
+    recipe_payload = yaml.safe_load(recipe.read_text())
+    recipe_payload["target_training_fractions"] = [0.1, 0.5]
+    recipe.write_text(yaml.safe_dump(recipe_payload, sort_keys=False))
+
+    with pytest.raises(ValueError, match="target fraction 0.1 is unavailable"):
+        compile_cells(registry, recipe, audit, root)
+
+    recipe_payload["audit_unavailable_fraction_policy"] = "skip"
+    recipe.write_text(yaml.safe_dump(recipe_payload, sort_keys=False))
+    cells, metadata = compile_cells(registry, recipe, audit, root)
+
+    assert len(cells["minipigs"]) == 4
+    assert {row["target_fraction"] for row in cells["minipigs"]} == {0.5}
+    assert metadata["audit_unavailable_fraction_policy"] == "skip"
+    assert metadata["skipped_cell_counts"] == {"minipigs": 4}
+    assert metadata["unavailable_target_fractions"] == [
+        {
+            "species": "minipigs",
+            "target_recording": (
+                "sub-01_ses-01_task-AcousStim_acq-LH_desc-raw"
+            ),
+            "target_fraction": 0.1,
+        }
+    ]
+
+
 @pytest.mark.parametrize("field", ["manifest_hash", "checkpoint_sha256"])
 def test_registry_hash_disagreement_is_rejected(
     tmp_path: Path, field: str
@@ -441,6 +492,27 @@ def test_actual_phase4a_registry_compiles_exact_matrix() -> None:
     assert len({(row["wandb_group"], row["run_name"]) for row in rows}) == 477
     assert (
         len({(row["wandb_group"], row["wandb_run_id"]) for row in rows}) == 477
+    )
+
+
+@pytest.mark.skipif(
+    not CHECKPOINT_ROOT.is_dir(), reason="Mila checkpoint storage unavailable"
+)
+def test_actual_phase4e_registry_skips_only_audit_unavailable_cells() -> None:
+    cells, metadata = compile_cells(
+        PHASE4E_REGISTRY, PHASE4E_RECIPE, PHASE4A_AUDIT, CHECKPOINT_ROOT
+    )
+    assert metadata["counts"] == {"minipigs": 2316, "monkeys": 744}
+    assert metadata["skipped_cell_counts"] == {
+        "minipigs": 84,
+        "monkeys": 36,
+    }
+    assert len(metadata["unavailable_target_fractions"]) == 10
+    rows = cells["minipigs"] + cells["monkeys"]
+    assert len(rows) == 3060
+    assert len({row["cell_id"] for row in rows}) == 3060
+    assert (
+        len({(row["wandb_group"], row["wandb_run_id"]) for row in rows}) == 3060
     )
 
 

@@ -10,6 +10,7 @@ base_experiments:
   monkeys: auditory_decoding/neurosoft_conv_bigru_transfer_monkeys
 transfer_regimes: [full_finetuning_reset_router]
 target_training_fractions: [0.05, 0.10, 0.25, 0.50, 1.00]
+audit_unavailable_fraction_policy: skip
 target_finetuning_seeds: [42, 43, 44]
 expected_source_seed_pairs: [[42, 42], [43, 43], [44, 44]]
 evaluate_test: true
@@ -41,7 +42,7 @@ species:
       transfer_validation_loss: [transfer, minipigs, 8band, phase4e, validation-loss-selected, learning-curves, discriminative]
       scratch_matched: [scratch, minipigs, 8band, phase4e, learning-curves, matched-control]
     expected_checkpoints: 21
-    expected_cells: 2400
+    expected_cells: 2316
   monkeys:
     wandb_groups:
       transfer_validation_loss: PHASE4E_VALIDATION_LOSS_TRANSFER_MONKEYS
@@ -50,4 +51,4 @@ species:
       transfer_validation_loss: [transfer, monkeys, 8band, phase4e, validation-loss-selected, learning-curves, discriminative]
       scratch_matched: [scratch, monkeys, 8band, phase4e, learning-curves, matched-control]
     expected_checkpoints: 15
-    expected_cells: 780
+    expected_cells: 744

@@ -3,7 +3,7 @@
 **Status:** In Progress
 **Date started:** 2026-09-14
 **Parent experiment:** [Phase 4D -- Transfer Recipe and LR Warmup Screen](20260911-MS-transfer-lr-warmup-screen.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Phase 4E Runtime Packing Audit](20260914-MS-phase4e-runtime-packing-audit.md)
 **Tags:** neurosoft, supervised-pretraining, transfer, validation-loss, checkpoint-selection, data-scaling, learning-curves, phase4e, 8band, mila
 
 ## Background
