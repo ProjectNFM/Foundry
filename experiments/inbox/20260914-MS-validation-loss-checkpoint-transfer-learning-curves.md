@@ -161,6 +161,7 @@ uv run python main.py \
   hydra.sweep.dir=/network/scratch/s/sobralm/runs/PHASE4E_VALIDATION_LOSS_SOURCE_MINIPIGS \
   'hydra.sweep.subdir=${run.name}' \
   hydra/launcher=slurm_default hydra.launcher.partition=long \
+  +hydra.launcher.additional_parameters.exclude=cn-c004 \
   hydra.launcher.gres=gpu:rtx8000:1 \
   hydra.launcher.cell_list=launch/phase4e/phase4e-source-minipigs.jsonl \
   hydra.launcher.tasks_per_node=4 hydra.launcher.cpus_per_task=1 \
@@ -172,6 +173,7 @@ uv run python main.py \
   hydra.sweep.dir=/network/scratch/s/sobralm/runs/PHASE4E_VALIDATION_LOSS_SOURCE_MONKEYS \
   'hydra.sweep.subdir=${run.name}' \
   hydra/launcher=slurm_default hydra.launcher.partition=long \
+  +hydra.launcher.additional_parameters.exclude=cn-c004 \
   hydra.launcher.gres=gpu:rtx8000:1 \
   hydra.launcher.cell_list=launch/phase4e/phase4e-source-monkeys.jsonl \
   hydra.launcher.tasks_per_node=2 hydra.launcher.cpus_per_task=2 \
@@ -270,6 +272,21 @@ TBD
   allocations then started and failed in 2--3 seconds with the same
   pre-Foundry `functools` import error; the pending remainder of both arrays
   was cancelled. No source-training cell reached Foundry initialization.
+- **Root cause:** every failed allocation from both attempts was placed on
+  `cn-c004`. The same project interpreter imports `functools` correctly on the
+  login node, and `functools.py` is present beside the `contextlib.py` that the
+  failing traceback successfully opened. This isolates the failure to
+  `cn-c004`'s stale or broken view of the home-hosted Python standard library,
+  rather than Foundry, Submitit, the snapshot, or the virtual environment.
+- **Node-excluded replacement arrays:** resubmitted on `long` with explicit
+  `#SBATCH --exclude=cn-c004`. Minipigs: Slurm array `10788773` (6 packed
+  allocations / 21 cells), snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260914T152741_PHASE4E_VALIDATION_LOSS_SOURCE_MINIPIGS_7cef83d1_a8229694`.
+  Monkeys: Slurm array `10788779` (8 packed allocations / 15 cells), snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260914T152809_PHASE4E_VALIDATION_LOSS_SOURCE_MONKEYS_7cef83d1_c824d86d`.
+  Both use immutable snapshot commit `7cef83d1`; their generated submission
+  scripts were verified to contain the node exclusion and both arrays were
+  pending normally after submission.
 
 ## Conclusions
 
