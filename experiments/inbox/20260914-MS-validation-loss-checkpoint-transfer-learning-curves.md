@@ -259,6 +259,14 @@ TBD
   'functools'` while Submitit imported Python's `contextlib`. The pending
   monkey allocations were cancelled; no source-training cell began. Correct
   the compute-node Python environment before submitting a fresh source array.
+- **Replacement source arrays:** submitted with
+  `FOUNDRY_ENV_FILE=/home/mila/s/sobralm/Foundry/.venv/bin/activate`, which
+  establishes the project virtual environment on each worker. Minipigs:
+  `10788724` (6 packed allocations / 21 cells), snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260914T151855_PHASE4E_VALIDATION_LOSS_SOURCE_MINIPIGS_ebf74839_eb03ffd8`.
+  Monkeys: `10788727` (8 packed allocations / 15 cells), snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260914T151937_PHASE4E_VALIDATION_LOSS_SOURCE_MONKEYS_ebf74839_fa4da94e`.
+  Both arrays were queued cleanly at submission time.
 
 ## Conclusions
 
