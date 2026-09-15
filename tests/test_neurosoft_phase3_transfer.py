@@ -711,6 +711,14 @@ class TestTamperDetection:
             verify_checkpoint_integrity(manifest, str(tmp_path))
 
 
+def test_milestone_manifest_without_monitor_value_logs_safely():
+    """Scheduled milestones have no metric-selected score."""
+    import main
+
+    assert main._format_checkpoint_monitor_value(None) == "n/a"
+    assert main._format_checkpoint_monitor_value(0.123456) == "0.1235"
+
+
 # ---------------------------------------------------------------------------
 # Target mismatch detection
 # ---------------------------------------------------------------------------

@@ -1403,6 +1403,11 @@ def _resolve_manifest_path(path: str | os.PathLike[str]) -> Path:
     raise FileNotFoundError(f"Checkpoint manifest not found: {path}")
 
 
+def _format_checkpoint_monitor_value(value: object) -> str:
+    """Format metric-selected scores while supporting scheduled milestones."""
+    return f"{float(value):.4f}" if isinstance(value, (int, float)) else "n/a"
+
+
 def _load_and_validate_checkpoint_manifest(
     cfg: DictConfig,
     datamodule,
@@ -1462,12 +1467,14 @@ def _load_and_validate_checkpoint_manifest(
     trained_on = manifest["trained_on"]
     excluded = trained_on["excluded_target"]
 
+    monitor_value = manifest["selection"].get("monitor_value")
+    monitor_text = _format_checkpoint_monitor_value(monitor_value)
     logger.info(
-        "Loaded checkpoint manifest: kind=%s monitor=%s score=%.4f "
+        "Loaded checkpoint manifest: kind=%s monitor=%s score=%s "
         "excluded_target=%s/%s source=%s",
         manifest["checkpoint"]["kind"],
         manifest["selection"]["monitor"],
-        manifest["selection"]["monitor_value"],
+        monitor_text,
         excluded.get("species"),
         excluded.get("subject"),
         trained_on.get("source_selection_id"),
