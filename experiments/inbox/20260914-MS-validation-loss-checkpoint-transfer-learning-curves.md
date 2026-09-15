@@ -1,6 +1,6 @@
 # Phase 4E -- Validation-Loss Checkpoint Transfer Learning Curves
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-09-14
 **Parent experiment:** [Phase 4D -- Transfer Recipe and LR Warmup Screen](20260911-MS-transfer-lr-warmup-screen.md)
 **Follow-up experiments:** [Phase 4E Runtime Packing Audit](20260914-MS-phase4e-runtime-packing-audit.md)
@@ -280,7 +280,58 @@ Slurm job ID and snapshot bundle path here immediately after launch.
 
 ## Results
 
-TBD
+### Summary
+
+The validation-loss-selected pretrained GRU did not improve upon its matched
+scratch GRU. Across the target-data curve, its subject-balanced test-F1 effect
+was negative for every minipig fraction and for four of five monkey fractions;
+the positive monkey 100% estimate remained inconclusive. The convergence
+contrast was also predominantly negative: transfer reached its own stable
+90%-of-smoothed-peak validation endpoint later than scratch, particularly at
+the larger fractions. Thus neither prespecified low-data benefit nor the
+anticipated speed benefit was observed.
+
+The primary plots use the prespecified aggregation: source seeds are averaged
+before matching each target seed, target seeds are averaged to recording,
+recordings to subject, and subjects receive equal species-level weight. Bands
+are 20,000-draw non-parametric 95% bootstrap intervals over subjects. Stable
+convergence is the first of three consecutive validation evaluations at or
+above 90% of a run's own three-point-median-smoothed peak F1; censored runs use
+their final evaluation. Positive values in the paired panels favor transfer.
+
+The absolute comparator uses the completed train-global-z-score EEGNet
+baseline (not the raw-input Phase-1 EEGNet), so its preprocessing, causal
+split, fractions, and target seeds align with the Phase 4E target matrix. It
+is descriptive rather than a paired intervention contrast; in particular,
+EEGNet uses its established model-specific training schedule.
+
+### Figures
+
+![Primary paired transfer effects](../../analysis/figures/20260914-MS-validation-loss-checkpoint-transfer-learning-curves_main_transfer_advantage.png)
+
+The main panel shows the desired common sign convention: test-F1 advantage is
+transfer minus scratch, and speed advantage is scratch stable steps minus
+transfer stable steps. Solid trajectories are minipigs; dashed trajectories
+are monkeys.
+
+![Absolute model comparison](../../analysis/figures/20260914-MS-validation-loss-checkpoint-transfer-learning-curves_absolute_comparison.png)
+
+Blue is global-z-score EEGNet, light green is scratch GRU, and dark green is
+validation-loss-selected pretrained GRU. Full uncertainty ribbons are used for
+test F1. EEGNet's convergence uncertainty is sufficiently broad that the
+absolute convergence panel uses pointwise intervals instead, preserving the
+readability of all six trajectories.
+
+![Session-level paired transfer effects](../../analysis/figures/20260914-MS-validation-loss-checkpoint-transfer-learning-curves_session_paired_distributions.png)
+
+![Top-half scratch-performance sensitivity analysis](../../analysis/figures/20260914-MS-validation-loss-checkpoint-transfer-learning-curves_top_half_robustness.png)
+
+The sensitivity subset is post hoc: within species, it retains the top half of
+recordings ranked by seed-averaged scratch 100%-data test F1 (20 of 40 minipig
+recordings and 7 of 13 monkey recordings). It does not reveal a joint
+performance-and-speed transfer advantage. This selection is explicitly not a
+confirmatory test, because choosing on scratch full-data performance can induce
+regression-to-the-mean effects.
 
 ### Downstream result-accounting note
 
@@ -385,8 +436,17 @@ in results accounting.
 
 ## Conclusions
 
-TBD
+The hypothesis is not supported. Minimum-source-validation-loss selection at
+10K source steps yielded no confirmed low-data transfer improvement and no
+convergence-speed advantage over the matched scratch GRU. The paired,
+subject-balanced results instead support negative transfer as the primary
+interpretation, with the strongest and most consistent speed disadvantages at
+larger target-data fractions. The one missing scratch test summary remains
+explicitly accounted for below and was not rerun.
 
 ## Notes for future experiments
 
-TBD
+- Keep the Phase 4E figure script and W&B-derived CSV caches as the
+reproducible source for all figure revisions; do not hand-edit plotted values.
+- Treat the top-half result as a robustness sensitivity analysis, not a basis
+  for a new selection rule or a confirmatory claim.
