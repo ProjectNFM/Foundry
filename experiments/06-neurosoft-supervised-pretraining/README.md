@@ -2,7 +2,8 @@
 
 **Experiments:** 15<br>
 **Date range:** 2026-08-26 to 2026-09-14<br>
-**Contributors:** MS
+**Contributors:** MS<br>
+**Follow-up experiments:** [Adapter-bias reliance across source-pretraining age](../inbox/20260915-MS-adapter-bias-perturbation.md)
 
 > **Take-home result:** For this supervised Conv--BiGRU, pretraining provides
 > no demonstrated improvement in performance, label efficiency, or
