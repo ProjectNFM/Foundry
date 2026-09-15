@@ -557,44 +557,47 @@ def plot_main(delta: pd.DataFrame, path: Path, title: str) -> None:
 
 
 def plot_absolute(summary: pd.DataFrame, path: Path) -> None:
-    fig, axes = plt.subplots(
-        1, 2, figsize=(12.4, 4.55), constrained_layout=True
-    )
+    fig, axes = plt.subplots(2, 2, figsize=(12.4, 8.4), constrained_layout=True)
     specs = [
         ("test_f1", "Subject-balanced test supported-F1", False),
         ("stable_step", "Stable convergence (optimizer steps)", True),
     ]
-    for axis, (metric, ylabel, starts_zero) in zip(axes, specs, strict=True):
-        data = summary[summary.metric.eq(metric)]
-        for model in MODEL_COLORS:
-            for species in SPECIES:
-                subset = data[data.model.eq(model) & data.species.eq(species)]
+    for row, species in enumerate(SPECIES):
+        for column, (metric, ylabel, starts_zero) in enumerate(specs):
+            axis = axes[row, column]
+            data = summary[
+                summary.metric.eq(metric) & summary.species.eq(species)
+            ]
+            for model in MODEL_COLORS:
+                subset = data[data.model.eq(model)]
                 draw_line(
                     axis,
                     subset,
                     color=MODEL_COLORS[model],
                     linestyle=LINESTYLES[species],
-                    label=f"{model} — {SPECIES_LABELS[species]}",
+                    label=model,
                     metric=metric,
                     ribbon=not starts_zero,
                 )
-        setup_x(axis)
-        axis.set_ylabel(ylabel)
-        if starts_zero:
-            axis.set_ylim(bottom=0)
-    axes[0].set_title("Final performance")
-    axes[1].set_title("Convergence speed")
+            setup_x(axis)
+            axis.set_ylabel(ylabel)
+            axis.set_title(
+                f"{SPECIES_LABELS[species]} — "
+                f"{'Final performance' if metric == 'test_f1' else 'Convergence speed'}"
+            )
+            if starts_zero:
+                axis.set_ylim(bottom=0)
     model_handles = [
         Line2D([0], [0], color=color, lw=2.5, label=model)
         for model, color in MODEL_COLORS.items()
     ]
-    first = axes[1].legend(
+    first = axes[0, 1].legend(
         handles=model_handles, title="Model", frameon=False, loc="upper left"
     )
-    axes[1].add_artist(first)
-    axes[1].legend(
+    axes[0, 1].add_artist(first)
+    axes[1, 1].legend(
         handles=species_legend(),
-        title="Species",
+        title="Line style",
         frameon=False,
         loc="lower right",
     )

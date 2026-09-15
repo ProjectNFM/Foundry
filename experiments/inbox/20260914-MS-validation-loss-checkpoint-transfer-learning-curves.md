@@ -317,10 +317,10 @@ are monkeys.
 ![Absolute model comparison](../../analysis/figures/20260914-MS-validation-loss-checkpoint-transfer-learning-curves_absolute_comparison.png)
 
 Blue is global-z-score EEGNet, light green is scratch GRU, and dark green is
-validation-loss-selected pretrained GRU. Full uncertainty ribbons are used for
-test F1. EEGNet's convergence uncertainty is sufficiently broad that the
-absolute convergence panel uses pointwise intervals instead, preserving the
-readability of all six trajectories.
+validation-loss-selected pretrained GRU. The 2×2 layout separates minipigs
+from monkeys. Full uncertainty ribbons are used for test F1. EEGNet's
+convergence uncertainty is sufficiently broad that the absolute convergence
+panels use pointwise intervals instead.
 
 ![Session-level paired transfer effects](../../analysis/figures/20260914-MS-validation-loss-checkpoint-transfer-learning-curves_session_paired_distributions.png)
 
