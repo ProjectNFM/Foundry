@@ -205,6 +205,21 @@ uv run python main.py \
   hyperparameters.num_workers=1 hydra.launcher.mem_gb=32 -m
 ```
 
+### Submission record
+
+Submitted from clean commit
+`8b933c9ff269b8561df81c48b215a35b9666b03d` on 2026-09-15.
+
+| Species | Logical runs | Packed allocations | Slurm array | Snapshot bundle |
+|---|---:|---:|---|---|
+| Minipigs | 1,800 | 225 | `10807331` | `/network/scratch/s/sobralm/foundry-launches/20260915T230308_20260915-MS-SOURCE_VALIDATION_DOWNSTREAM_TRAJECTORY_MINIPIGS_8b933c9f_658b9db7` |
+| Monkeys | 585 | 74 | `10807340` | `/network/scratch/s/sobralm/foundry-launches/20260915T230501_20260915-MS-SOURCE_VALIDATION_DOWNSTREAM_TRAJECTORY_MONKEYS_8b933c9f_f6bda681` |
+
+Both arrays use the Phase 4E downstream hardware and packing configuration:
+partition `long`, one RTX 8000 per packed allocation, eight tasks per node,
+two CPUs per task, one dataloader worker per task, 32 GB memory, a three-hour
+limit, requeue enabled, and `cn-c004` excluded.
+
 ### Key config overrides
 
 - `data.training_fraction=1.0` only.
