@@ -282,6 +282,16 @@ Slurm job ID and snapshot bundle path here immediately after launch.
 
 TBD
 
+### Downstream result-accounting note
+
+All 3,060 downstream Slurm tasks completed successfully. One completed
+minipig scratch cell has no final W&B test summary and is excluded from
+paired downstream test-metric summaries: `sub-03_ses-07_task-AcousStim_acq-LHanest_desc-raw`,
+25% target fraction, target seed `44`, run ID `d2c35668`. The corresponding
+transfer runs and the other two scratch seeds remain available. Do not rerun
+this cell solely for the final analysis; report the missing datum explicitly
+in results accounting.
+
 ### Source-pretraining launch record
 
 - **Minipigs:** Slurm array `10788617` (6 packed allocations / 21 cells),
