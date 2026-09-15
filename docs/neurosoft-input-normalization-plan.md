@@ -3,7 +3,7 @@
 **Status:** Proposed implementation plan (2026-08-31).  
 **Scope:** NeuroSoft raw EEG/ECoG/iEEG inputs, beginning with the
 `NeurosoftConvBiGRU` acoustic-stimulus experiments.  
-**Motivating evidence:** [Conv--BiGRU compact capacity screen](../experiments/inbox/20260831-MS-neurosoft-conv-bigru-compact-capacity.md).
+**Motivating evidence:** [Conv--BiGRU compact capacity screen](../experiments/06-neurosoft-supervised-pretraining/20260831-MS-neurosoft-conv-bigru-compact-capacity.md).
 
 ## Decision
 

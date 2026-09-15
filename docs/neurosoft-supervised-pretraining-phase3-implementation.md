@@ -1084,7 +1084,7 @@ Implemented deliverables:
    `path_stem` resolve smoke, volume, diversity, and composition manifests
    from `manifests/neurosoft_supervised/v1/index.json` (524 entries).
 4. Phase 3 experiment record:
-   `experiments/inbox/20260903-MS-neurosoft-supervised-pretraining-pipeline.md`
+   `experiments/06-neurosoft-supervised-pretraining/20260903-MS-neurosoft-supervised-pretraining-pipeline.md`
    with the full ten-job matrix, launch commands, and gate criteria.
 5. W&B API-backed analysis script:
    `analysis/20260903-MS-neurosoft-supervised-pretraining-pipeline_analysis.py`

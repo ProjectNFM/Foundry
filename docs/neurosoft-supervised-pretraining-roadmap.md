@@ -316,7 +316,7 @@ Record realized rather than nominal compute at each milestone.
 ### Phase 0 -- Protocol and data audit
 
 **Status:** Completed 2026-08-26. See the
-[protocol and results](../experiments/inbox/20260826-neurosoft-supervised-pretraining-protocol.md),
+[protocol and results](../experiments/06-neurosoft-supervised-pretraining/20260826-neurosoft-supervised-pretraining-protocol.md),
 [full data audit](neurosoft-phase0-audit.md), and machine-readable
 [audit](neurosoft-phase0-audit.json),
 [split validation](neurosoft-phase0-split-validation.json), and
