@@ -71,20 +71,19 @@ therefore became the matched scratch control for all transfer claims.
 
 ![Scratch-baseline learning curves](../../analysis/figures/20260901-MS-scratch-baselines-normalization_learning_curves.png)
 
-## 2. Ordinary full-pool pretraining did not help
+## 2. Neither the best-validation-F1 nor earlier checkpoints helped
 
-The first matched transfer gate used the complete same-species,
-target-excluded source pool and selected the source checkpoint with the best
-validation F1. At 100% target data, transfer changed subject-balanced test F1
-by **-2.35 percentage points** for minipigs (95% CI -3.38 to -1.45) and
-**-1.03 points** for monkeys (95% CI -3.37 to +2.09). It produced no reliable
+Initial experiments used the complete same-species, target-excluded source
+pool and selected the source checkpoint with the best pretraining validation
+F1. This did not help: at 100% target data, transfer changed subject-balanced
+test F1 by **-2.35 percentage points** for minipigs (95% CI -3.38 to -1.45)
+and **-1.03 points** for monkeys (95% CI -3.37 to +2.09), with no reliable
 optimization advantage.
 
-## 3. Earlier checkpoints were less harmful, not beneficial
-
-We tested predeclared source checkpoints at 500, 1,500, 5,000, and 15,000
-steps, plus the source-validation-selected checkpoint. The 500-step checkpoint
-was approximately neutral to scratch; later checkpoints became increasingly
+To test whether the selected checkpoint was simply too late, we then compared
+predeclared source checkpoints at 500, 1,500, 5,000, and 15,000 steps with the
+source-validation-selected checkpoint. The 500-step checkpoint was
+approximately neutral to scratch; later checkpoints became increasingly
 harmful for minipigs. Monkey estimates were less precise but showed no
 compelling benefit. This pattern is consistent with longer source optimization
 reducing transferability under the current objective, but it does not by
@@ -97,7 +96,7 @@ available source step. The result therefore does not prove that no better
 checkpoint exists; it shows little evidence that a nearby checkpoint would
 produce a large, robust gain.
 
-## 4. Transfer was recipe-sensitive, but the gains were small
+## 3. Transfer was recipe-sensitive, but the gains were small
 
 Resetting the source head did not reliably beat scratch. Frozen learned
 features did not beat frozen random features, indicating that target backbone
@@ -111,7 +110,7 @@ useful and the stronger-F1 settings were generally slower than scratch.
 This screen motivated using the strongest observed recipe in the final,
 fully replicated learning-curve experiment.
 
-## 5. The final learning curves show no transfer advantage
+## 4. The final learning curves show no transfer advantage
 
 The definitive test combined the most favorable lessons from the diagnostics:
 source training was limited to 10,000 steps, the checkpoint was selected by
