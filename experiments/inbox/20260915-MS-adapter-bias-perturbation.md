@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-09-15
 **Parent experiment:** [NeuroSoft supervised pretraining: no demonstrated benefit under the tested recipe](../06-neurosoft-supervised-pretraining/README.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Source-validation performance versus downstream transfer](20260915-MS-source-validation-downstream-trajectory.md)
 **Tags:** neurosoft, supervised-pretraining, source-evaluation, checkpoint-age, session-adapter, adapter-bias, perturbation, 8band, minipigs, monkeys
 
 ## Background

@@ -1,0 +1,21 @@
+{
+  "checkpoint_set_id": "phase4e-fixed-milestones-v1",
+  "lock_payload_sha256": "1f1cdb8f9acb15888343202d2242d25c41d97f95c742a7b18965b55589505439",
+  "records": 180,
+  "records_by_species": {
+    "minipigs": 105,
+    "monkeys": 75
+  },
+  "records_by_step": {
+    "100": 36,
+    "1000": 36,
+    "10000": 36,
+    "300": 36,
+    "3000": 36
+  },
+  "registry": "/home/mila/s/sobralm/Foundry/launch/checkpoint_sets/phase4e-fixed-milestones.jsonl",
+  "registry_sha256": "a8d64f3c83e0b265536fd15363d0f685fa987568867bd8c4fd498ceb9162162e",
+  "schema": "foundry-checkpoint-registry-lock",
+  "source_git_sha": "7cef83d151cb0030192712122bd144fba449f74c",
+  "version": 1
+}

@@ -1,0 +1,42 @@
+schema: foundry-downstream-recipe
+version: 1
+recipe_id: phase4f-source-validation-downstream-trajectory
+output_stem: phase4f-checkpoint-trajectory
+audit_path: docs/neurosoft-phase0-audit.json
+eligible_session_selection:
+  eligible: true
+base_experiments:
+  minipigs: auditory_decoding/neurosoft_conv_bigru_transfer_minipigs
+  monkeys: auditory_decoding/neurosoft_conv_bigru_transfer_monkeys
+transfer_regimes: [full_finetuning_reset_router]
+target_training_fractions: [1.0]
+target_finetuning_seeds: [42, 43, 44]
+expected_source_seed_pairs: [[42, 42], [43, 43], [44, 44]]
+evaluate_test: true
+fixed_overrides:
+  - hyperparameters.warmup_fraction=0.1
+  - hyperparameters.start_lr_factor=0.0001
+  - hyperparameters.scheduler_name=phased
+  - hyperparameters.scheduler_interval=step
+  - hyperparameters.hold=0
+  - hyperparameters.decay=0
+  - hyperparameters.learning_rate=0.003
+  - hyperparameters.backbone_learning_rate=0.0003
+  - hyperparameters.backbone_components=[temporal_frontend,gru]
+  - hyperparameters.adapter_warmup_steps=0
+condition_labels:
+  study: source_validation_downstream_trajectory
+  target_data: full
+  checkpoint_comparator: phase4e_fixed_milestone
+  phase4e_recipe_matched: true
+species:
+  minipigs:
+    wandb_group: 20260915-MS-SOURCE_VALIDATION_DOWNSTREAM_TRAJECTORY_MINIPIGS
+    wandb_tags: [transfer, minipigs, 8band, phase4f, checkpoint-trajectory, phase4e-recipe, discriminative]
+    expected_checkpoints: 105
+    expected_cells: 1800
+  monkeys:
+    wandb_group: 20260915-MS-SOURCE_VALIDATION_DOWNSTREAM_TRAJECTORY_MONKEYS
+    wandb_tags: [transfer, monkeys, 8band, phase4f, checkpoint-trajectory, phase4e-recipe, discriminative]
+    expected_checkpoints: 75
+    expected_cells: 585

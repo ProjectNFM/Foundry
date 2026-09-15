@@ -302,14 +302,25 @@ def validate_registry(
             "condition"
         ].get("checkpoint_kind"):
             raise ValueError(f"{checkpoint_id}: checkpoint kind mismatch")
-        selection_value = manifest.get("selection", {}).get("monitor_value")
-        if (
+        selection = manifest.get("selection", {})
+        selection_value = selection.get("monitor_value")
+        milestone_step = record["condition"].get("milestone_step")
+        manifest_step = manifest.get("trained_on", {}).get("optimizer_steps")
+        is_scheduled_milestone = (
+            selection.get("monitor") == "not_selected_milestone"
+            and isinstance(milestone_step, int)
+            and milestone_step > 0
+            and manifest_step == milestone_step
+        )
+        if not is_scheduled_milestone and (
             not isinstance(selection_value, (int, float))
             or not math.isfinite(selection_value)
             or selection_value <= 0
         ):
             raise ValueError(
-                f"{checkpoint_id}: source validation metric must be finite and positive"
+                f"{checkpoint_id}: source validation metric must be finite and "
+                "positive unless this is a scheduled milestone whose declared "
+                "step matches the manifest optimizer step"
             )
 
         resolved_manifest_path = manifest_path.resolve()

@@ -38,6 +38,12 @@ PHASE4E_RECIPE = (
     REPO_ROOT
     / "configs/downstream_recipes/phase4e_validation_loss_learning_curves.yaml"
 )
+PHASE4F_REGISTRY = (
+    REPO_ROOT / "launch/checkpoint_sets/phase4e-fixed-milestones.jsonl"
+)
+PHASE4F_RECIPE = (
+    REPO_ROOT / "configs/downstream_recipes/phase4f_checkpoint_trajectory.yaml"
+)
 CHECKPOINT_ROOT = Path("/network/scratch/s/sobralm/foundry-checkpoints")
 
 
@@ -519,6 +525,49 @@ def test_actual_phase4e_registry_skips_only_audit_unavailable_cells() -> None:
 @pytest.mark.skipif(
     not CHECKPOINT_ROOT.is_dir(), reason="Mila checkpoint storage unavailable"
 )
+def test_actual_phase4f_registry_compiles_exact_matrix() -> None:
+    cells, metadata = compile_cells(
+        PHASE4F_REGISTRY, PHASE4F_RECIPE, PHASE4A_AUDIT, CHECKPOINT_ROOT
+    )
+    assert metadata["counts"] == {"minipigs": 1800, "monkeys": 585}
+    assert metadata["skipped_cell_counts"] == {}
+    assert metadata["unavailable_target_fractions"] == []
+    rows = cells["minipigs"] + cells["monkeys"]
+    assert len(rows) == 2385
+    assert len({row["cell_id"] for row in rows}) == 2385
+    assert len({row["checkpoint_id"] for row in rows}) == 180
+    assert {row["target_fraction"] for row in rows} == {1.0}
+    assert {row["transfer_regime"] for row in rows} == {
+        "full_finetuning_reset_router"
+    }
+    assert {row["source_condition"]["milestone_step"] for row in rows} == {
+        100,
+        300,
+        1000,
+        3000,
+        10000,
+    }
+    assert (
+        len({(row["wandb_group"], row["wandb_run_id"]) for row in rows}) == 2385
+    )
+    expected = {
+        "hyperparameters.warmup_fraction=0.1",
+        "hyperparameters.start_lr_factor=0.0001",
+        "hyperparameters.scheduler_name=phased",
+        "hyperparameters.scheduler_interval=step",
+        "hyperparameters.hold=0",
+        "hyperparameters.decay=0",
+        "hyperparameters.learning_rate=0.003",
+        "hyperparameters.backbone_learning_rate=0.0003",
+        "hyperparameters.backbone_components=[temporal_frontend,gru]",
+        "hyperparameters.adapter_warmup_steps=0",
+    }
+    assert all(set(row["fixed_overrides"]) == expected for row in rows)
+
+
+@pytest.mark.skipif(
+    not CHECKPOINT_ROOT.is_dir(), reason="Mila checkpoint storage unavailable"
+)
 def test_corrected_phase4a_recipe_pins_matched_downstream_lr() -> None:
     cells, metadata = compile_cells(
         PHASE4A_REGISTRY,
@@ -579,6 +628,59 @@ def test_phase4a_cell_resolves_transfer_config(
         assert cfg.run.unsupported_bf16_fallback == "16-mixed"
         assert str(cfg.data.root) == "/shared/processed"
         assert cfg.data.training_fraction_seed == row["target_finetuning_seed"]
+    finally:
+        GlobalHydra.instance().clear()
+
+
+@pytest.mark.skipif(
+    not CHECKPOINT_ROOT.is_dir(), reason="Mila checkpoint storage unavailable"
+)
+@pytest.mark.parametrize("species", ["minipigs", "monkeys"])
+def test_phase4f_cell_resolves_phase4e_recipe(
+    species: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cells, _ = compile_cells(
+        PHASE4F_REGISTRY, PHASE4F_RECIPE, PHASE4A_AUDIT, CHECKPOINT_ROOT
+    )
+    row = cells[species][0]
+    monkeypatch.setenv("FOUNDRY_DATA_ROOT", "/shared/processed")
+    GlobalHydra.instance().clear()
+    try:
+        with initialize_config_dir(
+            config_dir=str(REPO_ROOT / "configs"), version_base=None
+        ):
+            cfg = compose(
+                config_name="config",
+                overrides=[
+                    f"experiment=auditory_decoding/neurosoft_conv_bigru_transfer_{species}",
+                    *row["overrides"],
+                ],
+            )
+        OmegaConf.resolve(cfg)
+        assert cfg.run.name == row["cell_id"]
+        assert cfg.run.group == (
+            f"20260915-MS-SOURCE_VALIDATION_DOWNSTREAM_TRAJECTORY_{species.upper()}"
+        )
+        assert (
+            cfg.run.pretrained_transfer_regime == "full_finetuning_reset_router"
+        )
+        assert cfg.run.evaluate_test is True
+        assert cfg.data.training_fraction == 1.0
+        assert cfg.hyperparameters.learning_rate == pytest.approx(0.003)
+        assert cfg.hyperparameters.backbone_learning_rate == pytest.approx(
+            0.0003
+        )
+        assert list(cfg.hyperparameters.backbone_components) == [
+            "temporal_frontend",
+            "gru",
+        ]
+        assert cfg.hyperparameters.warmup_fraction == pytest.approx(0.1)
+        assert cfg.hyperparameters.start_lr_factor == pytest.approx(0.0001)
+        assert cfg.hyperparameters.scheduler_name == "phased"
+        assert cfg.hyperparameters.scheduler_interval == "step"
+        assert cfg.hyperparameters.hold == 0
+        assert cfg.hyperparameters.decay == 0
+        assert cfg.hyperparameters.adapter_warmup_steps == 0
     finally:
         GlobalHydra.instance().clear()
 
