@@ -577,7 +577,7 @@ def plot_absolute(summary: pd.DataFrame, path: Path) -> None:
                     linestyle=LINESTYLES[species],
                     label=model,
                     metric=metric,
-                    ribbon=not starts_zero,
+                    ribbon=False,
                 )
             setup_x(axis)
             axis.set_ylabel(ylabel)
