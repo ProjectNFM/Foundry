@@ -245,10 +245,10 @@ uv run python main.py \
   hydra.launcher.mem_gb=32 -m
 ```
 
-The registry generator, source-loss checkpoint callback/configuration, and
-downstream recipe must be implemented and committed before any production
-submission. Follow the repository snapshot requirements and record every
-Slurm job ID and snapshot bundle path here immediately after launch.
+The registry generator, source-loss checkpoint callback/configuration, explicit
+per-cell `skip` policy, and downstream recipe were implemented and committed
+before production submission. The completed immutable-snapshot submissions are
+recorded below.
 
 ### Key config overrides
 
@@ -304,6 +304,45 @@ baseline (not the raw-input Phase-1 EEGNet), so its preprocessing, causal
 split, fractions, and target seeds align with the Phase 4E target matrix. It
 is descriptive rather than a paired intervention contrast; in particular,
 EEGNet uses its established model-specific training schedule.
+
+### Metrics
+
+`ΔF1` is transfer minus matched scratch in percentage points; `Δ steps` is
+scratch stable steps minus transfer stable steps. Thus positive values favor
+transfer for both metrics. Values are subject-balanced means with 95% bootstrap
+intervals.
+
+| Species | Data | ΔF1 (pp), 95% CI | Δ steps, 95% CI |
+|---|---:|---:|---:|
+| Minipigs | 5% | -1.30 [-3.01, +0.21] | -35 [-54, -19] |
+| Minipigs | 10% | -1.31 [-2.58, -0.32] | -67 [-119, -21] |
+| Minipigs | 25% | -0.59 [-1.25, +0.02] | -82 [-165, -10] |
+| Minipigs | 50% | -1.85 [-2.60, -1.19] | -169 [-240, -99] |
+| Minipigs | 100% | -0.81 [-1.67, +0.03] | -264 [-674, +159] |
+| Monkeys | 5% | -2.05 [-4.81, +0.21] | -26 [-46, -2] |
+| Monkeys | 10% | -1.27 [-2.71, +0.11] | -30 [-66, +6] |
+| Monkeys | 25% | -0.56 [-3.57, +2.29] | -149 [-211, -106] |
+| Monkeys | 50% | -0.59 [-4.15, +2.93] | -213 [-483, +77] |
+| Monkeys | 100% | +1.60 [-0.84, +4.42] | -542 [-835, -248] |
+
+**Decision-rule outcome.** No lower-data fraction had a positive `ΔF1` whose
+95% interval excluded zero, so the prespecified low-data-benefit criterion
+failed. At 100%, minipigs failed the on-par criterion because the lower bound
+was below -1 pp. Monkeys met the lower-bound condition but their +1.60 pp point
+estimate was outside the prespecified ±1 pp on-par band. Accordingly, neither
+species met the complete hypothesis.
+
+### Analysis
+
+The W&B-derived analysis is reproducible with
+`uv run python analysis/20260914-MS-validation-loss-checkpoint-transfer-learning-curves_analysis.py --entity poyo-eeg`.
+It audits all 3,060 compiled Phase 4E cell identities, fetches the final test
+summary and validation history, and saves non-versioned CSV caches under
+`analysis/csv/`. All 3,060 W&B runs were `finished`; the stable-convergence
+endpoint was available for every run. The one missing final test summary is
+handled as documented below. The global-z-score EEGNet comparison is based on
+its completed canonical baseline runs and is descriptive, not a paired causal
+contrast.
 
 ### Figures
 
@@ -394,24 +433,23 @@ in results accounting.
   average and monkey validation loss by 31.4%; the later monkey overfitting
   confirms the usefulness of loss-based checkpoint selection. Reproduce with
   `uv run python analysis/20260914-MS-validation-loss-checkpoint-transfer-learning-curves.py`.
-- **Downstream compilation status:** the hash-verified 36-row source registry
-  was generated at `launch/checkpoint_sets/phase4e-validation-loss.jsonl`.
-  Compilation intentionally stopped when the existing compiler encountered
-  the first audit-unavailable low-fraction cell. Before launch, implement and
-  test an explicit per-cell `skip` policy, update the recipe's expected counts
-  to 2,316 minipig and 744 monkey cells, and recompile the complete 3,060-cell
-  matrix. No downstream jobs have been submitted yet.
+- **Downstream compilation outcome:** the hash-verified 36-row source registry
+  at `launch/checkpoint_sets/phase4e-validation-loss.jsonl` was compiled with
+  the explicit audit-unavailable per-cell `skip` policy. The completed matrix
+  contains 2,316 minipig and 744 monkey cells (3,060 total), preserving the
+  established scientific availability mask.
 
-### Downstream-production plan
+### Downstream-production execution
 
 - The runtime audit completed 48 exact Phase 4E cells (32 minipig and 16
   monkey) under their deterministic production W&B identities. They count
   toward the scientific matrix and are excluded from fresh submissions.
-- Pending lists contain 2,284 minipig and 728 monkey cells, 3,012 total. The
-  common `tasks_per_node=8`, `cpus_per_task=2`, and `num_workers=1` setup
-  creates 286 and 91 packed RTX-8000 allocations, respectively.
-- Both submissions use `long`, 32 GB RAM, the shared snapshot root, the
-  project virtual environment, and exclude `cn-c004`.
+- The production submissions excluded the 48 completed audit cells, leaving
+  2,284 minipig and 728 monkey cells (3,012 total). Together with the audit
+  cells, they complete the 3,060-cell scientific matrix.
+- Both arrays completed on `long` using one RTX 8000 per allocation,
+  `tasks_per_node=8`, `cpus_per_task=2`, `num_workers=1`, 32 GB RAM, the shared
+  snapshot root, the project virtual environment, and `cn-c004` exclusion.
 
 ### Downstream-production launch record
 
@@ -424,8 +462,10 @@ in results accounting.
 - Both sealed snapshots use immutable commit `4da2dd41`, one RTX 8000 per
   packed allocation, `tasks_per_node=8`, `cpus_per_task=2`,
   `hyperparameters.num_workers=1`, `mem_gb=32`, partition `long`, and
-  `cn-c004` exclusion. The minipig array started allocations immediately;
-  the monkey array was pending normally at submission.
+  `cn-c004` exclusion. All 286 minipig and 91 monkey packed allocations
+  completed without Slurm failure or GPU OOM. W&B reports all 3,060 scientific
+  downstream identities as `finished`; the 48 audit cells plus the 3,012
+  production-list cells account for the full matrix.
 
 ### Source-pretraining figures
 
