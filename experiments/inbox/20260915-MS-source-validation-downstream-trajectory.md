@@ -212,13 +212,22 @@ Submitted from clean commit
 
 | Species | Logical runs | Packed allocations | Slurm array | Snapshot bundle |
 |---|---:|---:|---|---|
-| Minipigs | 1,800 | 225 | `10807331` | `/network/scratch/s/sobralm/foundry-launches/20260915T230308_20260915-MS-SOURCE_VALIDATION_DOWNSTREAM_TRAJECTORY_MINIPIGS_8b933c9f_658b9db7` |
-| Monkeys | 585 | 74 | `10807340` | `/network/scratch/s/sobralm/foundry-launches/20260915T230501_20260915-MS-SOURCE_VALIDATION_DOWNSTREAM_TRAJECTORY_MONKEYS_8b933c9f_f6bda681` |
+| Minipigs | 1,800 | 225 | `10807874` | `/network/scratch/s/sobralm/foundry-launches/20260915T233754_20260915-MS-SOURCE_VALIDATION_DOWNSTREAM_TRAJECTORY_MINIPIGS_be7b3737_fbc354a1` |
+| Monkeys | 585 | 74 | `10807878` | `/network/scratch/s/sobralm/foundry-launches/20260915T233836_20260915-MS-SOURCE_VALIDATION_DOWNSTREAM_TRAJECTORY_MONKEYS_be7b3737_8da4ce50` |
 
 Both arrays use the Phase 4E downstream hardware and packing configuration:
 partition `long`, one RTX 8000 per packed allocation, eight tasks per node,
 two CPUs per task, one dataloader worker per task, 32 GB memory, a three-hour
 limit, requeue enabled, and `cn-c004` excluded.
+
+The initial arrays `10807331` (minipigs) and `10807340` (monkeys), submitted
+from commit `8b933c9`, were cancelled. Forty minipig packed allocations had
+started and failed before training because scheduled milestone manifests have
+no metric-selected `monitor_value`, while the transfer loader logged that
+optional value with a floating-point-only formatter. No monkey allocation had
+started. Commit `be7b373775c5bd0926337726ebdb28fec4579a5e` made the logging path
+support metric-free scheduled milestones and added a regression test; the
+complete matrices were then resubmitted as the replacement arrays above.
 
 ### Key config overrides
 
