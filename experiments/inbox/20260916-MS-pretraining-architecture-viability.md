@@ -94,6 +94,16 @@ rejected merely for underperforming the default source model.
   on a Quadro RTX 8000 using the intended `16-mixed` fallback. It produced all
   fixed, loss-selected, and final checkpoint artifacts with finite loss;
   validation-inclusive wall time was 55.1 seconds.
+- **Batch-128 monkey canary:** The default-backbone `sub-01` monkey recipe
+  completed its step-100 validation with epoch-based validation disabled and
+  wrote all milestone, loss-selected, and final manifests. Peak active GPU
+  use was below 0.8 GiB on the RTX8000.
+- **Batch-128 production launch:** Submitted 2026-09-16 as packed array
+  `10823892` (35 minipig cells in 9 four-worker allocations) from snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260916T200036_NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS_92362ddd_9ccc2c32`,
+  and array `10823901` (25 monkey cells in 7 four-worker allocations) from
+  snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260916T200107_NEUROSOFT_SOURCE_PRETRAINING_MONKEYS_92362ddd_7cf79b9d`.
 - **Superseded launch:** The batch-16 arrays `10823721` and `10823722` were
   cancelled before relaunch. Their source snapshot paths were
   `/network/scratch/s/sobralm/foundry-launches/20260916T193629_NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS_25c5f131_4fe32e20`,

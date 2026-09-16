@@ -29,7 +29,7 @@ advantage as source training progresses?
 
 ## Hypothesis
 
-Relative to the matched default-backbone seed-42 trajectory, the small
+Relative to the matched batch-128 reference-backbone seed-42 trajectory, the small
 backbone will have a less negative subject-balanced change in transfer-minus-
 scratch held-out supported macro-F1 from source step 100 to step 10,000. The
 hypothesis is evaluated separately by species and is supported when the 95%
@@ -44,7 +44,8 @@ preservation.
 
 - **Source model:** Small-backbone condition declared downstream-ready by the
   parent experiment; one source seed `(selection=42, model=42)` per excluded
-  target subject.
+  target subject. Its comparator is the parent's separately trained
+  batch-128 reference-backbone condition.
 - **Target model:** The same small frontend/GRU architecture as the source,
   with a fresh ordinary recording-specific bias-enabled target adapter and a
   fresh router.

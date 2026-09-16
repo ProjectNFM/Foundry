@@ -33,7 +33,7 @@ recording-specific adapter?
 
 Bias-free source checkpoints will exhibit less deterioration in transfer-
 minus-scratch held-out supported macro-F1 from source step 100 to step 10,000
-than the matched default bias-enabled seed-42 checkpoints, and the preservation
+than the matched batch-128 reference bias-enabled seed-42 checkpoints, and the preservation
 will be greatest with a fresh bias-free target adapter. The primary contrast
 is the target-adapter interaction within the bias-free source trajectory:
 `bias-free-target erosion - ordinary-target erosion` must have a strictly
@@ -47,6 +47,8 @@ actually mitigates the original failure mode.
 
 - **Source model:** Bias-free recording-specific source adapters with the
   default 1x backbone, declared downstream-ready by the parent experiment.
+  The bias-enabled comparator is the parent's batch-128 reference-backbone
+  condition.
 - **Source seed:** `(selection=42, model=42)` only.
 - **Source checkpoints:** Fixed steps 100, 300, 1,000, 3,000, and 10,000;
   loss-selected checkpoints remain saved but excluded.

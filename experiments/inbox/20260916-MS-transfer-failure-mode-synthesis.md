@@ -9,8 +9,9 @@
 ## Background
 
 The parent [architecture-viability experiment](20260916-MS-pretraining-architecture-viability.md)
-creates a common source-training comparison and fixed-checkpoint inventory for
-four model interventions. Its downstream children test the interventions
+creates a common batch-128 source-training comparison and fixed-checkpoint
+inventory for four model interventions plus a default-backbone reference. Its
+downstream children test the interventions
 independently:
 
 - [small-backbone checkpoint transfer](20260916-MS-small-backbone-transfer.md);
@@ -53,8 +54,9 @@ excluded-subject bootstrap intervals and retain species-specific verdicts.
 ### Setup
 
 - **Runs:** No new training. Reuse the complete fixed-checkpoint results from
-  the parent and four linked downstream experiments plus the existing default
-  seed-42 Phase 4F trajectory and matched scratch controls.
+  the parent and four linked downstream experiments, using the parent's
+  batch-128 reference backbone as the primary comparator. The historical
+  batch-16 Phase 4E trajectory remains contextual only.
 - **Checkpoints:** Fixed source steps 100, 300, 1,000, 3,000, and 10,000 only.
   Loss-selected checkpoints are excluded even though they remain stored.
 - **Common unit:** Excluded target subject, preserving its full checkpoint

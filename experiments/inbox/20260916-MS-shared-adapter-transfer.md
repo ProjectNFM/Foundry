@@ -32,7 +32,7 @@ pretrained shared input projection during target finetuning?
 
 Shared-adapter source checkpoints will exhibit less deterioration in transfer-
 minus-scratch held-out supported macro-F1 from source step 100 to step 10,000
-than the default recording-specific seed-42 checkpoints, and preservation will
+than the batch-128 reference recording-specific seed-42 checkpoints, and preservation will
 be greatest when the pretrained shared adapter is transferred and finetuned.
 The primary contrast is
 `shared-adapter-retained erosion - ordinary-target erosion`; its 95%
@@ -46,6 +46,8 @@ mitigates the original transfer erosion.
 
 - **Source model:** One shared biased `Linear(32, 64)` input adapter and the
   default 1x backbone, declared downstream-ready by the parent experiment.
+  The ordinary-adapter comparator is the parent's batch-128 reference-backbone
+  condition.
 - **Source seed:** `(selection=42, model=42)` only.
 - **Source checkpoints:** Fixed steps 100, 300, 1,000, 3,000, and 10,000;
   loss-selected checkpoints remain saved but excluded.
