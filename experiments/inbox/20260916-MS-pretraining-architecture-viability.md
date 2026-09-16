@@ -93,6 +93,12 @@ rejected merely for underperforming the default source model.
   on a Quadro RTX 8000 using the intended `16-mixed` fallback. It produced all
   fixed, loss-selected, and final checkpoint artifacts with finite loss;
   validation-inclusive wall time was 55.1 seconds.
+- **Production launch:** Submitted 2026-09-16 as array `10823721` (28 minipig
+  cells) from snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260916T193629_NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS_25c5f131_4fe32e20`,
+  and array `10823722` (20 monkey cells) from snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260916T193702_NEUROSOFT_SOURCE_PRETRAINING_MONKEYS_25c5f131_2e814ba1`.
+  Both arrays request one RTX8000 for eight hours and exclude `cn-c004`.
 
 The new source matrix is:
 
