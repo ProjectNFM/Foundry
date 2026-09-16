@@ -9,6 +9,6 @@
   "output": "source-minipigs.jsonl",
   "records": 35,
   "schema": "neurosoft-architecture-source-cell-lock",
-  "sha256": "d2475ac0c2b292549bae3a484f00969ab7d89f94969a6b0e437d18ab3e2ce6ff",
+  "sha256": "10625da4a6044365adfae3f7118d9d90b8e570d038272d4fe6fa2aad0dd697ef",
   "version": 1
 }

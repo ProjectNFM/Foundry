@@ -20,6 +20,7 @@ from tools.generate_architecture_viability_source_cells import (
     GROUPS,
     TARGETS,
     build_records,
+    source_run_name,
 )
 
 
@@ -309,7 +310,7 @@ def _fake_source_outputs(tmp_path: Path) -> tuple[Path, Path]:
         for species, numbers in TARGETS.items():
             for number in numbers:
                 subject = f"sub-{number:02d}"
-                run_name = f"arch-{condition}-{species}-{subject}-s42-m42"
+                run_name = source_run_name(condition, species, subject)
                 manifest_dir = (
                     run_root / GROUPS[species] / run_name / "manifests"
                 )

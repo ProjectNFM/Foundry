@@ -673,7 +673,11 @@ class NeurosoftConvBiGRU(nn.Module):
         raw_session_id = str(data.session.id)
         namespace = getattr(data, "dataset_namespace", None)
         session_id = self.resolve_session_id(raw_session_id, namespace)
-        if session_id not in self.session_adapter.layers:
+        # Both adapter implementations expose their configured recording
+        # widths through ``channel_counts``.  Only the recording-specific
+        # adapter has ``layers``; the shared padded adapter has one ``shared``
+        # projection instead.
+        if session_id not in self.session_adapter.channel_counts:
             raise KeyError(f"Unknown NeuroSoft session ID {session_id!r}")
         if signal.shape[1] != self.session_adapter.channel_counts[session_id]:
             raise ValueError(

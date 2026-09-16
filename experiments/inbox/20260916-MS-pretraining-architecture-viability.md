@@ -86,9 +86,9 @@ rejected merely for underperforming the default source model.
   runs remain historical context; this matrix supplies the matched batch-128
   reference.
 - **WandB:** Planned groups
-  `20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-MINIPIGS` and
-  `20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-MONKEYS`; exact run
-  names and eight-character run IDs will be recorded after launch.
+  `20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-FIX1-MINIPIGS` and
+  `20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-FIX1-MONKEYS`; exact
+  run names and eight-character run IDs will be recorded after launch.
 - **RTX8000 canary:** The worst-case large-backbone minipig recipe for
   `sub-01`, with the production source manifest and seed, completed 250 steps
   on a Quadro RTX 8000 using the intended `16-mixed` fallback. It produced all
@@ -98,12 +98,28 @@ rejected merely for underperforming the default source model.
   completed its step-100 validation with epoch-based validation disabled and
   wrote all milestone, loss-selected, and final manifests. Peak active GPU
   use was below 0.8 GiB on the RTX8000.
-- **Batch-128 production launch:** Submitted 2026-09-16 as packed array
+- **Corrected shared-adapter canary:** After the `tokenize()` validation was
+  made adapter-agnostic, the shared-padded monkey `sub-01` batch-128 recipe
+  completed 100 steps, validation, all five fixed milestone manifests, a
+  loss-selected manifest, and a final manifest on the local RTX8000 using
+  `16-mixed` fallback. This specifically covers the data-loader path that
+  failed in the initial matrix.
+- **Superseded batch-128 production launch:** Submitted 2026-09-16 as packed array
   `10823892` (35 minipig cells in 9 four-worker allocations) from snapshot
   `/network/scratch/s/sobralm/foundry-launches/20260916T200036_NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS_92362ddd_9ccc2c32`,
   and array `10823901` (25 monkey cells in 7 four-worker allocations) from
   snapshot
-  `/network/scratch/s/sobralm/foundry-launches/20260916T200107_NEUROSOFT_SOURCE_PRETRAINING_MONKEYS_92362ddd_7cf79b9d`.
+  `/network/scratch/s/sobralm/foundry-launches/20260916T200107_NEUROSOFT_SOURCE_PRETRAINING_MONKEYS_92362ddd_7cf79b9d`. The seven minipig
+  shared-padded cells failed during validation because `tokenize()` assumed
+  the per-session adapter's `.layers` attribute. Both arrays were then
+  cancelled so the complete matrix can be rerun from one corrected snapshot;
+  no output from these arrays is part of this experiment.
+- **Corrected batch-128 production launch:** The full 60-cell `FIX1` matrix
+  will be submitted after the clean commit below. Its output roots and run
+  names are versioned (`B128-FIX1`, `-b128-fix1-`) to prevent collision with
+  the superseded partial attempt. The checkpoint-registry builder uses the
+  same canonical run-name function as the cell generator, including that
+  version label.
 - **Superseded launch:** The batch-16 arrays `10823721` and `10823722` were
   cancelled before relaunch. Their source snapshot paths were
   `/network/scratch/s/sobralm/foundry-launches/20260916T193629_NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS_25c5f131_4fe32e20`,
@@ -185,7 +201,7 @@ uv run python tools/audit_architecture_viability_parity.py --json
 
 uv run python main.py \
   experiment=pretraining/neurosoft_conv_bigru_supervised_minipigs \
-  hydra.sweep.dir=/network/scratch/s/sobralm/runs/20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-MINIPIGS \
+  hydra.sweep.dir=/network/scratch/s/sobralm/runs/20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-FIX1-MINIPIGS \
   'hydra.sweep.subdir=${run.name}' \
   hydra/launcher=slurm_default hydra.launcher.partition=long \
   hydra.launcher.gres=gpu:rtx8000:1 hydra.launcher.timeout_min=480 \
@@ -196,7 +212,7 @@ uv run python main.py \
 
 uv run python main.py \
   experiment=pretraining/neurosoft_conv_bigru_supervised_monkeys \
-  hydra.sweep.dir=/network/scratch/s/sobralm/runs/20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-MONKEYS \
+  hydra.sweep.dir=/network/scratch/s/sobralm/runs/20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-FIX1-MONKEYS \
   'hydra.sweep.subdir=${run.name}' \
   hydra/launcher=slurm_default hydra.launcher.partition=long \
   hydra.launcher.gres=gpu:rtx8000:1 hydra.launcher.timeout_min=480 \

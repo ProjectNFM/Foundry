@@ -15,6 +15,7 @@ from tools.generate_architecture_viability_source_cells import (
     CONDITIONS,
     GROUPS,
     TARGETS,
+    source_run_name,
 )
 
 
@@ -50,7 +51,7 @@ def build_registry(
     for species, numbers in TARGETS.items():
         for number in numbers:
             subject = f"sub-{number:02d}"
-            run_name = f"arch-{condition_id}-{species}-{subject}-s42-m42"
+            run_name = source_run_name(condition_id, species, subject)
             manifest_dir = run_root / GROUPS[species] / run_name / "manifests"
             for step, kind in MILESTONES.items():
                 matches = sorted(manifest_dir.glob(f"{kind}-step{step}.json"))
@@ -196,7 +197,12 @@ def main() -> None:
             write_registry(
                 args.output_dir / f"architecture-{condition}-fixed.jsonl", rows
             )
-    print(json.dumps({"counts": counts, "total": 240}, sort_keys=True))
+    print(
+        json.dumps(
+            {"counts": counts, "total": sum(counts.values())},
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":

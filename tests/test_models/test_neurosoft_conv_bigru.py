@@ -126,6 +126,27 @@ def test_tokenize_collate_forward_and_backward_across_channel_counts():
     assert model.session_adapter.layers["monkey"].weight.grad is not None
 
 
+def test_shared_padded_tokenize_collate_and_forward():
+    """Tokenization must not assume the per-session adapter's ``layers``."""
+    model = _model(input_adapter_mode="shared_padded", shared_input_channels=5)
+    batch = collate(
+        [
+            model.tokenize(_data("minipig", 3)),
+            model.tokenize(_data("monkey", 5)),
+        ]
+    )
+    assert batch["input_values"].shape == (2, 5, 1000)
+    outputs = model(
+        input_values=batch["input_values"],
+        task_index=batch["task_index"],
+        input_session_ids=batch["input_session_ids"],
+        input_channel_counts=batch["input_channel_counts"],
+        input_seq_len=batch["input_seq_len"],
+    )
+    assert outputs["neurosoft"].shape == (2, 8)
+    assert not hasattr(model.session_adapter, "layers")
+
+
 def test_fixed_recipe_shape_and_raw_sampling_rate_reach_frontend():
     model = _model()
     data = _data("minipig", 3)

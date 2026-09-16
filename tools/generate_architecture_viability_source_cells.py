@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the audited 60-cell batch-128 NeuroSoft source matrix."""
+"""Generate the audited corrected 60-cell batch-128 NeuroSoft source matrix."""
 
 from __future__ import annotations
 
@@ -13,9 +13,11 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = {"minipigs": range(1, 8), "monkeys": range(1, 6)}
+LAUNCH_REVISION = "fix1"
+RUN_LABEL = f"b128-{LAUNCH_REVISION}"
 GROUPS = {
-    "minipigs": "20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-MINIPIGS",
-    "monkeys": "20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-MONKEYS",
+    "minipigs": "20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-FIX1-MINIPIGS",
+    "monkeys": "20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-FIX1-MONKEYS",
 }
 CONDITIONS: dict[str, dict[str, Any]] = {
     "reference_backbone": {
@@ -65,6 +67,11 @@ def _digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def source_run_name(condition_id: str, species: str, subject: str) -> str:
+    """Return the immutable output/W&B name for a source-matrix cell."""
+    return f"arch-{condition_id}-{species}-{subject}-{RUN_LABEL}-s42-m42"
+
+
 def build_records(repo_root: Path, species: str) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for condition_id, model in CONDITIONS.items():
@@ -95,7 +102,7 @@ def build_records(repo_root: Path, species: str) -> list[dict[str, Any]]:
                 raise ValueError(
                     f"{manifest_path}: source identity {observed!r} != {expected!r}"
                 )
-            run_name = f"arch-{condition_id}-{species}-{subject}-b128-s42-m42"
+            run_name = source_run_name(condition_id, species, subject)
             cell_id = (
                 f"architecture_viability__{condition_id}__{species}__{subject}"
             )

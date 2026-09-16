@@ -9,6 +9,6 @@
   "output": "source-monkeys.jsonl",
   "records": 25,
   "schema": "neurosoft-architecture-source-cell-lock",
-  "sha256": "bf975ec90d515dc6f9d608907700d3a72eb60ff66db3a0856852e03ebd62c5bc",
+  "sha256": "59c8a824e464daa4263d2b8fb69784b47368dac976c827133eb76507f7cbead3",
   "version": 1
 }
