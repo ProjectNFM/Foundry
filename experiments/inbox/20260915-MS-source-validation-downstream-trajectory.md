@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-09-15
 **Parent experiment:** [Adapter-bias reliance across source-pretraining age](20260915-MS-adapter-bias-perturbation.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Source-pretraining architecture viability](20260916-MS-pretraining-architecture-viability.md)
 **Tags:** neurosoft, supervised-pretraining, checkpoint-age, source-validation, transfer, optimizer-efficiency, 8band, minipigs, monkeys, phase4f
 
 ## Background

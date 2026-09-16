@@ -304,6 +304,7 @@ def generate_checkpoint_markdown(manifest: dict[str, Any]) -> str:
             f"- **Slurm job ID:** `{manifest.get('slurm_job_id', 'n/a')}`",
             f"- **W&B project:** `{wandb_info.get('project', 'n/a')}`",
             f"- **W&B group:** `{wandb_info.get('group', 'n/a')}`",
+            f"- **W&B run name:** `{wandb_info.get('name', 'n/a')}`",
             f"- **W&B run ID:** `{wandb_info.get('run_id', 'n/a')}`",
             f"- **Manifest hash:** `{manifest.get('manifest_hash', 'n/a')}`",
             "",

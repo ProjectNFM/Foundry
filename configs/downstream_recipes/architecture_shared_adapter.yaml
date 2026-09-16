@@ -1,0 +1,64 @@
+schema: foundry-downstream-recipe
+version: 1
+recipe_id: architecture-shared-adapter-transfer
+output_stem: shared-adapter
+audit_path: docs/neurosoft-phase0-audit.json
+eligible_session_selection: {eligible: true}
+base_experiments:
+  minipigs: auditory_decoding/neurosoft_conv_bigru_transfer_minipigs
+  monkeys: auditory_decoding/neurosoft_conv_bigru_transfer_monkeys
+transfer_regimes: [full_finetuning_reset_router, full_finetuning_retain_shared_adapter_reset_router]
+target_training_fractions: [1.0]
+target_finetuning_seeds: [42, 43, 44]
+expected_source_seed_pairs: [[42, 42]]
+checkpoint_model_fields: [temporal_channels, gru_hidden_size]
+evaluate_test: true
+learning_rates: [0.003]
+fixed_overrides:
+  - hyperparameters.warmup_fraction=0.1
+  - hyperparameters.start_lr_factor=0.0001
+  - hyperparameters.scheduler_name=phased
+  - hyperparameters.scheduler_interval=step
+  - hyperparameters.hold=0
+  - hyperparameters.decay=0
+condition_matrix:
+  - id: transfer_shared_to_ordinary
+    source: pretrained
+    transfer_regime: full_finetuning_reset_router
+    scratch_family: shared-padded
+    backbone_lr_multiplier: 0.1
+    adapter_warmup_steps: 0
+    model_overrides: {input_adapter_mode: per_session, input_adapter_bias: true}
+  - id: transfer_shared_retained
+    source: pretrained
+    transfer_regime: full_finetuning_retain_shared_adapter_reset_router
+    scratch_family: shared-padded
+    backbone_lr_multiplier: 0.1
+    adapter_warmup_steps: 0
+    model_overrides: {input_adapter_mode: shared_padded, input_adapter_bias: true, shared_input_channels: 32}
+  - id: scratch_shared_padded
+    source: scratch
+    transfer_regime: null
+    source_condition: scratch-shared-padded
+    scratch_family: shared-padded
+    backbone_lr_multiplier: null
+    adapter_warmup_steps: 0
+    model_overrides: {input_adapter_mode: shared_padded, input_adapter_bias: true, shared_input_channels: 32}
+condition_labels: {study: architecture_transfer, architecture_family: shared_padded, target_data: full}
+species:
+  minipigs:
+    wandb_groups:
+      transfer_shared_to_ordinary: 20260916-MS-SHARED-ADAPTER-TRANSFER-MINIPIGS
+      transfer_shared_retained: 20260916-MS-SHARED-ADAPTER-RETAINED-TRANSFER-MINIPIGS
+      scratch_shared_padded: 20260916-MS-SHARED-ADAPTER-SCRATCH-MINIPIGS
+    wandb_tags: [minipigs, 8band, architecture-transfer, shared-adapter]
+    expected_checkpoints: 35
+    expected_cells: 1320
+  monkeys:
+    wandb_groups:
+      transfer_shared_to_ordinary: 20260916-MS-SHARED-ADAPTER-TRANSFER-MONKEYS
+      transfer_shared_retained: 20260916-MS-SHARED-ADAPTER-RETAINED-TRANSFER-MONKEYS
+      scratch_shared_padded: 20260916-MS-SHARED-ADAPTER-SCRATCH-MONKEYS
+    wandb_tags: [monkeys, 8band, architecture-transfer, shared-adapter]
+    expected_checkpoints: 25
+    expected_cells: 429

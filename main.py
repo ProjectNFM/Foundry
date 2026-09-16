@@ -637,6 +637,7 @@ def _resolve_pretrained_components(
 _NEUROSOFT_TRANSFER_REGIMES = {
     "full_finetuning",
     "full_finetuning_reset_router",
+    "full_finetuning_retain_shared_adapter_reset_router",
     "frozen_representation",
     "frozen_random_control",
 }
@@ -666,12 +667,13 @@ def _validate_pretrained_transfer_configuration(cfg: DictConfig) -> None:
     checkpoint = OmegaConf.select(
         cfg, "run.pretrained_checkpoint", default=None
     )
-    if regime == "full_finetuning_reset_router" and not _is_configured(
-        manifest
-    ):
+    if regime in {
+        "full_finetuning_reset_router",
+        "full_finetuning_retain_shared_adapter_reset_router",
+    } and not _is_configured(manifest):
         raise ValueError(
-            "full_finetuning_reset_router requires a pretrained checkpoint "
-            "manifest and does not accept an unchecked checkpoint path"
+            f"{regime} requires a pretrained checkpoint manifest and does "
+            "not accept an unchecked checkpoint path"
         )
     if regime == "frozen_random_control":
         invalid = []
@@ -1774,6 +1776,7 @@ def _emit_source_checkpoint_manifests(
     datamodule,
     output_dir: str,
     normalization_artifacts: dict | None,
+    model: torch.nn.Module | None = None,
 ) -> None:
     """Write JSON/Markdown checkpoint manifests for best and milestone checkpoints.
 
@@ -1821,7 +1824,12 @@ def _emit_source_checkpoint_manifests(
         slurm_ids.get("slurm_job_id", "unknown") if slurm_ids else "unknown"
     )
 
-    wandb_info = {"project": "unknown", "group": "unknown", "run_id": "unknown"}
+    wandb_info = {
+        "project": "unknown",
+        "group": "unknown",
+        "name": str(OmegaConf.select(cfg, "run.name", default="unknown")),
+        "run_id": "unknown",
+    }
     if trainer.logger is not None:
         from lightning.pytorch.loggers import WandbLogger
 
@@ -1832,6 +1840,11 @@ def _emit_source_checkpoint_manifests(
                     "project": getattr(exp, "project", "unknown"),
                     "group": OmegaConf.select(
                         cfg, "run.group", default="unknown"
+                    ),
+                    "name": getattr(
+                        exp,
+                        "name",
+                        OmegaConf.select(cfg, "run.name", default="unknown"),
                     ),
                     "run_id": getattr(exp, "id", "unknown"),
                 }
@@ -1844,8 +1857,44 @@ def _emit_source_checkpoint_manifests(
             elif isinstance(value, str):
                 norm_hashes[str(key)] = value
 
+    model_metadata = {
+        "source_condition": OmegaConf.select(
+            cfg, "run.source_condition", default="default"
+        ),
+        "input_adapter_mode": OmegaConf.select(
+            cfg, "model.input_adapter_mode", default="per_session"
+        ),
+        "input_adapter_bias": bool(
+            OmegaConf.select(cfg, "model.input_adapter_bias", default=True)
+        ),
+        "shared_input_channels": int(
+            OmegaConf.select(cfg, "model.shared_input_channels", default=32)
+        ),
+        "adapter_dim": int(cfg.model.adapter_dim),
+        "temporal_channels": int(cfg.model.temporal_channels),
+        "temporal_kernel_samples": int(cfg.model.temporal_kernel_samples),
+        "temporal_stride": int(cfg.model.temporal_stride),
+        "conv_depth": int(cfg.model.conv_depth),
+        "gru_hidden_size": int(cfg.model.gru_hidden_size),
+        "gru_num_layers": int(cfg.model.gru_num_layers),
+        "gru_bidirectional": bool(cfg.model.gru_bidirectional),
+    }
+    if model is not None:
+        metadata_model = getattr(model, "_orig_mod", model)
+        model_metadata["total_parameter_count"] = sum(
+            parameter.numel() for parameter in metadata_model.parameters()
+        )
+        model_metadata["transferable_parameter_count"] = sum(
+            parameter.numel()
+            for component_name in ("temporal_frontend", "gru")
+            for parameter in getattr(
+                metadata_model, component_name
+            ).parameters()
+        )
+
     recipe = {
         "model": OmegaConf.to_container(cfg.model, resolve=True),
+        "model_metadata": model_metadata,
         "hyperparameters": OmegaConf.to_container(
             cfg.hyperparameters, resolve=True
         ),
@@ -2061,6 +2110,44 @@ def _emit_source_checkpoint_manifests(
                     "Failed to write milestone manifest for step %d",
                     step,
                     exc_info=True,
+                )
+
+    if model_ckpt_cb is not None and model_ckpt_cb.last_model_path:
+        final_path = model_ckpt_cb.last_model_path
+        if os.path.isfile(final_path):
+            snap = (
+                compute_cb.get_compute_snapshot(trainer)
+                if compute_cb is not None
+                else {"optimizer_steps": trainer.global_step}
+            )
+            snap["precision"] = str(trainer.precision)
+            try:
+                checkpoint_relative_path = _publish_source_checkpoint(
+                    final_path, cfg
+                )
+                final_selection = _build_selection(snap)
+                final_selection["monitor"] = "not_selected_final"
+                final_selection["monitor_value"] = None
+                json_path, _ = write_checkpoint_manifest(
+                    final_path,
+                    manifest_dir,
+                    kind="final",
+                    trained_on=_build_trained_on(snap),
+                    selection=final_selection,
+                    compute=_build_compute(snap),
+                    recipe=recipe,
+                    normalization_artifact_hashes=norm_hashes,
+                    git_sha=git_sha,
+                    snapshot_bundle=snapshot_bundle,
+                    slurm_job_id=slurm_job_id,
+                    wandb_info=wandb_info,
+                    checkpoint_relative_path=checkpoint_relative_path,
+                )
+                written_manifests.append(str(json_path))
+                logger.info("Wrote final checkpoint manifest: %s", json_path)
+            except Exception:
+                logger.warning(
+                    "Failed to write final checkpoint manifest", exc_info=True
                 )
 
     logger.info(
@@ -2343,6 +2430,7 @@ def main(cfg: DictConfig):
                 datamodule,
                 output_dir,
                 normalization_artifacts,
+                model,
             )
         if OmegaConf.select(cfg, "run.evaluate_test", default=False):
             logger.info(

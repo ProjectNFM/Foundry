@@ -26,7 +26,13 @@ from foundry.tasks.targets import extract_multitask_targets
 class SessionInputAdapter(nn.Module):
     """Map each recording's physical channels into a shared feature space."""
 
-    def __init__(self, session_configs: Mapping[str, int], adapter_dim: int):
+    def __init__(
+        self,
+        session_configs: Mapping[str, int],
+        adapter_dim: int,
+        *,
+        bias: bool = True,
+    ):
         super().__init__()
         if not session_configs:
             raise ValueError(
@@ -38,9 +44,12 @@ class SessionInputAdapter(nn.Module):
         if any(count <= 0 for count in self.channel_counts.values()):
             raise ValueError("Every session channel count must be positive")
         self.adapter_dim = adapter_dim
+        self.bias = bool(bias)
         self.layers = nn.ModuleDict(
             {
-                session_id: nn.Linear(channel_count, adapter_dim, bias=True)
+                session_id: nn.Linear(
+                    channel_count, adapter_dim, bias=self.bias
+                )
                 for session_id, channel_count in self.channel_counts.items()
             }
         )
@@ -108,6 +117,119 @@ class SessionInputAdapter(nn.Module):
             adapted = self.layers[session_id](
                 x[item, :channel_count].transpose(0, 1)
             ).transpose(0, 1)
+            adapted[:, seq_len:] = 0
+            out[item] = adapted
+        return out
+
+
+class SharedPaddedInputAdapter(nn.Module):
+    """Right-pad filtered channels and apply one recording-agnostic linear.
+
+    Channel names are deliberately ignored.  ``session_configs`` is retained
+    only to validate recording identities and their post-filter channel counts.
+    """
+
+    def __init__(
+        self,
+        session_configs: Mapping[str, int],
+        adapter_dim: int,
+        *,
+        shared_input_channels: int,
+        bias: bool = True,
+    ) -> None:
+        super().__init__()
+        if not session_configs:
+            raise ValueError(
+                "session_configs must contain at least one session"
+            )
+        self.channel_counts = {
+            str(key): int(value) for key, value in session_configs.items()
+        }
+        if any(count <= 0 for count in self.channel_counts.values()):
+            raise ValueError("Every session channel count must be positive")
+        if shared_input_channels <= 0:
+            raise ValueError("shared_input_channels must be positive")
+        too_wide = {
+            key: count
+            for key, count in self.channel_counts.items()
+            if count > shared_input_channels
+        }
+        if too_wide:
+            raise ValueError(
+                "Shared padded adapter cannot accept sessions wider than "
+                f"{shared_input_channels}: {too_wide}"
+            )
+        self.adapter_dim = int(adapter_dim)
+        self.shared_input_channels = int(shared_input_channels)
+        self.bias = bool(bias)
+        # Keep the historical top-level ``session_adapter`` namespace while
+        # making the single shared projection explicit and auditable.
+        self.shared = nn.Linear(
+            self.shared_input_channels, self.adapter_dim, bias=self.bias
+        )
+
+    _as_session_id = staticmethod(SessionInputAdapter._as_session_id)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        *,
+        input_session_ids: Sequence[object],
+        input_channel_counts: torch.Tensor | Sequence[int],
+        input_seq_len: torch.Tensor | Sequence[int],
+    ) -> torch.Tensor:
+        if x.ndim != 3:
+            raise ValueError(
+                f"Expected input_values with shape (B, C, T), got {tuple(x.shape)}"
+            )
+        batch_size, padded_channels, padded_time = x.shape
+        if len(input_session_ids) != batch_size:
+            raise ValueError(
+                "input_session_ids must have one ID per batch item"
+            )
+        if (
+            len(input_channel_counts) != batch_size
+            or len(input_seq_len) != batch_size
+        ):
+            raise ValueError(
+                "input_channel_counts and input_seq_len must have one value per batch item"
+            )
+
+        out = x.new_zeros(batch_size, self.adapter_dim, padded_time)
+        for item in range(batch_size):
+            session_id = self._as_session_id(input_session_ids[item])
+            if session_id not in self.channel_counts:
+                known = ", ".join(self.channel_counts)
+                raise KeyError(
+                    f"Unknown NeuroSoft session ID {session_id!r}; configured IDs: {known}"
+                )
+            channel_count = int(input_channel_counts[item])
+            seq_len = int(input_seq_len[item])
+            expected_channels = self.channel_counts[session_id]
+            if channel_count != expected_channels:
+                raise ValueError(
+                    f"Session {session_id!r} is configured for {expected_channels} channels, "
+                    f"but batch item declares {channel_count}"
+                )
+            if not 0 < channel_count <= padded_channels:
+                raise ValueError(
+                    f"Invalid channel count {channel_count} for padded width {padded_channels}"
+                )
+            if channel_count > self.shared_input_channels:
+                raise ValueError(
+                    f"Shared padded adapter width is {self.shared_input_channels}, "
+                    f"but {session_id!r} has {channel_count} filtered channels"
+                )
+            if not 0 < seq_len <= padded_time:
+                raise ValueError(
+                    f"Invalid sequence length {seq_len} for padded length {padded_time}"
+                )
+
+            padded = x.new_zeros(padded_time, self.shared_input_channels)
+            padded[:, :channel_count] = x[item, :channel_count].transpose(0, 1)
+            adapted = self.shared(padded).transpose(0, 1)
+            # A biased shared projection would otherwise make padded time
+            # positions non-zero.
             adapted[:, seq_len:] = 0
             out[item] = adapted
         return out
@@ -200,6 +322,7 @@ class NeurosoftConvBiGRU(nn.Module):
     TRANSFER_REGIMES = (
         "full_finetuning",
         "full_finetuning_reset_router",
+        "full_finetuning_retain_shared_adapter_reset_router",
         "frozen_representation",
         "frozen_random_control",
     )
@@ -217,6 +340,9 @@ class NeurosoftConvBiGRU(nn.Module):
         conv_depth: int = 1,
         dropout_rate: float = 0.3,
         adapter_initializer: str = "pytorch_default",
+        input_adapter_mode: str = "per_session",
+        input_adapter_bias: bool = True,
+        shared_input_channels: int = 32,
         gru_hidden_size: int = 128,
         gru_num_layers: int = 2,
         gru_bidirectional: bool = True,
@@ -255,6 +381,18 @@ class NeurosoftConvBiGRU(nn.Module):
         # run seed. Keep its name on the module so it is recorded by normal
         # hyperparameter/checkpoint serialization.
         self.adapter_initializer = adapter_initializer
+        if input_adapter_mode not in {"per_session", "shared_padded"}:
+            raise ValueError(
+                "input_adapter_mode must be 'per_session' or 'shared_padded'"
+            )
+        if input_adapter_mode == "shared_padded" and not input_adapter_bias:
+            raise ValueError(
+                "shared_padded is the specified biased shared adapter; "
+                "input_adapter_bias must be true"
+            )
+        self.input_adapter_mode = input_adapter_mode
+        self.input_adapter_bias = bool(input_adapter_bias)
+        self.shared_input_channels = int(shared_input_channels)
         self.gru_hidden_size = gru_hidden_size
         self.gru_num_layers = gru_num_layers
         self.gru_bidirectional = gru_bidirectional
@@ -276,7 +414,17 @@ class NeurosoftConvBiGRU(nn.Module):
                     else:
                         raw_to_canonical[raw_id] = canonical_id
             self._raw_to_canonical = raw_to_canonical
-        self.session_adapter = SessionInputAdapter(session_configs, adapter_dim)
+        if input_adapter_mode == "per_session":
+            self.session_adapter = SessionInputAdapter(
+                session_configs, adapter_dim, bias=input_adapter_bias
+            )
+        else:
+            self.session_adapter = SharedPaddedInputAdapter(
+                session_configs,
+                adapter_dim,
+                shared_input_channels=shared_input_channels,
+                bias=input_adapter_bias,
+            )
 
         # The first block is the declared 64-sample/stride-4 recipe. Extra
         # depth uses explicitly length-preserving 3-sample blocks, making its
@@ -325,7 +473,7 @@ class NeurosoftConvBiGRU(nn.Module):
 
     @property
     def configured_session_ids(self) -> set[str]:
-        return set(self.session_adapter.layers.keys())
+        return set(self.session_adapter.channel_counts)
 
     def resolve_session_id(
         self, raw_id: str, namespace: str | None = None
@@ -367,6 +515,13 @@ class NeurosoftConvBiGRU(nn.Module):
             "frozen_random_control",
         }:
             return self._FROZEN_REPRESENTATION_COMPONENTS
+        if mode == "full_finetuning_retain_shared_adapter_reset_router":
+            if self.input_adapter_mode != "shared_padded":
+                raise ValueError(
+                    "retained-shared-adapter transfer requires a "
+                    "shared_padded target adapter"
+                )
+            return ("session_adapter", *self._FROZEN_REPRESENTATION_COMPONENTS)
         raise ValueError(
             "mode must be one of " + ", ".join(self.TRANSFER_REGIMES)
         )
@@ -424,11 +579,11 @@ class NeurosoftConvBiGRU(nn.Module):
             {
                 session_id
                 for session_id in session_ids
-                if session_id not in self.session_adapter.layers
+                if session_id not in self.session_adapter.channel_counts
             }
         )
         if unknown_ids:
-            known = ", ".join(self.session_adapter.layers.keys())
+            known = ", ".join(self.session_adapter.channel_counts)
             raise KeyError(
                 f"Unknown NeuroSoft session ID(s) {unknown_ids}; configured IDs: {known}"
             )

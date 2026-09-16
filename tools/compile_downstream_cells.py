@@ -298,6 +298,12 @@ def validate_registry(
                     f"{checkpoint_id}: registry {key}={record[key]!r} disagrees "
                     f"with manifest value {actual!r}"
                 )
+        declared_model = record.get("model_metadata")
+        manifest_model = manifest.get("recipe", {}).get("model_metadata")
+        if declared_model is not None and declared_model != manifest_model:
+            raise ValueError(
+                f"{checkpoint_id}: registry model_metadata disagrees with manifest"
+            )
         if manifest.get("checkpoint", {}).get("kind") != record[
             "condition"
         ].get("checkpoint_kind"):
@@ -502,6 +508,13 @@ def compile_cells(
                 f"checkpoint_filter selected no records from {registry_path}"
             )
     fixed_overrides = _fixed_overrides(recipe)
+    checkpoint_model_fields = recipe.get("checkpoint_model_fields", [])
+    if not isinstance(checkpoint_model_fields, list) or not all(
+        isinstance(field, str) and field for field in checkpoint_model_fields
+    ):
+        raise ValueError(
+            "checkpoint_model_fields must be a list of field names"
+        )
     unavailable_fraction_policy = recipe.get(
         "audit_unavailable_fraction_policy", "error"
     )
@@ -623,6 +636,11 @@ def compile_cells(
                 raise ValueError(
                     f"{condition_id}: backbone_lr_multiplier must be positive"
                 )
+            model_overrides = condition.get("model_overrides", {})
+            if not isinstance(model_overrides, dict):
+                raise ValueError(
+                    f"{condition_id}: model_overrides must be a mapping"
+                )
         learning_rates = [
             float(value) for value in recipe.get("learning_rates", [])
         ]
@@ -649,6 +667,11 @@ def compile_cells(
         species_recipe = recipe["species"][species]
         groups = species_recipe.get("wandb_groups", {})
         condition_id = str(condition["id"]) if condition is not None else regime
+        scratch_family = (
+            str(condition.get("scratch_family", condition_id))
+            if condition is not None
+            else "default"
+        )
         wandb_group = str(
             groups.get(
                 condition_id,
@@ -681,6 +704,7 @@ def compile_cells(
             checkpoint_identity = (
                 condition_id if condition is not None else "random-control"
             )
+            checkpoint_model_overrides: list[str] = []
         else:
             checkpoint_set = checkpoint_set_id
             checkpoint_id = str(checkpoint["checkpoint_id"])
@@ -694,6 +718,21 @@ def compile_cells(
                 source_condition.get("label") or checkpoint["checkpoint_set_id"]
             )
             checkpoint_identity = checkpoint_id
+            metadata = checkpoint.get("model_metadata", {})
+            missing_model_fields = [
+                field
+                for field in checkpoint_model_fields
+                if field not in metadata
+            ]
+            if missing_model_fields:
+                raise ValueError(
+                    f"{checkpoint_id}: missing checkpoint model fields "
+                    f"{missing_model_fields}"
+                )
+            checkpoint_model_overrides = [
+                f"model.{field}={str(metadata[field]).lower() if isinstance(metadata[field], bool) else metadata[field]}"
+                for field in checkpoint_model_fields
+            ]
 
         for fraction_value in fraction_values:
             availability = target.get("fraction_availability", {}).get(
@@ -717,11 +756,21 @@ def compile_cells(
                     if learning_rate is not None
                     else ""
                 )
+                matched_scratch_id = (
+                    f"{recipe['recipe_id']}__scratch__{scratch_family}__{species}__"
+                    f"{recording_id}__{lr_suffix}f{_slug_fraction(fraction_value)}__"
+                    f"t{int(target_seed)}"
+                )
                 cell_id = (
-                    f"{recipe['recipe_id']}__{species}__{recording_id}__"
-                    f"{checkpoint_identity}__{condition_id}__"
-                    f"{lr_suffix}"
-                    f"f{_slug_fraction(fraction_value)}__t{int(target_seed)}"
+                    matched_scratch_id
+                    if checkpoint is None
+                    and condition is not None
+                    and condition.get("source") == "scratch"
+                    else (
+                        f"{recipe['recipe_id']}__{species}__{recording_id}__"
+                        f"{checkpoint_identity}__{condition_id}__{lr_suffix}"
+                        f"f{_slug_fraction(fraction_value)}__t{int(target_seed)}"
+                    )
                 )
                 if cell_id in all_ids:
                     raise ValueError(f"Duplicate cell ID: {cell_id}")
@@ -759,6 +808,7 @@ def compile_cells(
                 elif checkpoint is None and condition is not None:
                     labels["transfer_control"] = "scratch"
                 cell_overrides = list(fixed_overrides)
+                cell_overrides.extend(checkpoint_model_overrides)
                 if condition is not None:
                     cell_overrides.extend(
                         [
@@ -783,6 +833,15 @@ def compile_cells(
                             ),
                         ]
                     )
+                    for key, value in condition.get(
+                        "model_overrides", {}
+                    ).items():
+                        rendered = (
+                            str(value).lower()
+                            if isinstance(value, bool)
+                            else value
+                        )
+                        cell_overrides.append(f"model.{key}={rendered}")
                 row = {
                     "cell_id": cell_id,
                     "run_name": cell_id,
@@ -805,6 +864,8 @@ def compile_cells(
                         else regime
                     ),
                     "condition_id": condition_id,
+                    "scratch_family": scratch_family,
+                    "matched_scratch_id": matched_scratch_id,
                     "base_learning_rate": learning_rate,
                     "adapter_warmup_steps": (
                         int(condition.get("adapter_warmup_steps", 0))

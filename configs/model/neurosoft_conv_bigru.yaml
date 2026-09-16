@@ -12,6 +12,9 @@ conv_depth: 1
 dropout_rate: 0.3
 # PyTorch's default nn.Linear initializer, deterministic under the run seed.
 adapter_initializer: pytorch_default
+input_adapter_mode: per_session
+input_adapter_bias: true
+shared_input_channels: 32
 gru_hidden_size: 128
 gru_num_layers: 2
 gru_bidirectional: true

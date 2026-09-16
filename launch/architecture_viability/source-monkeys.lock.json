@@ -1,0 +1,13 @@
+{
+  "conditions": {
+    "bias_free": 5,
+    "large_backbone": 5,
+    "shared_padded": 5,
+    "small_backbone": 5
+  },
+  "output": "source-monkeys.jsonl",
+  "records": 20,
+  "schema": "neurosoft-architecture-source-cell-lock",
+  "sha256": "5930564801c042f8c570bd111f04c5ab0ef7846b7823dad67317b080a269b0db",
+  "version": 1
+}

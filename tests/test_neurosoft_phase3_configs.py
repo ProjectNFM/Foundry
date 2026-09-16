@@ -238,6 +238,10 @@ class TestTransferConfigs:
         [
             ("full_finetuning", "/fake/manifest.json"),
             ("full_finetuning_reset_router", "/fake/manifest.json"),
+            (
+                "full_finetuning_retain_shared_adapter_reset_router",
+                "/fake/manifest.json",
+            ),
             ("frozen_representation", "/fake/manifest.json"),
             ("frozen_random_control", None),
         ],
