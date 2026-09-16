@@ -1,6 +1,6 @@
 # Source-pretraining architecture viability
 
-**Status:** Draft
+**Status:** In Progress
 **Date started:** 2026-09-16
 **Parent experiment:** [Source-validation performance versus downstream transfer](20260915-MS-source-validation-downstream-trajectory.md)
 **Follow-up experiments:** [Small-backbone checkpoint transfer](20260916-MS-small-backbone-transfer.md), [Large-backbone checkpoint transfer](20260916-MS-large-backbone-transfer.md), [Bias-free checkpoint transfer](20260916-MS-bias-free-transfer.md), [Shared-adapter checkpoint transfer](20260916-MS-shared-adapter-transfer.md), [Transfer failure-mode synthesis](20260916-MS-transfer-failure-mode-synthesis.md)
@@ -88,6 +88,11 @@ rejected merely for underperforming the default source model.
   `20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-MINIPIGS` and
   `20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-MONKEYS`; exact run names and
   eight-character run IDs will be recorded after launch.
+- **RTX8000 canary:** The worst-case large-backbone minipig recipe for
+  `sub-01`, with the production source manifest and seed, completed 250 steps
+  on a Quadro RTX 8000 using the intended `16-mixed` fallback. It produced all
+  fixed, loss-selected, and final checkpoint artifacts with finite loss;
+  validation-inclusive wall time was 55.1 seconds.
 
 The new source matrix is:
 
