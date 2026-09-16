@@ -152,6 +152,10 @@ No target validation or test result enters this gate.
 export FOUNDRY_DATA_ROOT=/network/scratch/s/sobralm/brainsets/processed
 export FOUNDRY_SNAPSHOT_ROOT=/network/scratch/s/sobralm/foundry-launches
 export FOUNDRY_CHECKPOINT_ROOT=/network/scratch/s/sobralm/foundry-checkpoints
+# The RTX 8000 source reference used FP16 through the configured precision
+# fallback.  Pin it here so all new conditions use the same hardware/precision
+# regime, and avoid the node that failed before interpreter initialization.
+export FOUNDRY_ENV_FILE=/home/mila/s/sobralm/Foundry/.venv/bin/activate
 
 git status --short  # must print nothing
 
@@ -163,6 +167,8 @@ uv run python main.py \
   hydra.sweep.dir=/network/scratch/s/sobralm/runs/20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-MINIPIGS \
   'hydra.sweep.subdir=${run.name}' \
   hydra/launcher=slurm_default hydra.launcher.partition=long \
+  hydra.launcher.gres=gpu:rtx8000:1 hydra.launcher.timeout_min=480 \
+  +hydra.launcher.additional_parameters.exclude=cn-c004 \
   hydra.launcher.cell_list=launch/architecture_viability/source-minipigs.jsonl \
   -m
 
@@ -171,6 +177,8 @@ uv run python main.py \
   hydra.sweep.dir=/network/scratch/s/sobralm/runs/20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-MONKEYS \
   'hydra.sweep.subdir=${run.name}' \
   hydra/launcher=slurm_default hydra.launcher.partition=long \
+  hydra.launcher.gres=gpu:rtx8000:1 hydra.launcher.timeout_min=480 \
+  +hydra.launcher.additional_parameters.exclude=cn-c004 \
   hydra.launcher.cell_list=launch/architecture_viability/source-monkeys.jsonl \
   -m
 ```
