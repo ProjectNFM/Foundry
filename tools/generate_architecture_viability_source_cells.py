@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the audited 48-cell NeuroSoft architecture source matrix."""
+"""Generate the audited 60-cell batch-128 NeuroSoft source matrix."""
 
 from __future__ import annotations
 
@@ -14,10 +14,18 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = {"minipigs": range(1, 8), "monkeys": range(1, 6)}
 GROUPS = {
-    "minipigs": "20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-MINIPIGS",
-    "monkeys": "20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-MONKEYS",
+    "minipigs": "20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-MINIPIGS",
+    "monkeys": "20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-MONKEYS",
 }
 CONDITIONS: dict[str, dict[str, Any]] = {
+    "reference_backbone": {
+        "input_adapter_mode": "per_session",
+        "input_adapter_bias": True,
+        "shared_input_channels": 32,
+        "temporal_channels": 128,
+        "gru_hidden_size": 128,
+        "transferable_parameter_count": 507456,
+    },
     "small_backbone": {
         "input_adapter_mode": "per_session",
         "input_adapter_bias": True,
@@ -87,7 +95,7 @@ def build_records(repo_root: Path, species: str) -> list[dict[str, Any]]:
                 raise ValueError(
                     f"{manifest_path}: source identity {observed!r} != {expected!r}"
                 )
-            run_name = f"arch-{condition_id}-{species}-{subject}-s42-m42"
+            run_name = f"arch-{condition_id}-{species}-{subject}-b128-s42-m42"
             cell_id = (
                 f"architecture_viability__{condition_id}__{species}__{subject}"
             )
@@ -124,6 +132,8 @@ def build_records(repo_root: Path, species: str) -> list[dict[str, Any]]:
                 f"run.tags=[source-pretraining,{species},8band,architecture-viability,{condition_id}]",
                 "trainer.max_steps=10000",
                 "trainer.val_check_interval=100",
+                "+trainer.check_val_every_n_epoch=null",
+                "hyperparameters.batch_size=128",
                 "trainer.callbacks.early_stopping=null",
                 "trainer.callbacks.model_checkpoint.monitor=val/loss",
                 "trainer.callbacks.model_checkpoint.mode=min",
@@ -203,16 +213,16 @@ def main() -> None:
         species: build_records(args.repo_root.resolve(), species)
         for species in TARGETS
     }
-    expected = {"minipigs": 28, "monkeys": 20}
+    expected = {"minipigs": 35, "monkeys": 25}
     actual = {species: len(rows) for species, rows in by_species.items()}
-    if actual != expected or sum(actual.values()) != 48:
+    if actual != expected or sum(actual.values()) != 60:
         raise AssertionError(f"Unexpected source cell counts: {actual}")
     for species, rows in by_species.items():
         if len({row["cell_id"] for row in rows}) != len(rows):
             raise ValueError(f"{species}: duplicate source cell IDs")
     if not args.check:
         write_outputs(args.output_dir.resolve(), by_species)
-    print(json.dumps({"counts": actual, "total": 48}, sort_keys=True))
+    print(json.dumps({"counts": actual, "total": 60}, sort_keys=True))
 
 
 if __name__ == "__main__":

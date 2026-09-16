@@ -2,12 +2,13 @@
   "conditions": {
     "bias_free": 7,
     "large_backbone": 7,
+    "reference_backbone": 7,
     "shared_padded": 7,
     "small_backbone": 7
   },
   "output": "source-minipigs.jsonl",
-  "records": 28,
+  "records": 35,
   "schema": "neurosoft-architecture-source-cell-lock",
-  "sha256": "23fad08b1ff0c9e6ea3480f9dc108f46400927e3a52d086d568b82f910305fbb",
+  "sha256": "d2475ac0c2b292549bae3a484f00969ab7d89f94969a6b0e437d18ab3e2ce6ff",
   "version": 1
 }

@@ -34,6 +34,9 @@ SOURCE_ALLOWED_PREFIXES = (
     "trainer.logger.group",
     "trainer.logger.tags",
     "trainer.callbacks.compute_milestones.milestone_fractions",
+    "trainer.check_val_every_n_epoch",
+    "hyperparameters.batch_size",
+    "data.batch_size",
 )
 DOWNSTREAM_ALLOWED_PREFIXES = (
     "model.input_adapter_",
@@ -131,6 +134,14 @@ def audit_source_cells() -> dict[str, int]:
             ) != [0.01, 0.03, 0.1, 0.3, 1.0]:
                 raise ValueError(
                     f"{row['cell_id']}: fixed milestone schedule drift"
+                )
+            if new.get("hyperparameters.batch_size") != 128:
+                raise ValueError(f"{row['cell_id']}: batch size drift")
+            if new.get("data.batch_size") != 128:
+                raise ValueError(f"{row['cell_id']}: data batch size drift")
+            if new.get("trainer.check_val_every_n_epoch") is not None:
+                raise ValueError(
+                    f"{row['cell_id']}: epoch validation must be disabled"
                 )
         counts[species] = len(rows)
     return counts

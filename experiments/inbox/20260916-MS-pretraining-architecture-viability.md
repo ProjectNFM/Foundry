@@ -21,8 +21,8 @@ predictions but did not establish that the bias caused downstream transfer
 erosion. Its proposed follow-up was to retrain the complete source pipeline
 without adapter biases.
 
-This experiment implements and source-trains four interventions before any new
-downstream matrix is launched:
+This experiment implements and source-trains four interventions plus a
+batch-128 default-backbone reference before any new downstream matrix is launched:
 
 1. an approximately ten-times-smaller transferable backbone;
 2. an approximately ten-times-larger transferable backbone;
@@ -32,25 +32,25 @@ downstream matrix is launched:
 
 The experiment is an implementation and viability gate. It asks whether all
 four models learn non-degenerate source-task solutions under the matched Phase
-4E recipe, characterizes their learning dynamics, and publishes the fixed
+batch-128 recipe, characterizes their learning dynamics, and publishes the fixed
 checkpoint manifests required by the linked downstream experiments. It does
 not test downstream transfer.
 
 ## Question
 
-Can the small-backbone, large-backbone, bias-free-adapter, and shared-padded-
-adapter variants all be trained stably under the matched Phase 4E source
-recipe and learn non-degenerate source-task solutions suitable for fixed-
-checkpoint downstream evaluation?
+Can the batch-128 default-backbone reference, small-backbone, large-backbone,
+bias-free-adapter, and shared-padded-adapter variants all be trained stably
+and learn non-degenerate source-task solutions suitable for fixed-checkpoint
+downstream evaluation?
 
 ## Hypothesis
 
-All four variants will complete 10,000 source optimizer steps with finite
+All five conditions will complete 10,000 source optimizer steps with finite
 metrics and will show meaningful source-task learning from step 100 to step
 10,000: subject-balanced source-validation cross-entropy will decrease,
 supported macro-F1 will increase, and late-checkpoint predictions will not
 collapse persistently to one class. The joint hypothesis is fully supported
-only if every variant meets these common criteria in both species; otherwise
+only if every condition meets these common criteria in both species; otherwise
 it is partially supported with a separate downstream-readiness decision for
 each variant and species.
 
@@ -63,8 +63,8 @@ rejected merely for underperforming the default source model.
 
 ### Setup
 
-- **Model:** Four variants of `NeurosoftConvBiGRU`, compared with the existing
-  default Phase 4E seed-42 source runs.
+- **Model:** The batch-128 default `NeurosoftConvBiGRU` reference plus four
+  architecture variants.
 - **Data:** The existing same-species, target-subject-excluded full source
   pools: seven minipig exclusions and five monkey exclusions. Every new
   condition uses source-selection seed 42 and the exact corresponding
@@ -72,43 +72,43 @@ rejected merely for underperforming the default source model.
 - **Task:** NeuroSoft eight-band acoustic-stimulus classification.
 - **Source seed:** Model initialization seed 42 only. Source-selection and
   model seeds are deliberately paired as `(42, 42)` in every condition.
-- **Training:** The final Phase 4E train-global-normalized source recipe:
-  10,000 optimizer steps, validation every 100 steps, no early stopping,
-  batch size 16, learning rate `2.5e-4`, weight decay `0.018`, and the existing
-  precision fallback policy.
+- **Training:** 10,000 optimizer steps, validation every 100 steps, no early
+  stopping, batch size 128, learning rate `2.5e-4`, weight decay `0.018`, and
+  the existing precision fallback policy. Epoch-based validation is disabled
+  so the step cadence remains valid for short monkey epochs at batch 128.
 - **Fixed checkpoints used by this program:** Steps 100, 300, 1,000, 3,000,
   and 10,000.
 - **Saved but currently excluded checkpoint:** Each run must retain its
   minimum-source-validation-loss checkpoint and manifest. It is excluded from
   this experiment's ordered analyses, all initial downstream registries, and
   all confirmation criteria.
-- **Existing reference:** The 12 default-backbone Phase 4E source runs with
-  source-selection/model seed `(42, 42)`.
+- **Historical reference:** The 12 batch-16 default-backbone Phase 4E source
+  runs remain historical context; this matrix supplies the matched batch-128
+  reference.
 - **WandB:** Planned groups
-  `20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-MINIPIGS` and
-  `20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-MONKEYS`; exact run names and
-  eight-character run IDs will be recorded after launch.
+  `20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-MINIPIGS` and
+  `20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-MONKEYS`; exact run
+  names and eight-character run IDs will be recorded after launch.
 - **RTX8000 canary:** The worst-case large-backbone minipig recipe for
   `sub-01`, with the production source manifest and seed, completed 250 steps
   on a Quadro RTX 8000 using the intended `16-mixed` fallback. It produced all
   fixed, loss-selected, and final checkpoint artifacts with finite loss;
   validation-inclusive wall time was 55.1 seconds.
-- **Production launch:** Submitted 2026-09-16 as array `10823721` (28 minipig
-  cells) from snapshot
+- **Superseded launch:** The batch-16 arrays `10823721` and `10823722` were
+  cancelled before relaunch. Their source snapshot paths were
   `/network/scratch/s/sobralm/foundry-launches/20260916T193629_NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS_25c5f131_4fe32e20`,
-  and array `10823722` (20 monkey cells) from snapshot
   `/network/scratch/s/sobralm/foundry-launches/20260916T193702_NEUROSOFT_SOURCE_PRETRAINING_MONKEYS_25c5f131_2e814ba1`.
-  Both arrays request one RTX8000 for eight hours and exclude `cn-c004`.
 
 The new source matrix is:
 
 | Condition | Adapter | Transferable backbone | Minipig runs | Monkey runs | Total |
 |---|---|---:|---:|---:|---:|
+| Batch-128 reference backbone | Recording-specific, bias enabled | 507,456 (1x) | 7 | 5 | 12 |
 | Small backbone | Recording-specific, bias enabled | 51,066 (0.100631x) | 7 | 5 | 12 |
 | Large backbone | Recording-specific, bias enabled | 5,084,598 (10.019781x) | 7 | 5 | 12 |
 | Bias-free adapter | Recording-specific, no bias | 1x | 7 | 5 | 12 |
 | Shared padded adapter | One shared `32 -> 64` biased projection | 1x | 7 | 5 | 12 |
-| **Total new runs** |  |  | **28** | **20** | **48** |
+| **Total new runs** |  |  | **35** | **25** | **60** |
 
 Capacity is defined on the transferable `temporal_frontend + gru`, not on the
 complete source model whose recording-specific adapter parameter count varies
@@ -129,8 +129,8 @@ normalization and time padding is re-zeroed after the linear layer.
 Every run must publish five fixed milestone manifests, one loss-selected
 manifest, the normal final checkpoint, exact model and transferable parameter
 counts, and compute metadata. The expected new fixed-checkpoint inventory is
-`48 * 5 = 240` manifests. The expected saved-but-excluded loss-selected
-inventory is 48 manifests.
+`60 * 5 = 300` manifests. The expected saved-but-excluded loss-selected
+inventory is 60 manifests.
 
 #### Source analysis and readiness gate
 
@@ -175,20 +175,22 @@ uv run python tools/audit_architecture_viability_parity.py --json
 
 uv run python main.py \
   experiment=pretraining/neurosoft_conv_bigru_supervised_minipigs \
-  hydra.sweep.dir=/network/scratch/s/sobralm/runs/20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-MINIPIGS \
+  hydra.sweep.dir=/network/scratch/s/sobralm/runs/20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-MINIPIGS \
   'hydra.sweep.subdir=${run.name}' \
   hydra/launcher=slurm_default hydra.launcher.partition=long \
   hydra.launcher.gres=gpu:rtx8000:1 hydra.launcher.timeout_min=480 \
+  hydra.launcher.tasks_per_node=4 hydra.launcher.cpus_per_task=1 \
   +hydra.launcher.additional_parameters.exclude=cn-c004 \
   hydra.launcher.cell_list=launch/architecture_viability/source-minipigs.jsonl \
   -m
 
 uv run python main.py \
   experiment=pretraining/neurosoft_conv_bigru_supervised_monkeys \
-  hydra.sweep.dir=/network/scratch/s/sobralm/runs/20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-MONKEYS \
+  hydra.sweep.dir=/network/scratch/s/sobralm/runs/20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-MONKEYS \
   'hydra.sweep.subdir=${run.name}' \
   hydra/launcher=slurm_default hydra.launcher.partition=long \
   hydra.launcher.gres=gpu:rtx8000:1 hydra.launcher.timeout_min=480 \
+  hydra.launcher.tasks_per_node=4 hydra.launcher.cpus_per_task=1 \
   +hydra.launcher.additional_parameters.exclude=cn-c004 \
   hydra.launcher.cell_list=launch/architecture_viability/source-monkeys.jsonl \
   -m
@@ -197,6 +199,7 @@ uv run python main.py \
 ### Key config overrides
 
 - Common: `trainer.max_steps=10000`, `trainer.val_check_interval=100`,
+  `trainer.check_val_every_n_epoch=null`, `hyperparameters.batch_size=128`,
   `trainer.callbacks.early_stopping=null`, and validation-loss checkpoint
   selection retained for artifact creation only.
 - Small/large: capacity-specific `model.temporal_channels` and

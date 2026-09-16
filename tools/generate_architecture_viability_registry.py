@@ -189,7 +189,7 @@ def main() -> None:
         for condition in CONDITIONS
     }
     counts = {condition: len(rows) for condition, rows in registries.items()}
-    if set(counts.values()) != {60} or sum(counts.values()) != 240:
+    if set(counts.values()) != {60} or sum(counts.values()) != 300:
         raise AssertionError(f"Unexpected registry counts: {counts}")
     if not args.check:
         for condition, rows in registries.items():

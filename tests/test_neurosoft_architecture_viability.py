@@ -285,13 +285,20 @@ def test_all_six_transfer_paths_execute_optimizer_step(
 def test_source_generator_exact_matrix() -> None:
     minipigs = build_records(ROOT, "minipigs")
     monkeys = build_records(ROOT, "monkeys")
-    assert (len(minipigs), len(monkeys)) == (28, 20)
+    assert (len(minipigs), len(monkeys)) == (35, 25)
     rows = minipigs + monkeys
-    assert len({row["cell_id"] for row in rows}) == 48
+    assert len({row["cell_id"] for row in rows}) == 60
     assert {row["source_selection_seed"] for row in rows} == {42}
     assert {row["source_model_seed"] for row in rows} == {42}
     assert all(
         row["fixed_milestones"] == [100, 300, 1000, 3000, 10000] for row in rows
+    )
+    assert all(
+        "hyperparameters.batch_size=128" in row["overrides"] for row in rows
+    )
+    assert all(
+        "+trainer.check_val_every_n_epoch=null" in row["overrides"]
+        for row in rows
     )
 
 
