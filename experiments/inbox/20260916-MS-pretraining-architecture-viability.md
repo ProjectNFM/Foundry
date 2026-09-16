@@ -114,12 +114,17 @@ rejected merely for underperforming the default source model.
   the per-session adapter's `.layers` attribute. Both arrays were then
   cancelled so the complete matrix can be rerun from one corrected snapshot;
   no output from these arrays is part of this experiment.
-- **Corrected batch-128 production launch:** The full 60-cell `FIX1` matrix
-  will be submitted after the clean commit below. Its output roots and run
-  names are versioned (`B128-FIX1`, `-b128-fix1-`) to prevent collision with
-  the superseded partial attempt. The checkpoint-registry builder uses the
-  same canonical run-name function as the cell generator, including that
-  version label.
+- **Corrected batch-128 production launch:** Submitted 2026-09-16 from commit
+  `10627bc7699f8f92e0610a6606163d384b31d75c` as packed array `10824083` (35
+  minipig cells in 9 four-worker allocations), snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260916T202230_NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS_10627bc7_6b042687`,
+  and packed array `10824095` (25 monkey cells in 7 four-worker allocations),
+  snapshot
+  `/network/scratch/s/sobralm/foundry-launches/20260916T202301_NEUROSOFT_SOURCE_PRETRAINING_MONKEYS_10627bc7_6a3494d1`.
+  Its output roots and run names are versioned (`B128-FIX1`, `-b128-fix1-`) to
+  prevent collision with the superseded partial attempt. The checkpoint-registry
+  builder uses the same canonical run-name function as the cell generator,
+  including that version label.
 - **Superseded launch:** The batch-16 arrays `10823721` and `10823722` were
   cancelled before relaunch. Their source snapshot paths were
   `/network/scratch/s/sobralm/foundry-launches/20260916T193629_NEUROSOFT_SOURCE_PRETRAINING_MINIPIGS_25c5f131_4fe32e20`,
