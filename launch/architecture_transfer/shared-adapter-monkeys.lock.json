@@ -10,7 +10,7 @@
   },
   "output_count": 429,
   "output_path": "shared-adapter-monkeys.jsonl",
-  "output_sha256": "7f214405a76a06fbc9c3f6381c03ac7ea7661d184d568e67394e25478c0a1ed7",
+  "output_sha256": "8caeaee75d215aacb9e779122b8fb794df76085179299a184b04a9ee1507b2b9",
   "output_stem": "shared-adapter",
   "per_checkpoint_counts": {
     "architecture-shared_padded-minipigs-sub-01-step100": 12,
@@ -80,7 +80,7 @@
     "transfer_shared_to_ordinary": 795
   },
   "recipe_id": "architecture-shared-adapter-transfer",
-  "recipe_sha256": "e9e1446a556b672cb418bd2783a5a82d792597763b2c7bf7a1b1e3730fe4a95f",
+  "recipe_sha256": "6716476cb3c4b90c72947fa5d5599568a159e5cc15c51b16ed0e1e2e36588501",
   "registry_sha256": "cec00e133c2438b75990bcb03a0aec5be59e5b8ee19f607ccbcc1d51bf4f1506",
   "schema": "foundry-downstream-cell-lock",
   "skipped_cell_counts": {},
