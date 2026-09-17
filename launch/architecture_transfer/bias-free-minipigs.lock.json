@@ -10,7 +10,7 @@
   },
   "output_count": 1320,
   "output_path": "bias-free-minipigs.jsonl",
-  "output_sha256": "0faa8f23c51368025b55e40abbbe97bbc4a372ccf8308f5d73e05df6daaf531f",
+  "output_sha256": "763886b84c6372cec4daecc2ef91e72a13e1b6b84440661801d908f939d5e8d6",
   "output_stem": "bias-free",
   "per_checkpoint_counts": {
     "architecture-bias_free-minipigs-sub-01-step100": 12,
@@ -80,7 +80,7 @@
     "transfer_bias_free_to_biased": 795
   },
   "recipe_id": "architecture-bias-free-transfer",
-  "recipe_sha256": "d0c0798f06ef0a2e9c89f777b3b623537415824ad3684aceecbc647cfb3cab1f",
+  "recipe_sha256": "1c5979448fac4b09fdac1c90ab963be591574a70e069b07ee41de17fcabe357f",
   "registry_sha256": "3101b145cbdad877f5ecf0179e7f31e4794029f77aa00b6cdc1f6bd090f00cf7",
   "schema": "foundry-downstream-cell-lock",
   "skipped_cell_counts": {},
