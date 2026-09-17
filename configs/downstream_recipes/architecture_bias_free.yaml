@@ -43,7 +43,7 @@ condition_matrix:
     scratch_family: bias-free
     backbone_lr_multiplier: null
     adapter_warmup_steps: 0
-    model_overrides: {input_adapter_mode: per_session, input_adapter_bias: false}
+    model_overrides: {temporal_channels: 128, gru_hidden_size: 128, input_adapter_mode: per_session, input_adapter_bias: false}
 condition_labels: {study: architecture_transfer, architecture_family: bias_free, target_data: full}
 species:
   minipigs:
