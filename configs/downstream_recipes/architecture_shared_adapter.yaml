@@ -28,7 +28,7 @@ condition_matrix:
     scratch_family: shared-padded
     backbone_lr_multiplier: 0.1
     adapter_warmup_steps: 0
-    model_overrides: {input_adapter_mode: per_session, input_adapter_bias: true}
+    model_overrides: {input_adapter_mode: per_session, input_adapter_bias: true, shared_input_channels: 32}
   - id: transfer_shared_retained
     source: pretrained
     transfer_regime: full_finetuning_retain_shared_adapter_reset_router
