@@ -10,7 +10,7 @@
   },
   "output_count": 234,
   "output_path": "reference-backbone-monkeys.jsonl",
-  "output_sha256": "dc0d7dd53f30808fbc2fd9eba048a2c85d0ccb1ba0452325d7034ad899f38815",
+  "output_sha256": "cc3bc974a0223e1f2cc24c40fbbff0822cb9531cbda3799f7fc7f651c12117a7",
   "output_stem": "reference-backbone",
   "per_checkpoint_counts": {
     "architecture-reference_backbone-minipigs-sub-01-step100": 6,
@@ -79,7 +79,7 @@
     "transfer_reference": 795
   },
   "recipe_id": "architecture-reference-backbone-transfer",
-  "recipe_sha256": "057007aff2b393099c9a2198822838403821e3734d0cb7975dd322c647a4c55b",
+  "recipe_sha256": "48dc78a5932376427e2f62657b93e74d4e68d3b7a9de7032634a2cd963fad609",
   "registry_sha256": "059da701ea414fafb10ed972d04d6322ca3cf7fcd4182c376601790e6664391f",
   "schema": "foundry-downstream-cell-lock",
   "skipped_cell_counts": {},
