@@ -35,6 +35,9 @@ condition_matrix:
     scratch_family: reference
     backbone_lr_multiplier: null
     adapter_warmup_steps: 0
+    # Keep every cell vector structurally identical to the pretrained cells;
+    # the packed launcher requires one common set of Hydra override keys.
+    model_overrides: {temporal_channels: 128, gru_hidden_size: 128}
 condition_labels: {study: architecture_transfer, architecture_family: reference_backbone, target_data: full}
 species:
   minipigs:
