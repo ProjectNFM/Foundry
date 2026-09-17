@@ -1,0 +1,20 @@
+{
+  "checkpoint_set_id": "architecture-bias_free-fixed-v1",
+  "lock_payload_sha256": "f793a147e8ec450450938369700ec852ef67d7591f152c3221db060e81aec182",
+  "records": 60,
+  "records_by_species": {
+    "minipigs": 35,
+    "monkeys": 25
+  },
+  "records_by_step": {
+    "100": 12,
+    "1000": 12,
+    "10000": 12,
+    "300": 12,
+    "3000": 12
+  },
+  "registry": "/home/mila/s/sobralm/Foundry/launch/checkpoint_sets/architecture-bias_free-fixed.jsonl",
+  "registry_sha256": "3101b145cbdad877f5ecf0179e7f31e4794029f77aa00b6cdc1f6bd090f00cf7",
+  "schema": "foundry-checkpoint-registry-lock",
+  "version": 1
+}

@@ -1,0 +1,20 @@
+{
+  "checkpoint_set_id": "architecture-shared_padded-fixed-v1",
+  "lock_payload_sha256": "e076061a257445e707d202a999094a0a3acee9c644db185acf022fee0fe28f59",
+  "records": 60,
+  "records_by_species": {
+    "minipigs": 35,
+    "monkeys": 25
+  },
+  "records_by_step": {
+    "100": 12,
+    "1000": 12,
+    "10000": 12,
+    "300": 12,
+    "3000": 12
+  },
+  "registry": "/home/mila/s/sobralm/Foundry/launch/checkpoint_sets/architecture-shared_padded-fixed.jsonl",
+  "registry_sha256": "cec00e133c2438b75990bcb03a0aec5be59e5b8ee19f607ccbcc1d51bf4f1506",
+  "schema": "foundry-checkpoint-registry-lock",
+  "version": 1
+}

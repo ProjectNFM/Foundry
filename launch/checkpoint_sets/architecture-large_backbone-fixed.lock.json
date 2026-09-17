@@ -1,0 +1,20 @@
+{
+  "checkpoint_set_id": "architecture-large_backbone-fixed-v1",
+  "lock_payload_sha256": "4a8bcdaa1a1c952a130b31843693cc94ccc4f78b37920cc2c155785d1f0f52c8",
+  "records": 60,
+  "records_by_species": {
+    "minipigs": 35,
+    "monkeys": 25
+  },
+  "records_by_step": {
+    "100": 12,
+    "1000": 12,
+    "10000": 12,
+    "300": 12,
+    "3000": 12
+  },
+  "registry": "/home/mila/s/sobralm/Foundry/launch/checkpoint_sets/architecture-large_backbone-fixed.jsonl",
+  "registry_sha256": "965c0866f278a2353ba608479a14e3f7192d2c1375eedd13c02b314163e45fff",
+  "schema": "foundry-checkpoint-registry-lock",
+  "version": 1
+}
