@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-09-16
 **Parent experiment:** [Source-validation performance versus downstream transfer](20260915-MS-source-validation-downstream-trajectory.md)
-**Follow-up experiments:** [Small-backbone checkpoint transfer](20260916-MS-small-backbone-transfer.md), [Large-backbone checkpoint transfer](20260916-MS-large-backbone-transfer.md), [Bias-free checkpoint transfer](20260916-MS-bias-free-transfer.md), [Shared-adapter checkpoint transfer](20260916-MS-shared-adapter-transfer.md), [Transfer failure-mode synthesis](20260916-MS-transfer-failure-mode-synthesis.md)
+**Follow-up experiments:** [Batch-128 reference transfer replication](20260916-MS-batch128-reference-transfer-replication.md)
 **Tags:** neurosoft, supervised-pretraining, architecture, capacity, adapter-bias, shared-adapter, checkpoint-age, 8band, minipigs, monkeys
 
 ## Background
@@ -303,13 +303,17 @@ It fetches both final W&B groups, recovers the five fixed validation events
 per run, bootstraps complete held-out-subject trajectories, and writes the run
 inventory, fixed-milestone table, and readiness summary under `analysis/csv/`.
 
-### Figures
-
 ![Source validation cross-entropy trajectories](../../analysis/figures/20260916-MS-pretraining-architecture-viability_val_loss_trajectories.png)
 
 ![Source validation supported macro-F1 trajectories](../../analysis/figures/20260916-MS-pretraining-architecture-viability_val_supported_f1_trajectories.png)
 
 ![Source compute comparison](../../analysis/figures/20260916-MS-pretraining-architecture-viability_compute.png)
+
+![Source run inventory](../../analysis/figures/20260916-MS-pretraining-architecture-viability_run_inventory.png)
+
+### Figures
+
+All generated figures are referenced in the Analysis section above.
 
 ## Conclusions
 
