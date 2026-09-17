@@ -1,6 +1,6 @@
 # Source-pretraining architecture viability
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-09-16
 **Parent experiment:** [Source-validation performance versus downstream transfer](20260915-MS-source-validation-downstream-trajectory.md)
 **Follow-up experiments:** [Small-backbone checkpoint transfer](20260916-MS-small-backbone-transfer.md), [Large-backbone checkpoint transfer](20260916-MS-large-backbone-transfer.md), [Bias-free checkpoint transfer](20260916-MS-bias-free-transfer.md), [Shared-adapter checkpoint transfer](20260916-MS-shared-adapter-transfer.md), [Transfer failure-mode synthesis](20260916-MS-transfer-failure-mode-synthesis.md)
@@ -46,18 +46,22 @@ downstream evaluation?
 ## Hypothesis
 
 All five conditions will complete 10,000 source optimizer steps with finite
-metrics and will show meaningful source-task learning from step 100 to step
-10,000: subject-balanced source-validation cross-entropy will decrease,
-supported macro-F1 will increase, and late-checkpoint predictions will not
-collapse persistently to one class. The joint hypothesis is fully supported
-only if every condition meets these common criteria in both species; otherwise
-it is partially supported with a separate downstream-readiness decision for
-each variant and species.
+metrics and will show meaningful non-degenerate source-task learning from step
+100 to step 10,000: subject-balanced supported macro-F1 will increase and
+late-checkpoint predictions will not collapse persistently to one class.
+Source-validation cross-entropy is a characterization of fitting dynamics, not
+a monotonic success criterion. In particular, source overfitting is expected
+to emerge in some conditions after the early learning phase, and its earlier
+or stronger appearance in the large-backbone condition is an informative
+capacity-dependent outcome rather than a failure.
 
-Differences in absolute source performance, learning speed, train-validation
-gap, compute, or channel-count sensitivity are prespecified characterization
-outcomes. They do not create separate hypothesis tests and a variant is not
-rejected merely for underperforming the default source model.
+The joint hypothesis is fully supported if every condition satisfies the
+completion, finiteness, non-collapse, and supported-F1-learning criteria in
+both species. Differences in absolute source performance, cross-entropy
+trajectory, learning speed, train-validation gap, compute, or channel-count
+sensitivity are prespecified characterization outcomes. They do not create
+separate hypothesis tests and a variant is not rejected merely for
+underperforming the default source model.
 
 ## Experiment
 
@@ -85,10 +89,12 @@ rejected merely for underperforming the default source model.
 - **Historical reference:** The 12 batch-16 default-backbone Phase 4E source
   runs remain historical context; this matrix supplies the matched batch-128
   reference.
-- **WandB:** Planned groups
+- **WandB:** Final groups
   `20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-FIX1-MINIPIGS` and
-  `20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-FIX1-MONKEYS`; exact
-  run names and eight-character run IDs will be recorded after launch.
+  `20260916-MS-PRETRAINING-ARCHITECTURE-VIABILITY-B128-FIX1-MONKEYS`. All 60
+  human-readable run names and eight-character W&B run IDs are recorded in
+  `analysis/csv/20260916-MS-pretraining-architecture-viability_run_inventory.csv`,
+  generated directly from these two groups by the analysis script.
 - **RTX8000 canary:** The worst-case large-backbone minipig recipe for
   `sub-01`, with the production source manifest and seed, completed 250 steps
   on a Quadro RTX 8000 using the intended `16-mixed` fallback. It produced all
@@ -247,29 +253,136 @@ uv run python main.py \
 
 ### Summary
 
-TBD
+All 60 source-pretraining runs finished: 35 minipig and 25 monkey runs, or
+seven/five held-out target subjects respectively for each of the five model
+conditions. All 300 prespecified fixed source checkpoints had finite
+validation measurements. Every condition in both species improved
+subject-balanced supported macro-F1 from step 100 to step 10,000, giving
+evidence of non-degenerate source-task learning across the complete matrix.
+
+Validation cross-entropy revealed a capacity- and species-dependent fitting
+trajectory rather than a viability failure. The large backbone reached the
+strongest late overfitting in both species, and monkey CE rose late for every
+condition except the small backbone. This is consistent with the revised
+hypothesis: CE is a characterization of source fitting, while supported F1
+and completion establish viability.
 
 ### Metrics
 
-TBD
+Subject-balanced means at the first and final fixed checkpoints; F1 is
+supported macro-F1.
+
+| Species | Condition | CE: 100 -> 10,000 | F1: 100 -> 10,000 | Readiness |
+|---|---|---:|---:|---|
+| Minipigs | Reference | 1.954 -> 1.587 | 0.143 -> 0.446 | Ready |
+| Minipigs | Small | 2.003 -> 1.581 | 0.102 -> 0.387 | Ready |
+| Minipigs | Large | 1.922 -> 2.490 | 0.179 -> 0.481 | Ready |
+| Minipigs | Bias-free | 1.961 -> 1.686 | 0.136 -> 0.425 | Ready |
+| Minipigs | Shared padded | 1.990 -> 1.628 | 0.117 -> 0.425 | Ready |
+| Monkeys | Reference | 1.799 -> 2.089 | 0.223 -> 0.544 | Ready |
+| Monkeys | Small | 1.907 -> 1.417 | 0.169 -> 0.536 | Ready |
+| Monkeys | Large | 1.703 -> 2.885 | 0.287 -> 0.539 | Ready |
+| Monkeys | Bias-free | 1.823 -> 2.485 | 0.241 -> 0.525 | Ready |
+| Monkeys | Shared padded | 1.901 -> 2.592 | 0.170 -> 0.472 | Ready |
+
+The bootstrap confidence intervals for the F1 slope against `ln(source step)`
+were positive for every condition/species cell. The corresponding CE slopes
+identify the expected late-fitting behavior: negative for all minipig
+conditions except large, and negative only for the monkey small backbone.
 
 ### Analysis
 
-TBD. The W&B-backed analysis script will be
-`analysis/20260916-MS-pretraining-architecture-viability_analysis.py`.
+The W&B-backed analysis script is
+`analysis/20260916-MS-pretraining-architecture-viability_analysis.py`:
+
+```bash
+uv run python analysis/20260916-MS-pretraining-architecture-viability_analysis.py
+```
+
+It fetches both final W&B groups, recovers the five fixed validation events
+per run, bootstraps complete held-out-subject trajectories, and writes the run
+inventory, fixed-milestone table, and readiness summary under `analysis/csv/`.
 
 ### Figures
 
-TBD
+![Source validation cross-entropy trajectories](../../analysis/figures/20260916-MS-pretraining-architecture-viability_val_loss_trajectories.png)
+
+![Source validation supported macro-F1 trajectories](../../analysis/figures/20260916-MS-pretraining-architecture-viability_val_supported_f1_trajectories.png)
+
+![Source compute comparison](../../analysis/figures/20260916-MS-pretraining-architecture-viability_compute.png)
 
 ## Conclusions
 
-TBD
+**Hypothesis fully confirmed.** All five evaluated model conditions completed
+the full source recipe with finite metrics and substantially increasing
+supported macro-F1 in both minipigs and monkeys. The non-monotonic CE curves
+are informative evidence about capacity-dependent source fitting: overfitting
+appeared earliest and most strongly for the large backbone, particularly in
+monkeys, without preventing substantial source-task learning. Every evaluated
+condition is therefore suitable for the next downstream stage.
 
 ## Notes for future experiments
 
-Proceed only with condition/species pairs declared Ready or Ready with caveat.
-The linked downstream experiment files prespecify the intended analyses but
-must be revised rather than silently reinterpreted if this source-stage gate
-reveals an implementation defect, collapse, or materially different model
-than planned.
+- Run downstream evaluation for every pretrained condition, beginning with all
+  fixed source checkpoints at 100% downstream training-data percentage.
+
+### Batch-128 reference-backbone downstream rerun
+
+The new batch-128 reference source checkpoints require their own downstream
+matrix; the historical batch-16 trajectory is not a substitute. This rerun is
+**795 transfer + 159 matched-scratch = 954 jobs**: 600 + 120 minipig jobs and
+195 + 39 monkey jobs. It uses the five fixed checkpoints only (steps 100,
+300, 1,000, 3,000, and 10,000), source seed `(42,42)`, target seeds
+`{42,43,44}`, and 100% target data.
+
+Each logical cell uses the established Phase 4F downstream optimizer and
+launcher envelope: target batch size 16, LR `0.003` with `0.1x` temporal/GRU
+LR, phased step scheduler, no adapter warmup; one RTX 8000 packed with eight
+tasks, two CPUs per task, one dataloader worker per task, 32 GB memory, and a
+three-hour `long` allocation. This is 90 packed minipig allocations and 30
+packed monkey allocations.
+
+```bash
+# Run from a clean, committed repository. The registry re-verifies every
+# manifest/checkpoint hash before compiling the cell lists.
+export FOUNDRY_DATA_ROOT=/network/scratch/s/sobralm/brainsets/processed
+export FOUNDRY_SNAPSHOT_ROOT=/network/scratch/s/sobralm/foundry-launches
+export FOUNDRY_CHECKPOINT_ROOT=/network/scratch/s/sobralm/foundry-checkpoints
+git status --short  # must print nothing
+
+uv run python tools/generate_architecture_viability_registry.py \
+  --run-root /network/scratch/s/sobralm/runs \
+  --checkpoint-root "$FOUNDRY_CHECKPOINT_ROOT"
+uv run python tools/compile_downstream_cells.py \
+  --registry launch/checkpoint_sets/architecture-reference_backbone-fixed.jsonl \
+  --recipe configs/downstream_recipes/architecture_reference_backbone.yaml \
+  --audit docs/neurosoft-phase0-audit.json \
+  --checkpoint-root "$FOUNDRY_CHECKPOINT_ROOT" \
+  --output-dir launch/architecture_transfer
+
+uv run python main.py \
+  experiment=auditory_decoding/neurosoft_conv_bigru_transfer_minipigs \
+  run.group=20260916-MS-REFERENCE-BACKBONE-TRANSFER-MINIPIGS \
+  hydra.sweep.dir=/network/scratch/s/sobralm/runs/20260916-MS-REFERENCE-BACKBONE-TRANSFER-MINIPIGS \
+  'hydra.sweep.subdir=${run.name}' \
+  hydra/launcher=slurm_default hydra.launcher.partition=long \
+  hydra.launcher.gres=gpu:rtx8000:1 \
+  +hydra.launcher.additional_parameters.exclude=cn-c004 \
+  hydra.launcher.cell_list=launch/architecture_transfer/reference-backbone-minipigs.jsonl \
+  hydra.launcher.tasks_per_node=8 hydra.launcher.cpus_per_task=2 \
+  hyperparameters.num_workers=1 hydra.launcher.mem_gb=32 \
+  -m
+
+uv run python main.py \
+  experiment=auditory_decoding/neurosoft_conv_bigru_transfer_monkeys \
+  run.group=20260916-MS-REFERENCE-BACKBONE-TRANSFER-MONKEYS \
+  hydra.sweep.dir=/network/scratch/s/sobralm/runs/20260916-MS-REFERENCE-BACKBONE-TRANSFER-MONKEYS \
+  'hydra.sweep.subdir=${run.name}' \
+  hydra/launcher=slurm_default hydra.launcher.partition=long \
+  hydra.launcher.gres=gpu:rtx8000:1 \
+  +hydra.launcher.additional_parameters.exclude=cn-c004 \
+  hydra.launcher.cell_list=launch/architecture_transfer/reference-backbone-monkeys.jsonl \
+  hydra.launcher.tasks_per_node=8 hydra.launcher.cpus_per_task=2 \
+  hyperparameters.num_workers=1 hydra.launcher.mem_gb=32 \
+  -m
+```

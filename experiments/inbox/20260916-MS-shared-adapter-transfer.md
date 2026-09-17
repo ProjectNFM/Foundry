@@ -90,6 +90,7 @@ The loader must reject this regime for recording-specific source adapters.
 
 ```bash
 # Run after the parent shared-adapter source condition passes its gate.
+export FOUNDRY_DATA_ROOT=/network/scratch/s/sobralm/brainsets/processed
 export FOUNDRY_SNAPSHOT_ROOT=/network/scratch/s/sobralm/foundry-launches
 export FOUNDRY_CHECKPOINT_ROOT=/network/scratch/s/sobralm/foundry-checkpoints
 git status --short  # must print nothing
@@ -106,14 +107,28 @@ uv run python tools/compile_downstream_cells.py \
 
 uv run python main.py \
   experiment=auditory_decoding/neurosoft_conv_bigru_transfer_minipigs \
+  run.group=20260916-MS-SHARED-ADAPTER-TRANSFER-MINIPIGS \
+  hydra.sweep.dir=/network/scratch/s/sobralm/runs/20260916-MS-SHARED-ADAPTER-TRANSFER-MINIPIGS \
+  'hydra.sweep.subdir=${run.name}' \
   hydra/launcher=slurm_default hydra.launcher.partition=long \
+  hydra.launcher.gres=gpu:rtx8000:1 \
+  +hydra.launcher.additional_parameters.exclude=cn-c004 \
   hydra.launcher.cell_list=launch/architecture_transfer/shared-adapter-minipigs.jsonl \
+  hydra.launcher.tasks_per_node=8 hydra.launcher.cpus_per_task=2 \
+  hyperparameters.num_workers=1 hydra.launcher.mem_gb=32 \
   -m
 
 uv run python main.py \
   experiment=auditory_decoding/neurosoft_conv_bigru_transfer_monkeys \
+  run.group=20260916-MS-SHARED-ADAPTER-TRANSFER-MONKEYS \
+  hydra.sweep.dir=/network/scratch/s/sobralm/runs/20260916-MS-SHARED-ADAPTER-TRANSFER-MONKEYS \
+  'hydra.sweep.subdir=${run.name}' \
   hydra/launcher=slurm_default hydra.launcher.partition=long \
+  hydra.launcher.gres=gpu:rtx8000:1 \
+  +hydra.launcher.additional_parameters.exclude=cn-c004 \
   hydra.launcher.cell_list=launch/architecture_transfer/shared-adapter-monkeys.jsonl \
+  hydra.launcher.tasks_per_node=8 hydra.launcher.cpus_per_task=2 \
+  hyperparameters.num_workers=1 hydra.launcher.mem_gb=32 \
   -m
 ```
 
