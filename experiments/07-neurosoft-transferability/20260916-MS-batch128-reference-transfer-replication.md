@@ -1,6 +1,6 @@
 # Batch-128 reference transfer replication
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-09-16
 **Parent experiment:** [Source-pretraining architecture viability](20260916-MS-pretraining-architecture-viability.md)
 **Follow-up experiments:** [Model-scale transfer](20260916-MS-model-scale-transfer.md), [Adapter-bias transfer](20260916-MS-bias-free-transfer.md), [Shared-adapter transfer](20260916-MS-shared-adapter-transfer.md), [Recipe-matched scratch transfer control](20260918-MS-recipe-matched-scratch-control.md)
@@ -133,7 +133,10 @@ All generated figures are referenced in the Analysis section above.
 
 ## Conclusions
 
-TBD
+The hypothesis was supported under this experiment's original scratch
+comparison: the 100-step checkpoint improved test F1 in both species, but the
+benefit disappeared with longer source training. Transfer did not improve
+optimization efficiency, and the late checkpoints were neutral or harmful.
 
 ## Notes for future experiments
 

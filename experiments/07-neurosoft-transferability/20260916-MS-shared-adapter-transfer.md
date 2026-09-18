@@ -1,6 +1,6 @@
 # Shared-adapter transfer
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-09-16
 **Parent experiment:** [Batch-128 reference transfer replication](20260916-MS-batch128-reference-transfer-replication.md)
 **Follow-up experiments:** TBD
@@ -125,7 +125,10 @@ All generated figures are referenced in the Analysis section above.
 
 ## Conclusions
 
-TBD
+The shared source adapter did not establish durable transfer, and retaining
+that interface during target finetuning added no consistent benefit. Later
+checkpoints were at best neutral in minipigs and harmful in monkeys, while
+optimization efficiency remained worse than scratch.
 
 ## Notes for future experiments
 

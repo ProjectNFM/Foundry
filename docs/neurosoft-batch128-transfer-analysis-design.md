@@ -44,7 +44,7 @@ files plus the existing source-pretraining viability experiment.
 ### 1. Source-pretraining architecture viability (retain)
 
 Keep
-`experiments/inbox/20260916-MS-pretraining-architecture-viability.md` and
+`experiments/07-neurosoft-transferability/20260916-MS-pretraining-architecture-viability.md` and
 `analysis/20260916-MS-pretraining-architecture-viability_analysis.py` mostly
 intact. This experiment remains the source-training prerequisite and reference:
 all five source conditions completed, learned non-degenerate source-task
@@ -192,7 +192,7 @@ design.
 
 Historical batch-16 replication context comes from:
 
-- `experiments/inbox/20260915-MS-source-validation-downstream-trajectory.md`
+- `experiments/07-neurosoft-transferability/20260915-MS-source-validation-downstream-trajectory.md`
 - `analysis/20260915-MS-source-validation-downstream-trajectory.py`
 - its generated non-versioned CSV caches.
 

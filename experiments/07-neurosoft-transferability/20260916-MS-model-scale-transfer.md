@@ -1,6 +1,6 @@
 # Model-scale transfer
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-09-16
 **Parent experiment:** [Batch-128 reference transfer replication](20260916-MS-batch128-reference-transfer-replication.md)
 **Follow-up experiments:** TBD
@@ -128,7 +128,10 @@ All generated figures are referenced in the Analysis section above.
 
 ## Conclusions
 
-TBD
+Changing backbone scale did not rescue transfer. Every scale showed its best
+relative performance at the earliest checkpoint and worse performance after
+longer source training. None provided a consistent optimization-efficiency
+benefit over its architecture-matched scratch control.
 
 ## Notes for future experiments
 
