@@ -1,0 +1,27 @@
+{
+  "audit_sha256": "48cd1a57189bb7f0fe63b8fc3cbd6949deb82c215d0c8edd431b94794bc9467a",
+  "audit_unavailable_fraction_policy": "error",
+  "checkpoint_set_id": "architecture-reference_backbone-fixed-v1",
+  "compiler_sha256": "0c126b548df99e1b6e6859df57ff8df0c378bd85cec865d01e8f2fc59518b972",
+  "compiler_version": "1",
+  "counts": {
+    "minipigs": 120,
+    "monkeys": 39
+  },
+  "output_count": 39,
+  "output_path": "recipe-matched-scratch-monkeys.jsonl",
+  "output_sha256": "672b5b2e49e15d96aaf2c136006da75016839ac4da289b2657aa7ef566c3cf46",
+  "output_stem": "recipe-matched-scratch",
+  "per_checkpoint_counts": {},
+  "per_condition_counts": {
+    "scratch_recipe_matched": 159
+  },
+  "recipe_id": "architecture-reference-recipe-matched-scratch",
+  "recipe_sha256": "0c4e9b77526aa6d92214f5c2b01ac25474036c43b801719f65b9bdeba7d7c08e",
+  "registry_sha256": "059da701ea414fafb10ed972d04d6322ca3cf7fcd4182c376601790e6664391f",
+  "schema": "foundry-downstream-cell-lock",
+  "skipped_cell_counts": {},
+  "species": "monkeys",
+  "unavailable_target_fractions": [],
+  "version": 1
+}
