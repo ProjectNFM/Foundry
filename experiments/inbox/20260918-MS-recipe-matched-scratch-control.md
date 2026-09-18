@@ -118,8 +118,17 @@ uv run python main.py \
 
 ### Submission record
 
-TBD immediately after submission: record the clean launch commit, Slurm array
-ID, allocation count, and immutable snapshot bundle path.
+Submitted on 2026-09-18 from clean commit
+`2f1d7afdd1fb662732ef5d4a4b8015fe324bf5bc`.
+
+| Logical runs | Packed allocations | Slurm array | Snapshot bundle |
+|---:|---:|---|---|
+| 120 | 15 | `10848168_[0-14]` | `/network/scratch/s/sobralm/foundry-launches/20260918T171004_20260918-MS-RECIPE-MATCHED-SCRATCH-MINIPIGS_2f1d7afd_1fd55dae` |
+
+The launch used the same latest architecture-transfer scratch envelope: legacy
+`long`, one RTX 8000 per allocation, eight cells per GPU, two CPUs per cell,
+one data-loader worker per cell, 32 GB allocation memory, the standard
+three-hour limit, and `cn-c004` excluded.
 
 ### Key config overrides
 
