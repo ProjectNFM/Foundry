@@ -44,6 +44,10 @@ from _architecture_transfer_analysis import (
 
 ROOT = Path(__file__).resolve().parents[1]
 STEM = "20260918-MS-recipe-matched-scratch-control"
+SPECIES_LABEL = "minipig"
+EXPECTED_TRANSFER_CELLS = 600
+EXPECTED_SCRATCH_CELLS = 120
+EXPECTED_SUBJECTS = 7
 PARENT_MATRIX = (
     ROOT
     / "launch"
@@ -144,18 +148,30 @@ def load_design() -> pd.DataFrame:
     new = pd.DataFrame(_matrix_rows(SCRATCH_MATRIX, "recipe-matched-scratch"))
     if set(new.condition) != {"scratch_recipe_matched"}:
         raise RuntimeError("Unexpected recipe-matched scratch condition")
-    if len(parent[parent.condition == "transfer_reference"]) != 600:
-        raise RuntimeError("Expected 600 completed reference transfer cells")
-    if len(parent[parent.condition == "scratch_legacy"]) != 120:
-        raise RuntimeError("Expected 120 legacy scratch cells")
-    if len(new) != 120:
-        raise RuntimeError("Expected 120 recipe-matched scratch cells")
+    if (
+        len(parent[parent.condition == "transfer_reference"])
+        != EXPECTED_TRANSFER_CELLS
+    ):
+        raise RuntimeError(
+            f"Expected {EXPECTED_TRANSFER_CELLS} completed reference transfer cells"
+        )
+    if (
+        len(parent[parent.condition == "scratch_legacy"])
+        != EXPECTED_SCRATCH_CELLS
+    ):
+        raise RuntimeError(
+            f"Expected {EXPECTED_SCRATCH_CELLS} legacy scratch cells"
+        )
+    if len(new) != EXPECTED_SCRATCH_CELLS:
+        raise RuntimeError(
+            f"Expected {EXPECTED_SCRATCH_CELLS} recipe-matched scratch cells"
+        )
 
     new_lookup = {
         (row.recording, int(row.target_seed)): row.cell_id
         for row in new.itertuples(index=False)
     }
-    if len(new_lookup) != 120:
+    if len(new_lookup) != EXPECTED_SCRATCH_CELLS:
         raise RuntimeError("Recipe-matched scratch pairing keys are not unique")
     transfer = parent.condition == "transfer_reference"
     parent.loc[transfer, "matched_scratch_id"] = [
@@ -199,9 +215,13 @@ def simultaneous_intervals(subject: pd.DataFrame) -> pd.DataFrame:
         index="subject", columns="source_step", values="effect"
     )
     pivot = pivot.reindex(columns=list(SOURCE_STEPS))
-    if pivot.shape != (7, 5) or pivot.isna().any().any():
+    if (
+        pivot.shape != (EXPECTED_SUBJECTS, len(SOURCE_STEPS))
+        or pivot.isna().any().any()
+    ):
         raise RuntimeError(
-            f"Expected complete 7x5 subject matrix, got {pivot.shape}"
+            f"Expected complete {EXPECTED_SUBJECTS}x{len(SOURCE_STEPS)} "
+            f"subject matrix, got {pivot.shape}"
         )
     values = pivot.to_numpy(float)
     estimates = values.mean(axis=0)
@@ -385,7 +405,9 @@ def plot_absolute(
     ax.scatter(x, 100 * summary["mean"], c=colors, s=70, zorder=4)
     ax.set_xticks(x, summary.label, rotation=25, ha="right")
     ax.set_ylabel("Test supported macro-F1 (%)")
-    ax.set_title("Absolute minipig performance under both scratch controls")
+    ax.set_title(
+        f"Absolute {SPECIES_LABEL} performance under both scratch controls"
+    )
     ax.grid(axis="y", alpha=0.25)
     _save(fig, "absolute_performance")
 

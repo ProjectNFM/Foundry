@@ -17,7 +17,7 @@
     "scratch_recipe_matched": 159
   },
   "recipe_id": "architecture-reference-recipe-matched-scratch",
-  "recipe_sha256": "0c4e9b77526aa6d92214f5c2b01ac25474036c43b801719f65b9bdeba7d7c08e",
+  "recipe_sha256": "bcd449b53337a07bc5b57e40c4c380333671c4da898972168c6cd9536f753600",
   "registry_sha256": "059da701ea414fafb10ed972d04d6322ca3cf7fcd4182c376601790e6664391f",
   "schema": "foundry-downstream-cell-lock",
   "skipped_cell_counts": {},

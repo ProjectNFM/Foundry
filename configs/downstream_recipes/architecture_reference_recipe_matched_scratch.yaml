@@ -43,9 +43,8 @@ species:
     expected_checkpoints: 35
     expected_cells: 120
   monkeys:
-    # Compiled for schema parity but not part of this minipig-only experiment.
     wandb_groups:
-      scratch_recipe_matched: 20260918-MS-RECIPE-MATCHED-SCRATCH-MONKEYS-NOT-LAUNCHED
-    wandb_tags: [monkeys, 8band, architecture-transfer, reference, recipe-matched-scratch, not-launched]
+      scratch_recipe_matched: 20260918-MS-RECIPE-MATCHED-SCRATCH-MONKEYS
+    wandb_tags: [monkeys, 8band, architecture-transfer, reference, recipe-matched-scratch]
     expected_checkpoints: 25
     expected_cells: 39

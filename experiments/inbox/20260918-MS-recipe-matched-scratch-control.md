@@ -3,7 +3,7 @@
 **Status:** Completed
 **Date started:** 2026-09-18
 **Parent experiment:** [Batch-128 reference transfer replication](20260916-MS-batch128-reference-transfer-replication.md)
-**Follow-up experiments:** TBD
+**Follow-up experiments:** [Monkey recipe-matched scratch transfer control](20260918-MS-recipe-matched-scratch-monkeys.md)
 **Tags:** neurosoft, supervised-pretraining, transfer, scratch-control, recipe-matching, discriminative-lr, checkpoint-age, 8band, minipigs
 
 ## Background
