@@ -1,6 +1,6 @@
 # Monkey recipe-matched scratch transfer control
 
-**Status:** In Progress
+**Status:** Completed
 **Date started:** 2026-09-18
 **Parent experiment:** [Recipe-matched scratch transfer control](20260918-MS-recipe-matched-scratch-control.md)
 **Follow-up experiments:** TBD
@@ -146,28 +146,109 @@ allocation memory, the standard three-hour limit, and `cn-c004` excluded.
 
 ### Summary
 
-TBD
+All 39 recipe-matched monkey scratch runs finished and passed identity,
+endpoint, history, and compiled-provenance checks. The joint analysis audited
+all 195 reused reference-transfer runs and all 39 legacy scratch runs, for 273
+exact W&B runs total.
+
+No checkpoint met the preregistered criterion for positive transfer. Every
+point estimate favored recipe-matched scratch. The 100-step checkpoint was
+`-1.13` F1 percentage points below it, with a simultaneous 95% interval
+entirely below zero. The 300- and 1,000-step estimates were about `-2` points,
+although their simultaneous intervals included zero. The 3,000- and
+10,000-step checkpoints were significantly worse after family-wise adjustment.
+
+Recipe matching materially improved scratch itself. Recipe-matched scratch
+exceeded legacy scratch by `+4.14` points, with a 95% whole-subject bootstrap
+interval of `[+1.75, +6.83]`; all five monkey subjects improved. This shift
+reversed the apparent 100-step advantage from the parent comparison. Transfer
+also became slower than recipe-matched scratch from 1,000 source steps onward;
+the disadvantage grew sharply at the two latest checkpoints.
 
 ### Metrics
 
-TBD
+Subject-balanced test supported macro-F1. Transfer effects are percentage
+points relative to recipe-matched scratch; simultaneous intervals control
+family-wise error across the five checkpoint comparisons.
+
+| Source step | Absolute F1 | Transfer effect (pp) | Pointwise 95% CI (pp) | Simultaneous 95% CI (pp) | Subjects positive |
+|---:|---:|---:|---:|---:|---:|
+| 100 | 46.58% | -1.13 | [-2.00, -0.25] | [-2.16, -0.10] | 1/5 |
+| 300 | 45.68% | -2.03 | [-4.10, +0.04] | [-4.44, +0.38] | 2/5 |
+| 1,000 | 45.63% | -2.07 | [-4.15, -0.39] | [-4.22, +0.07] | 1/5 |
+| 3,000 | 43.80% | -3.90 | [-6.00, -2.37] | [-6.10, -1.71] | 0/5 |
+| 10,000 | 42.55% | -5.16 | [-7.94, -3.63] | [-8.00, -2.32] | 0/5 |
+
+The recipe-matched scratch absolute F1 was `47.71%`, compared with `43.56%`
+for legacy scratch. For the secondary 90%-of-scratch-quality endpoint, mean
+optimizer steps saved were `-187`, `-113`, `-364`, `-3,026`, and `-9,677` at
+source steps 100 through 10,000 respectively; negative values mean transfer
+was slower. The pointwise intervals excluded zero in the unfavorable direction
+from 1,000 source steps onward.
 
 ### Analysis
 
-The analysis scaffold is
+The reproducible analysis is
 [`analysis/20260918-MS-recipe-matched-scratch-monkeys_analysis.py`](../../analysis/20260918-MS-recipe-matched-scratch-monkeys_analysis.py).
-It fetches the exact parent monkey transfer, legacy scratch, and new matched-
-scratch runs through the W&B API, audits their compiled identities, and writes
-CSV and figure artifacts using this report's filename stem.
+It hash-audits both immutable matrices, fetches exact run IDs through
+`wandb.Api()`, validates completion and provenance, pairs at recording and
+target-seed level, aggregates seed -> recording -> subject, and bootstraps the
+five whole subjects. The simultaneous intervals use the maximum absolute
+studentized statistic across the five checkpoint effects with 20,000
+whole-subject bootstrap draws.
+
+```bash
+uv run python analysis/20260918-MS-recipe-matched-scratch-monkeys_analysis.py
+```
+
+The stem-matched CSV caches under `analysis/csv/` contain the exact 273-run
+coverage audit, endpoints, histories, paired tables, subject aggregates, and
+simultaneous-interval summary. CSV caches are intentionally gitignored.
 
 ### Figures
 
-TBD
+#### Main figures
+
+![Checkpoint effects recentered to recipe-matched scratch](../../analysis/figures/20260918-MS-recipe-matched-scratch-monkeys_recentered_transfer_effects.png)
+
+![Recipe-matched versus legacy scratch](../../analysis/figures/20260918-MS-recipe-matched-scratch-monkeys_scratch_recipe_sensitivity.png)
+
+![Optimization efficiency relative to recipe-matched scratch](../../analysis/figures/20260918-MS-recipe-matched-scratch-monkeys_efficiency_trajectory.png)
+
+#### Additional figures
+
+![Absolute performance under both scratch controls](../../analysis/figures/20260918-MS-recipe-matched-scratch-monkeys_absolute_performance.png)
+
+![Subject-level transfer heterogeneity](../../analysis/figures/20260918-MS-recipe-matched-scratch-monkeys_subject_effect_heatmap.png)
+
+![Recording-level transfer effects](../../analysis/figures/20260918-MS-recipe-matched-scratch-monkeys_recording_effect_heatmap.png)
+
+![Target-seed dispersion](../../analysis/figures/20260918-MS-recipe-matched-scratch-monkeys_target_seed_dispersion.png)
+
+![Normalized downstream validation dynamics](../../analysis/figures/20260918-MS-recipe-matched-scratch-monkeys_normalized_training_dynamics.png)
+
+![Classwise transfer effects](../../analysis/figures/20260918-MS-recipe-matched-scratch-monkeys_classwise_effects.png)
 
 ## Conclusions
 
-TBD
+**Hypothesis refuted.** No pretrained checkpoint had statistically higher
+monkey test supported macro-F1 than recipe-matched scratch under the
+preregistered family-wise criterion. All five point estimates were negative;
+the 100-, 3,000-, and 10,000-step checkpoints were significantly worse after
+family-wise adjustment. From 1,000 source steps onward, transfer also reached
+matched scratch quality significantly more slowly in the descriptive
+pointwise analysis.
+
+The legacy scratch recipe was an even larger confound for monkeys than for
+minipigs. Applying the transfer arm's discriminative learning-rate schedule to
+the randomly initialized reference model improved scratch by `+4.14` F1
+points across all five subjects and changed the parent's apparent early
+transfer benefit into a disadvantage. Together with the minipig replication,
+the result provides no evidence that these source checkpoints improve full-
+data downstream performance or optimization under a recipe-matched comparison.
+This conclusion remains specific to the reference model, supervised source
+objective, checkpoint family, full-data targets, and tested downstream recipe.
 
 ## Notes for future experiments
 
-TBD
+None requested.
